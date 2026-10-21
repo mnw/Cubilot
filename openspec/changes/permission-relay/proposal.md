@@ -1,12 +1,12 @@
 ## Why
 
-Claude Code pauses the agent's session whenever a tool requires approval (Bash, Write, Edit, …). The approval dialog opens in the local terminal and waits for a Y/N keystroke. In v0.7, that local terminal is A2AChannel's embedded xterm pane — which means the human has to be physically focused on that specific tab to unblock the agent.
+Claude Code pauses the agent's session whenever a tool requires approval (Bash, Write, Edit, …). The approval dialog opens in the local terminal and waits for a Y/N keystroke. In v0.7, that local terminal is Cubilot's embedded xterm pane — which means the human has to be physically focused on that specific tab to unblock the agent.
 
 For a multi-agent workspace this is the wrong shape. If the human is chatting with Alice about architecture while Bob's session hits a `Bash` approval, Bob hangs until the human remembers to switch tabs. At three or four agents the backlog of silent waits becomes a coordination tax that erodes the premise of the product.
 
 Claude Code 2.1.81 added an MCP capability — `claude/channel/permission` — that forwards approval prompts to any two-way channel that declares it. The channel receives `notifications/claude/channel/permission_request` with a request ID, tool name, description, and argument preview. It sends back `notifications/claude/channel/permission` with `allow` or `deny`. Both the remote verdict and the local terminal dialog stay live; first answer wins, the other is dropped.
 
-chatbridge already is a two-way channel. Declaring the capability and wiring request-render + verdict-send into A2AChannel turns every agent's approval prompt into a chat-room event the human (or another agent) can act on from anywhere the hub is reachable. Approve Bob's Bash call from the chat UI while staying in Alice's tab. No more silent waits.
+chatbridge already is a two-way channel. Declaring the capability and wiring request-render + verdict-send into Cubilot turns every agent's approval prompt into a chat-room event the human (or another agent) can act on from anywhere the hub is reachable. Approve Bob's Bash call from the chat UI while staying in Alice's tab. No more silent waits.
 
 ## What Changes
 

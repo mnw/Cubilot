@@ -34,7 +34,7 @@ header {
   font-weight: 400;
 }
 /* Version sits inline with the brand name as a small tag — no divider, just
-   a thin space before. Reads as "A2AChannel v0.9.9" — one product mark. */
+   a thin space before. Reads as "Cubilot v0.9.9" — one product mark. */
 .brand-meta {
   font-family: var(--mono);
   font-size: var(--fs-2xs);

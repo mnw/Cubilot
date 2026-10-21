@@ -1,8 +1,8 @@
 ## MODIFIED Requirements
 
-### Requirement: A2AChannel bundles tmux and orchestrates one session per agent
+### Requirement: Cubilot bundles tmux and orchestrates one session per agent
 
-A static tmux binary for `aarch64-apple-darwin` SHALL be bundled under `src-tauri/resources/tmux` and packaged into `A2AChannel.app/Contents/Resources/`. The Rust shell SHALL invoke the bundled tmux binary against a shared socket at `~/Library/Application Support/A2AChannel/tmux.sock` to start a detached session via a single `new-session -d` invocation:
+A static tmux binary for `aarch64-apple-darwin` SHALL be bundled under `src-tauri/resources/tmux` and packaged into `Cubilot.app/Contents/Resources/`. The Rust shell SHALL invoke the bundled tmux binary against a shared socket at `~/Library/Application Support/Cubilot/tmux.sock` to start a detached session via a single `new-session -d` invocation:
 
 ```
 bundled-tmux -S <sock> new-session -d -s <agent> -x 80 -y 24 -c <cwd>
@@ -15,9 +15,9 @@ The `$SHELL -ic` wrapper is load-bearing: Anthropic's installer creates `claude`
 
 Session names SHALL match the agent name exactly (validated against the hub's `AGENT_NAME_RE`, both on the UI and defensively in Rust). The session is created in detached mode; the Rust shell does not attach as a controlling client at spawn time.
 
-Sessions SHALL NOT be configured with `remain-on-exit on`. When claude exits for any reason, the pane exits, the tmux session dies, and the UI's `pty://exit/<agent>` listener removes the tab. On auto-attach to sessions that outlived an earlier A2AChannel process, the Rust shell SHALL defensively run `set-option -t <agent> remain-on-exit off` to clear the option from any legacy v0.7-alpha session that set it.
+Sessions SHALL NOT be configured with `remain-on-exit on`. When claude exits for any reason, the pane exits, the tmux session dies, and the UI's `pty://exit/<agent>` listener removes the tab. On auto-attach to sessions that outlived an earlier Cubilot process, the Rust shell SHALL defensively run `set-option -t <agent> remain-on-exit off` to clear the option from any legacy v0.7-alpha session that set it.
 
-The tmux status bar SHALL be hidden (`set-option -t <agent> status off`) on both create and auto-attach paths — redundant with the A2AChannel tab label.
+The tmux status bar SHALL be hidden (`set-option -t <agent> status off`) on both create and auto-attach paths — redundant with the Cubilot tab label.
 
 The bundled tmux binary SHALL be codesigned explicitly (ad-hoc sign) before the outer `.app` is assembled, not relying solely on `codesign --deep`. This avoids library-validation issues on macOS versions that enforce it for nested executables.
 
@@ -25,14 +25,14 @@ The bundled tmux binary SHALL be codesigned explicitly (ad-hoc sign) before the 
 
 - **GIVEN** no tmux session named `alice` exists
 - **WHEN** the user clicks "Launch" on the `alice` tab in the terminal pane
-- **THEN** A2AChannel invokes `bundled-tmux -S <sock> new-session -d -s alice -x 80 -y 24 -c <cwd> <shell-wrapped-claude>` targeting the shared socket
+- **THEN** Cubilot invokes `bundled-tmux -S <sock> new-session -d -s alice -x 80 -y 24 -c <cwd> <shell-wrapped-claude>` targeting the shared socket
 - **AND** immediately after, `set-option -t alice status off` is invoked to hide the status bar
-- **AND** A2AChannel does NOT kill the session when the app exits
+- **AND** Cubilot does NOT kill the session when the app exits
 
 #### Scenario: claude alias in .zshrc resolves under `$SHELL -ic`
 
 - **GIVEN** the user's `.zshrc` contains `alias claude=~/.claude/local/claude` (Anthropic installer default)
-- **AND** A2AChannel is launched via the macOS GUI (not from a terminal — PATH is sparse)
+- **AND** Cubilot is launched via the macOS GUI (not from a terminal — PATH is sparse)
 - **WHEN** the user clicks Launch on an agent tab
 - **THEN** the interactive shell started by `$SHELL -ic` sources `.zshrc`, resolves the alias, and starts claude
 - **AND** claude starts in the tmux pane without a "command not found" error
@@ -49,14 +49,14 @@ The bundled tmux binary SHALL be codesigned explicitly (ad-hoc sign) before the 
 #### Scenario: Auto-attach clears legacy `remain-on-exit` on startup
 
 - **GIVEN** an `alice` tmux session exists on the socket with `remain-on-exit` set to `on` (e.g. created by a v0.7-alpha build)
-- **WHEN** A2AChannel starts and `pty_spawn` auto-attaches on reconcile
-- **THEN** A2AChannel runs `set-option -t alice remain-on-exit off` before attaching the PTY
+- **WHEN** Cubilot starts and `pty_spawn` auto-attaches on reconcile
+- **THEN** Cubilot runs `set-option -t alice remain-on-exit off` before attaching the PTY
 - **AND** a subsequent `/exit` from the user cleanly terminates the session (no held pane)
 
 #### Scenario: Agent name invalid for session creation
 
 - **WHEN** the user attempts to open a terminal for an agent whose name contains `/` or `:`
-- **THEN** A2AChannel refuses with an error (UI-side validation)
+- **THEN** Cubilot refuses with an error (UI-side validation)
 - **AND** the error is re-enforced server-side in the Rust shell if the UI check is bypassed
 - **AND** no tmux invocation occurs
 
@@ -66,7 +66,7 @@ The webview SHALL provide a vertically-tabbed right-side pane (`xterm.js`-backed
 
 `tmux -C` control mode SHALL NOT be used. `send-keys` SHALL NOT be used for interactive input forwarding. All terminal I/O passes through the PTY as raw ANSI bytes.
 
-The right pane SHALL be opt-in: a header toggle persists the choice in `localStorage` under `a2achannel_terminal_enabled`. Default state is off on first launch so existing users see no UI change on upgrade.
+The right pane SHALL be opt-in: a header toggle persists the choice in `localStorage` under `cubilot_terminal_enabled`. Default state is off on first launch so existing users see no UI change on upgrade.
 
 The Rust shell SHALL expose exactly the following Tauri surface for terminal I/O:
 
@@ -85,7 +85,7 @@ Note: earlier drafts included `pty_restart` (for re-running claude inside a `rem
 - **WHEN** the user clicks the terminal toggle in the header
 - **THEN** the right-side pane appears with one tab per known agent
 - **AND** selecting a tab attaches to that agent's tmux session via a new PTY and begins streaming output
-- **AND** `localStorage.a2achannel_terminal_enabled` is set to `"true"`
+- **AND** `localStorage.cubilot_terminal_enabled` is set to `"true"`
 
 #### Scenario: Typing in the pane reaches the session
 
@@ -105,7 +105,7 @@ Note: earlier drafts included `pty_restart` (for re-running claude inside a `rem
 
 #### Scenario: Resize propagates to the session
 
-- **GIVEN** the user resizes the A2AChannel window
+- **GIVEN** the user resizes the Cubilot window
 - **WHEN** the xterm container resizes
 - **THEN** the fit-addon computes new `cols` / `rows`
 - **AND** the UI invokes `pty_resize(agent, cols, rows)`
@@ -121,14 +121,14 @@ Note: earlier drafts included `pty_restart` (for re-running claude inside a `rem
 
 ### Requirement: User can still `tmux attach` from their own terminal
 
-The shared socket at `~/Library/Application Support/A2AChannel/tmux.sock` SHALL be documented in the README as a supported attachment point. A user running `bundled-tmux -S ~/Library/Application\ Support/A2AChannel/tmux.sock attach -t <agent>` in their own Terminal.app SHALL be able to interact with the same session concurrently with the A2AChannel webview pane.
+The shared socket at `~/Library/Application Support/Cubilot/tmux.sock` SHALL be documented in the README as a supported attachment point. A user running `bundled-tmux -S ~/Library/Application\ Support/Cubilot/tmux.sock attach -t <agent>` in their own Terminal.app SHALL be able to interact with the same session concurrently with the Cubilot webview pane.
 
 Multi-client input behavior SHALL follow tmux's native semantics (both clients can type; documented caveat: interactive prompts should be answered from one client at a time).
 
 #### Scenario: External attach works alongside webview attach
 
-- **GIVEN** A2AChannel's pane is attached to the `alice` session
-- **WHEN** the user runs `bundled-tmux -S ~/Library/Application\ Support/A2AChannel/tmux.sock attach -t alice` in Terminal.app
+- **GIVEN** Cubilot's pane is attached to the `alice` session
+- **WHEN** the user runs `bundled-tmux -S ~/Library/Application\ Support/Cubilot/tmux.sock attach -t alice` in Terminal.app
 - **THEN** both clients see identical output
 - **AND** keystrokes from either client reach the session's stdin
 
@@ -138,19 +138,19 @@ Multi-client input behavior SHALL follow tmux's native semantics (both clients c
 
 The UI SHALL support two entry paths for an agent to appear as a tab in the terminal pane:
 
-1. **Explicit:** a `+ New agent` control in the tab strip opens a modal requesting an agent name (validated against `AGENT_NAME_RE`) and a working directory (native directory picker). On submit, A2AChannel generates the per-agent MCP config (per the MCP config requirement below), spawns the tmux session with `--mcp-config <path>`, allocates the PTY, and the tab renders claude's startup.
-2. **Reactive:** when the hub's roster gains a new agent (because a `channel-bin` sidecar registered from a `claude` session the user started outside A2AChannel), the UI SHALL add a tab for that agent in an `external` state. The tab is display-only: no xterm is mounted and no PTY is owned by A2AChannel.
+1. **Explicit:** a `+ New agent` control in the tab strip opens a modal requesting an agent name (validated against `AGENT_NAME_RE`) and a working directory (native directory picker). On submit, Cubilot generates the per-agent MCP config (per the MCP config requirement below), spawns the tmux session with `--mcp-config <path>`, allocates the PTY, and the tab renders claude's startup.
+2. **Reactive:** when the hub's roster gains a new agent (because a `channel-bin` sidecar registered from a `claude` session the user started outside Cubilot), the UI SHALL add a tab for that agent in an `external` state. The tab is display-only: no xterm is mounted and no PTY is owned by Cubilot.
 
 An agent MAY transition between states:
 
-- `external` → `live` when the user explicitly launches a session inside A2AChannel for that agent name (this spawns a new tmux session; the user is responsible for quitting any previously-running external claude to avoid channel-bin collisions).
+- `external` → `live` when the user explicitly launches a session inside Cubilot for that agent name (this spawns a new tmux session; the user is responsible for quitting any previously-running external claude to avoid channel-bin collisions).
 - `live` → tab-removed when the session is killed (via the tab × control, via external `tmux kill-session`, via claude `/exit`, or because claude crashes). There is no intermediate `dead` state; `pty://exit/<agent>` fires and the UI removes the tab. If the agent remains in the hub roster after, the next reconcile re-surfaces it as `external`.
 
 #### Scenario: Explicit agent creation
 
 - **GIVEN** the roster is empty (only the human)
 - **WHEN** the user clicks `+ New agent`, enters name `alice`, picks cwd `/code/project-alice`
-- **THEN** A2AChannel writes the per-agent MCP config at `~/Library/Application Support/A2AChannel/mcp-configs/alice.json`
+- **THEN** Cubilot writes the per-agent MCP config at `~/Library/Application Support/Cubilot/mcp-configs/alice.json`
 - **AND** a tmux session named `alice` is created on the shared socket with claude as its first command
 - **AND** a tab for `alice` appears in the pane in the `live` state with an xterm attached to the PTY
 - **AND** within a few seconds `channel-bin` (spawned by claude via `.mcp.json`) registers `alice` with the hub and the legend pill turns online
@@ -161,22 +161,22 @@ An agent MAY transition between states:
 - **WHEN** `channel-bin` registers `bob` with the hub
 - **THEN** the hub broadcasts a roster update
 - **AND** a tab for `bob` appears in the terminal pane in the `external` state
-- **AND** the tab shows a status line indicating the agent is running outside A2AChannel
-- **AND** no xterm is mounted for that tab and A2AChannel does NOT own a PTY for `bob`
+- **AND** the tab shows a status line indicating the agent is running outside Cubilot
+- **AND** no xterm is mounted for that tab and Cubilot does NOT own a PTY for `bob`
 
-### Requirement: A2AChannel generates a per-agent MCP config file and passes it via `--mcp-config`
+### Requirement: Cubilot generates a per-agent MCP config file and passes it via `--mcp-config`
 
-On explicit spawn, A2AChannel SHALL write a per-agent MCP config file at `~/Library/Application Support/A2AChannel/mcp-configs/<agent>.json` (mode `0600`, directory mode `0700`) containing only the `chatbridge` server entry with `CHATBRIDGE_AGENT` set to the chosen agent name. The file SHALL be regenerated on every spawn (not merged) so stale paths or agent names self-heal.
+On explicit spawn, Cubilot SHALL write a per-agent MCP config file at `~/Library/Application Support/Cubilot/mcp-configs/<agent>.json` (mode `0600`, directory mode `0700`) containing only the `chatbridge` server entry with `CHATBRIDGE_AGENT` set to the chosen agent name. The file SHALL be regenerated on every spawn (not merged) so stale paths or agent names self-heal.
 
-The tmux-spawned claude command SHALL include `--mcp-config <absolute-path-to-generated-file>`. A2AChannel SHALL NOT modify, merge, or create any `.mcp.json` file in the user's filesystem. The user's existing project `.mcp.json` (if any) loads additively alongside our generated config — claude merges servers from both sources without `--strict-mcp-config`.
+The tmux-spawned claude command SHALL include `--mcp-config <absolute-path-to-generated-file>`. Cubilot SHALL NOT modify, merge, or create any `.mcp.json` file in the user's filesystem. The user's existing project `.mcp.json` (if any) loads additively alongside our generated config — claude merges servers from both sources without `--strict-mcp-config`.
 
-This requirement supersedes an earlier draft that had A2AChannel author the user's project `.mcp.json`. The `--mcp-config` path was adopted after the PoC proved it works and eliminates an entire class of merge/write/confirm UX.
+This requirement supersedes an earlier draft that had Cubilot author the user's project `.mcp.json`. The `--mcp-config` path was adopted after the PoC proved it works and eliminates an entire class of merge/write/confirm UX.
 
 #### Scenario: Fresh spawn writes config
 
-- **GIVEN** no config exists for agent `alice` at `~/Library/Application Support/A2AChannel/mcp-configs/alice.json`
+- **GIVEN** no config exists for agent `alice` at `~/Library/Application Support/Cubilot/mcp-configs/alice.json`
 - **WHEN** the user launches `alice` via `+ New agent`
-- **THEN** A2AChannel writes the config file (mode `0600`) containing a single `mcpServers.chatbridge` entry
+- **THEN** Cubilot writes the config file (mode `0600`) containing a single `mcpServers.chatbridge` entry
 - **AND** `CHATBRIDGE_AGENT` in the entry equals `"alice"`
 - **AND** the tmux-spawned claude receives `--mcp-config /Users/.../mcp-configs/alice.json`
 - **AND** the user's project `.mcp.json` (if any) is not touched

@@ -1,7 +1,7 @@
 // HTTP client for the hub's /post, /handoffs, /interrupts, /permissions, /upload
 // routes. Handles auth token rotation (on 401, re-reads the discovery file and
 // retries once with the fresh token). Per-retry resolve keeps us in sync with
-// A2AChannel.app restarts that mint new URL/port + new token pairs.
+// Cubilot.app restarts that mint new URL/port + new token pairs.
 
 import type { Host, HttpResult } from "./host";
 

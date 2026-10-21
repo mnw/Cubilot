@@ -2,7 +2,7 @@
 
 Coordination between Claude Code agents today routes through free-text messages. Every coordination pattern (handoff, proposal, question, status update) is re-invented per-conversation in natural language, and consumed by reading prose. That works for ambient chat; it doesn't work for operations where the receiver needs to take a specific, bounded action whose outcome the sender needs back programmatically.
 
-The product framing shift: A2AChannel is not "chat with AI" — it's a **runtime for agent coordination patterns** with a chat surface for human participation. The first concrete pattern we're formalizing is **handoff**: agent A transfers work to agent B; B accepts or declines with reason; the sender (or the human) may cancel while pending; the hub auto-expires stale items; everyone involved is notified of every transition.
+The product framing shift: Cubilot is not "chat with AI" — it's a **runtime for agent coordination patterns** with a chat surface for human participation. The first concrete pattern we're formalizing is **handoff**: agent A transfers work to agent B; B accepts or declines with reason; the sender (or the human) may cancel while pending; the hub auto-expires stale items; everyone involved is notified of every transition.
 
 Everything that makes a handoff useful beyond "just a chat message" needs state: who sent it, who was supposed to receive it, is it still open, when does it expire, what was the disposition. That state has to survive a hub restart (the handoff was about work in flight; losing it silently is a correctness bug, not a UX bug). That's the wedge that brings persistence into the app for the first time — but **only for protocol state**, not for chat log.
 
@@ -230,7 +230,7 @@ The general JSON body cap is 256 KiB (established in `hub-request-safety`). For 
 ### 13. Ledger placement + permissions
 
 ```
-~/Library/Application Support/A2AChannel/
+~/Library/Application Support/Cubilot/
 ├── config.json           (existing)
 ├── hub.url               (existing, 0600)
 ├── hub.token             (existing, 0600)

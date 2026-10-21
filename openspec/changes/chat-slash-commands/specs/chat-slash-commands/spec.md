@@ -58,7 +58,7 @@ A slash send SHALL include exactly one `@target` token following the slash comma
 - **WHEN** the user sends `/clear @all`
 - **THEN** `pty_write` is invoked for `planner` and `docs` only
 - **AND** `builder` is excluded with reason `permission pending`
-- **AND** `nebula` is excluded with reason `external state — not owned by A2AChannel`
+- **AND** `nebula` is excluded with reason `external state — not owned by Cubilot`
 
 #### Scenario: `@all` to a single-agent room behaves like targeting that one agent
 - **GIVEN** the selected room contains exactly one live agent `solo`
@@ -112,7 +112,7 @@ When the slash command is a member of the destructive set `{ /clear, /compact }`
 
 ### Requirement: External-state agents and the shell tab are never slash targets
 
-Agents whose `data-state` is `external` (running outside A2AChannel; A2AChannel does not own their PTY) SHALL be excluded from `@all` expansion and SHALL NOT be selectable from the `@mention` popover when the composer is in slash mode. The shell tab SHALL never be presented as a slash target.
+Agents whose `data-state` is `external` (running outside Cubilot; Cubilot does not own their PTY) SHALL be excluded from `@all` expansion and SHALL NOT be selectable from the `@mention` popover when the composer is in slash mode. The shell tab SHALL never be presented as a slash target.
 
 #### Scenario: External-state agent is filtered out of slash @-popover
 - **GIVEN** the selected room contains a live agent `alice` and an external agent `bob`

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "A2AChannel",
+  "productName": "Cubilot",
   "version": "0.12.0",
   "identifier": "com.mnw.cubilot",
   "build": {
@@ -10,7 +10,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "A2AChannel",
+        "title": "Cubilot",
         "width": 980,
         "height": 720,
         "minWidth": 640,

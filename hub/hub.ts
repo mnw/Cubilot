@@ -1,4 +1,4 @@
-// A2AChannel hub. Dynamic roster; any agent that hits /agent-stream?agent=<n> auto-registers.
+// Cubilot hub. Dynamic roster; any agent that hits /agent-stream?agent=<n> auto-registers.
 // Env vars: PORT, A2A_TOKEN, A2A_ATTACHMENTS_DIR, A2A_LEDGER_DB, A2A_HUMAN_NAME, A2A_ALLOWED_EXTENSIONS.
 
 import { Database } from "bun:sqlite";

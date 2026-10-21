@@ -12,7 +12,7 @@ Today the human can chat at agents (channel) but cannot drive their slash comman
 - Busy detection (best-effort): agents with a pending permission or interrupt are auto-skipped from `@all` expansion, with a status note. Claude's internal modal state (mid-stream, slash-picker open) is unobservable from outside the PTY and is not handled.
 - Audit: each slash send produces one synthetic `system` chat entry (`human → /clear @all (planner, builder, reviewer, docs)`). In-memory only, lost on hub restart. No new persistent kind.
 - Destructive confirm: when the command is in a hardcoded destructive set (`/clear`, `/compact`) **and** the resolved target list has more than one agent, a confirm modal appears before the PTY writes. Single-agent destructive sends and any non-destructive `@all` send proceed without confirmation.
-- `external`-state agents (sessions A2AChannel does not own a PTY for) are excluded from `@all` and cannot be targeted individually. The shell tab is never an agent and never a target.
+- `external`-state agents (sessions Cubilot does not own a PTY for) are excluded from `@all` and cannot be targeted individually. The shell tab is never an agent and never a target.
 
 ## Capabilities
 

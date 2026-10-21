@@ -2,12 +2,12 @@
 
 ### Requirement: The Tauri shell SHALL pass `--settings <path>` to claude alongside `--mcp-config <path>` at agent spawn
 
-For each agent spawned via `pty_spawn`, the claude command line SHALL include `--settings <path>` where `<path>` is the absolute path to the per-agent settings file at `~/Library/Application Support/A2AChannel/settings/<agent>.json`. This mirrors the existing `--mcp-config <path>` pattern and follows the same "no user-file mutation" principle: A2AChannel materializes its own settings file under its own data dir; the user's `~/.claude/settings.json` remains untouched.
+For each agent spawned via `pty_spawn`, the claude command line SHALL include `--settings <path>` where `<path>` is the absolute path to the per-agent settings file at `~/Library/Application Support/Cubilot/settings/<agent>.json`. This mirrors the existing `--mcp-config <path>` pattern and follows the same "no user-file mutation" principle: Cubilot materializes its own settings file under its own data dir; the user's `~/.claude/settings.json` remains untouched.
 
 #### Scenario: Settings flag is included in claude invocation
 - **WHEN** `pty_spawn(agent="alice", cwd="/work/proj", room="proj")` is called
 - **THEN** the resulting tmux command spawns claude with arguments including `--mcp-config <mcp-path> --settings <settings-path>`
-- **AND** `<settings-path>` is `~/Library/Application Support/A2AChannel/settings/alice.json`
+- **AND** `<settings-path>` is `~/Library/Application Support/Cubilot/settings/alice.json`
 - **AND** the user's `~/.claude/settings.json` is not modified
 
 #### Scenario: Older claude versions without `--settings` support warn but do not block spawn

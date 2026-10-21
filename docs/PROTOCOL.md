@@ -1,6 +1,6 @@
-# A2AChannel Protocol Reference
+# Cubilot Protocol Reference
 
-The A2AChannel hub speaks two kinds of message. Free-text chat goes through
+The Cubilot hub speaks two kinds of message. Free-text chat goes through
 the `post` tool and the `/post` + `/send` HTTP routes — it has no persistent
 state beyond the in-memory chat log. **Typed protocol messages** have a
 `kind`, a typed payload, a lifecycle, and persist in a SQLite ledger so
@@ -216,7 +216,7 @@ See [the interrupt kind](#the-interrupt-kind) above for schema and lifecycle.
 ## HTTP endpoints
 
 All routes are under `http://127.0.0.1:<hub-port>` (dynamic; see
-`~/Library/Application Support/A2AChannel/hub.url`).
+`~/Library/Application Support/Cubilot/hub.url`).
 
 | Method | Path | Auth | Body cap | Purpose |
 |---|---|---|---|---|
@@ -682,7 +682,7 @@ does.
 ## Identity and trust model
 
 Tokens are issued per running hub instance, written to
-`~/Library/Application Support/A2AChannel/hub.token` (mode `0600`), and
+`~/Library/Application Support/Cubilot/hub.token` (mode `0600`), and
 rotated on every app launch and settings reload. The channel-mode sidecar
 reads the file on startup, attaches it to every POST, and re-reads on HTTP
 401 to handle rotations transparently.
@@ -704,7 +704,7 @@ v0.5.x.
 ## Storage
 
 All handoff state lives in SQLite at
-`~/Library/Application Support/A2AChannel/ledger.db` (mode `0600`; WAL mode
+`~/Library/Application Support/Cubilot/ledger.db` (mode `0600`; WAL mode
 with sidecar files `.ledger.db-wal` / `.ledger.db-shm` also mode `0600`).
 
 Two tables:
@@ -800,8 +800,8 @@ each kind:
 The embedded terminal pane introduced in v0.7 is **not part of this protocol**. It's a shell-side surface with no hub involvement:
 
 - The pane lives entirely in the Tauri shell + webview. No new HTTP routes on the hub, no new SSE event kinds, no ledger schema change.
-- `claude` processes the pane spawns register with the hub via their own `channel-bin` sidecar, identical to claudes launched from a user's terminal. The hub sees them as normal `agent joined` events; it cannot distinguish A2AChannel-pane agents from external ones.
-- The tmux socket at `~/Library/Application Support/A2AChannel/tmux.sock` is a multi-client shared socket. Anything that can speak tmux (the pane, or a user's external terminal via `tmux -S <sock> attach`) sees the same session state. This is tmux's native behavior; A2AChannel doesn't implement any synchronization.
+- `claude` processes the pane spawns register with the hub via their own `channel-bin` sidecar, identical to claudes launched from a user's terminal. The hub sees them as normal `agent joined` events; it cannot distinguish Cubilot-pane agents from external ones.
+- The tmux socket at `~/Library/Application Support/Cubilot/tmux.sock` is a multi-client shared socket. Anything that can speak tmux (the pane, or a user's external terminal via `tmux -S <sock> attach`) sees the same session state. This is tmux's native behavior; Cubilot doesn't implement any synchronization.
 
 **Practical consequence for protocol design:** adding protocol messages that reference the terminal pane state (e.g., "send this slash-command to agent X") would need to cross the out-of-band boundary. Don't do that — the pane is deliberately segregated so that:
 
@@ -815,7 +815,7 @@ If a future release needs to coordinate claude sessions programmatically (e.g., 
 
 # Room transcript persistence (v0.10) — opt-in JSONL
 
-Per-room durable chat history. Off by default; flipped on per room via the settings route. Lives at `~/Library/Application Support/A2AChannel/transcripts/<hash8>-<sanitized>.jsonl` (active) plus `<hash8>-<sanitized>.<6-digit-seq>.jsonl` (rotated chunks). Active file rotates at 10,000 lines; rotated chunks are preserved until `clear-transcript`.
+Per-room durable chat history. Off by default; flipped on per room via the settings route. Lives at `~/Library/Application Support/Cubilot/transcripts/<hash8>-<sanitized>.jsonl` (active) plus `<hash8>-<sanitized>.<6-digit-seq>.jsonl` (rotated chunks). Active file rotates at 10,000 lines; rotated chunks are preserved until `clear-transcript`.
 
 **Routes:**
 

@@ -13,7 +13,7 @@ The PTY does not distinguish input by origin: bytes written from the composer ar
 - **AND** the bytes were delivered via `pty_write(agent="builder", b64=base64("/clear\r"))`
 
 #### Scenario: External-state agent rejects composer slash sends
-- **GIVEN** an agent `bob` is in `external` state (A2AChannel does not own its PTY)
+- **GIVEN** an agent `bob` is in `external` state (Cubilot does not own its PTY)
 - **WHEN** the user attempts `/clear @bob` from the composer
 - **THEN** the composer's `@`-popover did not list `bob` as a valid target
 - **AND** no `pty_write` invocation for `bob` occurs

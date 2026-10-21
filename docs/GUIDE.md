@@ -1,12 +1,12 @@
-# A2AChannel
+# Cubilot
 
 > Coordination primitives for parallel Claude Code sessions — messages, handoffs, interrupts, permission relay.
 
-![demo](docs/demo.gif)
+![demo](demo.gif)
 
 ## Why
 
-Every Claude Code session is an island. Sub-agents spawned via the `Task` tool run in their own fresh context — the parent only sees the final return value, not the sub-agent's intermediate reasoning. Separate Claude Code sessions are even more isolated: no parent, no shared anything. A2AChannel gives those independent sessions a shared room, structured handoffs, and interrupts, so they can coordinate without you shuttling context between windows. Agents launch from the app itself — bundled terminal pane, bundled tmux, no `.mcp.json` editing, no separate windows to juggle.
+Every Claude Code session is an island. Sub-agents spawned via the `Task` tool run in their own fresh context — the parent only sees the final return value, not the sub-agent's intermediate reasoning. Separate Claude Code sessions are even more isolated: no parent, no shared anything. Cubilot gives those independent sessions a shared room, structured handoffs, and interrupts, so they can coordinate without you shuttling context between windows. Agents launch from the app itself — bundled terminal pane, bundled tmux, no `.mcp.json` editing, no separate windows to juggle.
 
 The coordination is a protocol, not a chat app. Every message is a typed primitive with durable state, logged to an append-only SQLite ledger. You're in the room too. Handoffs and interrupts persist across restarts; pending work replays to the right agent on reconnect.
 
@@ -104,7 +104,7 @@ Guardrails:
 - Slash mode is **disabled** when the room dropdown is on `All rooms` — pick a concrete room first. Cross-room slash broadcasts are intentionally not possible.
 - Agents with a pending permission or interrupt are **auto-skipped** from `@all` expansion (the audit row notes the skip + reason). Claude's internal modal states (mid-stream, slash-picker open) are unobservable from outside the PTY; if a send lands in a bad state you'll see it in the xterm.
 - `/clear` and `/compact` targeting more than one agent prompt for confirmation (irreversible per-agent context wipe).
-- `external`-state agents (claude sessions A2AChannel doesn't own a PTY for) are not selectable from the slash `@`-popover.
+- `external`-state agents (claude sessions Cubilot doesn't own a PTY for) are not selectable from the slash `@`-popover.
 
 Each successful send produces a single `system` row in the chat log: `human → /clear @all (planner, builder, reviewer, docs)`. The audit row is in-memory only — lost on hub restart. Persistent transcripts (see below) capture it to JSONL on disk if the room has them on.
 
@@ -120,7 +120,7 @@ After each send the audit row reports the actual mode each agent landed on (`Pla
 ## Quickstart
 
 1. Install: `brew tap mnw/a2achannel && brew trust mnw/a2achannel && brew install --cask a2achannel`. Launch the app.
-2. Click **`+ agent`** in the header, enter a name, pick the **harness** (`claude` or `pi`), the project directory, then **Launch**. A2AChannel spawns the chosen agent binary inside a bundled tmux session in an embedded terminal tab. No `.mcp.json` editing, no separate terminal.
+2. Click **`+ agent`** in the header, enter a name, pick the **harness** (`claude` or `pi`), the project directory, then **Launch**. Cubilot spawns the chosen agent binary inside a bundled tmux session in an embedded terminal tab. No `.mcp.json` editing, no separate terminal.
 3. Repeat for each agent. They register with the hub, appear in the roster pills, and can `post`/`send_handoff` to each other and to you.
 
 ### Harnesses
@@ -158,8 +158,8 @@ Ad-hoc signed — on first launch macOS may ask you to confirm via **System Sett
 | Xcode Command Line Tools | `xcode-select --install` |
 
 ```bash
-git clone https://github.com/mnw/A2AChannel.git
-cd A2AChannel
+git clone https://github.com/mnw/Cubilot.git
+cd Cubilot
 bun install
 ./scripts/install.sh
 ```
@@ -178,11 +178,11 @@ Contributors with push access: `./scripts/release.sh <version>` bumps versions, 
 claude --dangerously-load-development-channels server:chatbridge
 ```
 
-The agent appears in the roster the moment `chatbridge` registers; in the app's terminal pane it shows as an `external`-state tab (A2AChannel doesn't own its PTY).
+The agent appears in the roster the moment `chatbridge` registers; in the app's terminal pane it shows as an `external`-state tab (Cubilot doesn't own its PTY).
 
 ## Config
 
-`~/Library/Application Support/A2AChannel/config.yml` (seeded with comments on first launch):
+`~/Library/Application Support/Cubilot/config.yml` (seeded with comments on first launch):
 
 ```yaml
 human_name: human
@@ -211,7 +211,7 @@ Edit, click **↻** in the header to reload — hub restarts with the new values
 - `anthropic_api_key` left empty means claude uses its keychain OAuth (the usual case); set it for API-key auth without touching your shell.
 - `chat_history_limit` is the in-memory ring-buffer cap. Hub restart wipes the chat log regardless of persistence — JSONL stays on disk as forensic record but is not replayed.
 
-**Global MCP servers** at `~/Library/Application Support/A2AChannel/mcp.json` (open via the connector-graph icon in the titlebar). Servers in this file are merged into every per-agent `.mcp.json` at spawn time; the `chatbridge` server name is reserved by A2AChannel and silently stripped from your config.
+**Global MCP servers** at `~/Library/Application Support/Cubilot/mcp.json` (open via the connector-graph icon in the titlebar). Servers in this file are merged into every per-agent `.mcp.json` at spawn time; the `chatbridge` server name is reserved by Cubilot and silently stripped from your config.
 
 ## Architecture
 
@@ -220,7 +220,7 @@ Edit, click **↻** in the header to reload — hub restarts with the new values
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  A2AChannel.app  (Tauri 2 — native macOS)                   │
+│  Cubilot.app  (Tauri 2 — native macOS)                   │
 │                                                             │
 │  ┌─────────────────────┐        ┌───────────────────────┐   │
 │  │ Webview             │◄─SSE───┤ a2a-bin (hub mode)    │   │
@@ -256,7 +256,7 @@ Edit, click **↻** in the header to reload — hub restarts with the new values
 
 **a2a-bin (hub mode)** — HTTP + SSE server on a dynamic loopback port. Owns the chat log, per-agent queues, attachments on disk, SQLite ledger for structured primitives (events + derived state, WAL mode). Bearer-token auth on all routes; read routes also accept `?token=` for `EventSource` and `<img>`.
 
-**a2a-bin (channel mode)** — MCP server, one per Claude Code session. Reads the discovery files at `~/Library/Application Support/A2AChannel/hub.{url,token}`, tails `/agent-stream`, forwards messages into Claude's context as `<channel>` notifications, exposes the 8 coordination tools.
+**a2a-bin (channel mode)** — MCP server, one per Claude Code session. Reads the discovery files at `~/Library/Application Support/Cubilot/hub.{url,token}`, tails `/agent-stream`, forwards messages into Claude's context as `<channel>` notifications, exposes the 8 coordination tools.
 
 **Webview** — vanilla HTML/CSS/JS, no framework. `main.js` orchestrates SSE + chat + nutshell; each structured Kind (handoff, interrupt, permission) lives under `ui/kinds/<kind>.js` and self-registers with `KindCardRenderer` so `main.js` dispatches by prefix instead of branching per kind. `terminal.js` owns the PTY pane + xterm.js lifecycle. Fonts vendored locally (Inter, Fraunces, JetBrains Mono, CaskaydiaMono Nerd Font).
 
@@ -264,21 +264,21 @@ Edit, click **↻** in the header to reload — hub restarts with the new values
 
 **Bundled tmux** — static tmux 3.5a for `aarch64-apple-darwin`, built via `scripts/build-tmux.sh`, bundled in the app.
 
-Full protocol schemas, endpoints, and state machines: [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
+Full protocol schemas, endpoints, and state machines: [`docs/PROTOCOL.md`](PROTOCOL.md).
 
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| UI stuck on "connecting…" | Hub didn't start | Check `~/Library/Logs/A2AChannel/hub.log` |
+| UI stuck on "connecting…" | Hub didn't start | Check `~/Library/Logs/Cubilot/hub.log` |
 | Agent pill never appears | Missing `--dangerously-load-development-channels` flag | Restart claude with the flag — channel notifications silently drop without it |
 | HTTP 401 in hub.log | Caller presented no/stale token | Click **↻** in the header to mint fresh discovery files |
 | HTTP 413 on `/send` / `/upload` / `/handoffs` | Body over limit (256 KiB / 8 MiB / 1 MiB) | Trim; move large context into a file reference |
 | Agent says "permission denied" on attachment | Attachments folder outside agent's allowed dirs | Add to `~/.claude/settings.json` `permissions.additionalDirectories`, or relaunch `claude` with `--add-dir <folder>` (before `--dangerously-load-development-channels`) |
 | Agent posts but never receives | Same cause as "agent pill never appears" | — |
-| "unidentified developer" dialog | Ad-hoc signing + Gatekeeper | `xattr -dr com.apple.quarantine /Applications/A2AChannel.app`, or right-click → Open once |
+| "unidentified developer" dialog | Ad-hoc signing + Gatekeeper | `xattr -dr com.apple.quarantine /Applications/Cubilot.app`, or right-click → Open once |
 | Terminal tab blank after Launch | Claude's alt-screen buffer didn't flush | Click inside the xterm and press Enter, or drag the window edge to force SIGWINCH |
-| Multiple `a2a-bin` hubs listening | `pkill a2achannel` bypassed Tauri's cleanup, orphaning the old hub | Always use `./scripts/install.sh` (has orphan-sweep); to recover, `pgrep -fl a2a-bin`, kill the hubs with `A2A_MODE=hub`, relaunch |
+| Multiple `a2a-bin` hubs listening | `pkill cubilot` bypassed Tauri's cleanup, orphaning the old hub | Always use `./scripts/install.sh` (has orphan-sweep); to recover, `pgrep -fl a2a-bin`, kill the hubs with `A2A_MODE=hub`, relaunch |
 
 ## Limitations
 
@@ -288,12 +288,12 @@ Full protocol schemas, endpoints, and state machines: [`docs/PROTOCOL.md`](docs/
 
 ## Persistent transcripts (opt-in)
 
-Off by default. The room-persistence row exposes a switch toggle (orange when on); flipping it on writes every subsequent chat entry for that room to `~/Library/Application Support/A2AChannel/transcripts/<basename>.jsonl` (mode 0600, line-delimited JSON, `v: 1` schema).
+Off by default. The room-persistence row exposes a switch toggle (orange when on); flipping it on writes every subsequent chat entry for that room to `~/Library/Application Support/Cubilot/transcripts/<basename>.jsonl` (mode 0600, line-delimited JSON, `v: 1` schema).
 
 When the active file hits 10,000 lines it's renamed to `<basename>.000001.jsonl` and a fresh active file starts. Rotated chunks are **never auto-deleted** — they're archive.
 
 ```
-~/Library/Application Support/A2AChannel/transcripts/
+~/Library/Application Support/Cubilot/transcripts/
 ├── ab12cd34-auth_review.jsonl              ← active, ≤ 10,000 lines
 ├── ab12cd34-auth_review.000001.jsonl       ← rotated chunk (oldest)
 └── ab12cd34-auth_review.000002.jsonl       ← rotated chunk
@@ -312,4 +312,4 @@ Hub restart wipes the in-memory chat log; **the JSONL is not replayed back into 
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](../LICENSE).

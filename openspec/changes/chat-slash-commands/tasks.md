@@ -52,7 +52,7 @@
 - [x] 6.3 Unit-test `commandUnion` and `commandAvailability` with synthetic discovery output (covered in `tests/unit/slash-parse.test.ts`).
 - [ ] 6.4 ~~Integration test for `/clear @all`~~ Skipped — requires DOM mocking (composer textarea, popover state, modal flow) plus Tauri IPC mocking; the surface duplicates the manual smoke test below. The audit-text format is covered by `formatSlashAuditText` unit tests.
 - [ ] 6.5 ~~Integration test for `/help @builder` in All-rooms view~~ Skipped — same DOM/IPC mock surface as 6.4. The room-gating is exercised manually in 8.3.
-- [ ] 6.6 Manual / smoke test: with two real claude agents launched in A2AChannel, send `/clear @all` from the composer; verify both xterms reset and the audit row appears in chat. **Pending verification at install time (8.3).**
+- [ ] 6.6 Manual / smoke test: with two real claude agents launched in Cubilot, send `/clear @all` from the composer; verify both xterms reset and the audit row appears in chat. **Pending verification at install time (8.3).**
 
 ## 7. Documentation
 

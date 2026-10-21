@@ -1,7 +1,7 @@
 // Claude subprocess adapter — spawns `claude --print` and pipes content to
 // stdin. Uses the user's existing Claude Code subscription (Pro/Max), no API
 // key required. Auth is shared via macOS keychain (same process user as
-// A2AChannel).
+// Cubilot).
 //
 // Path resolution: macOS GUI apps inherit a sanitised $PATH from launchd that
 // excludes user-installed npm bins. Relying on `claude` being in $PATH fails

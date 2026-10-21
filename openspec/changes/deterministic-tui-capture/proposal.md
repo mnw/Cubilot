@@ -11,7 +11,7 @@ The architectural fix is to control all three layers of the contract — renderi
 ## What Changes
 
 - **NEW Tauri command `pty_capture_turn(agent, input) → CaptureResult`** — a single-turn capture primitive. Resizes the agent's tmux window to a forced large geometry (240×100), tees PTY output to a per-capture file via `tmux pipe-pane`, injects `input` via the existing `pty_write`, waits for a deterministic completion sentinel, restores the window, returns the captured log path.
-- **Per-agent claude settings injection** at spawn — A2AChannel writes `~/Library/Application Support/A2AChannel/settings/<agent>.json` with a `Stop` hook that `touch`es a sentinel file in `/tmp/a2a/<agent>/signals/` after every claude turn. Same pattern as the existing `--mcp-config <path>` injection (no user-file mutation, scoped via env).
+- **Per-agent claude settings injection** at spawn — Cubilot writes `~/Library/Application Support/Cubilot/settings/<agent>.json` with a `Stop` hook that `touch`es a sentinel file in `/tmp/a2a/<agent>/signals/` after every claude turn. Same pattern as the existing `--mcp-config <path>` injection (no user-file mutation, scoped via env).
 - **`A2A_AGENT` env var** added to the tmux session env at spawn, scoping the hook's sentinel path per agent.
 - **Slash-send refactor** — `slash-send.js`'s capture path replaced by a call to `pty_capture_turn`. The byte-stream-listener / quiescence-detector / headless-render / regex-slice pipeline goes away. Markdown wrap + chat post stay.
 - **Per-agent file layout** under `/tmp/a2a/<agent>/`:

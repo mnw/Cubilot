@@ -77,7 +77,7 @@ _(Note: v0.8 already shipped schema v5; bumping to v6 instead of v4 as the origi
 
 - [x] 9.1 `<select id="room-switcher">` + `#room-controls` cluster in header.
 - [x] 9.2 Populated from `ROSTER` distinct rooms + "All rooms"; rebuilt via `renderRoomSwitcher()` inside `applyRoster()`.
-- [x] 9.3 Persisted to `localStorage.a2achannel_selected_room`; falls back to "All".
+- [x] 9.3 Persisted to `localStorage.cubilot_selected_room`; falls back to "All".
 - [x] 9.4 `.msg[data-room]` filter via injected `<style id="room-filter-style">` rule.
 - [x] 9.5 `.handoff-card / .interrupt-card / .permission-card` data-room tagged, filter rule covers them.
 - [x] 9.6 `.legend-item` data-room tagged; human lacks the attr → always visible.

@@ -27,7 +27,7 @@ The orchestrator body SHALL be ≤25 LOC of clear sequencing (no inline argv ass
 
 #### Scenario: Argv preserves single-token quoted paths
 
-- **GIVEN** `cwd = "/Users/mnw/Workspace/A2AChannel/Some Path With Spaces"`, `agent = "alice"`, `spawn_cmd = "claude --mcp-config '/path/with spaces.json' --dangerously-load-development-channels server:chatbridge"`, `session_existed = false`
+- **GIVEN** `cwd = "/Users/mnw/Workspace/Cubilot/Some Path With Spaces"`, `agent = "alice"`, `spawn_cmd = "claude --mcp-config '/path/with spaces.json' --dangerously-load-development-channels server:chatbridge"`, `session_existed = false`
 - **WHEN** `build_spawn_argv(...)` is called
 - **THEN** the returned argv passes the entire `claude ...` invocation as a single tmux argv element (so /bin/sh's argv-join doesn't split the quoted `--mcp-config '/path/with spaces.json'` into multiple tokens — the v0.6 regression)
 - **AND** the test runs without invoking tmux

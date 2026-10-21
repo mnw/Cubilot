@@ -1,6 +1,6 @@
 ## Why
 
-v0.6 shipped without the embedded terminal pane — it was the main tentpole feature and the one that failed in integration. The goal is single-window operation: the human launches agents, sends commands and slash-commands, and answers permission prompts without leaving A2AChannel. Stage-gate escape hatches (Terminal.app spawn) don't satisfy this goal. v0.7 commits to the embedded pane, but with a materially different architecture than the v0.6 attempt.
+v0.6 shipped without the embedded terminal pane — it was the main tentpole feature and the one that failed in integration. The goal is single-window operation: the human launches agents, sends commands and slash-commands, and answers permission prompts without leaving Cubilot. Stage-gate escape hatches (Terminal.app spawn) don't satisfy this goal. v0.7 commits to the embedded pane, but with a materially different architecture than the v0.6 attempt.
 
 The v0.6 implementation used `tmux -C` control mode as the bridge between tmux and the webview. That stacked three fragile parsers (tmux's `%output` framing, a `send-keys` dispatch path, and xterm.js consumption) into one input loop, and one of them broke in a way that couldn't be diagnosed in the release budget. The v0.7 approach drops control mode entirely and runs tmux inside a raw PTY, feeding its ANSI stream directly into xterm.js — the same pattern every standalone terminal emulator uses.
 
@@ -15,7 +15,7 @@ The v0.6 implementation used `tmux -C` control mode as the bridge between tmux a
 - All tmux-spawned commands wrap through the user's login shell (`$SHELL -l -c "..."`) so `claude` resolves under the user's PATH — macOS GUI apps inherit launchd's sparse PATH, which almost never contains `claude`.
 - xterm.js 5.x + `xterm-addon-fit` vendored under `ui/vendor/xterm/` — single-file ESM, no CDN, no bundler.
 - UI: right-side vertical tab strip, one tab per agent. Launch / attach / kill controls per tab. Opt-in via header toggle, persisted in `localStorage`. Default off on first launch.
-- Two entry paths for an agent to appear in the pane: **explicit** (`+ New agent` button prompts for name + cwd; A2AChannel writes or merges `.mcp.json` and spawns tmux+claude) and **reactive** (agent launched from the user's own terminal registers via `channel-bin`; appears as a display-only `external`-state tab).
+- Two entry paths for an agent to appear in the pane: **explicit** (`+ New agent` button prompts for name + cwd; Cubilot writes or merges `.mcp.json` and spawns tmux+claude) and **reactive** (agent launched from the user's own terminal registers via `channel-bin`; appears as a display-only `external`-state tab).
 - `.mcp.json` authoring: absent → write; matching chatbridge entry → skip; conflicting → prompt the user and merge while preserving other `mcpServers.*` entries.
 - **PoC gate:** no code lands in `src-tauri/` or `ui/` until a standalone Tauri scratch project demonstrates a working xterm ↔ PTY ↔ bash loop including Ctrl-C, arrow keys, interactive prompts, resize, and UTF-8. The PoC explicitly un-blocks integration.
 

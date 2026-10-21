@@ -154,7 +154,7 @@ Claude agents SHALL join a room through the `chatbridge` Claude Code plugin load
 
 #### Scenario: Claude agent connects without the dev-channels flag
 
-- **WHEN** A2AChannel spawns Claude agent `alice` in room `eu-space`
+- **WHEN** Cubilot spawns Claude agent `alice` in room `eu-space`
 - **THEN** the tmux command contains `--plugin-dir` and does not contain `--dangerously-load-development-channels`
 - **AND** any `--mcp-config` it contains names the generated global-servers file, whose servers never include `chatbridge`
 - **AND** `alice` appears online in the roster
@@ -270,7 +270,7 @@ The hub SHALL serve `GET /permissions/:id/wait?timeout_ms=<n>` under read-route 
 
 ### Requirement: The user's global MCP servers still reach Claude agents
 
-When the user's global MCP config (`~/Library/Application Support/A2AChannel/mcp.json`) lists servers other than `chatbridge`, each Claude spawn SHALL generate `<app data>/mcp-configs/global.json` (mode `0600`, written atomically) containing only those servers under `mcpServers`, and SHALL pass it with one `--mcp-config` flag. A server named `chatbridge` SHALL never be written. With no such servers, no file SHALL be left and no flag SHALL be passed.
+When the user's global MCP config (`~/Library/Application Support/Cubilot/mcp.json`) lists servers other than `chatbridge`, each Claude spawn SHALL generate `<app data>/mcp-configs/global.json` (mode `0600`, written atomically) containing only those servers under `mcpServers`, and SHALL pass it with one `--mcp-config` flag. A server named `chatbridge` SHALL never be written. With no such servers, no file SHALL be left and no flag SHALL be passed.
 
 #### Scenario: Global servers configured
 

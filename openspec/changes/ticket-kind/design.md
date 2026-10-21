@@ -1,6 +1,6 @@
 ## Context
 
-A2AChannel owns three persistent kinds — `handoff`, `interrupt`, `permission` — each a
+Cubilot owns three persistent kinds — `handoff`, `interrupt`, `permission` — each a
 state machine over SQLite with one event plus one derived-table update per transition, in
 a single transaction. The orchestrator in `hub.ts` is kind-agnostic: adding a kind is one
 file under `hub/kinds/` and one entry in the `KINDS` array, with routes dispatch,
@@ -30,7 +30,7 @@ opinionated, so the right implementation is the one that adds no new mechanism.
   never pushed.
 - No cross-Room tickets. Rooms are the isolation boundary everywhere else and this is
   not where that changes.
-- Not a CI or pipeline trigger. Build, review and deploy stay outside A2AChannel.
+- Not a CI or pipeline trigger. Build, review and deploy stay outside Cubilot.
 
 ## Decisions
 
@@ -126,11 +126,11 @@ transaction — rejected, it writes two events in one transaction and couples ha
 ticket.
 
 **`external_ref` is an opaque string, not an integration.** Client work is tracked
-outside A2AChannel under keys like `EUSPACE-246`, which is also the enforced commit
+outside Cubilot under keys like `EUSPACE-246`, which is also the enforced commit
 prefix. Carrying the key makes a thread traceable across ticket, chat and commit for the
 cost of one nullable column. *Alternative considered:* syncing with the external tracker —
 rejected; it buys a copy that goes stale, plus auth, rate limits and a failure mode for a
-system we do not control. A2AChannel tickets are agent-coordination state at a finer
+system we do not control. Cubilot tickets are agent-coordination state at a finer
 grain than the tracker's deliverables; one external item may spawn several.
 
 **A four-column board, not six.** `cancelled` and the distinction between `claimed` and

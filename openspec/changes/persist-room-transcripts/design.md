@@ -1,6 +1,6 @@
 ## Context
 
-A2AChannel keeps the chat log in memory only (`chatLog: Entry[]` in `hub/hub.ts`). Hub restart wipes the room-level conversation history, even though every individual agent's claude session continues to write its own transcript at `~/.claude/projects/<cwd>/<session>.jsonl`. The orchestration layer's view (who said what across agents, system audit rows, briefing emits) is the one slice of state that has no durable home.
+Cubilot keeps the chat log in memory only (`chatLog: Entry[]` in `hub/hub.ts`). Hub restart wipes the room-level conversation history, even though every individual agent's claude session continues to write its own transcript at `~/.claude/projects/<cwd>/<session>.jsonl`. The orchestration layer's view (who said what across agents, system audit rows, briefing emits) is the one slice of state that has no durable home.
 
 Adjacent state is already well-organized:
 - **SQLite (`ledger.db`)** owns structured kinds: `events` table + per-kind derived tables (`handoffs`, `interrupts`, `permissions`, `nutshell`). All ACID, all queryable.
@@ -13,7 +13,7 @@ The CLAUDE.md hard rule "Never persist the roster or chat log without being aske
 
 **Goals:**
 - Per-room opt-in transcript persistence with default off.
-- JSONL append-only at `~/Library/Application Support/A2AChannel/transcripts/<room>.jsonl`.
+- JSONL append-only at `~/Library/Application Support/Cubilot/transcripts/<room>.jsonl`.
 - SQLite (`ledger.db`) untouched in its existing role; only addition is a new `room_settings` table for the per-room flag.
 - Hub restart restores the conversation view by hydrating `chatLog` from JSONL + replaying kinds from SQLite, merged by timestamp.
 - `/clear` semantics extend cleanly: same command wipes both in-memory cache and on-disk transcript atomically.
@@ -144,8 +144,8 @@ A room without a row in `room_settings` is treated as "persistence off, retentio
 This change is purely additive. No existing data is migrated, no behavior changes for users who don't opt in.
 
 1. **Forward migration:** SQL `CREATE TABLE IF NOT EXISTS room_settings (...)` runs on hub startup if missing.
-2. **Rollback:** Setting `persist_transcript = false` for all rooms returns the system to pre-change behavior. JSONL files left on disk are inert (no reader running). A user can `rm -rf ~/Library/Application\ Support/A2AChannel/transcripts/` to fully revert.
-3. **Downgrade:** A user installing an older A2AChannel build on top of an installed v0.10+ data dir leaves the JSONL files orphaned but harmless (the older code doesn't know they exist).
+2. **Rollback:** Setting `persist_transcript = false` for all rooms returns the system to pre-change behavior. JSONL files left on disk are inert (no reader running). A user can `rm -rf ~/Library/Application\ Support/Cubilot/transcripts/` to fully revert.
+3. **Downgrade:** A user installing an older Cubilot build on top of an installed v0.10+ data dir leaves the JSONL files orphaned but harmless (the older code doesn't know they exist).
 4. **Versioned line schema:** Future schema changes append-only — never modify old lines. Readers tolerate unknown `v` by skipping.
 
 ## Open Questions

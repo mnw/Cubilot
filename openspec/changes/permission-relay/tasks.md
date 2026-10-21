@@ -137,7 +137,7 @@
 ## 10. Release
 
 - [x] 10.1 Bumped version to `0.8.0` in `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and `hub/channel.ts` server version string.
-- [ ] 10.2 Run `./scripts/install.sh` for a clean install. _(user-run — writes to /Applications/A2AChannel.app)_
+- [ ] 10.2 Run `./scripts/install.sh` for a clean install. _(user-run — writes to /Applications/Cubilot.app)_
 - [ ] 10.3 Run the §8 test matrix against the installed build. Log results in the release notes. _(user-run — needs real claude processes)_
 - [ ] 10.4 Git tag `v0.8.0`, push, create GitHub release with DMG + `.app.zip`. _(user-gated — per CLAUDE.md "never commit unless asked")_
 - [ ] 10.5 Archive this OpenSpec change (`openspec archive permission-relay`). _(after release ships)_

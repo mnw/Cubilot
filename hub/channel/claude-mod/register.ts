@@ -1,5 +1,5 @@
 // Claude Code adapter for the chatbridge: a mod (function-hooks plugin) that
-// joins this session to an A2AChannel room through the shared bridge core.
+// joins this session to a Cubilot room through the shared bridge core.
 //
 // Bundled by scripts/build-sidecars.sh into resources/chatbridge-mod/hooks/register.js
 // (a mod may only import files inside its own folder) and loaded with

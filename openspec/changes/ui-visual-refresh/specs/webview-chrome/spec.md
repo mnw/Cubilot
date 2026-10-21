@@ -2,13 +2,13 @@
 
 ### Requirement: Two-column application layout preserved from v0.7.0
 
-The A2AChannel webview SHALL retain the v0.7.0 two-column main-body structure: a Chat column (always visible) and an optional Terminal column (shown when the user toggles the header icon). A drag-resizable splitter SHALL separate the two when both are visible. The header, nutshell strip, and title-bar area SHALL span the full window width above the main body.
+The Cubilot webview SHALL retain the v0.7.0 two-column main-body structure: a Chat column (always visible) and an optional Terminal column (shown when the user toggles the header icon). A drag-resizable splitter SHALL separate the two when both are visible. The header, nutshell strip, and title-bar area SHALL span the full window width above the main body.
 
 An earlier draft of this refresh added a three-column layout with a dedicated Activity Ledger rail; it was rejected after prototype because it duplicated every pending handoff (inline in chat + in the rail) without adding information. Handoff and interrupt cards SHALL continue to render inline in the chat stream exactly as v0.7.0 did.
 
 #### Scenario: Terminal pane disabled
 
-- **GIVEN** `localStorage.a2achannel_terminal_enabled` is `"false"` (or absent)
+- **GIVEN** `localStorage.cubilot_terminal_enabled` is `"false"` (or absent)
 - **WHEN** the webview renders
 - **THEN** the main body displays the Chat column at full width
 - **AND** the Terminal column and splitter are hidden
@@ -16,7 +16,7 @@ An earlier draft of this refresh added a three-column layout with a dedicated Ac
 #### Scenario: Terminal pane enabled
 
 - **WHEN** the user clicks the terminal toggle icon in the header
-- **THEN** `localStorage.a2achannel_terminal_enabled` is set to `"true"`
+- **THEN** `localStorage.cubilot_terminal_enabled` is set to `"true"`
 - **AND** the main body renders Chat + splitter + Terminal side-by-side
 - **AND** the splitter remains drag-resizable within 25–75%
 
@@ -138,7 +138,7 @@ The app bundle icons (`src-tauri/icons/icon.icns` and size variants) SHALL be re
 
 - **WHEN** a maintainer runs `bun x tauri icon icon.svg -o src-tauri/icons`
 - **THEN** `src-tauri/icons/icon.icns` and all size variants are produced from `icon.svg`
-- **AND** the next `tauri build` bundles them into `A2AChannel.app/Contents/Resources/`
+- **AND** the next `tauri build` bundles them into `Cubilot.app/Contents/Resources/`
 
 #### Scenario: Header brand mark visually matches
 

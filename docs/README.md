@@ -40,7 +40,7 @@ inline in the repository README.
 - **No audio** (GIF has none anyway; if you record MP4, silence is fine).
 - **Captions** inline in the video if any step isn't self-evident from
   the UI. Keep them short and high-contrast.
-- **Window chrome:** include the A2AChannel window chrome (header with
+- **Window chrome:** include the Cubilot window chrome (header with
   pills + settings/reload/MCP buttons) so it's obviously a desktop app,
   not a web demo.
 

@@ -13,7 +13,7 @@ Constraints:
 ## Goals / Non-Goals
 
 **Goals:**
-- One A2AChannel window hosts multiple isolated projects without cross-project context pollution.
+- One Cubilot window hosts multiple isolated projects without cross-project context pollution.
 - Agents in different rooms do not see each other's broadcast chatter.
 - Explicit cross-room addressing remains possible (peer-to-peer by name).
 - Per-room nutshell so new agents in project A are onboarded with project A's summary, not a global blob.
@@ -22,7 +22,7 @@ Constraints:
 - Defense-in-depth: channel-bin re-validates the room on every inbound event so a hub routing bug cannot leak context.
 
 **Non-Goals:**
-- Multiple A2AChannel instances running simultaneously. Still a single-instance product.
+- Multiple Cubilot instances running simultaneously. Still a single-instance product.
 - Per-room authentication. All rooms share the one bearer token; any agent with the token can address any other room (via explicit `to: "<name>"`).
 - Per-room `attachments_dir` or `human_name`. Inherited from global config.
 - Room renaming or mid-session reassignment. Rooms are fixed at spawn.
@@ -142,7 +142,7 @@ The human is in every room. The human's UI does client-side filtering when a spe
 4. UI shows the room switcher on boot. Default selection is the room of the first agent in the roster, or "All" if mixed.
 
 **Rollback**:
-- Downgrade to v0.8 is blocked by the existing ledger downgrade-protection check (v0.9 ledger has schema_version=4, v0.8 refuses to open it). To force a downgrade, the user `rm ~/Library/Application\ Support/A2AChannel/ledger.db` before starting v0.8 — they lose handoff / interrupt / nutshell history. Documented as a caveat.
+- Downgrade to v0.8 is blocked by the existing ledger downgrade-protection check (v0.9 ledger has schema_version=4, v0.8 refuses to open it). To force a downgrade, the user `rm ~/Library/Application\ Support/Cubilot/ledger.db` before starting v0.8 — they lose handoff / interrupt / nutshell history. Documented as a caveat.
 - The `room` column being additive means a v0.8 codebase reading a v0.9 ledger would work *if* the downgrade check were bypassed. We don't bypass it; the protection is intentional.
 
 **Release checklist**:

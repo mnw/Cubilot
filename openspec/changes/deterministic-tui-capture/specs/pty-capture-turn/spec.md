@@ -1,6 +1,6 @@
 ## ADDED Requirements
 
-### Requirement: A2AChannel SHALL provide a `pty_capture_turn` Tauri command for deterministic single-turn TUI capture
+### Requirement: Cubilot SHALL provide a `pty_capture_turn` Tauri command for deterministic single-turn TUI capture
 
 A new Tauri command `pty_capture_turn(agent: String, input: String, timeout_ms: Option<u32>) -> Result<CaptureResult, String>` SHALL be exposed by `src-tauri/src/pty.rs`. The command SHALL coordinate three layers of the capture contract — rendering geometry (tmux window size), output stream (tmux pipe-pane), and completion signal (filesystem sentinel written by claude's `Stop` hook) — to deliver a complete, untruncated capture of a single claude turn.
 
@@ -100,13 +100,13 @@ The sentinel filename uses whole-second epoch (`date +%s`); the actual completio
 - **THEN** only sentinel files with mtime > start_instant are eligible
 - **AND** older sentinels are skipped during polling
 
-### Requirement: A2AChannel SHALL inject the per-agent claude settings file at agent spawn
+### Requirement: Cubilot SHALL inject the per-agent claude settings file at agent spawn
 
-For each agent spawn, the Tauri shell SHALL materialize a per-agent settings file at `~/Library/Application Support/A2AChannel/settings/<agent>.json` containing the `Stop` hook command. The claude invocation SHALL include `--settings <path>` referencing this file (mirrors the existing `--mcp-config <path>` pattern). The agent's tmux session SHALL be spawned with `A2A_AGENT=<name>` in its env so the hook command can scope its sentinel writes per-agent.
+For each agent spawn, the Tauri shell SHALL materialize a per-agent settings file at `~/Library/Application Support/Cubilot/settings/<agent>.json` containing the `Stop` hook command. The claude invocation SHALL include `--settings <path>` referencing this file (mirrors the existing `--mcp-config <path>` pattern). The agent's tmux session SHALL be spawned with `A2A_AGENT=<name>` in its env so the hook command can scope its sentinel writes per-agent.
 
 #### Scenario: Settings file is materialized at every spawn
 - **WHEN** `pty_spawn(agent, cwd, ...)` is invoked
-- **THEN** the file `~/Library/Application Support/A2AChannel/settings/<agent>.json` is written (mode 0600)
+- **THEN** the file `~/Library/Application Support/Cubilot/settings/<agent>.json` is written (mode 0600)
 - **AND** the file's `Stop` hook command references `$A2A_AGENT` for path scoping
 - **AND** the claude invocation includes `--settings <that path>`
 

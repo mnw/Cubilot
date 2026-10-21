@@ -564,7 +564,7 @@ fn render_seed_yaml(
     };
 
     format!(
-        "# A2AChannel config. Applied on launch; click Reload to re-read.\n\
+        "# Cubilot config. Applied on launch; click Reload to re-read.\n\
          \n\
          # Identity shown in the roster.\n\
          human_name: {human_name}\n\
@@ -1075,7 +1075,7 @@ fn open_global_mcp_config() -> Result<(), String> {
             "_comment": "Global MCP servers shared by all Claude agents (pi agents have no MCP support). Standard .mcp.json schema. \
                          Each server may carry an optional non-standard `prompts: [\"name\", ...]` array \
                          which lets the slash picker show /mcp__<server>__<name> as a discoverable command. \
-                         The `chatbridge` server is reserved by A2AChannel; entries with that name are \
+                         The `chatbridge` server is reserved by Cubilot; entries with that name are \
                          silently dropped on save.",
             "mcpServers": {}
         })).map_err(|e| e.to_string())?;
@@ -1338,7 +1338,7 @@ fn read_frontmatter_description(path: &Path) -> Option<String> {
     None
 }
 
-// Launch line for sessions started outside A2AChannel. No hub URL or token: the mod
+// Launch line for sessions started outside Cubilot. No hub URL or token: the mod
 // reads the discovery files itself.
 #[tauri::command]
 fn get_mcp_template() -> Result<String, String> {

@@ -242,8 +242,8 @@ The hub SHALL accept `POST /handoffs/:id/cancel` with body `{ by, reason? }`. Au
 The endpoint is directly reachable via `curl` with a valid bearer token; this is the v1 exercise path for human-override cancellation (no UI originates-from-human form yet):
 
 ```bash
-TOKEN=$(cat ~/Library/Application\ Support/A2AChannel/hub.token)
-HUB=$(cat  ~/Library/Application\ Support/A2AChannel/hub.url)
+TOKEN=$(cat ~/Library/Application\ Support/Cubilot/hub.token)
+HUB=$(cat  ~/Library/Application\ Support/Cubilot/hub.url)
 HUMAN=$(# read from get_human_name or config; default "human")
 curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
      -d "{\"by\":\"$HUMAN\",\"reason\":\"override\"}" \

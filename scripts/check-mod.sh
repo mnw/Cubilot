@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 MOD=hub/channel/claude-mod
-DTS="${1:-$HOME/Library/Application Support/A2AChannel/chatbridge-mod/.claude-plugin/types/claude-code/index.d.ts}"
+DTS="${1:-$HOME/Library/Application Support/Cubilot/chatbridge-mod/.claude-plugin/types/claude-code/index.d.ts}"
 
 if [ ! -f "$DTS" ]; then
   echo "FAIL: Claude Code declarations not found: $DTS"

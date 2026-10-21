@@ -5,7 +5,7 @@ TBD - created by archiving change v096-css-hygiene. Update Purpose after archive
 ## Requirements
 ### Requirement: CSS is organized into semantic files under `ui/styles/`
 
-The A2AChannel UI SHALL ship CSS as a set of semantic files under `ui/styles/`, each scoped to a single concern, loaded by `ui/index.html` via individual `<link rel="stylesheet">` tags in a deterministic order.
+The Cubilot UI SHALL ship CSS as a set of semantic files under `ui/styles/`, each scoped to a single concern, loaded by `ui/index.html` via individual `<link rel="stylesheet">` tags in a deterministic order.
 
 The file set includes at minimum:
 
@@ -164,7 +164,7 @@ The refactor introduces no new HTML element types, no new event listeners, and n
 
 ### Requirement: Webview JavaScript is organized into per-responsibility files
 
-The A2AChannel UI SHALL ship JavaScript as a set of per-responsibility files under `ui/`, each scoped to a single concern, loaded by `ui/index.html` via individual classic `<script src=…>` tags in a documented load order.
+The Cubilot UI SHALL ship JavaScript as a set of per-responsibility files under `ui/`, each scoped to a single concern, loaded by `ui/index.html` via individual classic `<script src=…>` tags in a documented load order.
 
 Folder structure:
 
@@ -251,7 +251,7 @@ The structural refactor SHALL NOT change observable behavior of the UI. Every in
 #### Scenario: Manual click-through gate before shipping
 
 - **WHEN** the extraction commits are complete and the app is installed
-- **THEN** a manual click-through covers: send a message in two rooms; run /usage in an embedded pane and confirm the pill updates; fire a handoff (accept + decline + cancel + expire); trip a permission card (allow + deny + dismiss); send + ack an interrupt; edit and accept a nutshell proposal; click "Reload settings"; toggle the terminal pane; spawn an agent; kill an agent externally and observe the dead-state UI; restart A2AChannel and confirm tabs auto-reattach
+- **THEN** a manual click-through covers: send a message in two rooms; run /usage in an embedded pane and confirm the pill updates; fire a handoff (accept + decline + cancel + expire); trip a permission card (allow + deny + dismiss); send + ack an interrupt; edit and accept a nutshell proposal; click "Reload settings"; toggle the terminal pane; spawn an agent; kill an agent externally and observe the dead-state UI; restart Cubilot and confirm tabs auto-reattach
 - **AND** every step behaves identically to the pre-extraction baseline
 - **AND** no regression surfaces during the click-through
 

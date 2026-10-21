@@ -1,10 +1,10 @@
 ## Context
 
-v0.7 shipped the embedded terminal pane so a human could interact with claude's TUI without leaving A2AChannel. That fixes "see the agent's output"; it does not fix "unblock the agent." When claude requests approval for a `Bash` or `Write` call, the TUI prompt renders inside that agent's tab. The human must focus that exact tab and press Y/N. With more than two agents in a room, the accumulated wait becomes a coordination failure mode — the human is in Alice's tab discussing architecture while Bob silently hangs on a two-line tool approval.
+v0.7 shipped the embedded terminal pane so a human could interact with claude's TUI without leaving Cubilot. That fixes "see the agent's output"; it does not fix "unblock the agent." When claude requests approval for a `Bash` or `Write` call, the TUI prompt renders inside that agent's tab. The human must focus that exact tab and press Y/N. With more than two agents in a room, the accumulated wait becomes a coordination failure mode — the human is in Alice's tab discussing architecture while Bob silently hangs on a two-line tool approval.
 
 Claude Code 2.1.81 introduced an MCP extension that relays these approval dialogs to any two-way channel that opts in. Request lifecycle: claude emits a `notifications/claude/channel/permission_request` with a request_id + metadata, stays open for answers from either the local terminal or the channel, applies the first answer to arrive, drops the other. chatbridge is already a two-way channel; the opt-in is a single capability declaration plus handler wiring.
 
-This change routes those prompts through A2AChannel's hub so any participant with chat access can approve or deny from anywhere in the UI, without switching xterm tabs. Architecturally it's a new structured-message kind that mirrors the handoff/interrupt/nutshell pattern: ledger-backed, SSE-broadcast, version-reconciled, replayed on reconnect.
+This change routes those prompts through Cubilot's hub so any participant with chat access can approve or deny from anywhere in the UI, without switching xterm tabs. Architecturally it's a new structured-message kind that mirrors the handoff/interrupt/nutshell pattern: ledger-backed, SSE-broadcast, version-reconciled, replayed on reconnect.
 
 Current constraints:
 - macOS ARM64 only.
@@ -16,7 +16,7 @@ Current constraints:
 ## Goals / Non-Goals
 
 **Goals:**
-- Route every Claude Code tool-use approval prompt through A2AChannel so the human can answer from the chat UI rather than being pinned to the originating xterm tab.
+- Route every Claude Code tool-use approval prompt through Cubilot so the human can answer from the chat UI rather than being pinned to the originating xterm tab.
 - Keep the local xterm dialog fully functional — first answer wins, no regression for users who want the traditional flow.
 - Make any roster member (human or agent) capable of relaying a verdict via `ack_permission`, matching the handoff pattern where agents can accept/decline on their own.
 - Preserve the structured-handoff/interrupt playbook: ledger event + derived row in one transaction, SSE broadcast with monotonic version, replay on reconnect, terminal-state idempotency (same-status retry → 200, different-status → 409).
@@ -48,7 +48,7 @@ Current constraints:
 
 **Decision:** The human SHALL answer by default. Any agent with a valid bearer token MAY also submit a verdict via `ack_permission`. The hub accepts the first verdict to arrive (regardless of submitter), broadcasts `permission.resolved`, and the chatbridge relays it back to claude.
 
-**Why allow agent verdicts:** matches the existing trust model (handoff accept is open to the recipient, and `cancel_handoff` to the sender or human). In multi-agent team setups where a `reviewer` agent is the designated approver for trivial reads, denying it the ability to ack makes the feature less useful than its precedent. An admin can deploy A2AChannel with a policy hook later if they want to restrict this.
+**Why allow agent verdicts:** matches the existing trust model (handoff accept is open to the recipient, and `cancel_handoff` to the sender or human). In multi-agent team setups where a `reviewer` agent is the designated approver for trivial reads, denying it the ability to ack makes the feature less useful than its precedent. An admin can deploy Cubilot with a policy hook later if they want to restrict this.
 
 **Alternatives considered:**
 - Human-only verdicts — rejected. Breaks the symmetry with the rest of the protocol; forces every team-based review flow to route through one person. The coordination tax we're trying to remove comes back as "only the human can approve."
@@ -184,7 +184,7 @@ ack_permission({
 
 ## Migration Plan
 
-- **Users on v0.7.x:** no migration needed. Relaunch A2AChannel; ledger auto-migrates to v3 on first open. Agents relaunched under v0.8 get the capability automatically via chatbridge.
+- **Users on v0.7.x:** no migration needed. Relaunch Cubilot; ledger auto-migrates to v3 on first open. Agents relaunched under v0.8 get the capability automatically via chatbridge.
 - **Claude Code < 2.1.81:** no change — capability ignored. Local dialog continues to be the only path.
 - **Rollback to v0.7.x:** safe. The `permissions` table stays in the ledger (v0.7 code doesn't read it); no data loss. Chatbridge running as v0.7 simply doesn't declare the capability.
 - **MCP protocol:** new tool (`ack_permission`) added. Other tools unchanged. Agents discover it via `tools/list`.

@@ -9,7 +9,7 @@ The Rust shell SHALL bind a listener on `127.0.0.1:0` at startup, read the OS-as
 
 #### Scenario: Fresh startup on a machine with no port conflict
 
-- **WHEN** the user launches `A2AChannel.app`
+- **WHEN** the user launches `Cubilot.app`
 - **THEN** the Rust shell binds `127.0.0.1:0`, obtains a free port (e.g. `54831`)
 - **AND** releases its listener
 - **AND** spawns `hub-bin` with `PORT=54831` in its environment
@@ -18,18 +18,18 @@ The Rust shell SHALL bind a listener on `127.0.0.1:0` at startup, read the OS-as
 #### Scenario: Port 8011 is already held by an unrelated process
 
 - **WHEN** another process is listening on `127.0.0.1:8011`
-- **AND** the user launches `A2AChannel.app`
+- **AND** the user launches `Cubilot.app`
 - **THEN** the app obtains a different free port (any port ≠ 8011) and starts normally
 - **AND** no `EADDRINUSE` error is written to `hub.log`
 
 ### Requirement: Hub URL is published to a discovery file
 
-On successful hub startup, the Rust shell SHALL write the hub URL to `~/Library/Application Support/A2AChannel/hub.url`. The file SHALL contain exactly the URL (e.g. `http://127.0.0.1:54831`), optionally terminated by a newline. The parent directory SHALL be created if it does not exist. The write SHALL be atomic: the Rust shell SHALL write to a temporary file in the same directory and rename it over the target. The discovery file SHALL be created with file mode `0600` (owner read/write only) so that other local users cannot observe the running hub's URL.
+On successful hub startup, the Rust shell SHALL write the hub URL to `~/Library/Application Support/Cubilot/hub.url`. The file SHALL contain exactly the URL (e.g. `http://127.0.0.1:54831`), optionally terminated by a newline. The parent directory SHALL be created if it does not exist. The write SHALL be atomic: the Rust shell SHALL write to a temporary file in the same directory and rename it over the target. The discovery file SHALL be created with file mode `0600` (owner read/write only) so that other local users cannot observe the running hub's URL.
 
 #### Scenario: Discovery file is written on first launch
 
 - **WHEN** the app starts for the first time on a machine
-- **AND** `~/Library/Application Support/A2AChannel/` does not yet exist
+- **AND** `~/Library/Application Support/Cubilot/` does not yet exist
 - **THEN** the directory is created
 - **AND** `hub.url` is written with content matching the hub's actual URL
 - **AND** `hub.url` has filesystem mode `0600`
@@ -70,12 +70,12 @@ The app's Content-Security-Policy SHALL permit `connect-src` and `img-src` direc
 
 ### Requirement: Hub publishes an auth token alongside the URL
 
-On successful hub startup, the Rust shell SHALL mint a cryptographically-random token (at least 32 bytes of entropy, URL-safe base64 encoded) and write it to `~/Library/Application Support/A2AChannel/hub.token`. The file SHALL contain exactly the token, optionally terminated by a newline. The write SHALL be atomic. The token file SHALL be created with file mode `0600`. The token SHALL be re-minted on every app launch (no persistence across restarts).
+On successful hub startup, the Rust shell SHALL mint a cryptographically-random token (at least 32 bytes of entropy, URL-safe base64 encoded) and write it to `~/Library/Application Support/Cubilot/hub.token`. The file SHALL contain exactly the token, optionally terminated by a newline. The write SHALL be atomic. The token file SHALL be created with file mode `0600`. The token SHALL be re-minted on every app launch (no persistence across restarts).
 
 #### Scenario: Token file created at startup
 
 - **WHEN** the app starts
-- **THEN** `~/Library/Application Support/A2AChannel/hub.token` exists with mode `0600`
+- **THEN** `~/Library/Application Support/Cubilot/hub.token` exists with mode `0600`
 - **AND** its contents match `/^[A-Za-z0-9_-]{40,}\n?$/`
 - **AND** the contents differ from any token written by a previous app session
 
@@ -100,14 +100,14 @@ The `get_hub_url` Tauri command SHALL return a JSON object of shape `{ url: stri
 The bridge core, on every runtime, SHALL determine the hub URL using the following priority order:
 
 1. If the `CHATBRIDGE_HUB` environment variable is set and non-empty, use it verbatim.
-2. Otherwise, read `~/Library/Application Support/A2AChannel/hub.url` through `Host.readText` and use its contents (trimmed of whitespace).
+2. Otherwise, read `~/Library/Application Support/Cubilot/hub.url` through `Host.readText` and use its contents (trimmed of whitespace).
 3. Otherwise (file missing, empty, or unreadable), treat as connection failure and apply the backoff-and-retry loop.
 
 On connection failure or stream end, the bridge SHALL re-run the resolution on each retry attempt so that stale URLs self-heal once the app restarts.
 
 #### Scenario: Bridge with no env var finds the running hub
 
-- **GIVEN** `A2AChannel.app` is running and has written `hub.url`
+- **GIVEN** `Cubilot.app` is running and has written `hub.url`
 - **AND** an agent starts without `CHATBRIDGE_HUB`
 - **WHEN** the bridge starts
 - **THEN** it reads `hub.url`, connects to that URL, and registers the agent
@@ -115,7 +115,7 @@ On connection failure or stream end, the bridge SHALL re-run the resolution on e
 #### Scenario: Bridge started before the app converges once the app starts
 
 - **GIVEN** an agent's bridge started with no `CHATBRIDGE_HUB` env
-- **AND** `A2AChannel.app` was not running at that moment
+- **AND** `Cubilot.app` was not running at that moment
 - **WHEN** the app is launched 30 seconds later
 - **THEN** the bridge's next retry (within its 2-second backoff interval) reads the now-present `hub.url`
 - **AND** connects successfully

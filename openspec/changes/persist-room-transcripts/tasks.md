@@ -8,7 +8,7 @@
 
 - [x] 2.1 Create `hub/core/transcript.ts` exporting: `init()`, `transcriptDir()`, `roomBasename(room)` returning `<hash8>-<sanitized>`, `activePath(room)`, `chunkPath(room, seq)`, `appendEntry(room, entry)`, `clearRoom(room)`, `tailActive(room, n)`, `listChunks(room)`, `nextChunkSeq(room)`.
 - [x] 2.2 Implement `roomBasename(room)`: sha1 of room label, take first 8 hex chars; sanitize the label by replacing every char NOT in `[A-Za-z0-9_.-]` with `_`; return `<hash8>-<sanitized>`. Stable per room label.
-- [x] 2.3 `init()` ensures `~/Library/Application Support/A2AChannel/transcripts/` exists with mode 0700. Idempotent.
+- [x] 2.3 `init()` ensures `~/Library/Application Support/Cubilot/transcripts/` exists with mode 0700. Idempotent.
 - [x] 2.4 `appendEntry()` uses `fs.appendFileSync` with explicit `\n`, sets file mode 0600 on first create, prepends `"v": 1` to the JSON line. Synchronous, write-through (no buffering).
 - [x] 2.5 After each successful append, `appendEntry()` checks the active file's line count; if it equals 10,000, performs rotation (atomic rename to `<basename>.<6-digit-seq>.jsonl` where seq comes from `nextChunkSeq(room) + 1`). Constant `ROTATION_LINES = 10_000` in module scope.
 - [x] 2.6 `nextChunkSeq(room)` scans the directory for files matching `<basename>.\d+\.jsonl`, parses the numeric segment, returns max + 1 (or 1 if none). 6-digit zero-padded format on serialize.
@@ -60,5 +60,5 @@
 
 - [x] 9.1 Bump version (package.json, src-tauri/Cargo.toml, src-tauri/Cargo.lock, src-tauri/tauri.conf.json) — `0.10.0`.
 - [x] 9.2 Build via `./scripts/install.sh`. Smoke-test pending — user defers until they have time.
-- [x] 9.3 Tag v0.10.0, push tag, create GitHub release with `A2AChannel-0.10.0.zip` (sha256 `b7daa7ee...d90ad7`).
+- [x] 9.3 Tag v0.10.0, push tag, create GitHub release with `Cubilot-0.10.0.zip` (sha256 `b7daa7ee...d90ad7`).
 - [x] 9.4 Update brew cask sha256 + version, commit + push the tap repo (`mnw/homebrew-a2achannel`).

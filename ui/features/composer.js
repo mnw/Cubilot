@@ -209,7 +209,7 @@ async function _dispatchChat(intent) {
     if (!r.ok) {
       const err = await parseErrorBody(r);
       const msg = r.status === 401
-        ? `Send failed: auth out of sync — did A2AChannel restart? (${err})`
+        ? `Send failed: auth out of sync — did Cubilot restart? (${err})`
         : `Send failed: ${err}`;
       addMessage({ from: 'system', to: 'you', text: msg, ts: '' });
     }

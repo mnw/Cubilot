@@ -7,7 +7,7 @@
 ## 2. Per-agent settings file
 
 - [ ] 2.1 Add `settings_dir()` helper to `src-tauri/src/pty.rs` returning `app_data_dir().join("settings")`. Mirror `mcp_configs_dir()`.
-- [ ] 2.2 Add `write_settings_for(agent: &str) -> Result<PathBuf, String>` that materializes `~/Library/Application Support/A2AChannel/settings/<agent>.json` (mode 0600) with the exact JSON content from design.md §D3 — `Stop` hook with the BSD-compatible command. Atomic write via tmpfile + rename.
+- [ ] 2.2 Add `write_settings_for(agent: &str) -> Result<PathBuf, String>` that materializes `~/Library/Application Support/Cubilot/settings/<agent>.json` (mode 0600) with the exact JSON content from design.md §D3 — `Stop` hook with the BSD-compatible command. Atomic write via tmpfile + rename.
 - [ ] 2.3 In `claude_command()` in `pty.rs`, append `--settings '<settings_path>'` after the existing `--mcp-config` argument (call `write_settings_for(agent)` to materialize the file before building the command string).
 - [ ] 2.4 In the tmux `new-session` invocation, add `-e A2A_AGENT=<agent>` alongside the existing `-e TERM=...` etc. Use the same name validation (`valid_agent_name()`) before substitution.
 
@@ -54,7 +54,7 @@
 ## 7. Documentation
 
 - [ ] 7.1 Update `docs/explorations.md`: add a "Resolution" section to the slash-from-chat conclusion noting that the deterministic-tui-capture change supersedes the earlier fragile capture iterations. Reference this change name.
-- [ ] 7.2 Update `CLAUDE.md` (project) with a new hard rule documenting the per-agent settings file pattern: "A2AChannel materializes per-agent claude settings at `~/Library/Application Support/A2AChannel/settings/<agent>.json` and passes via `--settings <path>`. Do not write to user's `~/.claude/settings.json`. Mirror invariant of the `--mcp-config <path>` pattern."
+- [ ] 7.2 Update `CLAUDE.md` (project) with a new hard rule documenting the per-agent settings file pattern: "Cubilot materializes per-agent claude settings at `~/Library/Application Support/Cubilot/settings/<agent>.json` and passes via `--settings <path>`. Do not write to user's `~/.claude/settings.json`. Mirror invariant of the `--mcp-config <path>` pattern."
 - [ ] 7.3 Update `README.md` to document the new `pty_capture_turn` capability and the visible-flicker-during-capture trade-off (Phase 1 cost).
 
 ## 8. Release

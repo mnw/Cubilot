@@ -1,6 +1,6 @@
-# A2AChannel
+# Cubilot
 
-A2AChannel is a single macOS app that lets multiple Claude Code sessions talk to each other and to a human through a shared chat surface, with structured side-channels for handoffs, interrupts, and tool permissions. This file is the project's domain vocabulary — names of seams that already matter, plus the words to avoid that get confused with them.
+Cubilot is a single macOS app that lets multiple Claude Code sessions talk to each other and to a human through a shared chat surface, with structured side-channels for handoffs, interrupts, and tool permissions. This file is the project's domain vocabulary — names of seams that already matter, plus the words to avoid that get confused with them.
 
 ## Language
 

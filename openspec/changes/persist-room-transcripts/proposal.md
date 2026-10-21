@@ -5,7 +5,7 @@ The chat log is in-memory only and resets on every hub restart. Power users runn
 ## What Changes
 
 - **Opt-in persistence**, off by default. Each room individually flips on persistence via a new `room_settings.persist_transcript` flag. Default behavior (off) is unchanged from today.
-- **JSONL append-only files** at `~/Library/Application Support/A2AChannel/transcripts/<room>.jsonl`, mode 0600, one chat entry per line as versioned JSON.
+- **JSONL append-only files** at `~/Library/Application Support/Cubilot/transcripts/<room>.jsonl`, mode 0600, one chat entry per line as versioned JSON.
 - **`room_settings` SQLite table** (new) holds `persist_transcript: bool` per room. Belongs in SQLite alongside the existing kinds because it's structured config, not append-only conversation. Rotation size is a global constant (10,000 lines) — not per-room configurable in this change.
 - **Hub restart hydration**: on startup, for each room with persistence on, tail the last N entries from JSONL into the in-memory `chatLog` cache. Replay merges JSONL chat entries with SQLite kind events by timestamp so SSE clients see history in true arrival order.
 - **`/clear` semantics**: when used to wipe a room's context, it deletes the active JSONL **and** every rotated chunk for that room. `/clear` is the destructive wipe; rotation is the non-destructive size cap. Both the in-memory cache and the on-disk transcript (all chunks) are cleared atomically.
@@ -34,7 +34,7 @@ None. The kinds (`handoff`, `interrupt`, `permission`, `nutshell`) and existing 
 - `CLAUDE.md` — hard-rule update.
 
 **Filesystem**
-- New directory: `~/Library/Application Support/A2AChannel/transcripts/`, mode 0700.
+- New directory: `~/Library/Application Support/Cubilot/transcripts/`, mode 0700.
 - New files: `<room>.jsonl` per opted-in room, mode 0600.
 - Bounded by retention setting; no compression in Phase 1.
 

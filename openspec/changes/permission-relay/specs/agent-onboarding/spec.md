@@ -10,7 +10,7 @@ The briefing is session-scoped — reconnects during the same hub process do NOT
 
 #### Scenario: First-connect briefing includes `ack_permission`
 
-- **GIVEN** A2AChannel v0.8 is running and alice connects for the first time
+- **GIVEN** Cubilot v0.8 is running and alice connects for the first time
 - **WHEN** the hub emits the briefing event
 - **THEN** the `tools` array in the briefing contains `ack_permission`
 - **AND** chatbridge's system-prompt forwarding renders the tool so alice's claude knows the capability exists

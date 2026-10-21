@@ -47,7 +47,7 @@ Fields specific to rooms:
 
 ### Requirement: Per-agent MCP config includes `CHATBRIDGE_ROOM`
 
-The generated per-agent MCP config at `~/Library/Application Support/A2AChannel/mcp-configs/<agent>.json` SHALL include `CHATBRIDGE_ROOM` in the `env` block of the chatbridge server entry, alongside the existing `A2A_MODE` and `CHATBRIDGE_AGENT` keys. The value is the agent's room as chosen in the spawn modal (or the git-root basename fallback).
+The generated per-agent MCP config at `~/Library/Application Support/Cubilot/mcp-configs/<agent>.json` SHALL include `CHATBRIDGE_ROOM` in the `env` block of the chatbridge server entry, alongside the existing `A2A_MODE` and `CHATBRIDGE_AGENT` keys. The value is the agent's room as chosen in the spawn modal (or the git-root basename fallback).
 
 External-spawn agents (launched from the user's own terminal with a hand-edited `.mcp.json` that lacks `CHATBRIDGE_ROOM`) SHALL fall back to the hub's `A2A_DEFAULT_ROOM` env at channel-bin startup. The fallback SHALL be fetched via a new read-auth endpoint `GET /room-default` returning `{ room: "<label>" }`.
 

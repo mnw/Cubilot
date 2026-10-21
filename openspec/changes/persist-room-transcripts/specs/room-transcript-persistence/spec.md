@@ -8,7 +8,7 @@ The system SHALL persist a room's chat transcript ONLY when that room has explic
 
 - **WHEN** a chat entry is appended for a room that has no row in `room_settings`
 - **THEN** the entry is added to the in-memory `chatLog` as today
-- **AND** no file is written under `~/Library/Application Support/A2AChannel/transcripts/`
+- **AND** no file is written under `~/Library/Application Support/Cubilot/transcripts/`
 
 #### Scenario: Opting a room in via settings route
 
@@ -24,12 +24,12 @@ The system SHALL persist a room's chat transcript ONLY when that room has explic
 
 ### Requirement: JSONL Append-Only Write Path
 
-The system SHALL persist each chat entry as one line of UTF-8 JSON terminated by `\n` to `~/Library/Application Support/A2AChannel/transcripts/<room>.jsonl`. Files SHALL be created with mode 0600 inside a directory created with mode 0700. Each line SHALL begin with the schema version field `"v": 1`.
+The system SHALL persist each chat entry as one line of UTF-8 JSON terminated by `\n` to `~/Library/Application Support/Cubilot/transcripts/<room>.jsonl`. Files SHALL be created with mode 0600 inside a directory created with mode 0700. Each line SHALL begin with the schema version field `"v": 1`.
 
 #### Scenario: First chat entry creates the file
 
 - **WHEN** the first chat entry is appended for an opted-in room with no existing transcript file
-- **THEN** the system creates the directory `~/Library/Application Support/A2AChannel/transcripts/` (mode 0700) if absent
+- **THEN** the system creates the directory `~/Library/Application Support/Cubilot/transcripts/` (mode 0700) if absent
 - **AND** creates `<room>.jsonl` (mode 0600)
 - **AND** writes one JSON line ending in `\n` containing at minimum `{ "v": 1, "ts": <epoch_ms>, "from": ..., "to": ..., "text": ... }`
 

@@ -24,11 +24,11 @@ The rule, abbreviated: a finding becomes a cycle only if it (a) addresses a CLAU
 
 **Filed:** 2026-05-11 (post-2a code audit, finding #2).
 
-**Sketch:** Persistent state under `~/Library/Application Support/A2AChannel/` is split between `lib.rs` (attachments, transcripts, hub.url, hub.token) and `pty.rs` (mcp-configs, settings, tmux.sock). Ephemeral state under `/tmp/a2a/<agent>/` is implicit in `pty.rs`'s capture and signals helpers. Tests in `tests/helpers/hub.ts:24–27` hardcode their own temp dirs because there's no path-resolution Module to override.
+**Sketch:** Persistent state under `~/Library/Application Support/Cubilot/` is split between `lib.rs` (attachments, transcripts, hub.url, hub.token) and `pty.rs` (mcp-configs, settings, tmux.sock). Ephemeral state under `/tmp/a2a/<agent>/` is implicit in `pty.rs`'s capture and signals helpers. Tests in `tests/helpers/hub.ts:24–27` hardcode their own temp dirs because there's no path-resolution Module to override.
 
 **Why not actioned:** Pure organizational-locality cleanup. No CLAUDE.md hard rule at risk. No production bug class. Test-surface improvement is real (single path-override point for hermetic test runs) but currently the per-test temp-dir dance works.
 
-**Opportunistic fix trigger:** If you're adding a new persistent directory (e.g., a Room summary GGUF cache, a per-agent log cache, anything that needs to land alongside the existing ~/Library/Application Support/A2AChannel/ structure), create `src-tauri/src/paths.rs` for that new entry and migrate at least the closest existing entries (the ones in the same conceptual cluster) in the same patch.
+**Opportunistic fix trigger:** If you're adding a new persistent directory (e.g., a Room summary GGUF cache, a per-agent log cache, anything that needs to land alongside the existing ~/Library/Application Support/Cubilot/ structure), create `src-tauri/src/paths.rs` for that new entry and migrate at least the closest existing entries (the ones in the same conceptual cluster) in the same patch.
 
 **Sketch of intended shape:** `src-tauri/src/paths.rs` exporting `persistent_app_data_dir()`, `persistent_mcp_configs_dir()`, `persistent_agent_settings_dir()`, `persistent_attachments_dir(config)`, `persistent_transcripts_dir(config)`, `ephemeral_agent_captures_dir(agent)`, `ephemeral_agent_signals_dir(agent)`, `discovery_url_path()`, `discovery_token_path()`. `lib.rs` and `pty.rs` import from it; tests can stub the persistent root for hermetic runs.
 

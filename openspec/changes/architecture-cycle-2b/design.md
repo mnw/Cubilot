@@ -13,7 +13,7 @@ This cycle (architecture-cycle-2b) targets five layers of friction (three deferr
 5. **`Composer` send mode is implicit; three send paths coupled through DOM state.** `ui/features/composer.js` branches three modes (chat → Hub `/post`, slash → Tauri `pty_write`, shift-tab → escape codes) but the dispatch decision lives in `_refreshSlashState`'s mutation of `sendBtn.disabled` based on `input.value` + `SELECTED_ROOM`. Mid-keystroke state mutations can flip the active mode underneath the user. The Interface ("send a thing") is implicit; mode is a derived, fragile property of DOM state.
 6. **`pty_spawn` is a 63-LOC orchestrator with a silent-failure path** (`let _ = tmux_run(...)` at line 369 swallows errors from `configure_existing_session`). Six concerns interleaved inline (validation, room resolution, registry idempotency, MCP-config materialization, locale resolution, session-existing-vs-new branching, tmux argv assembly, attach). Argv assembly bugs (the kind that broke v0.6 with quoted-path splitting) are buried inline rather than at a named seam. CLAUDE.md mandates per-helper test scenarios for `resolve_utf8_locale`, `configure_existing_session`, `attach_and_stream` — but the orchestrator that sequences them has no integration test (verified — `tests/integration/pty-plumbing.test.ts` never calls `pty_spawn` end-to-end).
 
-Stakeholders: A2AChannel (single-developer codebase), the long-running test agents whose live sessions are the smoke-test surface — same as 2a.
+Stakeholders: Cubilot (single-developer codebase), the long-running test agents whose live sessions are the smoke-test surface — same as 2a.
 
 ## Goals / Non-Goals
 
@@ -146,7 +146,7 @@ Add one integration scenario to `tests/integration/pty-plumbing.test.ts`: "spawn
 
 - **Panic-path test for `CaptureTransaction` is non-trivial.** Rust's default test runner aborts on panic. To assert that `Drop` runs on panic without crashing the test, the test must install a `std::panic::catch_unwind` boundary, optionally a `std::panic::set_hook` to suppress the test-runner's default panic message, and ensure the injected panic doesn't poison shared mutexes used by other tests. → **Mitigation:** Budget half a day for the panic test alone. Tasks 4.7 explicitly references the catch_unwind requirement.
 
-- **Long-running test agents are the smoke-test surface.** Same as 2a: install.sh restarts disrupt the test agents' work. → **Mitigation:** Per CLAUDE.md's "tmux sessions survive A2AChannel restart" rule, the agents reconnect cleanly. Group smoke-test cadence by minimizing redundant restarts. The KindRenderer commit can be smoke-tested without restarting test agents (Webview-only changes); the Tab-split absolutely cannot.
+- **Long-running test agents are the smoke-test surface.** Same as 2a: install.sh restarts disrupt the test agents' work. → **Mitigation:** Per CLAUDE.md's "tmux sessions survive Cubilot restart" rule, the agents reconnect cleanly. Group smoke-test cadence by minimizing redundant restarts. The KindRenderer commit can be smoke-tested without restarting test agents (Webview-only changes); the Tab-split absolutely cannot.
 
 - **`ui/index.html` still has zero framework + zero bundler.** `KindRenderer` exports must work as plain ES module imports. → **Mitigation:** Strict ES module exports, no JSX, no TypeScript on the `.js` files (TS lives only in `hub/`). The `ctx` factory pattern (Decision 4) keeps the surface explicit and TypeScript-friendly should we later introduce `.d.ts` files for the `.js` modules.
 

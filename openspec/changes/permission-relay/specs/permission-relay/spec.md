@@ -86,7 +86,7 @@ If the verdict arrives after Claude's local dialog has already been answered, Cl
 
 #### Scenario: Chat-first verdict closes the local dialog
 
-- **GIVEN** Claude has a pending `Bash` approval showing in both the xterm (local) and the A2AChannel UI (chat)
+- **GIVEN** Claude has a pending `Bash` approval showing in both the xterm (local) and the Cubilot UI (chat)
 - **WHEN** the human clicks Allow in the UI first
 - **THEN** the hub broadcasts `permission.resolved`
 - **AND** chatbridge emits `notifications/claude/channel/permission` to Claude
@@ -217,7 +217,7 @@ The onboarding briefing (from the `agent-onboarding` capability) SHALL include `
 
 ### Requirement: UI renders pending permissions as sticky red cards at the top of the chat
 
-The A2AChannel UI SHALL render pending permissions as sticky cards at the top of `#messages`, above any interrupt cards, with the same structural grid and state-badge treatment as handoff/interrupt cards. Each card SHALL include:
+The Cubilot UI SHALL render pending permissions as sticky cards at the top of `#messages`, above any interrupt cards, with the same structural grid and state-badge treatment as handoff/interrupt cards. Each card SHALL include:
 
 - Header: `<agent> · <tool_name>` route line, `PENDING` / `ALLOWED` / `DENIED` status badge, replay-badge on reconnect.
 - Body: the `description` field, styled as the primary text of the card.

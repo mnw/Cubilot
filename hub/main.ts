@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * A2AChannel sidecar entry point.
+ * Cubilot sidecar entry point.
  *
  *   A2A_MODE=hub  → start the HTTP/SSE hub (listens on PORT env)
  *

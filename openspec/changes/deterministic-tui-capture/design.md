@@ -91,10 +91,10 @@ sh -c 'mkdir -p /tmp/a2a/$A2A_AGENT/signals && touch /tmp/a2a/$A2A_AGENT/signals
 
 ### D3. Per-agent settings via `--settings <path>`, not user-file mutation
 
-Mirrors the existing `--mcp-config <path>` decision in `pty.rs::write_mcp_config_for()`. A2AChannel materializes a per-agent settings JSON in its own data dir and passes the path to claude:
+Mirrors the existing `--mcp-config <path>` decision in `pty.rs::write_mcp_config_for()`. Cubilot materializes a per-agent settings JSON in its own data dir and passes the path to claude:
 
 ```
-~/Library/Application Support/A2AChannel/settings/<agent>.json
+~/Library/Application Support/Cubilot/settings/<agent>.json
 ```
 
 Contents:

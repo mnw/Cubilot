@@ -3,31 +3,31 @@
 ## Purpose
 TBD - created by archiving change v06-roadmap. Update Purpose after archive.
 ## Requirements
-### Requirement: A2AChannel bundles tmux and orchestrates one session per agent
+### Requirement: Cubilot bundles tmux and orchestrates one session per agent
 
-A static tmux binary for `aarch64-apple-darwin` SHALL be bundled under `src-tauri/resources/tmux` and packaged into `A2AChannel.app/Contents/Resources/`. A2AChannel SHALL invoke the bundled tmux binary against its shared socket to start a detached session named `<agent-name>` in a user-chosen working directory. For a Claude agent the session's command SHALL be `CHATBRIDGE_AGENT='<name>' CHATBRIDGE_ROOM='<room>' claude [--continue|--resume] --plugin-dir '<bundled chatbridge mod>' --allowed-tools '<chatbridge tools>'`; it SHALL NOT include `--dangerously-load-development-channels`, and it SHALL include `--mcp-config '<generated global-servers file>'` only when the user has global MCP servers (never the chatbridge). For a pi agent the command is unchanged.
+A static tmux binary for `aarch64-apple-darwin` SHALL be bundled under `src-tauri/resources/tmux` and packaged into `Cubilot.app/Contents/Resources/`. Cubilot SHALL invoke the bundled tmux binary against its shared socket to start a detached session named `<agent-name>` in a user-chosen working directory. For a Claude agent the session's command SHALL be `CHATBRIDGE_AGENT='<name>' CHATBRIDGE_ROOM='<room>' claude [--continue|--resume] --plugin-dir '<bundled chatbridge mod>' --allowed-tools '<chatbridge tools>'`; it SHALL NOT include `--dangerously-load-development-channels`, and it SHALL include `--mcp-config '<generated global-servers file>'` only when the user has global MCP servers (never the chatbridge). For a pi agent the command is unchanged.
 
-Session names SHALL match the agent name exactly (validated against the hub's `AGENT_NAME_RE`). The session is created in detached mode; A2AChannel does not attach as a controlling client at spawn time.
+Session names SHALL match the agent name exactly (validated against the hub's `AGENT_NAME_RE`). The session is created in detached mode; Cubilot does not attach as a controlling client at spawn time.
 
 #### Scenario: New terminal session for a Claude agent
 
 - **GIVEN** no tmux session named `alice` exists
 - **WHEN** the user spawns Claude agent `alice` in room `eu-space`
-- **THEN** A2AChannel spawns the bundled tmux binary with `new-session -d -s alice` targeting its socket
+- **THEN** Cubilot spawns the bundled tmux binary with `new-session -d -s alice` targeting its socket
 - **AND** tmux runs a command containing `CHATBRIDGE_AGENT='alice'`, `CHATBRIDGE_ROOM='eu-space'` and `--plugin-dir`
 - **AND** the command does not contain `--dangerously-load-development-channels`
 - **AND** any `--mcp-config` it contains names the generated global-servers file
-- **AND** A2AChannel does NOT kill the session when the app exits
+- **AND** Cubilot does NOT kill the session when the app exits
 
 #### Scenario: No confirm prompt to dismiss
 
 - **WHEN** a Claude agent's session starts
-- **THEN** A2AChannel sends no keystrokes to the session on the agent's behalf
+- **THEN** Cubilot sends no keystrokes to the session on the agent's behalf
 
 #### Scenario: Agent name invalid for session creation
 
 - **WHEN** the user attempts to open a terminal for an agent whose name contains `/` or `:`
-- **THEN** A2AChannel refuses with an error
+- **THEN** Cubilot refuses with an error
 - **AND** no tmux invocation occurs
 
 ### Requirement: The webview renders each agent's tmux session in a right-side pane
@@ -41,7 +41,7 @@ The right pane SHALL be opt-in: a header toggle persists the choice in `localSto
 - **WHEN** the user clicks the terminal toggle in the header
 - **THEN** the right-side pane appears with one tab per active tmux session
 - **AND** selecting a tab attaches to that session and begins streaming output
-- **AND** localStorage stores `a2achannel_terminal_enabled=true`
+- **AND** localStorage stores `cubilot_terminal_enabled=true`
 
 #### Scenario: Typing in the pane sends to the session
 
@@ -50,28 +50,28 @@ The right pane SHALL be opt-in: a header toggle persists the choice in `localSto
 - **THEN** `send-keys -t alice -l "/model" Enter` is issued against the tmux socket
 - **AND** the session's output echoes the command and Claude's response streams back into the xterm
 
-### Requirement: tmux sessions survive A2AChannel restart
+### Requirement: tmux sessions survive Cubilot restart
 
-tmux sessions are long-lived by design. A2AChannel SHALL NOT terminate sessions on app exit, crash, or SIGTERM. On next launch, the webview SHALL query `tmux list-sessions` against the shared socket and populate the tab bar from the result.
+tmux sessions are long-lived by design. Cubilot SHALL NOT terminate sessions on app exit, crash, or SIGTERM. On next launch, the webview SHALL query `tmux list-sessions` against the shared socket and populate the tab bar from the result.
 
 #### Scenario: App quit and relaunch preserves the session
 
 - **GIVEN** a tmux session named `alice` is running claude
-- **WHEN** the user quits A2AChannel and relaunches it
+- **WHEN** the user quits Cubilot and relaunches it
 - **THEN** `alice` still exists in tmux
 - **AND** enabling the terminal pane shows `alice` as an active tab
 - **AND** attaching resumes the session's running claude process with its full scrollback intact
 
 ### Requirement: User can still `tmux attach` from their own terminal
 
-The shared socket at `~/.config/A2AChannel/tmux.sock` SHALL be documented in the README as a supported attachment point. A user running `tmux -S ~/.config/A2AChannel/tmux.sock attach -t <agent>` in their own Terminal.app SHALL be able to interact with the same session concurrently with the A2AChannel webview pane.
+The shared socket at `~/.config/Cubilot/tmux.sock` SHALL be documented in the README as a supported attachment point. A user running `tmux -S ~/.config/Cubilot/tmux.sock attach -t <agent>` in their own Terminal.app SHALL be able to interact with the same session concurrently with the Cubilot webview pane.
 
 Multi-client input behavior SHALL follow tmux's native semantics (both clients can type; documented caveat: interactive prompts should be answered from one client at a time).
 
 #### Scenario: External attach works alongside webview attach
 
-- **GIVEN** A2AChannel's pane is attached to the `alice` session
-- **WHEN** the user runs `tmux -S ~/.config/A2AChannel/tmux.sock attach -t alice` in Terminal.app
+- **GIVEN** Cubilot's pane is attached to the `alice` session
+- **WHEN** the user runs `tmux -S ~/.config/Cubilot/tmux.sock attach -t alice` in Terminal.app
 - **THEN** both clients see identical output
 - **AND** keystrokes from either client reach the session's stdin
 
@@ -94,7 +94,7 @@ The `xterm.js` library (ESM single-file build) and its default CSS SHALL be chec
 #### Scenario: Terminal pane works offline
 
 - **GIVEN** the machine has no network connectivity
-- **WHEN** the user opens A2AChannel and enables the terminal pane
+- **WHEN** the user opens Cubilot and enables the terminal pane
 - **THEN** xterm loads from the local bundle
 - **AND** the pane renders and functions identically to the online case
 

@@ -17,7 +17,7 @@ Current constraints:
 
 **Goals:**
 - Embedded per-agent terminal pane that renders raw tmux output via xterm.js.
-- Human can launch agents (`claude --dangerously-load-development-channels`), type slash-commands, answer interactive prompts — all inside A2AChannel.
+- Human can launch agents (`claude --dangerously-load-development-channels`), type slash-commands, answer interactive prompts — all inside Cubilot.
 - Sessions survive app quit/restart and remain attachable from the user's own Terminal.app for debugging.
 - Build discipline that actually ships: PoC-gate before integration so the v0.6 failure mode can't repeat.
 
@@ -49,7 +49,7 @@ Current constraints:
 
 ### 2. tmux orchestration: raw-PTY attach, session-dies-on-exit, no restart affordance
 
-**Decision (as shipped):** `bundled-tmux -S ~/Library/Application Support/A2AChannel/tmux.sock`. All sessions created on this socket. App quit does NOT kill sessions. App launch queries `list-sessions -F '#S'` and rebuilds the tab strip from the result.
+**Decision (as shipped):** `bundled-tmux -S ~/Library/Application Support/Cubilot/tmux.sock`. All sessions created on this socket. App quit does NOT kill sessions. App launch queries `list-sessions -F '#S'` and rebuilds the tab strip from the result.
 
 Session creation is a single `new-session -d` call — no chained options, no `remain-on-exit`. When claude exits for any reason (user types `/exit`, crash, graceful `/exit` from the kill path), the pane exits, the tmux session dies, and `pty://exit/<agent>` fires — the UI removes the tab on its own. If the user wants a fresh claude, they click `+ New agent` again.
 
@@ -60,7 +60,7 @@ bundled-tmux -S <sock> new-session -d -s <agent> -x 80 -y 24 -c <cwd>
 
 The entire shell command is passed as a SINGLE tmux argv element — see Decision 8/9 and Runtime Finding #8 for why argv splitting is load-bearing.
 
-On attach to an already-existing session (app restart → auto-attach), A2AChannel defensively runs `set-option -t <agent> remain-on-exit off` to undo any legacy session created by an earlier v0.7-alpha that did set it ON. This keeps the `/exit` → tab-close flow consistent for sessions that outlive A2AChannel.
+On attach to an already-existing session (app restart → auto-attach), Cubilot defensively runs `set-option -t <agent> remain-on-exit off` to undo any legacy session created by an earlier v0.7-alpha that did set it ON. This keeps the `/exit` → tab-close flow consistent for sessions that outlive Cubilot.
 
 **State machine (simplified from earlier draft):**
 
@@ -74,7 +74,7 @@ On attach to an already-existing session (app restart → auto-attach), A2AChann
 **Alternatives considered:**
 - `remain-on-exit on` + `respawn-pane -k` for restart (earlier draft of this decision) — rejected. The held-pane state was visually identical to a live claude (both show a cursor at the bottom), so users couldn't tell if claude was alive or dead without poking it. `pty_restart` + a "Restart claude" button added UI complexity for a state that users only hit on crashes, and the cwd had to be memoized separately. Dropping it collapsed four moving parts (Rust command + handler + JS button + state branch) for a cleaner UX.
 - Per-session socket — rejected. `list-sessions` becomes a directory walk; cross-session muxing breaks.
-- `~/.config/A2AChannel/tmux.sock` (original v0.6 spec) — rejected. Other app state lives in `Application Support`; consistency wins.
+- `~/.config/Cubilot/tmux.sock` (original v0.6 spec) — rejected. Other app state lives in `Application Support`; consistency wins.
 - `'claude ...; exec $SHELL'` suffix (earliest draft) — rejected. The fallback shell was visually identical to a live claude.
 - `send-keys -t <agent> 'claude ...' Enter` for restart — rejected. Aliases around the send-keys ban in Decision 1; no longer relevant since restart itself was dropped.
 - `which claude` from Rust at startup — rejected. `which` runs under launchd PATH; same blind spot as hardcoding.
@@ -84,7 +84,7 @@ On attach to an already-existing session (app restart → auto-attach), A2AChann
 - `-x 80 -y 24` is load-bearing on `new-session`. Without explicit dimensions, tmux probes the invoking TTY via `TIOCGWINSZ`; our Rust shell has no controlling terminal, so the probe fails with "open terminal failed: not a terminal". Dimensions are just defaults — the PTY attach below will SIGWINCH tmux to the real xterm size immediately.
 - External attach works as-is: `bundled-tmux -S <path> attach -t <agent>` from any terminal.
 - Session name validated against `AGENT_NAME_RE` on the JS side before invoking `pty_spawn`. Rust re-validates defensively.
-- tmux status bar is hidden (`set-option status off`) on every spawn and every auto-attach — redundant with the A2AChannel tab label.
+- tmux status bar is hidden (`set-option status off`) on every spawn and every auto-attach — redundant with the Cubilot tab label.
 
 ### 3. Output channel: Tauri events with base64-encoded binary payload
 
@@ -105,11 +105,11 @@ Event payload shape: `{ "agent": string, "b64": string }` where `b64` is the sta
 
 ### 4. PoC gate is a task, not a doc line
 
-**Decision:** Task 0 of `tasks.md` is "build a scratch Tauri project that proves the PTY↔xterm loop end-to-end" with explicit success criteria. No subsequent integration tasks are unblocked until Task 0 is checked off. The PoC scratch project lives outside the A2AChannel repo.
+**Decision:** Task 0 of `tasks.md` is "build a scratch Tauri project that proves the PTY↔xterm loop end-to-end" with explicit success criteria. No subsequent integration tasks are unblocked until Task 0 is checked off. The PoC scratch project lives outside the Cubilot repo.
 
 **Alternatives considered:**
 - Skip the PoC, start integrating — rejected. This is exactly what killed v0.6.
-- PoC inside the A2AChannel repo on a branch — rejected. Tempts premature integration. Scratch repo forces focus on the bridge alone.
+- PoC inside the Cubilot repo on a branch — rejected. Tempts premature integration. Scratch repo forces focus on the bridge alone.
 
 **Details:**
 - PoC success criteria (explicit, ordered):
@@ -124,7 +124,7 @@ Event payload shape: `{ "agent": string, "b64": string }` where `b64` is the sta
 
 ### 5. UI: right-side vertical tab strip, opt-in via header toggle
 
-**Decision:** Header gets a terminal toggle. When enabled, the window splits: chat on the left (fluid), tab strip + xterm pane on the right (fixed ~60% when open). Tabs list all currently-known agents; tapping "Launch" on an agent whose session doesn't exist creates it; tapping an existing tab attaches. Preference persists in `localStorage` under `a2achannel_terminal_enabled`. Default false on first launch so existing users see no UI disruption on upgrade.
+**Decision:** Header gets a terminal toggle. When enabled, the window splits: chat on the left (fluid), tab strip + xterm pane on the right (fixed ~60% when open). Tabs list all currently-known agents; tapping "Launch" on an agent whose session doesn't exist creates it; tapping an existing tab attaches. Preference persists in `localStorage` under `cubilot_terminal_enabled`. Default false on first launch so existing users see no UI disruption on upgrade.
 
 **Alternatives considered:**
 - Always-visible pane — rejected. Chat-only users don't need it and the window gets cramped on 13" laptops.
@@ -153,14 +153,14 @@ Event payload shape: `{ "agent": string, "b64": string }` where `b64` is the sta
 **Explicit path:**
 - UI surfaces a `+ New agent` control in the tab strip.
 - Click → modal prompts for name (`AGENT_NAME_RE`-validated) + cwd (Tauri `open({ directory: true })` picker).
-- A2AChannel writes `.mcp.json` into the chosen cwd per the rule in Decision 8, then spawns the tmux session, then allocates the PTY, then the attached xterm tab renders claude's startup.
+- Cubilot writes `.mcp.json` into the chosen cwd per the rule in Decision 8, then spawns the tmux session, then allocates the PTY, then the attached xterm tab renders claude's startup.
 - The resulting tab is a full-fat "live+PTY" tab: we own the PTY, we can kill it, we see output.
 
 **Reactive path:**
 - User has their own `.mcp.json` in some project dir, runs `claude` from Terminal.app.
 - channel-bin registers the agent name with the hub.
 - Hub broadcasts roster update. UI receives it and adds a tab.
-- This tab is **display-only**: the xterm is not mounted (we don't own the PTY); the tab shows a status line "running outside A2AChannel" and offers a "Move into pane" affordance that calls `pty_spawn` (which will `new-session -A -s` → attach if a matching tmux session somehow exists, or create a fresh one in a cwd the user picks — the old external claude keeps running on its own process, and the user can quit it manually).
+- This tab is **display-only**: the xterm is not mounted (we don't own the PTY); the tab shows a status line "running outside Cubilot" and offers a "Move into pane" affordance that calls `pty_spawn` (which will `new-session -A -s` → attach if a matching tmux session somehow exists, or create a fresh one in a cwd the user picks — the old external claude keeps running on its own process, and the user can quit it manually).
 
 **Alternatives considered:**
 - Explicit-only — rejected. Doesn't match existing v0.6 workflow where users launch claude from their own terminal; would force a UX change that has nothing to do with the terminal pane goal.
@@ -176,7 +176,7 @@ Event payload shape: `{ "agent": string, "b64": string }` where `b64` is the sta
 
 **What ended up shipping:**
 
-- A2AChannel writes a per-agent MCP config file at `~/Library/Application Support/A2AChannel/mcp-configs/<agent>.json` (mode `0600`, regenerated on every spawn).
+- Cubilot writes a per-agent MCP config file at `~/Library/Application Support/Cubilot/mcp-configs/<agent>.json` (mode `0600`, regenerated on every spawn).
 - The tmux-spawned claude command passes `--mcp-config <path>` pointing at that file.
 - Claude loads our config **additively** alongside any `.mcp.json` in the agent's cwd. The user's existing project MCP servers (docker, context7, serena, etc.) are preserved; we only add `chatbridge`.
 - No prompt modal, no merge logic, no overwrite worry — the user's project files are never touched.
@@ -188,13 +188,13 @@ Event payload shape: `{ "agent": string, "b64": string }` where `b64` is the sta
 <details>
 <summary>Original Decision 8 text (for archaeological reference)</summary>
 
-### 8-orig. `.mcp.json` authoring by A2AChannel
+### 8-orig. `.mcp.json` authoring by Cubilot
 
-**Decision:** On explicit-path spawn, A2AChannel inspects the chosen cwd for an existing `.mcp.json`. Three outcomes:
+**Decision:** On explicit-path spawn, Cubilot inspects the chosen cwd for an existing `.mcp.json`. Three outcomes:
 
-1. **File absent** → A2AChannel writes the file using the same template returned by `get_mcp_template`, substituting the chosen agent name into `CHATBRIDGE_AGENT`. No prompt.
+1. **File absent** → Cubilot writes the file using the same template returned by `get_mcp_template`, substituting the chosen agent name into `CHATBRIDGE_AGENT`. No prompt.
 2. **File present and the chatbridge entry matches** (same command path + `CHATBRIDGE_AGENT` equals the requested name) → proceed as if file absent; no write, no prompt. Idempotent.
-3. **File present but doesn't contain a matching chatbridge entry** → modal prompts the user: *"`.mcp.json` already exists in this folder. Add A2AChannel's chatbridge entry? (Keeps any other MCP servers in the file.)"* → on accept, merge the `mcpServers.chatbridge` key into the existing JSON and rewrite; on decline, abort the spawn with a message (`spawn cancelled — no chatbridge config written`).
+3. **File present but doesn't contain a matching chatbridge entry** → modal prompts the user: *"`.mcp.json` already exists in this folder. Add Cubilot's chatbridge entry? (Keeps any other MCP servers in the file.)"* → on accept, merge the `mcpServers.chatbridge` key into the existing JSON and rewrite; on decline, abort the spawn with a message (`spawn cancelled — no chatbridge config written`).
 
 **Alternatives considered:**
 - Always overwrite — rejected. Destroys any existing `mcpServers.<other>` entries the user has.
@@ -254,7 +254,7 @@ Documented here rather than left implicit so nobody "fixes" the inconsistency la
 
 **[Risk] Bundled tmux binary gets flagged by Gatekeeper on a notarized distribution.** → Mitigation: out of scope for v0.7 (ad-hoc sign only). If/when notarization enters the roadmap, revisit — likely need to notarize the tmux binary separately and embed a signed copy.
 
-**[Risk] `codesign --deep` on nested bundled tmux may hit library-validation issues on some macOS versions.** → Mitigation: sign the bundled tmux binary explicitly *before* signing the outer `.app`, not via `--deep` alone. Order: `codesign --force --sign - src-tauri/resources/tmux` → tauri build → `codesign --force --sign - A2AChannel.app`. `--deep` stays as belt-and-suspenders but is no longer the sole mechanism for the nested binary.
+**[Risk] `codesign --deep` on nested bundled tmux may hit library-validation issues on some macOS versions.** → Mitigation: sign the bundled tmux binary explicitly *before* signing the outer `.app`, not via `--deep` alone. Order: `codesign --force --sign - src-tauri/resources/tmux` → tauri build → `codesign --force --sign - Cubilot.app`. `--deep` stays as belt-and-suspenders but is no longer the sole mechanism for the nested binary.
 
 **[Risk] xterm.js CSP compatibility in the current Tauri 2 nonce-CSP + `script-src 'self' 'unsafe-inline'`.** → Mitigation: §3.2 of tasks.md pins this against the exact CSP string from `src-tauri/tauri.conf.json`. If xterm.js 5.x uses any `eval`-like path on a hot rendering code path, fall back to the canvas renderer (which is pure DOM) instead of WebGL.
 

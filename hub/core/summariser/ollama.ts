@@ -1,5 +1,5 @@
 // Ollama HTTP adapter — talks to a local ollama service over HTTP.
-// User runs `ollama serve` separately (or via brew services); A2AChannel
+// User runs `ollama serve` separately (or via brew services); Cubilot
 // detects via A2A_SUMMARISER=ollama. No binary bundling, no auth surface
 // (loopback only), no API key.
 //

@@ -84,7 +84,7 @@ Subtasks in §2 and §4 that built the ledger UI were completed-then-reverted. T
 
 - [x] 7.1 Confirm `icon.svg` at repo root is the v0.7.1 source icon (speech bubble + 3 Claude glyphs on warm-dark gradient).
 - [x] 7.2 Regenerate bundle icons: `bun x tauri icon icon.svg -o src-tauri/icons`. Verify `src-tauri/icons/icon.icns` + `icon.png` + assorted sizes are produced.
-- [x] 7.3 Build a test bundle (`bun x tauri build --bundles app`) and confirm the new icon renders in `/Applications/A2AChannel.app` (Finder preview, Dock).
+- [x] 7.3 Build a test bundle (`bun x tauri build --bundles app`) and confirm the new icon renders in `/Applications/Cubilot.app` (Finder preview, Dock).
 
 ## 8. Cleanup + release
 

@@ -2,12 +2,12 @@
 
 ### Requirement: Ledger database is opened at startup
 
-The hub SHALL open a SQLite database at `~/Library/Application Support/A2AChannel/ledger.db` at startup. If the file does not exist, the hub SHALL create it. On open, the hub SHALL enable WAL mode (`PRAGMA journal_mode=WAL`) and synchronous-normal (`PRAGMA synchronous=NORMAL`). The database file SHALL be created with filesystem mode `0600`. The path MAY be overridden by the `A2A_LEDGER_DB` environment variable (set by the Rust shell when bundled).
+The hub SHALL open a SQLite database at `~/Library/Application Support/Cubilot/ledger.db` at startup. If the file does not exist, the hub SHALL create it. On open, the hub SHALL enable WAL mode (`PRAGMA journal_mode=WAL`) and synchronous-normal (`PRAGMA synchronous=NORMAL`). The database file SHALL be created with filesystem mode `0600`. The path MAY be overridden by the `A2A_LEDGER_DB` environment variable (set by the Rust shell when bundled).
 
 #### Scenario: First launch creates the database
 
 - **WHEN** the hub starts and no `ledger.db` exists in the app data directory
-- **THEN** a new `ledger.db` is created at `~/Library/Application Support/A2AChannel/ledger.db` with mode `0600`
+- **THEN** a new `ledger.db` is created at `~/Library/Application Support/Cubilot/ledger.db` with mode `0600`
 - **AND** WAL mode is enabled
 
 #### Scenario: Subsequent launch opens existing database

@@ -18,7 +18,7 @@ The current v0.7 UI is functional but visually unremarkable — a single Catppuc
 ## Capabilities
 
 ### New Capabilities
-- `webview-chrome`: Layout, palette, typography, and visual affordances of the A2AChannel webview. Defines the three-column structure, header composition, nutshell strip, composer shape, and how typed-coordination primitives (handoffs, interrupts) render in the Activity Ledger versus inline in chat.
+- `webview-chrome`: Layout, palette, typography, and visual affordances of the Cubilot webview. Defines the three-column structure, header composition, nutshell strip, composer shape, and how typed-coordination primitives (handoffs, interrupts) render in the Activity Ledger versus inline in chat.
 
 ### Modified Capabilities
 <!-- None. All protocol/behaviour specs (handoff, interrupt, nutshell, terminal-projection, attachment-upload, agent-onboarding, hub-*) stay unchanged — this change is visual-only. -->

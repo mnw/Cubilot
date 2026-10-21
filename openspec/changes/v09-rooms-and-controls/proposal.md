@@ -1,8 +1,8 @@
 ## Why
 
-A2AChannel is single-roster and single-nutshell by design: every agent in the window sees every message, and the project summary is global. That worked when an A2A session equalled one project, but in practice the human runs several projects in parallel from the same window. With the current flat room, backend chatter from project A pollutes the context of every agent in project B — and the nutshell that helps onboard new agents to project A is actively misleading to agents in project B. Starting a second A2AChannel instance is not a workaround: the hub socket, discovery files, tmux socket, and ledger are all at fixed paths, so two instances fight over the same state.
+Cubilot is single-roster and single-nutshell by design: every agent in the window sees every message, and the project summary is global. That worked when an A2A session equalled one project, but in practice the human runs several projects in parallel from the same window. With the current flat room, backend chatter from project A pollutes the context of every agent in project B — and the nutshell that helps onboard new agents to project A is actively misleading to agents in project B. Starting a second Cubilot instance is not a workaround: the hub socket, discovery files, tmux socket, and ledger are all at fixed paths, so two instances fight over the same state.
 
-v0.9 introduces **rooms** as a first-class protocol primitive so one A2AChannel window can host multiple isolated projects without cross-project context leakage, and adds a per-room **pause / resume** control that lets the human halt and restart work across a whole room with one click (reusing the existing interrupt primitive).
+v0.9 introduces **rooms** as a first-class protocol primitive so one Cubilot window can host multiple isolated projects without cross-project context leakage, and adds a per-room **pause / resume** control that lets the human halt and restart work across a whole room with one click (reusing the existing interrupt primitive).
 
 ## What Changes
 

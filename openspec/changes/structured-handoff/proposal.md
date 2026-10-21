@@ -1,14 +1,14 @@
 ## Why
 
-Messages in A2AChannel are free text. Agents parse prose to figure out what a peer wants — "lgtm", "go ahead", "wait till migration lands" — which is brittle and loses information at every hop. Coordination patterns that need more than one bit of state (who owns what, did they accept, why did they decline) leak into ad-hoc conventions that differ per prompt, per session, per agent.
+Messages in Cubilot are free text. Agents parse prose to figure out what a peer wants — "lgtm", "go ahead", "wait till migration lands" — which is brittle and loses information at every hop. Coordination patterns that need more than one bit of state (who owns what, did they accept, why did they decline) leak into ad-hoc conventions that differ per prompt, per session, per agent.
 
 Adding a structured-message transport with a first concrete kind (`handoff`) turns coordination from "prose-parsing" into "protocol". Agents emit and consume typed JSON. The app renders each kind as a rich UI card. The pattern becomes machine-actionable without losing any of today's free-form channel.
 
-This is also the feature that makes A2AChannel meaningfully different from an MCP message bus: the bus moves text, the app now moves *typed coordination primitives* with durable state and a human in the loop.
+This is also the feature that makes Cubilot meaningfully different from an MCP message bus: the bus moves text, the app now moves *typed coordination primitives* with durable state and a human in the loop.
 
 ## What Changes
 
-- **New durable ledger** at `~/Library/Application Support/A2AChannel/ledger.db` (SQLite) alongside `config.json` / `hub.url` / `hub.token`. Holds an immutable event log plus a derived current-state table for handoffs.
+- **New durable ledger** at `~/Library/Application Support/Cubilot/ledger.db` (SQLite) alongside `config.json` / `hub.url` / `hub.token`. Holds an immutable event log plus a derived current-state table for handoffs.
 - **Human becomes a first-class roster member.** Default name `human`, overridable via `config.json` → `{ "human_name": "mnw" }`. The hub registers this identity at startup; it can be `@mention`ed, queried (`GET /handoffs?for=human`), and named as a handoff `from`/`to` with no special-casing. The chat-routing keyword `to: "you"` (used by free-text `post`) is retained for backward compatibility but is no longer how structured messages identify the human.
 - **Four new MCP tools** in `channel-bin`: `send_handoff(to, task, context?, ttl_seconds?)`, `accept_handoff(handoff_id, comment?)`, `decline_handoff(handoff_id, reason)`, `cancel_handoff(handoff_id, reason?)`. Plus the existing `post` tool, unchanged. Each tool's MCP schema directly encodes its required fields — the decline tool requires `reason` at the schema level, so role prompts can call it without needing to remember conditional validation.
 - **Five new HTTP endpoints** on the hub, all token-gated:
@@ -44,7 +44,7 @@ This is also the feature that makes A2AChannel meaningfully different from an MC
   - `hub/channel.ts` — add four MCP tools (`send_handoff`, `accept_handoff`, `decline_handoff`, `cancel_handoff`), parse structured channel notifications, forward to the model via `notifications/claude/channel` preserving `kind`, `handoff_id`, `version`, and other attributes as channel `meta`.
   - `ui/index.html` — read human name from `get_human_name` Tauri command at bootstrap; use it as the UI's identity in Accept/Decline/Cancel requests; add handoff card renderer with version-based reconciliation; render cards for `handoff.new` / `handoff.update`.
 - **APIs**: new HTTP endpoints, new SSE event kinds, new MCP tools, new Tauri command. Existing routes unchanged.
-- **Filesystem**: new file `~/Library/Application Support/A2AChannel/ledger.db` (+ `-wal` / `-shm` WAL sidecars while running). Mode `0600`.
+- **Filesystem**: new file `~/Library/Application Support/Cubilot/ledger.db` (+ `-wal` / `-shm` WAL sidecars while running). Mode `0600`.
 - **Dependencies**: none added. `bun:sqlite` is built into Bun.
 - **Documentation**: `README.md` gains a "Protocol messages" section above "What it does". `CLAUDE.md` hard rules add the ledger file path, the atomicity rule (event + state update in one transaction), the version/ordering contract, and the token-identity caveat.
 - **Known limitation, documented explicitly**: the bearer token in `hub.token` is shared across all `channel-bin` processes spawned against this hub. The `by` field on ack/decline/cancel endpoints is validated against the handoff's expected actor (recipient for ack/decline, sender or human for cancel), but the check is non-cryptographic — anyone with the token can claim any `by`. This inherits the trust model of `POST /post` (which already trusts `from` unchecked). Not a regression; worth naming so future hardening has a clear target.

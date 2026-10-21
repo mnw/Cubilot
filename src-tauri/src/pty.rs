@@ -204,7 +204,7 @@ fn remove_legacy_mcp_configs(dir: &std::path::Path, remove: &dyn Fn(&std::path::
 }
 
 // Global MCP servers for claude agents, as a standalone --mcp-config file. Atomic (tmpfile +
-// rename) because concurrent spawns rewrite it. `prompts` is A2AChannel's own slash-picker key,
+// rename) because concurrent spawns rewrite it. `prompts` is Cubilot's own slash-picker key,
 // not part of the MCP schema, so it is stripped. Empty map: no file, no flag. Only writing
 // global.json can fail the call; the legacy cleanup cannot.
 fn write_global_mcp_config(

@@ -1,6 +1,6 @@
 ## Context
 
-A2AChannel landed `architecture-cycle-1` (the prior `architecture` branch, merged to main as commits `2a383e0` through `b7a58d6`) which sealed the agent-registry four-structure invariant, consolidated the slash-command cluster, locked the Tab cold-start invariant, and paired Channel-tool schema with handler. Phase 3 (Room summary) merged to main as commits `bdcaf80` through `810c1a7` covering ADRs 0001/0002/0003.
+Cubilot landed `architecture-cycle-1` (the prior `architecture` branch, merged to main as commits `2a383e0` through `b7a58d6`) which sealed the agent-registry four-structure invariant, consolidated the slash-command cluster, locked the Tab cold-start invariant, and paired Channel-tool schema with handler. Phase 3 (Room summary) merged to main as commits `bdcaf80` through `810c1a7` covering ADRs 0001/0002/0003.
 
 This cycle (architecture-cycle-2a) targets the next layer of friction on the **Hub side**: the three near-duplicate Kind files and the inline-route monolith inside `hub.ts`. Two parallel architecture-skill explorations produced complementary plans — one Hub-deep ("Plan A": LedgerEntity + RouteModule + Fanout + BriefingDispatcher), one three-prong wide ("Plan B": KindBase + KindStore + KindRenderer + Tab split + CaptureTransaction + kinds.css). A side-by-side SWOT showed each plan independently identified real friction the other missed; merging is strictly better than either alone.
 
@@ -8,7 +8,7 @@ The work was originally scoped as one combined `architecture-cycle-2`. After rev
 
 The 2a cycle is sequential, single-branch, per the saved feedback memory ("recurring deepening passes on a fresh `architecture` branch: per-candidate commits, manual smoke-test, ff-merge to main, delete branch"). All 2a candidates touch hub.ts and the kinds files heavily; parallel branches would produce merge conflicts that consume more time than the cycle saves.
 
-Stakeholders: A2AChannel (single-developer codebase), the long-running test agents (Drupal/Copernicus/Django/EIFE) whose live sessions are the smoke-test surface.
+Stakeholders: Cubilot (single-developer codebase), the long-running test agents (Drupal/Copernicus/Django/EIFE) whose live sessions are the smoke-test surface.
 
 ## Goals / Non-Goals
 
@@ -100,7 +100,7 @@ Idempotency policy lives in each verb's `decide(prior, payload, cap)` callback, 
 
 - **`HubFeature` naming bikeshed risk.** `Module` collides with LANGUAGE.md vocabulary; `HubFeature` and `Surface` are candidates. → **Mitigation:** Settle the name in the grilling phase (pre-grill 1.2) BEFORE writing the contract. Add the chosen term to `CONTEXT.md`'s Glossary. A grep-rename later is cheap but distracting.
 
-- **Long-running test agents are the smoke-test surface.** Drupal/Copernicus/Django/EIFE are mid-task; install.sh restarts disrupt their work. → **Mitigation:** Per CLAUDE.md's "tmux sessions survive A2AChannel restart" rule, the agents reconnect cleanly. But each install.sh is still a 30-60s gap. Group the smoke-test cadence by minimizing redundant restarts (test as many candidates as possible per restart).
+- **Long-running test agents are the smoke-test surface.** Drupal/Copernicus/Django/EIFE are mid-task; install.sh restarts disrupt their work. → **Mitigation:** Per CLAUDE.md's "tmux sessions survive Cubilot restart" rule, the agents reconnect cleanly. But each install.sh is still a 30-60s gap. Group the smoke-test cadence by minimizing redundant restarts (test as many candidates as possible per restart).
 
 - **`hub.ts` shrinking from 901 → 200 LOC means a lot of code moves.** Risk of subtle behavioural drift if a route handler's auth check or body-cap is subtly different in its new home. → **Mitigation:** The dispatcher already enforces `auth: "mutating" | "read"` and `bodyMax` per `RouteDef`; route migrations express these declaratively rather than in inline code, which actually shrinks the failure surface. Verify per-route via the smoke-test cadence.
 

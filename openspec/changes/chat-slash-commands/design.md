@@ -3,7 +3,7 @@
 The Claude Code CLI does not expose any remote-input API: external processes cannot push prompts, slash commands, or keystrokes into a running interactive session. The Anthropic Agent SDK is a fresh-loop control surface, not a way to drive the CLI. A previous architectural exploration (see this change's preceding conversation) confirmed three things:
 
 1. The only way to send slash commands to a running tmux-backed claude is to write raw bytes to its PTY master.
-2. A2AChannel already owns those PTY masters via `pty_write(agent: String, b64: String)` (`src-tauri/src/pty.rs:374`).
+2. Cubilot already owns those PTY masters via `pty_write(agent: String, b64: String)` (`src-tauri/src/pty.rs:374`).
 3. PTY-write is byte-level equivalent to the human typing in the xterm — supports every slash command including TTY-bound ones (`/clear` confirm, `/model` picker, `/help`) that the SDK explicitly excludes.
 
 The chat composer today (`ui/index.html` and `ui/features/`) sends every message through `POST /post` to the hub, which fans it out to agent channel queues as MCP `notifications/claude/channel`. Claude reads channel messages as agent context — they do not invoke slash commands. Adding chat→PTY routing fills this gap without rewriting the channel contract.
@@ -102,7 +102,7 @@ Each successful send (after busy-skip) emits one chat entry:
                   skipped: nebula (permission pending)            12:34
 ```
 
-Implementation: the existing chat-render path accepts a `system`-typed entry. The webview appends one client-side after `pty_write` resolves. Not persisted to the hub; not broadcast to other clients (there are no other clients in single-user A2AChannel today).
+Implementation: the existing chat-render path accepts a `system`-typed entry. The webview appends one client-side after `pty_write` resolves. Not persisted to the hub; not broadcast to other clients (there are no other clients in single-user Cubilot today).
 
 **Alternatives considered:**
 - Persistent `command` kind with replay. Overkill for a personal tool. If a future user or team wants persistent slash audit, that's a follow-up change adding a new `KindModule`.
@@ -142,4 +142,4 @@ This rule mirrors how the `@mention` popover already works (triggers on `@` at w
 
 - **Two writers to the same PTY** → The xterm tab and the chat composer can both write to an agent's PTY master. tmux supports concurrent clients writing to a session; output multiplexes naturally. Documented in the modified `terminal-projection` spec.
 
-- **`@external` agents invisible to slash mode** → Externally-attached claude sessions (running outside A2AChannel) cannot be targeted because we don't own their PTY. Accepted: out of scope; they remain visible in the roster and chat-targetable as today.
+- **`@external` agents invisible to slash mode** → Externally-attached claude sessions (running outside Cubilot) cannot be targeted because we don't own their PTY. Accepted: out of scope; they remain visible in the roster and chat-targetable as today.

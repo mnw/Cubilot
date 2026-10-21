@@ -36,6 +36,6 @@ This requirement is documented as a hard rule in `CLAUDE.md` so a future refacto
 
 #### Scenario: Capability is safe in the shipping config
 
-- **GIVEN** A2AChannel running under its default configuration
+- **GIVEN** Cubilot running under its default configuration
 - **THEN** `A2A_TOKEN` is set, all mutating routes enforce bearer auth
 - **AND** chatbridge's capability declaration is safe — no unauthenticated path to verdict submission exists

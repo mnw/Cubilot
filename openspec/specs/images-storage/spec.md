@@ -7,8 +7,8 @@ TBD - created by archiving change images-on-disk. Update Purpose after archive.
 
 The Rust shell SHALL resolve the images folder from the following sources, in priority order:
 
-1. `images_dir` field in `~/Library/Application Support/A2AChannel/config.json`, if present and non-empty.
-2. Otherwise, the default `~/Documents/A2AChannel/images/`.
+1. `images_dir` field in `~/Library/Application Support/Cubilot/config.json`, if present and non-empty.
+2. Otherwise, the default `~/Documents/Cubilot/images/`.
 
 The resolved path SHALL be created (including intermediate directories) if it does not exist. The resolved path SHALL be passed to `hub-bin` via the `A2A_IMAGES_DIR` environment variable. If the file `config.json` does not exist on first launch, the Rust shell SHALL create it containing the default configuration `{ "images_dir": "<default-path>" }`.
 
@@ -17,9 +17,9 @@ A malformed or unreadable `config.json` SHALL be ignored (default applies); the 
 #### Scenario: First launch creates default config and folder
 
 - **WHEN** the app launches on a fresh machine
-- **AND** neither `config.json` nor `~/Documents/A2AChannel/images/` exists
+- **AND** neither `config.json` nor `~/Documents/Cubilot/images/` exists
 - **THEN** the folder is created
-- **AND** `config.json` is written with `{ "images_dir": "/Users/<you>/Documents/A2AChannel/images" }`
+- **AND** `config.json` is written with `{ "images_dir": "/Users/<you>/Documents/Cubilot/images" }`
 
 #### Scenario: Custom folder via config
 
@@ -79,12 +79,12 @@ When the hub inlines an image reference into text delivered via `notifications/c
 
 #### Scenario: Agent sees absolute path, UI sees URL
 
-- **GIVEN** `A2A_IMAGES_DIR` is `/Users/alice/Documents/A2AChannel/images`
+- **GIVEN** `A2A_IMAGES_DIR` is `/Users/alice/Documents/Cubilot/images`
 - **AND** a chat entry has `image: "/image/xyz.png"`
 - **WHEN** the hub delivers the entry to the webview via `/stream`
 - **THEN** the event body contains `"image": "/image/xyz.png"`
 - **WHEN** the hub delivers the same entry to an agent via `/agent-stream`
-- **THEN** the event body's `text` field ends with `[image: /Users/alice/Documents/A2AChannel/images/xyz.png]`
+- **THEN** the event body's `text` field ends with `[image: /Users/alice/Documents/Cubilot/images/xyz.png]`
 
 ### Requirement: channel.ts instructions nudge agents to read image paths
 

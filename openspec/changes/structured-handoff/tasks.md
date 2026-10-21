@@ -117,8 +117,8 @@
 
 ## 14. Verification
 
-- [x] 14.1 Build via `./scripts/install.sh`. Confirm `~/Library/Application Support/A2AChannel/ledger.db` created with mode `0600`.
-- [x] 14.2 `sqlite3 ~/Library/Application\ Support/A2AChannel/ledger.db '.schema'` confirms `events`, `handoffs`, `meta` tables with the specified columns.
+- [x] 14.1 Build via `./scripts/install.sh`. Confirm `~/Library/Application Support/Cubilot/ledger.db` created with mode `0600`.
+- [x] 14.2 `sqlite3 ~/Library/Application\ Support/Cubilot/ledger.db '.schema'` confirms `events`, `handoffs`, `meta` tables with the specified columns.
 - [x] 14.3 Register two agents (`alice`, `bob`). From alice: `send_handoff({to:"bob", task:"test task"})`. Confirm `201 { id }`.
 - [ ] 14.4 Confirm the UI renders a handoff card in the chat stream.
 - [ ] 14.5 Confirm bob receives a `<channel kind="handoff.new" version=…>` notification with the snapshot.

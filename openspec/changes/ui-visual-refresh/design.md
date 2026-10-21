@@ -124,7 +124,7 @@ All three resolved.
 
 1. **Nutshell handoffs in the ledger** — resolved: no special-casing. `[nutshell]`-prefixed handoffs targeting the human flow through the generic "Needs you" rendering path. This is a UI refresh, not a functionality rebuild.
 2. **Avatar glyph choice** — resolved: first-letter initial, uppercase, on the hash-derived colour circle. One-line change in `renderAvatar`.
-3. **Terminal pane default state** — resolved: keep default-hidden. Existing `localStorage.a2achannel_terminal_enabled` behaviour unchanged.
+3. **Terminal pane default state** — resolved: keep default-hidden. Existing `localStorage.cubilot_terminal_enabled` behaviour unchanged.
 
 ## Decision 9 (late): brand mark uses the app icon
 
