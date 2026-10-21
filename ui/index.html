@@ -223,35 +223,35 @@
 
 <div class="modal-backdrop" id="spawn-modal">
   <div class="modal">
-    <h2>Launch terminal for agent</h2>
+    <div class="spawn-head"><span class="spawn-icon" aria-hidden="true">&gt;_</span><h2>Launch terminal for agent</h2></div>
     <p>
       Creates a tmux session on <code>~/Library/Application Support/Cubilot/tmux.sock</code>
       running the chosen harness in the chosen directory.
     </p>
     <label>Agent name</label>
     <input id="spawn-agent-input" spellcheck="false" autocomplete="off" placeholder="alice" style="width:100%;" />
-    <label>Role</label>
+    <label>Role/Skill</label>
     <select id="spawn-role-select" style="width:100%;">
       <option value="">None</option>
     </select>
-    <div id="spawn-grid-row" style="margin-top:6px;">
-      <label>Model × effort <span id="spawn-grid-count" class="grid-count"></span></label>
-      <input id="spawn-grid-filter" class="grid-filter" spellcheck="false" autocomplete="off" placeholder="type to filter models" hidden />
-      <div id="spawn-grid" class="model-grid" role="grid" aria-label="Model and effort"></div>
-      <div id="spawn-grid-note" class="grid-note"></div>
-    </div>
     <div id="spawn-harness-row" style="margin-top:6px;">
       <label style="text-transform:uppercase; letter-spacing:0.1em; font-family:var(--mono); font-size:10px; color:var(--text-dim);">Harness</label>
       <div style="display:flex; flex-direction:column; gap:6px; margin-top:4px; font-family:var(--sans); font-size:12px; color:var(--text-muted);">
         <label style="display:flex; align-items:center; gap:8px; cursor:pointer; text-transform:none; letter-spacing:0;">
           <input type="radio" name="spawn-harness" value="claude" id="spawn-harness-claude" checked />
-          <span><code style="font-family:var(--mono); font-size:11px; color:var(--text);">claude</code> Claude Code</span>
+          <span><code style="font-family:var(--mono); font-size:11px; color:var(--text);">claude</code> <span class="sub">Claude Code</span></span>
         </label>
         <label style="display:flex; align-items:center; gap:8px; cursor:pointer; text-transform:none; letter-spacing:0;">
           <input type="radio" name="spawn-harness" value="pi" id="spawn-harness-pi" />
-          <span><code style="font-family:var(--mono); font-size:11px; color:var(--text);">pi</code> pi.dev</span>
+          <span><code style="font-family:var(--mono); font-size:11px; color:var(--text);">pi</code> <span class="sub">pi.dev</span></span>
         </label>
       </div>
+    </div>
+    <div id="spawn-grid-row" style="margin-top:6px;">
+      <label>Model × effort <span id="spawn-grid-count" class="grid-count"></span></label>
+      <input id="spawn-grid-filter" class="grid-filter" spellcheck="false" autocomplete="off" placeholder="type to filter models" hidden />
+      <div id="spawn-grid" class="model-grid" role="grid" aria-label="Model and effort"></div>
+      <div id="spawn-grid-note" class="grid-note"></div>
     </div>
     <label>Working directory</label>
     <div style="display:flex; gap:6px; align-items:center;">

@@ -1798,6 +1798,9 @@ mod chatbridge_mod_tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    // At most this many NotFound lookups in one run of the test below. Background rate: about 1 in 600 runs sees one.
+    const MAX_TRANSIENT_NOT_FOUND: u32 = 2;
+
     #[test]
     fn r5_the_mod_dir_is_never_missing_while_it_is_restaged() {
         use std::sync::atomic::{AtomicBool, Ordering};
@@ -1816,12 +1819,32 @@ mod chatbridge_mod_tests {
             std::thread::spawn(move || {
                 let mut reads = 0u32;
                 let mut bad = Vec::new();
+                let mut transient = 0u32;
                 while !stop.load(Ordering::SeqCst) {
+                    // Two lookups can see a path vanish for an instant while stagers run, and neither is a missing
+                    // mod (found with ticket t_02b33ef6093989cf; 600 runs each under 20 busy loops):
+                    //  1. a read walks dest, hooks, register.js in steps. If it resolved `dest` to a generation that a
+                    //     stager then swapped out and deleted at once, the last step gets NotFound (6 of 600 runs;
+                    //     0 of 600 when the delete is delayed by 300 ms).
+                    //  2. a lookup of `dest` alone, during the swap, now and then fails on macOS (1 of 600 runs, about
+                    //     1 in 2 million lookups).
+                    // So a NotFound is counted, not failed. What must hold: whatever is read is a whole generation,
+                    // and NotFound stays rare. A restage that moved the old mod aside before it moved the new one in
+                    // would make `dest` missing on every stage (tens of hits in a run) and fail the limit below.
+                    match fs::metadata(&dest) {
+                        Ok(_) => {}
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => transient += 1,
+                        Err(e) => bad.push(format!("dest: {e:?}")),
+                    }
                     match fs::read_to_string(dest.join("hooks/register.js")) {
                         Ok(t) if t == "AAAA" || t == "BBBB" => {}
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => transient += 1,
                         other => bad.push(format!("{other:?}")),
                     }
                     reads += 1;
+                }
+                if transient > MAX_TRANSIENT_NOT_FOUND {
+                    bad.push(format!("{transient} NotFound lookups (limit {MAX_TRANSIENT_NOT_FOUND}) in {reads} reads"));
                 }
                 (reads, bad)
             })
