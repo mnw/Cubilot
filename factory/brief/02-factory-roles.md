@@ -69,10 +69,12 @@ Consequences:
 1. **Use `--exclude-tools`, not `--tools`.** `--tools` with plain names is an allowlist. It removes every tool it does not name, the chatbridge tools from the pi extension too. `--exclude-tools edit,write` removes only those two.
 2. **Pi has no sub-agents.** This fits the factory rule (Part 4). The review checklists of the Validator and the Reviewer (`code-review`, `silent-failure-hunter`, `pr-test-analyzer`, `php-reviewer`, `typescript-reviewer`, `code-explorer`, `comment-analyzer`, `agency-*`) are already skills in `factory/`. The role loads them on demand, in its own context.
 3. **Pi has no permission prompts.** The `--no-approve` flag in the current Pi command only ignores trust-gated project files. It does not gate tools. Without `edit` and `write`, a Pi Validator can still change files through `bash`. The role file forbids this. For a hard limit, run Pi roles in a read-only checkout of the branch, or add a Pi permission-gate extension that blocks writing `bash` commands.
-4. **Model ID.** The role files propose `gpt-5.5`, which occurs in the Pi source. A public Pi setup from September 2026 (finding 8) lists `openai-codex/gpt-5.6-sol` and `openai-codex/gpt-5.6-terra`, so `gpt-5.5` can be one version old. The `openai-codex` provider can also mean a different sign-in than `OPENAI_API_KEY`. Run `pi --list-models` and pick the model and provider before release.
+4. **Model ID.** The role files propose `gpt-5.5`, which occurs in the Pi source. A public Pi setup from September 2026 (finding 8) lists `openai-codex/gpt-5.6-sol` and `openai-codex/gpt-5.6-terra`, so `gpt-5.5` can be one version old. The `openai-codex` provider can also mean a different sign-in than `OPENAI_API_KEY`. Run `pi --list-models` and pick the model and provider before release. **Decision (human, 2026-10-21):** use the ChatGPT subscription: `provider: openai-codex`, `model: gpt-5.6-sol` in `validator.md` and `reviewer.md`. `openai` `gpt-5.5` failed live with a ChatGPT sign-in (task 1.4). The human picks the model and the effort for each launch in the spawn modal.
 5. **No `ack_permission` for Pi roles.** Pi has no tool approvals to relay. This matches ground rule 7.
 
-### 7. Hooks can enforce a gate
+### 7. Hooks can enforce a gate, but not on chatbridge tools
+
+**Result of check 0.4 (2026-10-21, Claude Code 2.1.306): the hook below never runs.** PreToolUse and PostToolUse hooks from a plugin do not run for `mcp__chatbridge__*` tools, because the mod answers the call itself. A control hook on `Bash` ran. **Decision (human, 2026-10-21):** the Reviewer runs `ste-lint.py` on `context.path` before it accepts the handoff, and declines a handoff that fails, with the findings. An accepted handoff cannot become declined. Deliberate breaks (human decision 2026-10-21): the Editor lists each one in `change_summary` as `ste_disable: <rule> at <line>: <reason>`. The Reviewer runs the linter twice: with `--disable` for the listed rules (must exit 0), and with `--json` without it (every hit of a listed rule must be at a listed line). The Reviewer judges each reason. The Editor role text keeps the rule to run `ste-lint.py` before each handoff. A gate inside the chatbridge bridge is a backlog item (high blast radius). The text below is the original plan, kept for reference.
 
 ECC uses hooks to enforce rules, not to ask for them. A Claude Code plugin can ship hooks in `hooks/hooks.json`, and `${CLAUDE_PLUGIN_ROOT}` points to the staged plugin folder.
 
@@ -124,22 +126,27 @@ Do not use these parts:
 
 ### Step 1. Bundle and stage
 1. Add `factory/` to the Tauri bundle resources.
-2. When the app opens, stage each role into `<app data>/factory/<role>/`, the same way as `stage_chatbridge_mod`:
+2. When the app opens, stage all roles and `shared` into a new version folder `<app data>/factory/v-<hash>/<role>/` (build in a temp folder, then rename, like `stage_chatbridge_mod`), and write the version name to `<app data>/factory/current` (tmpfile + rename). The hash covers only the staged inputs, and an existing `v-<hash>` is reused. The staged inputs never change after the rename. Claude Code may add `.claude-plugin/types/`, `.gitignore` and `tsconfig.json` to a loaded plugin folder; they are not staged inputs and not in the hash. Running agents keep their version, also after an app restart (tmux sessions survive it). A spawn reads `current`, so it never sees a half-staged folder. This change deletes no old version: a spawn can read the old `current` just before a new one is published, and a cleanup could remove that version before the pane exists. Cleanup is a backlog item. Each role folder gets (below, `<current>` is the version name in `<app data>/factory/current`):
    - `.claude-plugin/plugin.json` with `{"name": "factory-<role>"}`
    - `skills/` from `factory/<role>/skills/`
    - `role.md`: the body of `factory/<role>/<role>.md` without the frontmatter
    - `hooks/hooks.json` from `factory/<role>/hooks/`, when the role has hooks (finding 7)
 3. Do not stage an `agents/` folder. The role plugin has skills and hooks only.
-4. **Skill listing (decision 2026-10-19).** Claude Code puts the name and the description of every skill it can find in a listing. The listing has a budget of 1 % of the context window. When the listing is too long, Claude Code removes the descriptions of the skills that are used least. The agent then cannot find them. Source: https://code.claude.com/docs/en/skills, "Skill descriptions are cut short". The human's own skills and plugin skills (for example 27 SEO skills) are in that listing too. For each Claude role, the app writes `<app data>/factory/<role>/settings.json` with `skillOverrides`:
-   - `"off"` for each skill that is not in the role plugin or in the shared plugin. The app makes the list at launch from the skills that Claude Code finds (user skills, plugin skills, project skills).
-   - No change for the skills of the role plugin and the shared plugin.
+4. **Skill listing (decision 2026-10-19).** Claude Code puts the name and the description of every skill it can find in a listing. The listing has a budget of 1 % of the context window. When the listing is too long, Claude Code removes the descriptions of the skills that are used least. The agent then cannot find them. Source: https://code.claude.com/docs/en/skills, "Skill descriptions are cut short". The human's own skills and plugin skills (for example 27 SEO skills) are in that listing too. For each Claude role, the app writes `<app data>/factory-settings/<agent>.json` at each launch (outside the version folders: the lists depend on the agent's project folder):
+   - `enabledPlugins`: `false` for each installed plugin (`<plugin>@<marketplace>`) and each `--plugin-dir` plugin (`<name>@inline`) that is not the role plugin or the shared plugin. Never turn off the chatbridge mod (`chatbridge@inline`): the agent needs it to join the room.
+   - `skillOverrides`: `"off"` for each user and project skill outside the role plugin and the shared plugin. The key is the bare skill name.
+   - No change for the role plugin and the shared plugin.
+   The app makes the lists at launch from the plugins and skills that Claude Code finds.
+   **Result of check 0.2 (2026-10-21, Claude Code 2.1.306):** `skillOverrides` does not affect plugin skills (docs: "Plugin skills are not affected by `skillOverrides`"). `enabledPlugins` in `--settings` turns off a whole plugin for one launch only. Account-synced plugins (from claude.ai, under `~/.claude/plugins/synced/`, for example the 27 SEO skills) stay on: no tested setting turns them off for one agent. **Decision (human, 2026-10-21):** accept them in the listing. A separate `CLAUDE_CONFIG_DIR` for each role is a backlog experiment.
    Pi roles need no change: the app gives Pi only the role's `--skill` folders and its own `PI_CODING_AGENT_DIR` (Part 7).
 5. **Skill size.** After compaction, Claude Code attaches again only the first 5,000 tokens of each skill that the agent used. Keep the rules that must always apply at the top of each factory skill. Keep `SKILL.md` under 500 lines, and put reference material in `references/`. The factory skills `code-review` and `api-design` follow this rule since 2026-10-19.
+6. **Shared plugin (decision 2026-10-21).** Stage `factory/shared/` into `<app data>/factory/<current>/shared/` with `{"name": "factory-shared"}`, and load it for every role (`--plugin-dir` for Claude, `--skill <app data>/factory/<current>/shared/skills` for Pi). It holds `asd-ste100` (moved from `factory/editor/skills/`, one copy only). Without it, the settings generator would turn off `asd-ste100`, a user skill today, for every Claude role.
+7. **User skill layer (decision 2026-10-21).** A user of the downloaded app cannot edit the bundle, and staging replaces `<app data>/factory/`. So the app stages `<app data>/factory-user/<role>/skills/` on top of the bundled skills. A user skill replaces a bundled skill with the same name. To go back, the user deletes the folder. A title-bar button next to the settings button opens `factory-user/` in Finder. The key is the folder name (it must equal the frontmatter `name`). A user folder replaces the bundled folder as a whole, with no file merge. The user layer is part of the version hash, so a change gives a new version (item 2) and never touches a running agent. A running agent reads skill text from its version folder when it uses a skill. **Proposed, needs the human's approval:** reload stages a new version and does not block.
 
 ### Step 2. Spawn with a role
 1. Add `role: Option<String>` to `pty_spawn` and to `format_claude_command`.
 2. Parse the role frontmatter: `harness` (default `claude`), `provider`, `model`, `thinking`, `disallowedTools` (Claude) and `excludeTools` (Pi). The role's `harness` overrides the harness choice in the spawn modal.
-3. For a Claude role, add to the Claude command: `--plugin-dir '<app data>/factory/<role>' --append-system-prompt-file '<app data>/factory/<role>/role.md' --settings '<app data>/factory/<role>/settings.json' --model <model>`, and `--disallowed-tools ...` from `disallowedTools`. Every Claude role sets `Task, Agent`.
+3. For a Claude role, add to the Claude command: `--plugin-dir '<app data>/factory/<current>/<role>' --plugin-dir '<app data>/factory/<current>/shared' --append-system-prompt-file '<app data>/factory/<current>/<role>/role.md' --settings '<app data>/factory-settings/<agent>.json' --model <model>`, and `--disallowed-tools ...` from `disallowedTools`. Every Claude role sets `Task, Agent`.
 4. When `role` is `None`, the command does not change.
 5. Many agents share one role. `worker-1` and `worker-2` both use `worker`. `tester-1` and `tester-2` both use `tester`.
 
@@ -152,7 +159,14 @@ The command pre-allows only `mcp__chatbridge__ack_permission`, `mcp__chatbridge_
 
 Without this, the human must approve each call and the factory stops.
 
-Do not pre-allow `ack_permission` for factory roles. Ground rule 7 in the README says only the human acks permissions.
+Block `ack_permission` for factory roles. Ground rule 7 in the README says only the human acks permissions.
+
+Removing `ack_permission` from `--allowed-tools` is not enough. In `default` mode the chatbridge mod runs all fifteen chatbridge tools with no prompt (CLAUDE.md, the `$.tool.check` rule). So a role agent could still call `ack_permission`. Block the tool instead:
+
+- Claude role: add `mcp__chatbridge__ack_permission` to `--disallowed-tools`, and leave it out of `--allowed-tools`. The mod refuses the call through `$.tool.check`. Not tested.
+- Pi role: add `ack_permission` to `--exclude-tools`. Not tested.
+
+Blocking the tool does not change the permission relay. The human still resolves a permission request from the card in the UI and from the agent's terminal.
 
 ### Step 4. UI
 1. Add a Role dropdown to the spawn modal. Fill it from the staged roles. "None" keeps the current behaviour.
@@ -172,8 +186,8 @@ Do not pre-allow `ack_permission` for factory roles. Ground rule 7 in the README
 1. Stage the Pi role like a Claude role (step 1).
 2. Add `role: Option<&str>` to `pi_command` (`src-tauri/src/pty.rs:560`).
 3. Add to the Pi command, before `-e`:
-   `--provider '<provider>' --model '<model>' --thinking '<thinking>' --append-system-prompt '<app data>/factory/<role>/role.md' --skill '<app data>/factory/<role>/skills' --exclude-tools '<excludeTools>'`
-4. Keep the existing flags: `--no-approve`, the shared `--skill` and `--prompt-template` folders from `claude_resource_flags` (they carry `asd-ste100`), and `-e <pi extension>`.
+   `--provider '<provider>' --model '<model>' --thinking '<thinking>' --append-system-prompt '<app data>/factory/<current>/<role>/role.md' --skill '<app data>/factory/<current>/<role>/skills' --exclude-tools '<excludeTools>'`
+4. Keep `--no-approve` and `-e <pi extension>`. For a role, pass `--no-skills`, then only the role and `factory-shared` `--skill` folders, and drop the `--skill` and `--prompt-template` folders of `claude_resource_flags`. Finding of task 1.4 (2026-10-21, pi 1.3.0): Pi loads `~/.claude/skills` by itself, and that folder has its own `asd-ste100`, so the order of `--skill` flags alone does not pick the shared copy. A launch without a role keeps today's flags.
 5. Do not add the role text in `pi-extension.ts` `before_agent_start`. The flag `--append-system-prompt` does this without a code change in the extension.
 6. Show the provider and model on the roster pill, so the human sees which agents run on OpenAI.
 7. When `OPENAI_API_KEY` is not set and Pi has no stored OpenAI credential, the launch fails. Run `pi auth check --provider openai --json` before the launch and show a clear message.
@@ -194,7 +208,7 @@ Do not pre-allow `ack_permission` for factory roles. Ground rule 7 in the README
 5. The Pi command with `--exclude-tools edit,write` still lists the chatbridge tools (`post`, `send_handoff`, `list_tickets`). Launch a Pi Validator and ask it to list its tools.
 6. A converted agent skill loads on demand in Pi. Ask the Validator to look for silent failures and check that it loads `silent-failure-hunter`.
 
-7. A plugin hook loaded through `--plugin-dir` fires for a tool of the chatbridge mod. Use the name `mcp__chatbridge__send_handoff` in the matcher, as the launch command does in `--allowed-tools`.
+7. **Superseded by check 0.4 (2026-10-21): the hook does not fire.** See finding 7. Original text: a plugin hook loaded through `--plugin-dir` fires for a tool of the chatbridge mod. Use the name `mcp__chatbridge__send_handoff` in the matcher, as the launch command does in `--allowed-tools`.
 8. A Claude role launched with `--disallowed-tools Task,Agent` cannot launch a sub-agent. Ask it to launch one and check that the tool is not available.
 
 ## Tests
@@ -205,12 +219,15 @@ Follow the existing launch-command tests in `src-tauri/src/pty.rs`:
 3. Role `editor`: the command contains `--model sonnet` and `--disallowed-tools` with `Task` and `Agent`.
 4. The builder escapes a quote in a role name, like it does for agent and room names.
 5. An unknown role returns an error and launches nothing.
-6. Role `validator`: the app uses the Pi harness even when the modal says Claude. The Pi command contains `--provider 'openai'`, `--model`, `--thinking`, `--append-system-prompt`, the role `--skill` folder and `--exclude-tools 'edit,write'`, and does not contain `--tools`.
+6. Role `validator`: the app uses the Pi harness even when the modal says Claude. The Pi command contains `--provider 'openai'`, `--model`, `--thinking`, `--append-system-prompt`, `--no-skills`, exactly two `--skill` folders (the staged role and `shared` skills), `--exclude-tools 'edit,write'`, no `--skill` or `--prompt-template` folder from `claude_resource_flags`, and does not contain `--tools`.
 7. Staging a role writes no `agents/` folder.
 8. Staging a Claude role copies `hooks/hooks.json` when the role has one.
-8a. The `settings.json` of a role sets `skillOverrides` to `"off"` for a user skill that is not in the role plugin. In the launched agent, `/context` shows only the skills of the role and the shared plugin.
-9. Editor hook: a handoff to `reviewer` for a file with an ASD-STE100 hard violation is blocked, and the findings reach the Editor. A clean file passes.
+8a. The `settings.json` of a role sets `skillOverrides` to `"off"` for a user skill that is not in the role plugin, and `enabledPlugins` to `false` for an installed plugin that is not the role plugin or the shared plugin. In the launched agent, the skill list shows only the skills of the role, the shared plugin and account-synced plugins. The settings do not turn off `chatbridge@inline`, and the agent has the chatbridge tools and sends a handoff.
+9. Editor gate: before it accepts, the Reviewer declines a handoff for a file with an ASD-STE100 hard violation, and the findings reach the Editor in the decline reason. The Reviewer accepts and reviews a clean file. `editor.md` tells the Editor to run `ste-lint.py` before each handoff and does not say that a hook enforces it. A break listed as `ste_disable: <rule> at <line>: <reason>` passes; the same rule at an unlisted line is declined.
 10. A model override in the modal changes `--model` for that launch only.
+11. Shared plugin: every role command loads the staged `shared` folder, and no role plugin contains `asd-ste100`. For a Pi role, the command has `--no-skills` and no inherited `--skill` or `--prompt-template` folder, and the loaded `asd-ste100` path is in the shared folder, not `~/.claude/skills`.
+12. User skill layer: a user skill folder replaces the bundled folder of the same name as a whole; deleting it restores the bundled skill; a deleted user-only skill is absent from the next version.
+13. Versioned staging: with a running role agent, a restage (reload or app restart) leaves that agent's staged inputs unchanged; a spawn during staging gets a complete version; staging the same inputs twice reuses one `v-<hash>`; no old version is deleted.
 
 ---
 

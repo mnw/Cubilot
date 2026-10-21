@@ -222,15 +222,33 @@ fn agent_command(
     session_mode: Option<&str>,
     harness: Harness,
     claude_path: Option<&std::path::Path>,
+    role: Option<&str>,
+    model: Option<&str>,
 ) -> Result<String, String> {
+    // A model override belongs to a role launch: without a role there is nothing to override.
+    if model.is_some() && role.is_none() {
+        return Err("a model override needs a role".to_string());
+    }
     match harness {
         Harness::Claude => claude_command(
             agent,
             room,
             session_mode,
             claude_path.ok_or_else(|| "Claude path is required for a Claude spawn".to_string())?,
+            role,
+            cwd,
+            model,
         ),
-        Harness::Pi => pi_command(agent, room, cwd, session_mode),
+        Harness::Pi => {
+            let launch = match role {
+                Some(r) => Some(crate::factory::with_model_override(
+                    crate::factory::resolve_role_launch(agent, r, std::path::Path::new(cwd))?,
+                    model,
+                )?),
+                None => None,
+            };
+            pi_command(agent, room, cwd, session_mode, launch.as_ref())
+        }
     }
 }
 
@@ -373,6 +391,44 @@ pub fn pane_harness(agent: &str) -> Harness {
     }
 }
 
+// ---- Roster pill: role, model and (Pi) provider of a running agent (task 5.4) ----
+// Recorded as tmux session options at spawn, like @cubilot_harness, because sessions outlive the app and the hub
+// does not know the role. Read back with one list-sessions call.
+#[derive(Debug, PartialEq, Clone, serde::Serialize)]
+pub struct PillInfo {
+    pub role: String,
+    pub model: String,
+    pub provider: String, // Pi roles only, else empty
+}
+
+fn role_options(spec: &crate::factory::RoleSpec, model_override: Option<&str>) -> Vec<(&'static str, String)> {
+    let model = model_override.map(str::to_string).or_else(|| spec.model.clone()).unwrap_or_default();
+    let provider = if spec.harness == "pi" { spec.provider.clone().unwrap_or_default() } else { String::new() };
+    vec![("@cubilot_role", spec.name.clone()), ("@cubilot_model", model), ("@cubilot_provider", provider)]
+}
+
+const PILL_FORMAT: &str = "#{session_name}\t#{@cubilot_role}\t#{@cubilot_model}\t#{@cubilot_provider}";
+
+// Sessions without a role (no option set) are left out: their pill stays as it is.
+fn parse_role_pills(out: &str) -> std::collections::HashMap<String, PillInfo> {
+    let mut map = std::collections::HashMap::new();
+    for line in out.lines() {
+        let mut f = line.split('\t');
+        let (Some(name), Some(role), Some(model), Some(provider)) = (f.next(), f.next(), f.next(), f.next()) else { continue };
+        if role.is_empty() || !valid_agent_name(name) {
+            continue;
+        }
+        map.insert(name.to_string(), PillInfo { role: role.to_string(), model: model.to_string(), provider: provider.to_string() });
+    }
+    map
+}
+
+#[tauri::command]
+pub fn pty_roles() -> std::collections::HashMap<String, PillInfo> {
+    // "no server running" is an error here too: no sessions, no pills.
+    tmux_run(&["list-sessions", "-F", PILL_FORMAT]).map(|o| parse_role_pills(&o)).unwrap_or_default()
+}
+
 #[tauri::command]
 pub fn pty_harness(agent: String) -> String {
     match pane_harness(&agent) {
@@ -492,6 +548,7 @@ fn pi_command(
     room: &str,
     cwd: &str,
     session_mode: Option<&str>,
+    role: Option<&crate::factory::RoleLaunch>,
 ) -> Result<String, String> {
     let ext = resolve_pi_extension()?;
     let ext_str = ext.to_string_lossy().replace('\'', r"'\''");
@@ -505,10 +562,44 @@ fn pi_command(
     let pi_escaped = pi_path.to_string_lossy().replace('\'', r"'\''");
     let agent_escaped = agent.replace('\'', r"'\''");
     let room_escaped = room.replace('\'', r"'\''");
-    let shared = claude_resource_flags(cwd);
+    // A role gets exactly its own and the shared skill folders (brief tests 6 and 11): no --skill or
+    // --prompt-template folder from claude_resource_flags, which would bring ~/.claude/skills back.
+    let shared = if role.is_some() { String::new() } else { claude_resource_flags(cwd) };
+    let (role_part, role_flags) = match role {
+        Some(r) if r.harness != "pi" => return Err(format!("role '{}' runs on {}, not pi", r.name, r.harness)),
+        Some(r) => pi_role_flags(r)?,
+        None => (String::new(), String::new()),
+    };
     Ok(format!(
-        "CHATBRIDGE_AGENT='{agent_escaped}' CHATBRIDGE_ROOM='{room_escaped}' '{pi_escaped}' {mode_part}--no-approve {shared}-e '{ext_str}'"
+        "CHATBRIDGE_AGENT='{agent_escaped}' CHATBRIDGE_ROOM='{room_escaped}' {role_part}'{pi_escaped}' {mode_part}--no-approve {role_flags}{shared}-e '{ext_str}'"
     ))
+}
+
+// Pi role flags (task 3.3). `--no-skills` is needed: without it Pi discovers ~/.claude/skills on its own and that
+// copy of a skill (asd-ste100) wins over every --skill (seen live, 1.4). Explicit --skill paths still load, so the
+// role gets exactly its own and the shared folder; pi_command drops the claude_resource_flags folders for a role.
+// `--exclude-tools`, never `--tools`: --tools is an allowlist and would remove the chatbridge tools.
+fn pi_role_flags(r: &crate::factory::RoleLaunch) -> Result<(String, String), String> {
+    if !crate::factory::valid_role_name(&r.name) {
+        return Err(format!("invalid role: {:?}", r.name));
+    }
+    let sq = |s: &str| s.replace('\'', r"'\''");
+    let psq = |p: &std::path::Path| sq(&p.to_string_lossy());
+    let mut f = format!("--no-skills --append-system-prompt '{}' ", psq(&r.prompt_file));
+    let role_skills = r.plugin_dir.join("skills");
+    if role_skills.is_dir() {
+        f.push_str(&format!("--skill '{}' ", psq(&role_skills)));
+    }
+    f.push_str(&format!("--skill '{}' ", psq(&r.shared_dir.join("skills"))));
+    for (flag, v) in [("--provider", &r.provider), ("--model", &r.model), ("--thinking", &r.thinking)] {
+        if let Some(v) = v {
+            f.push_str(&format!("{flag} '{}' ", sq(v)));
+        }
+    }
+    // Always present with a role: the role's list plus ack_permission (a Pi role must not answer permission requests).
+    let excluded = with_ack_permission_blocked(&r.exclude_tools, ACK_PERMISSION);
+    f.push_str(&format!("--exclude-tools '{}' ", sq(&excluded.join(","))));
+    Ok((format!("CHATBRIDGE_ROLE='{}' ", r.name), f))
 }
 
 // Direct-exec (no shell), so claude_path must be absolute — comes from config.yml.
@@ -521,12 +612,24 @@ fn claude_command(
     room: &str,
     session_mode: Option<&str>,
     claude_path: &std::path::Path,
+    role: Option<&str>,
+    cwd: &str,
+    model: Option<&str>,
 ) -> Result<String, String> {
+    // Resolved before the mod is staged or anything is written for a role-less spawn: no role, no change.
+    let launch = match role {
+        Some(r) => Some(crate::factory::with_model_override(
+            crate::factory::resolve_role_launch(agent, r, std::path::Path::new(cwd))?,
+            model,
+        )?),
+        None => None,
+    };
     claude_command_using(
         agent,
         room,
         session_mode,
         claude_path,
+        launch.as_ref(),
         &crate::ensure_chatbridge_mod_staged,
     )
 }
@@ -666,13 +769,34 @@ fn claude_command_using(
     room: &str,
     session_mode: Option<&str>,
     claude_path: &std::path::Path,
+    role: Option<&crate::factory::RoleLaunch>,
     stage: &dyn Fn() -> Result<PathBuf, String>,
 ) -> Result<String, String> {
     let mod_dir = stage()?;
     let mcp_config = write_global_mcp_config(&mcp_configs_dir(), read_global_mcp_servers())?;
     format_claude_command(
-        agent, room, session_mode, claude_path, &mod_dir, mcp_config.as_deref(),
+        agent, room, session_mode, claude_path, &mod_dir, mcp_config.as_deref(), role,
     )
+}
+
+// What a role agent may call without a prompt (task 4.1): the handoff, interrupt and ticket tools plus post and
+// post_file. `ack_permission` is NOT here: a role agent must not answer permission requests, the human does
+// (from the card in the UI and from the agent's terminal).
+const ROLE_ALLOWED_TOOLS: [&str; 14] = [
+    "post", "post_file",
+    "send_handoff", "accept_handoff", "decline_handoff", "cancel_handoff",
+    "send_interrupt", "ack_interrupt",
+    "create_ticket", "claim_ticket", "transition_ticket", "assign_ticket", "attach_ticket_file", "list_tickets",
+];
+const ACK_PERMISSION: &str = "ack_permission";
+
+// The role's own list plus ack_permission, without a duplicate.
+fn with_ack_permission_blocked(list: &[String], name: &str) -> Vec<String> {
+    let mut out = list.to_vec();
+    if !out.iter().any(|t| t == name) {
+        out.push(name.to_string());
+    }
+    out
 }
 
 fn format_claude_command(
@@ -682,7 +806,32 @@ fn format_claude_command(
     claude_path: &std::path::Path,
     mod_dir: &std::path::Path,
     mcp_config: Option<&std::path::Path>,
+    role: Option<&crate::factory::RoleLaunch>,
 ) -> Result<String, String> {
+    let sq = |s: &str| s.replace('\'', r"'\''");
+    let psq = |p: &std::path::Path| sq(&p.to_string_lossy());
+    // Role identity travels as env like agent and room; the flags load the staged role plugin and shared plugin.
+    // Nothing is added when there is no role.
+    let (role_part, role_flags) = match role {
+        // pty_spawn picks the harness from the role (harness_for_role), so this only guards a wrong call.
+        Some(r) if r.harness != "claude" => return Err(format!("role '{}' runs on {}, not claude", r.name, r.harness)),
+        Some(r) if crate::factory::valid_role_name(&r.name) => {
+            let settings = r.settings.as_ref().ok_or_else(|| format!("role '{}': no settings file", r.name))?;
+            let mut flags = format!(
+                "--plugin-dir '{}' --plugin-dir '{}' --append-system-prompt-file '{}' --settings '{}' ",
+                psq(&r.plugin_dir), psq(&r.shared_dir), psq(&r.prompt_file), psq(settings)
+            );
+            if let Some(m) = &r.model {
+                flags.push_str(&format!("--model '{}' ", sq(m)));
+            }
+            // Always present with a role: the role's list plus the blocked ack_permission.
+            let blocked = with_ack_permission_blocked(&r.disallowed_tools, &format!("mcp__chatbridge__{ACK_PERMISSION}"));
+            flags.push_str(&format!("--disallowed-tools '{}' ", sq(&blocked.join(","))));
+            (format!("CHATBRIDGE_ROLE='{}' ", r.name), flags)
+        }
+        Some(r) => return Err(format!("invalid role: {:?}", r.name)),
+        None => (String::new(), String::new()),
+    };
     let mode_part = match session_mode {
         Some("continue") => "--continue ",
         Some("resume")   => "--resume ",
@@ -697,8 +846,14 @@ fn format_claude_command(
         Some(p) => format!("--mcp-config '{}' ", p.to_string_lossy().replace('\'', r"'\''")),
         None => String::new(),
     };
+    // No role: the allow rule is the one the app has always passed (pinned by tests).
+    let allowed_tools = if role.is_some() {
+        ROLE_ALLOWED_TOOLS.iter().map(|t| format!("mcp__chatbridge__{t}")).collect::<Vec<_>>().join(",")
+    } else {
+        "mcp__chatbridge__ack_permission,mcp__chatbridge__post,mcp__chatbridge__post_file".to_string()
+    };
     Ok(format!(
-        "CHATBRIDGE_AGENT='{agent_escaped}' CHATBRIDGE_ROOM='{room_escaped}' '{claude_escaped}' {mode_part}--plugin-dir '{mod_escaped}' {mcp_part}--allowed-tools 'mcp__chatbridge__ack_permission,mcp__chatbridge__post,mcp__chatbridge__post_file'"
+        "CHATBRIDGE_AGENT='{agent_escaped}' CHATBRIDGE_ROOM='{room_escaped}' {role_part}'{claude_escaped}' {mode_part}--plugin-dir '{mod_escaped}' {mcp_part}{role_flags}--allowed-tools '{allowed_tools}'"
     ))
 }
 
@@ -913,6 +1068,34 @@ pub fn default_room_for_cwd(cwd: &std::path::Path) -> String {
         .to_string()
 }
 
+/// The role of a spawn request: blank is no role; anything else must be a known single-agent role that the
+/// current staged version contains, else the spawn fails before a tmux session exists.
+fn spawn_role(role: Option<String>) -> Result<Option<String>, String> {
+    spawn_role_with(role, &|r| crate::factory::resolve_role_spec(r).map(|_| ()))
+}
+
+fn spawn_role_with(role: Option<String>, check: &dyn Fn(&str) -> Result<(), String>) -> Result<Option<String>, String> {
+    let Some(r) = role.map(|r| r.trim().to_string()).filter(|r| !r.is_empty()) else { return Ok(None) };
+    check(&r)?;
+    Ok(Some(r))
+}
+
+/// The harness a spawn runs on: the role's frontmatter `harness` when a role is set, else the requested one.
+fn harness_for_role(requested: Harness, role: Option<&str>) -> Result<Harness, String> {
+    harness_for_role_with(requested, role, &|r| crate::factory::resolve_role_spec(r).map(|s| s.harness))
+}
+
+fn harness_for_role_with(
+    requested: Harness,
+    role: Option<&str>,
+    role_harness: &dyn Fn(&str) -> Result<String, String>,
+) -> Result<Harness, String> {
+    match role {
+        None => Ok(requested),
+        Some(r) => Harness::parse(Some(&role_harness(r)?)),
+    }
+}
+
 #[tauri::command]
 pub async fn pty_spawn(
     app: AppHandle,
@@ -922,11 +1105,18 @@ pub async fn pty_spawn(
     session_mode: Option<String>,
     room: Option<String>,
     harness: Option<String>,
+    role: Option<String>,
+    model: Option<String>,
 ) -> Result<(), String> {
+    // An unknown or council role fails here, before any tmux session exists. No role: nothing changes.
+    let role = spawn_role(role)?;
     if !valid_agent_name(&agent) {
         return Err(format!("invalid agent name: {agent}"));
     }
     let harness = Harness::parse(harness.as_deref())?;
+    // A role's own harness replaces the one the modal asked for (a Pi role builds the Pi command even when the
+    // modal says Claude). No role: the requested harness, as before.
+    let harness = harness_for_role(harness, role.as_deref())?;
 
     let resolved_room = match room.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(r) if valid_room_label(r) => r.to_string(),
@@ -966,6 +1156,8 @@ pub async fn pty_spawn(
             session_mode.as_deref(),
             harness,
             claude_path.as_deref(),
+            role.as_deref(),
+            model.as_deref().map(str::trim).filter(|m| !m.is_empty()),
         )?;
         let argv = build_spawn_argv(&agent, &cwd, &lang, api_key.as_deref(), &spawn_cmd);
         let argv_refs: Vec<&str> = argv.iter().map(String::as_str).collect();
@@ -973,6 +1165,16 @@ pub async fn pty_spawn(
         // Authoritative harness record; pane_harness falls back to the command only without it.
         if let Err(e) = tmux_run(&["set-option", "-t", &tmux_pane(&agent), "@cubilot_harness", harness.as_str()]) {
             eprintln!("[pty] pty_spawn/@cubilot_harness (falls back to command inspection): {e}");
+        }
+        if let Some(r) = &role {
+            // Best effort, like the harness record: a missing pill must not fail a launch that already runs.
+            if let Ok(spec) = crate::factory::resolve_role_spec(r) {
+                for (k, v) in role_options(&spec, model.as_deref().map(str::trim).filter(|m| !m.is_empty())) {
+                    if let Err(e) = tmux_run(&["set-option", "-t", &tmux_pane(&agent), k, &v]) {
+                        eprintln!("[pty] pty_spawn/{k} (pill only): {e}");
+                    }
+                }
+            }
         }
         if let Err(e) = tmux_run(&["set-option", "-t", &tmux_pane(&agent), "status", "off"]) {
             eprintln!("[pty] pty_spawn/status-off (best-effort): {e}");
@@ -1821,6 +2023,7 @@ mod spawn_argv_tests {
             Path::new("/Users/me/bin/claude"),
             Path::new("/Users/me/Library/Application Support/Cubilot/chatbridge-mod"),
             None,
+            None,
         ).unwrap();
         assert!(cmd.starts_with("CHATBRIDGE_AGENT='Dev 1' CHATBRIDGE_ROOM='EU Space' '/Users/me/bin/claude' --resume --plugin-dir '"), "{cmd}");
         assert!(cmd.contains("--plugin-dir '/Users/me/Library/Application Support/Cubilot/chatbridge-mod'"), "{cmd}");
@@ -1839,6 +2042,7 @@ mod spawn_argv_tests {
         let cmd = format_claude_command(
             "alice", "r", None, Path::new("/c"), Path::new("/m"),
             Some(Path::new("/Users/me/Application Support/Cubilot/mcp-configs/global.json")),
+            None,
         ).unwrap();
         let flag = concat!("--mcp", "-config");
         assert_eq!(cmd.matches(flag).count(), 1, "{cmd}");
@@ -1899,10 +2103,311 @@ mod spawn_argv_tests {
     #[test]
     fn claude_command_escapes_single_quotes_and_rejects_bad_session_mode() {
         use std::path::Path;
-        let cmd = format_claude_command("o'neil", "r'm", None, Path::new("/c"), Path::new("/m"), None).unwrap();
+        let cmd = format_claude_command("o'neil", "r'm", None, Path::new("/c"), Path::new("/m"), None, None).unwrap();
         assert!(cmd.contains(r"CHATBRIDGE_AGENT='o'\''neil'"), "{cmd}");
         assert!(cmd.contains(r"CHATBRIDGE_ROOM='r'\''m'"), "{cmd}");
-        assert!(format_claude_command("a", "r", Some("bogus"), Path::new("/c"), Path::new("/m"), None).is_err());
+        assert!(format_claude_command("a", "r", Some("bogus"), Path::new("/c"), Path::new("/m"), None, None).is_err());
+    }
+
+    // A real staged tree: the repo's factory/ staged into a temp app-data dir, plus a settings file for the agent.
+    fn staged_role(role: &str, agent: &str) -> (std::path::PathBuf, crate::factory::RoleLaunch) {
+        use crate::factory::*;
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let root = std::env::temp_dir().join(format!("cubilot-pty-role-{role}-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
+        let dest = root.join("factory");
+        let v = stage_factory(&src, &dest, &root.join("user")).unwrap();
+        let version = dest.join(&v);
+        let home = root.join("home/.claude");
+        std::fs::create_dir_all(&home).unwrap();
+        let settings = write_agent_settings(agent, role, &root, &home, &root.join("settings")).unwrap();
+        let spec = load_role_spec(role, &src, &version).unwrap();
+        let settings = if spec.harness == "claude" { Some(settings) } else { None };
+        (root, role_launch(&spec, &version, settings))
+    }
+
+    #[test]
+    fn claude_command_without_a_role_is_byte_for_byte_the_old_command() {
+        use std::path::Path;
+        let none = format_claude_command("a", "r", None, Path::new("/c"), Path::new("/m"), None, None).unwrap();
+        assert_eq!(
+            none,
+            "CHATBRIDGE_AGENT='a' CHATBRIDGE_ROOM='r' '/c' --plugin-dir '/m' --allowed-tools 'mcp__chatbridge__ack_permission,mcp__chatbridge__post,mcp__chatbridge__post_file'"
+        );
+        assert!(!none.contains("CHATBRIDGE_ROLE") && !none.contains("factory"));
+    }
+
+    #[test]
+    fn role_worker_command_loads_the_role_and_shared_plugin_prompt_file_settings_and_model() {
+        use std::path::Path;
+        let (root, launch) = staged_role("worker", "worker-1");
+        let cmd = format_claude_command("worker-1", "r", None, Path::new("/c"), Path::new("/m"), None, Some(&launch)).unwrap();
+        let v = launch.plugin_dir.parent().unwrap().display().to_string();
+        assert!(cmd.contains("CHATBRIDGE_ROLE='worker' '/c'"), "{cmd}");
+        assert!(cmd.contains(&format!("--plugin-dir '{v}/worker'")), "test 2: role plugin: {cmd}");
+        assert!(cmd.contains(&format!("--plugin-dir '{v}/shared'")), "test 11: shared plugin: {cmd}");
+        assert!(cmd.contains(&format!("--append-system-prompt-file '{v}/worker/role.md'")), "test 2: prompt file: {cmd}");
+        assert!(cmd.contains("--model 'sonnet'"), "test 2: {cmd}");
+        assert!(cmd.contains("--settings '") && cmd.contains("/settings/worker-1.json'"), "{cmd}");
+        // the chatbridge mod, and the allow rule 4.1 will change, stay as they were
+        assert!(cmd.contains("--plugin-dir '/m' --plugin-dir '"), "{cmd}");
+        assert!(cmd.contains("--allowed-tools 'mcp__chatbridge__post,mcp__chatbridge__post_file,mcp__chatbridge__send_handoff,"), "{cmd}");
+        // still one tmux argv element
+        let argv = build_spawn_argv("worker-1", "/tmp", "en_US.UTF-8", None, &cmd);
+        assert_eq!(argv.last().unwrap(), &cmd);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn role_editor_command_has_model_sonnet_and_blocks_task_and_agent() {
+        use std::path::Path;
+        let (root, launch) = staged_role("editor", "editor-1");
+        let cmd = format_claude_command("editor-1", "r", None, Path::new("/c"), Path::new("/m"), None, Some(&launch)).unwrap();
+        assert!(cmd.contains("--model 'sonnet'"), "test 3: {cmd}");
+        assert!(cmd.contains("--disallowed-tools 'Task,Agent,mcp__chatbridge__ack_permission'"), "test 3 and 4.1: {cmd}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn shared_plugin_holds_asd_ste100_and_no_role_plugin_does() {
+        let (root, launch) = staged_role("worker", "worker-1");
+        let v = launch.plugin_dir.parent().unwrap().to_path_buf();
+        assert!(launch.shared_dir.join("skills/asd-ste100/SKILL.md").is_file());
+        for e in std::fs::read_dir(&v).unwrap().flatten() {
+            if e.file_name() != "shared" {
+                assert!(!e.path().join("skills/asd-ste100").exists(), "test 11: {:?}", e.file_name());
+            }
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_launch_with_a_bad_role_name_is_refused() {
+        use std::path::Path;
+        let (root, mut launch) = staged_role("worker", "worker-1");
+        for bad in ["wor'ker", "../x", "a b", "", "Worker"] {
+            launch.name = bad.to_string();
+            assert!(
+                format_claude_command("a", "r", None, Path::new("/c"), Path::new("/m"), None, Some(&launch)).is_err(),
+                "{bad:?}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_pi_role_does_not_launch_on_claude_and_a_claude_role_not_on_pi() {
+        use std::path::Path;
+        let (root, pi) = staged_role("validator", "v");
+        let err = format_claude_command("a", "r", None, Path::new("/c"), Path::new("/m"), None, Some(&pi)).unwrap_err();
+        assert!(err.contains("runs on pi, not claude"), "{err}");
+        let (root2, claude) = staged_role("worker", "w");
+        let err = pi_role_flags_for_test(&claude).unwrap_err();
+        assert!(err.contains("not pi"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&root2);
+    }
+
+    // pi_command needs the pi extension and pi binary on disk; the role part is what these tests are about.
+    fn pi_role_flags_for_test(r: &crate::factory::RoleLaunch) -> Result<String, String> {
+        if r.harness != "pi" {
+            return Err(format!("role '{}' runs on {}, not pi", r.name, r.harness));
+        }
+        let (env, flags) = super::pi_role_flags(r)?;
+        Ok(format!("{env}{flags}"))
+    }
+
+    #[test]
+    fn role_validator_pi_flags_have_provider_model_thinking_prompt_skills_and_exclude_tools() {
+        let (root, launch) = staged_role("validator", "v");
+        let f = pi_role_flags_for_test(&launch).unwrap();
+        let v = launch.plugin_dir.parent().unwrap().display().to_string();
+        assert!(f.starts_with("CHATBRIDGE_ROLE='validator' --no-skills "), "{f}");
+        assert!(f.contains("--provider 'openai-codex'"), "test 6: {f}");
+        assert!(f.contains("--model 'gpt-5.6-sol'"), "test 6: {f}");
+        assert!(f.contains("--thinking 'high'"), "test 6: {f}");
+        assert!(f.contains(&format!("--append-system-prompt '{v}/validator/role.md'")), "test 6: {f}");
+        assert!(f.contains("--exclude-tools 'edit,write,ack_permission'"), "test 6 and 4.1: {f}");
+        assert!(!f.contains("--tools"), "test 6: no allowlist: {f}");
+        // test 11: role skills first, then shared; both from the staged version, not ~/.claude/skills
+        let role_at = f.find(&format!("--skill '{v}/validator/skills'")).expect("role skills");
+        let shared_at = f.find(&format!("--skill '{v}/shared/skills'")).expect("shared skills");
+        assert!(role_at < shared_at, "{f}");
+        assert!(launch.shared_dir.join("skills/asd-ste100/SKILL.md").is_file());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn pi_role_command_has_exactly_two_skill_folders_and_none_inherited() {
+        // the real pi_command needs pi-extension.js; the test says so loudly if it is missing
+        if crate::resolve_pi_extension().is_err() {
+            eprintln!("SKIPPED pi_command role test: pi-extension.js not found from the test binary");
+            return;
+        }
+        // a project that WOULD give claude_resource_flags a --skill and a --prompt-template folder
+        let proj = std::env::temp_dir().join(format!("cubilot-pi-proj-{}", std::process::id()));
+        std::fs::create_dir_all(proj.join(".claude/skills")).unwrap();
+        std::fs::create_dir_all(proj.join(".claude/commands")).unwrap();
+        let (root, launch) = staged_role("validator", "v");
+        let cwd = proj.to_string_lossy().into_owned();
+        let plain = super::pi_command("v", "r", &cwd, None, None).unwrap();
+        assert!(plain.contains("--prompt-template"), "setup: the plain command inherits folders: {plain}");
+        let cmd = super::pi_command("v", "r", &cwd, None, Some(&launch)).unwrap();
+        assert_eq!(cmd.matches("--skill '").count(), 2, "test 6: {cmd}");
+        assert!(!cmd.contains("--prompt-template"), "test 6: {cmd}");
+        assert!(!cmd.contains(&proj.to_string_lossy().to_string()), "test 6: no inherited project folder: {cmd}");
+        assert!(cmd.contains("--no-approve --no-skills "), "test 11: {cmd}");
+        assert!(cmd.find("/validator/skills'").unwrap() < cmd.find("/shared/skills'").unwrap(), "{cmd}");
+        assert!(cmd.contains(" -e '"), "extension kept: {cmd}");
+        assert!(!cmd.contains("--tools"), "{cmd}");
+        let none = super::pi_command("v", "r", &cwd, None, None).unwrap();
+        assert_eq!(none, plain);
+        assert!(!none.contains("CHATBRIDGE_ROLE") && !none.contains("--no-skills"), "{none}");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&proj);
+    }
+
+    #[test]
+    fn spawn_role_accepts_blank_and_a_valid_role_and_refuses_unknown_and_council() {
+        use crate::factory::*;
+        let root = std::env::temp_dir().join(format!("cubilot-spawn-role-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
+        let dest = root.join("factory");
+        let version = dest.join(stage_factory(&src, &dest, &root.join("user")).unwrap());
+        let check = |r: &str| load_role_spec(r, &src, &version).map(|_| ());
+        assert_eq!(super::spawn_role_with(None, &check), Ok(None));
+        assert_eq!(super::spawn_role_with(Some("".into()), &check), Ok(None), "empty");
+        assert_eq!(super::spawn_role_with(Some("  ".into()), &check), Ok(None), "blank");
+        assert_eq!(super::spawn_role_with(Some(" worker ".into()), &check), Ok(Some("worker".into())), "valid, trimmed");
+        assert!(super::spawn_role_with(Some("nope".into()), &check).unwrap_err().contains("unknown role"));
+        assert!(super::spawn_role_with(Some("a11y".into()), &check).unwrap_err().contains("council"));
+        assert!(super::spawn_role_with(Some("../worker".into()), &check).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_role_harness_replaces_the_requested_harness() {
+        use crate::factory::*;
+        let root = std::env::temp_dir().join(format!("cubilot-harness-role-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
+        let dest = root.join("factory");
+        let version = dest.join(stage_factory(&src, &dest, &root.join("user")).unwrap());
+        let of = |r: &str| load_role_spec(r, &src, &version).map(|s| s.harness);
+        // test 6: validator with the modal on Claude builds the Pi command
+        assert_eq!(super::harness_for_role_with(Harness::Claude, Some("validator"), &of), Ok(Harness::Pi));
+        // a Claude role with the modal on Pi builds the Claude command
+        assert_eq!(super::harness_for_role_with(Harness::Pi, Some("worker"), &of), Ok(Harness::Claude));
+        // no role: the argument is used as before
+        assert_eq!(super::harness_for_role_with(Harness::Pi, None, &of), Ok(Harness::Pi));
+        assert_eq!(super::harness_for_role_with(Harness::Claude, None, &of), Ok(Harness::Claude));
+        // an unknown role is still an error
+        assert!(super::harness_for_role_with(Harness::Claude, Some("nope"), &of).is_err());
+        // and the command builders follow: the validator launch builds with pi, not claude
+        let launch = {
+            let spec = load_role_spec("validator", &src, &version).unwrap();
+            role_launch(&spec, &version, None)
+        };
+        assert!(super::format_claude_command("a", "r", None, std::path::Path::new("/c"), std::path::Path::new("/m"), None, Some(&launch)).is_err());
+        let (env, flags) = super::pi_role_flags(&launch).unwrap();
+        assert!(env.contains("validator") && flags.contains("--provider 'openai-codex'"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_model_override_changes_model_for_that_launch_only() {
+        use crate::factory::*;
+        use std::path::Path;
+        let (root, launch) = staged_role("worker", "worker-2");
+        let v = launch.plugin_dir.parent().unwrap().to_path_buf();
+        let cmd = |l: &RoleLaunch| format_claude_command("worker-2", "r", None, Path::new("/c"), Path::new("/m"), None, Some(l)).unwrap();
+        assert!(cmd(&launch).contains("--model 'sonnet'"));
+        // test 10: the override replaces --model for this launch
+        let over = with_model_override(launch, Some("opus")).unwrap();
+        let c = cmd(&over);
+        assert!(c.contains("--model 'opus'") && !c.contains("--model 'sonnet'"), "{c}");
+        // ... and only this launch: the role file and the next launch of the role keep the default
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
+        let again = role_launch(&load_role_spec("worker", &src, &v).unwrap(), &v, over.settings.clone());
+        assert!(cmd(&again).contains("--model 'sonnet'"));
+        // no override, or a bad one
+        let same = with_model_override(again, None).unwrap();
+        assert!(cmd(&same).contains("--model 'sonnet'"));
+        for bad in ["", "o'pus", "a b", "$(x)", "x;y"] {
+            assert!(with_model_override(role_launch(&load_role_spec("worker", &src, &v).unwrap(), &v, None), Some(bad)).is_err(), "{bad:?}");
+        }
+        // an override with no role is refused, and a Pi role takes it too
+        let err = super::agent_command("a", "r", "/tmp", None, super::Harness::Claude, Some(Path::new("/c")), None, Some("opus")).unwrap_err();
+        assert!(err.contains("needs a role"), "{err}");
+        let (root2, pi) = staged_role("validator", "v");
+        let pi = with_model_override(pi, Some("gpt-5.6-terra")).unwrap();
+        let (_, flags) = super::pi_role_flags(&pi).unwrap();
+        assert!(flags.contains("--model 'gpt-5.6-terra'") && !flags.contains("gpt-5.6-sol"), "{flags}");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&root2);
+    }
+
+    #[test]
+    fn pill_options_and_parser_show_role_model_and_pi_provider() {
+        use crate::factory::*;
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
+        let spec = |r: &str| {
+            parse_role_spec(r, &std::fs::read_to_string(src.join(r).join(format!("{r}.md"))).unwrap()).unwrap()
+        };
+        let w = super::role_options(&spec("worker"), None);
+        assert_eq!(w, vec![("@cubilot_role", "worker".into()), ("@cubilot_model", "sonnet".into()), ("@cubilot_provider", "".into())]);
+        let w2 = super::role_options(&spec("worker"), Some("opus"));
+        assert_eq!(w2[1], ("@cubilot_model", "opus".to_string()), "the override is what runs");
+        let v = super::role_options(&spec("validator"), None);
+        assert_eq!((v[1].1.as_str(), v[2].1.as_str()), ("gpt-5.6-sol", "openai-codex"), "a Pi role shows its provider");
+        // what tmux prints for three sessions: a Claude role, a Pi role, a plain agent
+        let out = "worker-1\tworker\topus\t\nvalidator\tvalidator\tgpt-5.6-sol\topenai-codex\nplain\t\t\t\nbad name!\tworker\tx\t\n";
+        let m = super::parse_role_pills(out);
+        assert_eq!(m.len(), 2, "{m:?}");
+        assert_eq!(m["worker-1"], super::PillInfo { role: "worker".into(), model: "opus".into(), provider: "".into() });
+        assert_eq!(m["validator"].provider, "openai-codex");
+        assert!(!m.contains_key("plain"));
+        assert!(super::parse_role_pills("").is_empty() && super::parse_role_pills("garbage").is_empty());
+    }
+
+    #[test]
+    fn a_role_allows_the_handoff_interrupt_and_ticket_tools_and_blocks_ack_permission() {
+        use std::path::Path;
+        let (root, claude) = staged_role("worker", "worker-1");
+        let cmd = format_claude_command("worker-1", "r", None, Path::new("/c"), Path::new("/m"), None, Some(&claude)).unwrap();
+        let allowed = cmd.split("--allowed-tools '").nth(1).unwrap().split('\'').next().unwrap();
+        let allowed: Vec<&str> = allowed.split(',').collect();
+        for t in [
+            "post", "post_file", "send_handoff", "accept_handoff", "decline_handoff", "cancel_handoff",
+            "send_interrupt", "ack_interrupt", "create_ticket", "claim_ticket", "transition_ticket",
+            "assign_ticket", "attach_ticket_file", "list_tickets",
+        ] {
+            assert!(allowed.contains(&format!("mcp__chatbridge__{t}").as_str()), "{t} allowed: {allowed:?}");
+        }
+        assert!(!allowed.contains(&"mcp__chatbridge__ack_permission"), "not allowed: {allowed:?}");
+        let disallowed = cmd.split("--disallowed-tools '").nth(1).unwrap().split('\'').next().unwrap();
+        assert!(disallowed.split(',').any(|t| t == "mcp__chatbridge__ack_permission"), "blocked: {disallowed}");
+        assert!(disallowed.starts_with("Task,Agent,"), "next to the role's own list: {disallowed}");
+        assert_eq!(disallowed.matches("ack_permission").count(), 1);
+        // a role whose list already has it does not get a duplicate
+        let mut twice = claude;
+        twice.disallowed_tools.push("mcp__chatbridge__ack_permission".to_string());
+        let cmd2 = format_claude_command("worker-1", "r", None, Path::new("/c"), Path::new("/m"), None, Some(&twice)).unwrap();
+        assert_eq!(cmd2.matches("--disallowed-tools 'Task,Agent,mcp__chatbridge__ack_permission'").count(), 1, "{cmd2}");
+        // a Pi role: ack_permission goes into --exclude-tools, still no --tools
+        let (root2, pi) = staged_role("validator", "v");
+        let (_, flags) = super::pi_role_flags(&pi).unwrap();
+        assert!(flags.contains("--exclude-tools 'edit,write,ack_permission'") && !flags.contains("--tools"), "{flags}");
+        let (root3, rev) = staged_role("reviewer", "r1");
+        assert!(super::pi_role_flags(&rev).unwrap().1.contains("ack_permission"));
+        // no role: the old allow rule, no disallow flag (the pinned test above also checks the full string)
+        let none = format_claude_command("a", "r", None, Path::new("/c"), Path::new("/m"), None, None).unwrap();
+        assert!(none.contains("--allowed-tools 'mcp__chatbridge__ack_permission,mcp__chatbridge__post,mcp__chatbridge__post_file'"));
+        assert!(!none.contains("--disallowed-tools"), "{none}");
+        for r in [root, root2, root3] { let _ = std::fs::remove_dir_all(&r); }
     }
 
     #[test]
@@ -2019,6 +2524,7 @@ mod spawn_argv_tests {
             "r",
             None,
             std::path::Path::new("/bin/claude"),
+            None,
             &|| Err("chatbridge mod staging failed: disk full".to_string()),
         )
         .unwrap_err();

@@ -15,6 +15,7 @@ function applyRoster(agents) {
   }
 
   renderLegend();
+  refreshRolePills();
   renderTargetDropdown();
   renderRoomSwitcher();
   // An agent removed from the hub drops its pause there without an entry; re-read every tab's state.
@@ -75,6 +76,58 @@ function renderLegend() {
     empty.innerHTML = '<span class="legend-label">waiting for agents…</span>';
     legendEl.appendChild(empty);
   }
+}
+
+// Role pill text: "worker · opus", and for a Pi role "validator · gpt-5.5 · openai". Agents without a role keep
+// the plain pill. The data comes from the tmux session (pty_roles); outside the desktop app there is none.
+function rolePillText(info) {
+  return [info.role, info.model, info.provider].filter(Boolean).join(' · ');
+}
+
+// Task 6.2: an online agent with role `orchestrator` becomes the lead of its room, once, and only when the room has
+// no lead yet (the human's choice is never overridden). The hub route is human-only, so the call is made as the human.
+const leadAttempted = new Set();
+async function ensureOrchestratorLead(roles) {
+  for (const { room, agent } of pickLeadTargets(roles, ROSTER, presenceState, leadAttempted)) {
+    const k = leadAttemptKey(room, agent);
+    leadAttempted.add(k);
+    try {
+      const cur = await authedFetch(`/rooms/${encodeURIComponent(room)}/lead`);
+      if (!cur.ok) throw new Error(`read lead: ${cur.status}`);
+      if ((await cur.json())?.lead) continue;   // a lead is set: leave it
+      const r = await authedFetch(`/rooms/${encodeURIComponent(room)}/lead`, {
+        method: 'POST',
+        body: JSON.stringify({ by: HUMAN_NAME, agent }),
+      });
+      if (!r.ok) throw new Error(`set lead: ${r.status}`);
+      window.refreshRoomLead?.();
+    } catch (e) {
+      leadAttempted.delete(k);   // try again on the next refresh
+      console.warn('[roster] orchestrator lead:', e?.message ?? e);
+    }
+  }
+}
+
+let rolePillTimer = null;
+function refreshRolePills() {
+  clearTimeout(rolePillTimer);
+  rolePillTimer = setTimeout(async () => {
+    let roles = {};
+    try { roles = (await tauriInvoke('pty_roles')) || {}; } catch { return; }
+    ensureOrchestratorLead(roles);
+    for (const item of legendEl.querySelectorAll('.legend-item[data-agent]')) {
+      const info = roles[item.dataset.agent];
+      let el = item.querySelector('.legend-role');
+      if (!info) { el?.remove(); continue; }
+      if (!el) {
+        el = document.createElement('span');
+        el.className = 'legend-role';
+        item.querySelector('.legend-label')?.after(el);
+      }
+      el.textContent = rolePillText(info);
+      el.title = `role ${info.role}${info.model ? ', model ' + info.model : ''}${info.provider ? ', provider ' + info.provider : ''}`;
+    }
+  }, 300);
 }
 
 function renderTargetDropdown() {
@@ -210,6 +263,7 @@ function applyPresence(agents) {
     const pd = item.querySelector('.presence-dot');
     if (pd) pd.title = online ? 'connected' : 'offline';
   }
+  refreshRolePills();
   const names = ROSTER.map(a => a.name);
   const onCount = names.filter(n => agents[n]).length;
   let hubLabel = '';

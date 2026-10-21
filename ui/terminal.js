@@ -32,6 +32,10 @@
   const spawnCwdEl    = document.getElementById('spawn-cwd-input');
   const spawnCwdPick  = document.getElementById('spawn-cwd-pick');
   const spawnHarnessPi = document.getElementById('spawn-harness-pi');
+  const spawnRoleEl    = document.getElementById('spawn-role-select');
+  const spawnModelEl   = document.getElementById('spawn-model-input');
+  const spawnHarnessClaude = document.getElementById('spawn-harness-claude');
+  let spawnRoles = new Map();
   const spawnRoomEl     = document.getElementById('spawn-room-input');
   const spawnRoomBtn    = document.getElementById('spawn-room-picker-btn');
   const spawnRoomMenu   = document.getElementById('spawn-room-menu');
@@ -145,8 +149,10 @@
     localStorage.setItem('cubilot_agent_cwds', JSON.stringify(cwdCache));
   }
 
+  const { roleMemory, factoryRoom } = window.__CUBILOT_TERM__;
+
   const {
-    ptySpawn, ptyWrite, ptyResize, ptyKill, ptyList,
+    ptySpawn, listRoles, ptyWrite, ptyResize, ptyKill, ptyList,
     strToB64, b64ToBytes,
   } = window.__CUBILOT_TERM__.pty;
 
@@ -705,7 +711,7 @@
     for (const [agent, t] of tabs) if (t.joinWarnBar && hasJoined(presence, agent)) clearJoinWarning(t);
   };
 
-  async function handleLaunch(agent, cwd, sessionMode = null, room = null, harness = null) {
+  async function handleLaunch(agent, cwd, sessionMode = null, room = null, harness = null, role = null, model = null) {
     if (!_paneEnabled) setPaneEnabled(true);
     const t0 = performance.now();
     const stage = (label) =>
@@ -720,9 +726,10 @@
     t._launchStage = stage;
     try {
       stage('invoke pty_spawn');
-      await ptySpawn(agent, cwd, sessionMode, room, harness);
+      await ptySpawn(agent, cwd, sessionMode, room, harness, role, model);
       stage('pty_spawn returned');
       rememberCwd(agent, cwd);
+      roleMemory.remember(localStorage, agent, role, model);
       t.cwd = cwd;
       t.external = false;
       await _connectLiveTab(agent);
@@ -786,8 +793,61 @@
     refreshSpawnRoomDatalist();
     if (spawnSessionContinue) spawnSessionContinue.checked = false;
     if (spawnSessionResume)   spawnSessionResume.checked = false;
+    refreshSpawnRoles();
     spawnModal.classList.add('open');
     setTimeout(() => spawnAgentEl.focus(), 0);
+  }
+
+  // Roles come from the staged version; "None" stays first and is the default, so a launch without a role is unchanged.
+  async function refreshSpawnRoles() {
+    if (!spawnRoleEl) return;
+    const roles = await listRoles();
+    spawnRoles = new Map(roles.map((r) => [r.name, r]));
+    spawnRoleEl.innerHTML = '';
+    spawnRoleEl.add(new Option('None', ''));
+    for (const r of roles) {
+      const via = r.harness === 'pi' ? ` · pi${r.provider ? ' ' + r.provider : ''}` : '';
+      spawnRoleEl.add(new Option(`${r.name}${r.model ? ' (' + r.model + via + ')' : via}`, r.name));
+    }
+    spawnRoleEl.value = '';
+    onSpawnRoleChange();
+    recallSpawnRole();
+  }
+
+  // The last role and model override used for this agent name, if the role is still staged. Runs when the modal
+  // opens and when the name field is committed (change), never per keystroke, so it does not undo a manual pick.
+  function recallSpawnRole() {
+    const m = roleMemory.recall(localStorage, spawnAgentEl.value.trim());
+    if (!m || !spawnRoles.has(m.role)) return;
+    spawnRoleEl.value = m.role;
+    onSpawnRoleChange();
+    if (m.model && spawnModelEl) spawnModelEl.value = m.model;
+  }
+  spawnAgentEl?.addEventListener('change', recallSpawnRole);
+
+  // The role's harness wins over the radios (the app launches the role's harness), so with a role the radios show
+  // it and are locked; the model field holds the role's model as the default. With "None" nothing is locked and the
+  // model field is off, as before.
+  function onSpawnRoleChange() {
+    const r = spawnRoles.get(spawnRoleEl?.value || '');
+    for (const el of [spawnHarnessClaude, spawnHarnessPi]) if (el) el.disabled = !!r;
+    if (r) {
+      if (spawnHarnessClaude) spawnHarnessClaude.checked = r.harness !== 'pi';
+      if (spawnHarnessPi) spawnHarnessPi.checked = r.harness === 'pi';
+    }
+    if (spawnModelEl) {
+      spawnModelEl.disabled = !r;
+      spawnModelEl.dataset.default = r?.model || '';
+      spawnModelEl.value = r?.model || '';
+    }
+  }
+  spawnRoleEl?.addEventListener('change', onSpawnRoleChange);
+
+  // The model to send: only a value the user changed (a role with no model default counts any entry as a change).
+  function spawnModelOverride() {
+    if (!spawnRoleEl?.value || !spawnModelEl) return null;
+    const v = spawnModelEl.value.trim();
+    return v && v !== (spawnModelEl.dataset.default || '') ? v : null;
   }
 
   function refreshSpawnRoomDatalist() {
@@ -910,10 +970,79 @@
     else if (spawnSessionResume?.checked) sessionMode = 'resume';
     const harness = spawnHarnessPi?.checked ? 'pi' : 'claude';
     closeSpawnModal();
-    await handleLaunch(agent, cwd, sessionMode, room || null, harness);
+    await handleLaunch(agent, cwd, sessionMode, room || null, harness, spawnRoleEl?.value || null, spawnModelOverride());
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && spawnModal.classList.contains('open')) closeSpawnModal();
+  });
+
+  // ---- New factory room (tasks 6.1, 6.4): one orchestrator in a new room; the limits go to the room settings. ----
+  const frModal   = document.getElementById('factory-room-modal');
+  const frName    = document.getElementById('factory-room-name');
+  const frCwd     = document.getElementById('factory-room-cwd');
+  const frWorkers = document.getElementById('factory-room-workers');
+  const frTesters = document.getElementById('factory-room-testers');
+  const closeFactoryRoom = () => frModal?.classList.remove('open');
+  // Task 6.3: seed the room's Nutshell BEFORE the orchestrator starts, so its first briefing has it. Only when the
+  // room has none. A failure is shown and does not stop the launch (the Nutshell can be written later).
+  async function seedFactoryNutshell(room, cwd) {
+    try {
+      const cur = await authedFetch(`/nutshell?room=${encodeURIComponent(room)}`);
+      if (!cur.ok) throw new Error(`read nutshell: ${cur.status}`);
+      const req = factoryRoom.nutshellSeedRequests(room, cwd, HUMAN_NAME, (await cur.json())?.text);
+      if (!req) return;   // the room already has a Nutshell: leave it
+      const made = await authedFetch('/handoffs', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(req.create),
+      });
+      if (!made.ok) throw new Error(`create: ${made.status}`);
+      const { id } = await made.json();
+      const a = req.accept(id);
+      const done = await authedFetch(`/handoffs/${encodeURIComponent(a.id)}/accept`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(a.body),
+      });
+      if (!done.ok) throw new Error(`accept: ${done.status}`);
+    } catch (e) {
+      alert(`The Nutshell for #${room} was not seeded (${e?.message ?? e}). The orchestrator still starts.`);
+    }
+  }
+  document.getElementById('factory-room-btn')?.addEventListener('click', () => {
+    if (frName) frName.value = '';
+    if (frCwd) frCwd.value = '';
+    frModal?.classList.add('open');
+    setTimeout(() => frName?.focus(), 0);
+  });
+  document.getElementById('factory-room-cancel')?.addEventListener('click', closeFactoryRoom);
+  frModal?.addEventListener('click', (e) => { if (e.target === frModal) closeFactoryRoom(); });
+  document.getElementById('factory-room-pick')?.addEventListener('click', async () => {
+    const dir = await pickDirectory();
+    if (dir && frCwd) frCwd.value = dir;
+  });
+  document.getElementById('factory-room-submit')?.addEventListener('click', async () => {
+    const names = (typeof ROSTER !== 'undefined' && Array.isArray(ROSTER)) ? ROSTER.map(a => a.name) : [];
+    const r = factoryRoom.buildFactoryRoom(
+      { room: frName?.value, cwd: frCwd?.value, workers: frWorkers?.value, testers: frTesters?.value },
+      names,
+    );
+    if (r.error) { alert(r.error); return; }
+    const l = r.launch;
+    // Store the limits in the room settings first (6.4); if that fails nothing is launched and the form stays open.
+    try {
+      const res = await authedFetch(`/rooms/${encodeURIComponent(l.room)}/settings`, {
+        method: 'PUT',
+        body: JSON.stringify({ worker_limit: r.limits.workers, tester_limit: r.limits.testers }),
+      });
+      if (!res.ok) throw new Error(`hub answered ${res.status}`);
+    } catch (e) {
+      alert(`Could not store the worker and tester limits: ${e?.message ?? e}`);
+      return;
+    }
+    closeFactoryRoom();
+    await seedFactoryNutshell(l.room, l.cwd);
+    // Same call as the spawn modal makes, with the orchestrator role and no model override.
+    await handleLaunch(l.agent, l.cwd, null, l.room, null, l.role, null);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && frModal?.classList.contains('open')) closeFactoryRoom();
   });
 
   async function reconcile() {

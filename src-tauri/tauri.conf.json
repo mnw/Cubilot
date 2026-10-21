@@ -35,11 +35,22 @@
     "externalBin": [
       "binaries/cubilot-bin"
     ],
-    "resources": [
-      "resources/tmux",
-      "resources/pi-extension.js",
-      "resources/chatbridge-mod.js"
-    ],
+    "resources": {
+      "resources/tmux": "resources/tmux",
+      "resources/pi-extension.js": "resources/pi-extension.js",
+      "resources/chatbridge-mod.js": "resources/chatbridge-mod.js",
+      "../factory/a11y/": "factory/a11y/",
+      "../factory/editor/": "factory/editor/",
+      "../factory/orchestrator/": "factory/orchestrator/",
+      "../factory/reviewer/": "factory/reviewer/",
+      "../factory/seo/": "factory/seo/",
+      "../factory/tester/": "factory/tester/",
+      "../factory/validator/": "factory/validator/",
+      "../factory/worker/": "factory/worker/",
+      "../factory/writer/": "factory/writer/",
+      "../factory/shared/": "factory/shared/",
+      "../factory/licenses/": "factory/licenses/"
+    },
     "macOS": {
       "minimumSystemVersion": "11.0"
     }

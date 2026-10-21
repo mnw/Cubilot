@@ -202,6 +202,22 @@ if (settingsBtn) {
   });
 }
 
+const skillsBtn = document.getElementById('skills-btn');
+if (skillsBtn) {
+  skillsBtn.addEventListener('click', async () => {
+    try {
+      await tauriInvoke('open_skills_folder');
+    } catch (e) {
+      addMessage({
+        from: 'system',
+        to: HUMAN_NAME,
+        text: `Open skills folder failed: ${e?.message ?? e}`,
+        ts: '',
+      });
+    }
+  });
+}
+
 const mcpGlobalBtn = document.getElementById('mcp-global-btn');
 if (mcpGlobalBtn) {
   mcpGlobalBtn.addEventListener('click', async () => {

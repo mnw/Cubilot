@@ -5,7 +5,7 @@
     return window.__TAURI__?.core?.invoke || window.__TAURI_INTERNALS__?.invoke;
   }
 
-  async function ptySpawn(agent, cwd, sessionMode, room, harness) {
+  async function ptySpawn(agent, cwd, sessionMode, room, harness, role, model) {
     const args = { agent, cwd };
     if (sessionMode === 'resume' || sessionMode === 'continue') {
       args.sessionMode = sessionMode;
@@ -13,7 +13,15 @@
     if (room) args.room = room;
     // Omitted → Rust defaults to claude, so existing call sites keep working.
     if (harness) args.harness = harness;
+    // Omitted → no role, and the command is the same as before.
+    if (role) args.role = role;
+    // Only sent when the user changed the role's default model; then it applies to this launch only.
+    if (model) args.model = model;
     return _invoke()('pty_spawn', args);
+  }
+  async function listRoles() {
+    try { return await _invoke()('list_roles'); }
+    catch { return []; }
   }
   async function ptyWrite(agent, b64) {
     return _invoke()('pty_write', { agent, b64 });
@@ -66,7 +74,7 @@
 
   window.__CUBILOT_TERM__ = window.__CUBILOT_TERM__ || {};
   window.__CUBILOT_TERM__.pty = {
-    ptySpawn, ptyWrite, ptyResize, ptyKill, ptyList,
+    ptySpawn, listRoles, ptyWrite, ptyResize, ptyKill, ptyList,
     ptyCaptureTurn, ptyReadCapture, ptyHealGeometry, ptyTapRead,
     strToB64, b64ToBytes,
   };

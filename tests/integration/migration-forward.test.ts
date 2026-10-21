@@ -72,6 +72,12 @@ describe("ledger migration forward-compat", () => {
     expect(tables).toContain("nutshell");
     expect(tables).toContain("meta");
 
+    // v13 added the factory-room limits to room_settings.
+    expect(Number(ver)).toBeGreaterThanOrEqual(13);
+    expect((db.query("PRAGMA table_info(room_settings)").all() as Array<{ name: string }>).map((c) => c.name)).toEqual(
+      expect.arrayContaining(["worker_limit", "tester_limit"]),
+    );
+
     // v6 added room columns and restructured nutshell.
     expect((db.query("PRAGMA table_info(handoffs)").all() as Array<{ name: string }>).map((c) => c.name)).toContain("room");
     expect((db.query("PRAGMA table_info(nutshell)").all() as Array<{ name: string }>).map((c) => c.name)).toContain("room");

@@ -9,8 +9,8 @@ Brief: `factory/brief/02-factory-roles.md` (research findings, design steps 1 to
 ## What Changes
 
 - **Fast path first:** a launch script, `factory/scripts/factory-launch.sh <role> <agent-name>`, builds the role command outside the app. Teams can use the roles at once, and the role prompts and skills get tested before the app work.
-- The app bundles `factory/` and stages each role into `<app data>/factory/<role>/` as a Claude Code plugin with skills and hooks only (no `agents/` folder).
-- For each Claude role, the app writes `settings.json` with `skillOverrides` that turn off every skill outside the role plugin and the shared plugin, so the 1 % skill-listing budget keeps the role's skills visible.
+- The app bundles `factory/` and stages each role and `shared` into a versioned folder `<app data>/factory/v-<hash>/<role>/`, named by the pointer file `<app data>/factory/current`, as a Claude Code plugin with skills and hooks only (no `agents/` folder).
+- For each Claude role, the app writes `<app data>/factory-settings/<agent>.json` at each launch with `enabledPlugins` and `skillOverrides` that turn off every plugin and skill outside the role plugin and the shared plugin, so the 1 % skill-listing budget keeps the role's skills visible. Account-synced plugins stay visible.
 - `pty_spawn` and `format_claude_command` take an optional `role`. With a role, the Claude command adds `--plugin-dir`, `--append-system-prompt-file`, `--settings`, `--model` and `--disallowed-tools` (every role blocks `Task` and `Agent`). Without a role, the command is unchanged.
 - `pi_command` takes an optional `role` for the Validator and the Reviewer: `--provider`, `--model`, `--thinking`, `--append-system-prompt`, `--skill` and `--exclude-tools edit,write`. The role's harness overrides the harness choice in the spawn modal.
 - Agents with a role get the handoff, interrupt and ticket tools pre-allowed. `ack_permission` stays with the human.

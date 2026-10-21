@@ -33,6 +33,7 @@
   <button type="button" class="icon-btn titlebar-button" id="reveal-btn" title="Claude launch command" aria-label="Claude launch command"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></button>
   <button type="button" class="icon-btn titlebar-button" id="mcp-global-btn" title="Edit global MCP servers (shared by all agents)" aria-label="Edit global MCP servers"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="5" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><line x1="6.7" y1="7.2" x2="10.3" y2="10.8"/><line x1="6.7" y1="16.8" x2="10.3" y2="13.2"/><line x1="13.7" y1="10.8" x2="17.3" y2="7.2"/><line x1="13.7" y1="13.2" x2="17.3" y2="16.8"/></svg></button>
   <button type="button" class="icon-btn titlebar-button" id="settings-btn" title="Open config.yml in your default editor" aria-label="Open settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+  <button type="button" class="icon-btn titlebar-button" id="skills-btn" title="Open your role skills folder (factory-user)" aria-label="Open role skills folder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>
   <button type="button" class="icon-btn titlebar-button" id="reload-btn" title="Apply settings changes — restarts the hub, no app relaunch needed" aria-label="Reload settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
   </div>
 
@@ -70,6 +71,7 @@
           </button>
           <div class="room-menu" id="room-menu" role="listbox"></div>
         </div>
+        <button type="button" class="icon-btn" id="factory-room-btn" title="New factory room: start an orchestrator in a new room" aria-label="New factory room"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
         <button type="button" class="icon-btn" id="pause-room-btn" title="Pause all agents in the selected room. Agents finish their current tool call before stopping." aria-label="Pause room" disabled>
           <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
         </button>
@@ -228,6 +230,14 @@
     </p>
     <label>Agent name</label>
     <input id="spawn-agent-input" spellcheck="false" autocomplete="off" placeholder="alice" style="width:100%;" />
+    <label>Role</label>
+    <select id="spawn-role-select" style="width:100%;">
+      <option value="">None</option>
+    </select>
+    <div id="spawn-model-row" style="margin-top:6px;">
+      <label>Model</label>
+      <input id="spawn-model-input" spellcheck="false" autocomplete="off" placeholder="the role's model; empty for none" style="width:100%;" disabled />
+    </div>
     <div id="spawn-harness-row" style="margin-top:6px;">
       <label style="text-transform:uppercase; letter-spacing:0.1em; font-family:var(--mono); font-size:10px; color:var(--text-dim);">Harness</label>
       <div style="display:flex; flex-direction:column; gap:6px; margin-top:4px; font-family:var(--sans); font-size:12px; color:var(--text-muted);">
@@ -270,6 +280,28 @@
     <div class="modal-actions">
       <button type="button" id="spawn-cancel">Cancel</button>
       <button type="button" id="spawn-submit">Launch</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="factory-room-modal">
+  <div class="modal">
+    <h2>New factory room</h2>
+    <p>Starts one <code>orchestrator</code> agent in a new room. It asks for the workers and testers it needs.</p>
+    <label>Room name</label>
+    <input id="factory-room-name" spellcheck="false" autocomplete="off" placeholder="my-product" style="width:100%;" />
+    <label>Project folder</label>
+    <div style="display:flex; gap:6px; align-items:center;">
+      <input id="factory-room-cwd" spellcheck="false" autocomplete="off" placeholder="/Users/you/project" style="flex:1;" readonly />
+      <button type="button" id="factory-room-pick">Pick…</button>
+    </div>
+    <label>Worker limit</label>
+    <input id="factory-room-workers" type="number" min="1" max="20" value="2" style="width:100%;" />
+    <label>Tester limit</label>
+    <input id="factory-room-testers" type="number" min="1" max="20" value="2" style="width:100%;" />
+    <div class="modal-actions">
+      <button type="button" id="factory-room-cancel">Cancel</button>
+      <button type="button" id="factory-room-submit">Launch</button>
     </div>
   </div>
 </div>
@@ -395,6 +427,7 @@
 <!-- Tier 2: feature modules -->
 <script src="features/messages.js"></script>
 <script src="features/rooms.js"></script>
+<script src="features/orchestrator-lead.js"></script>
 <script src="features/roster.js"></script>
 <script src="features/nutshell.js"></script>
 <script src="features/room-persistence.js"></script>
@@ -416,6 +449,8 @@
 <script src="kinds/permission.js"></script>
 <script src="kinds/ticket.js"></script>
 <script src="terminal/pty.js"></script>
+<script src="terminal/role-memory.js"></script>
+<script src="terminal/factory-room.js"></script>
 <script src="terminal/xterm-themes.js"></script>
 <script src="terminal.js"></script>
 </body>

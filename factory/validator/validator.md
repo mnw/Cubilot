@@ -2,8 +2,8 @@
 name: validator
 description: The factory's challenger. Reviews the plan and the spec of each request before work starts. Questions every claim, test and diff from the Worker and the Testers. Gives PASS or FAIL on plans and on code tickets. Does not edit files.
 harness: pi
-provider: openai
-model: gpt-5.5
+provider: openai-codex
+model: gpt-5.6-sol
 thinking: high
 excludeTools: edit,write
 ---

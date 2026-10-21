@@ -1,3 +1,4 @@
+mod factory;
 mod pty;
 
 use std::{
@@ -1066,6 +1067,25 @@ fn open_config_file() -> Result<(), String> {
     Ok(())
 }
 
+// Opens the user skill layer folder (task 8.2). Created here when missing so a click before the first staging
+// still lands in Finder; the staging creates the per-role skills/ folders below it.
+// The roles the spawn modal offers: single-agent roles of the staged version `current` names.
+#[tauri::command]
+fn list_roles() -> Result<Vec<factory::RoleInfo>, String> {
+    factory::list_roles()
+}
+
+#[tauri::command]
+fn open_skills_folder() -> Result<(), String> {
+    let path = app_data_dir().join("factory-user");
+    fs::create_dir_all(&path).map_err(|e| format!("create {}: {e}", path.display()))?;
+    std::process::Command::new("open")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| format!("open {}: {e}", path.display()))?;
+    Ok(())
+}
+
 // chatbridge omitted from template intentionally; it's force-injected per-agent and stripped from user configs.
 #[tauri::command]
 fn open_global_mcp_config() -> Result<(), String> {
@@ -1374,6 +1394,8 @@ pub fn run() {
             get_human_name,
             get_ui_settings,
             open_config_file,
+            open_skills_folder,
+            list_roles,
             open_global_mcp_config,
             open_in_editor,
             reload_settings,
@@ -1383,6 +1405,7 @@ pub fn run() {
             pty::pty_kill,
             pty::pty_list,
             pty::pty_harness,
+            pty::pty_roles,
             pty::resolve_default_room,
             pty::pty_spawn_shell,
             pty::pty_shell_exists,
@@ -1403,6 +1426,11 @@ pub fn run() {
             match materialize_chatbridge_mod() {
                 Ok(p) => println!("[setup] chatbridge mod staged: {}", p.display()),
                 Err(e) => eprintln!("[setup] chatbridge mod staging failed: {e}"),
+            }
+
+            match factory::materialize_factory() {
+                Ok(v) => println!("[setup] factory roles staged: {v}"),
+                Err(e) => eprintln!("[setup] factory staging failed: {e}"),
             }
 
             let port = pick_free_port()?;

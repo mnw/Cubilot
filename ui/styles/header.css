@@ -120,6 +120,11 @@ header {
 
 .presence-dot { display: none; }  /* subsumed into .legend-dot visual */
 .legend-label { font-weight: 500; letter-spacing: 0; }
+.legend-role {
+  font-size: var(--fs-2xs);
+  color: var(--text-dim);
+  letter-spacing: 0.02em;
+}
 .legend-state {
   font-size: var(--fs-2xs);
   color: var(--text-dim);

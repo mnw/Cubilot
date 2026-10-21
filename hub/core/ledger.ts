@@ -4,7 +4,7 @@ import { Database } from "bun:sqlite";
 import { chmodSync } from "node:fs";
 import { randomId } from "./ids";
 
-export const LEDGER_SCHEMA_VERSION = 12;
+export const LEDGER_SCHEMA_VERSION = 13;
 
 export type LedgerOpenResult =
   | { db: Database; enabled: true }
@@ -334,22 +334,42 @@ export function migrateLedger(db: Database): void {
     })();
     console.log(`[ledger] applied migration v12`);
   }
+  if (current < 13) {
+    // v13: factory-room worker and tester limits on room_settings. NULL = not set.
+    db.transaction(() => {
+      db.exec(`
+        ALTER TABLE room_settings ADD COLUMN worker_limit INTEGER;
+        ALTER TABLE room_settings ADD COLUMN tester_limit INTEGER;
+      `);
+      db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '13')");
+    })();
+    console.log(`[ledger] applied migration v13`);
+  }
 }
 
 export type RoomSettings = {
   room: string;
   persist_transcript: boolean;
   room_summary_enabled: boolean;
+  worker_limit: number | null;
+  tester_limit: number | null;
   updated_at: number;
 };
 
 export function getRoomSettings(db: Database, room: string): RoomSettings | null {
   const row = db
     .query<
-      { room: string; persist_transcript: number; room_summary_enabled: number; updated_at: number },
+      {
+        room: string;
+        persist_transcript: number;
+        room_summary_enabled: number;
+        worker_limit: number | null;
+        tester_limit: number | null;
+        updated_at: number;
+      },
       [string]
     >(
-      "SELECT room, persist_transcript, room_summary_enabled, updated_at FROM room_settings WHERE room = ?",
+      "SELECT room, persist_transcript, room_summary_enabled, worker_limit, tester_limit, updated_at FROM room_settings WHERE room = ?",
     )
     .get(room);
   if (!row) return null;
@@ -357,6 +377,8 @@ export function getRoomSettings(db: Database, room: string): RoomSettings | null
     room: row.room,
     persist_transcript: !!row.persist_transcript,
     room_summary_enabled: !!row.room_summary_enabled,
+    worker_limit: row.worker_limit,
+    tester_limit: row.tester_limit,
     updated_at: row.updated_at,
   };
 }
@@ -364,19 +386,29 @@ export function getRoomSettings(db: Database, room: string): RoomSettings | null
 export function setRoomSettings(
   db: Database,
   room: string,
-  partial: { persist_transcript?: boolean; room_summary_enabled?: boolean },
+  partial: {
+    persist_transcript?: boolean;
+    room_summary_enabled?: boolean;
+    worker_limit?: number | null;
+    tester_limit?: number | null;
+  },
 ): void {
   const current = getRoomSettings(db, room);
   const persist = partial.persist_transcript ?? current?.persist_transcript ?? false;
   const summary = partial.room_summary_enabled ?? current?.room_summary_enabled ?? false;
+  // `in`, not `??`: an explicit null clears a limit, an absent key keeps it.
+  const workers = "worker_limit" in partial ? partial.worker_limit ?? null : current?.worker_limit ?? null;
+  const testers = "tester_limit" in partial ? partial.tester_limit ?? null : current?.tester_limit ?? null;
   db.run(
-    `INSERT INTO room_settings (room, persist_transcript, room_summary_enabled, updated_at)
-       VALUES (?, ?, ?, ?)
+    `INSERT INTO room_settings (room, persist_transcript, room_summary_enabled, worker_limit, tester_limit, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(room) DO UPDATE SET
        persist_transcript = excluded.persist_transcript,
        room_summary_enabled = excluded.room_summary_enabled,
+       worker_limit = excluded.worker_limit,
+       tester_limit = excluded.tester_limit,
        updated_at = excluded.updated_at`,
-    [room, persist ? 1 : 0, summary ? 1 : 0, Date.now()],
+    [room, persist ? 1 : 0, summary ? 1 : 0, workers, testers, Date.now()],
   );
 }
 

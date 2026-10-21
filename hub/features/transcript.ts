@@ -28,6 +28,8 @@ function getRoomSettingsResponse(deps: TranscriptDeps, room: string): Response {
     room,
     persist_transcript: false,
     room_summary_enabled: false,
+    worker_limit: null,
+    tester_limit: null,
     updated_at: 0,
   };
   const stats = settings.persist_transcript ? transcriptStore.activeStats(room) : null;
@@ -75,13 +77,37 @@ export function createTranscriptFeature(deps: TranscriptDeps): HubFeature {
         handler: async (req, _cap, params) => {
           const room = decodeRoom(params.id);
           if (!room) return Response.json({ error: "invalid room label" }, { status: 400 });
-          let body: { persist_transcript?: unknown; room_summary_enabled?: unknown };
+          type Body = {
+            persist_transcript?: unknown;
+            room_summary_enabled?: unknown;
+            worker_limit?: unknown;
+            tester_limit?: unknown;
+          };
+          let body: Body;
           try {
-            body = (await req.json()) as { persist_transcript?: unknown; room_summary_enabled?: unknown };
+            body = (await req.json()) as Body;
           } catch {
             return Response.json({ error: "invalid json" }, { status: 400 });
           }
-          const partial: { persist_transcript?: boolean; room_summary_enabled?: boolean } = {};
+          // `null`, a number, a string or an array is valid JSON but not a settings object: `in` would throw (500).
+          if (body === null || typeof body !== "object" || Array.isArray(body)) {
+            return Response.json({ error: "body must be a JSON object" }, { status: 400 });
+          }
+          const partial: {
+            persist_transcript?: boolean;
+            room_summary_enabled?: boolean;
+            worker_limit?: number | null;
+            tester_limit?: number | null;
+          } = {};
+          // Factory-room limits: a whole number 1..20, or null to clear. Anything else is a 400, nothing is written.
+          for (const key of ["worker_limit", "tester_limit"] as const) {
+            if (!(key in body)) continue;
+            const v = body[key];
+            if (v !== null && !(typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 20)) {
+              return Response.json({ error: `${key} must be a whole number 1 to 20, or null` }, { status: 400 });
+            }
+            partial[key] = v as number | null;
+          }
           if ("persist_transcript" in body) {
             if (typeof body.persist_transcript !== "boolean") {
               return Response.json({ error: "persist_transcript must be boolean" }, { status: 400 });
