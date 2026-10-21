@@ -14,9 +14,13 @@
   }
 
   // A launch with "None" forgets the agent: reopening the modal for it then shows "None", as today.
-  function remember(storage, agent, role, model) {
+  // `choice` = the grid choice of that launch ({model, provider, effort}, each null when it was the default).
+  function remember(storage, agent, role, choice) {
     const all = load(storage);
-    if (role) all[agent] = model ? { role, model } : { role };
+    const c = choice && typeof choice === 'object' ? choice : { model: choice };   // an older call passed the model alone
+    const keep = {};
+    for (const k of ['model', 'provider', 'effort']) if (typeof c[k] === 'string' && c[k]) keep[k] = c[k];
+    if (role) all[agent] = { role, ...keep };
     else delete all[agent];
     storage.setItem(KEY, JSON.stringify(all));
   }
@@ -25,7 +29,9 @@
   function recall(storage, agent) {
     const all = load(storage);
     const e = Object.prototype.hasOwnProperty.call(all, agent) ? all[agent] : null;
-    return e && typeof e.role === 'string' && e.role ? { role: e.role, model: typeof e.model === 'string' ? e.model : '' } : null;
+    if (!(e && typeof e.role === 'string' && e.role)) return null;
+    const str = (v) => (typeof v === 'string' ? v : '');
+    return { role: e.role, model: str(e.model), provider: str(e.provider), effort: str(e.effort) };
   }
 
   window.__CUBILOT_TERM__ = window.__CUBILOT_TERM__ || {};

@@ -40,7 +40,7 @@
 - [x] 3.2 Claude command with role: `--plugin-dir` for the role plugin and for the shared plugin, `--append-system-prompt-file`, `--settings`, `--model`, `--disallowed-tools` → verify: tests 2, 3 and 11
 - [x] 3.3 `role: Option<&str>` on `pi_command` with the Pi flags; pass `--no-skills`, then `--skill <app data>/factory/<current>/<role>/skills` and `--skill <app data>/factory/<current>/shared/skills` (the version that `current` names at launch); for a role, do not pass the `~/.claude` and project `--skill` and `--prompt-template` folders of `claude_resource_flags` (Pi loads `~/.claude/skills` by itself, finding of task 1.4); keep `--no-approve` and `-e` → verify: tests 6 and 11
 - [x] 3.4 The role's harness overrides the modal's harness → verify: test 6 (validator with the modal on Claude)
-- [ ] 3.5 Before a Pi launch, run `pi auth check --provider openai --json`; on failure show a clear message and launch nothing → verify: launch with no OpenAI sign-in shows the message
+- [x] 3.5 Before a Pi launch, run the Pi sign-in check for the role's provider (`openai-codex` for the ChatGPT subscription, human decision 2026-10-21; check first that pi 1.3.0 has such a command, for example `pi auth check --provider openai-codex --json`); on failure show a clear message and launch nothing → verify: launch with no OpenAI sign-in shows the message
 
 ## 4. Pre-allowed tools (design step 3)
 
@@ -53,6 +53,8 @@
 - [x] 5.2 Show the role's harness and model as defaults; model override for one launch; no harness change for a Pi role → verify: test 10
 - [x] 5.3 Remember role and model override for each agent name (like the cwd cache, `ui/terminal.js:142`) → verify: reopen the modal for `worker-1` and see the last role
 - [ ] 5.4 Roster pill shows role, model and, for Pi, the provider → verify: visual check with one Claude and one Pi agent
+
+- [ ] 5.5 Model × effort picker in the spawn modal (human request 2026-10-21, see the image in the room): a grid with one row for each model and one column for each effort level; one cell is selected; the role's default cell is marked. Rows depend on the harness: Claude shows haiku, sonnet, opus and fable; Pi shows ALL models of `pi --list-models` as `<model> [<provider>]` with a type-to-filter box and a count ("21/83"), like pi's own model picker (human, 2026-10-21); a provider that `pi auth check` does not report ready is marked, and a launch with it fails with the 3.5 sign-in message. Columns: Claude `--effort` low, medium, high, xhigh, max; Pi `--thinking` off, minimal, low, medium, high, xhigh, max. The choice applies to one launch only and replaces the 5.2 model field; it is sent to pty_spawn as model and effort only when it differs from the role default → verify: node checks of the grid model for both harnesses; a cargo test that a launch with model and effort gives `--model` and `--effort` (Claude) or `--model` and `--thinking` (Pi), and nothing extra for the default cell; the grid in the installed app
 
 ## 6. Factory preset (design step 5, reduced)
 

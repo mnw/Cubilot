@@ -5,7 +5,7 @@
     return window.__TAURI__?.core?.invoke || window.__TAURI_INTERNALS__?.invoke;
   }
 
-  async function ptySpawn(agent, cwd, sessionMode, room, harness, role, model) {
+  async function ptySpawn(agent, cwd, sessionMode, room, harness, role, model, effort, provider) {
     const args = { agent, cwd };
     if (sessionMode === 'resume' || sessionMode === 'continue') {
       args.sessionMode = sessionMode;
@@ -17,7 +17,14 @@
     if (role) args.role = role;
     // Only sent when the user changed the role's default model; then it applies to this launch only.
     if (model) args.model = model;
+    // The grid choice (5.5): only what differs from the role default. effort is --effort (Claude) or --thinking (Pi).
+    if (effort) args.effort = effort;
+    if (provider) args.provider = provider;
     return _invoke()('pty_spawn', args);
+  }
+  // Rows of the model x effort grid. Pi: every model of `pi --list-models` with whether its provider is signed in.
+  async function listModels(harness) {
+    return _invoke()('list_models', { harness });
   }
   async function listRoles() {
     try { return await _invoke()('list_roles'); }
@@ -74,7 +81,7 @@
 
   window.__CUBILOT_TERM__ = window.__CUBILOT_TERM__ || {};
   window.__CUBILOT_TERM__.pty = {
-    ptySpawn, listRoles, ptyWrite, ptyResize, ptyKill, ptyList,
+    ptySpawn, listRoles, listModels, ptyWrite, ptyResize, ptyKill, ptyList,
     ptyCaptureTurn, ptyReadCapture, ptyHealGeometry, ptyTapRead,
     strToB64, b64ToBytes,
   };

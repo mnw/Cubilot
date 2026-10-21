@@ -150,3 +150,22 @@
 }
 .nutshell-editor .actions button:last-child:hover { background: var(--orange-hover); color: var(--bg-inset); }
 
+
+/* Model x effort grid of the spawn modal (task 5.5). Rows scroll: Pi lists 80+ models. */
+.grid-count { color: var(--text-dim); font-family: var(--mono); font-size: 10px; letter-spacing: 0.04em; margin-left: 6px; }
+.grid-filter { width: 100%; margin: 4px 0; }
+.model-grid { max-height: 220px; overflow: auto; border: 1px solid var(--border, rgba(255,255,255,0.12)); border-radius: 6px; padding: 4px 6px; }
+.model-grid .grid-head, .model-grid .grid-row { display: grid; align-items: center; gap: 2px; }
+.model-grid .grid-head { position: sticky; top: 0; background: var(--bg-elev, var(--bg, #222)); z-index: 1; font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); padding: 2px 0; }
+.model-grid .grid-head span { text-align: center; }
+.model-grid .row-label { font-family: var(--mono); font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 6px; }
+.model-grid .row-label.not-ready::after { content: " !"; color: var(--warn, #d9a441); }
+.model-grid .row-label.default { color: var(--text); }
+.model-grid .cell { display: flex; justify-content: center; align-items: center; height: 20px; padding: 0; background: transparent; border: none; cursor: pointer; }
+.model-grid .cell::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim, #888); opacity: 0.6; }
+.model-grid .cell:hover::before { opacity: 1; transform: scale(1.4); }
+.model-grid .cell.default::before { background: #a78bfa; opacity: 1; }
+.model-grid .cell.selected { background: rgba(60,180,150,0.25); border-radius: 10px; }
+.model-grid .cell.selected::before { background: #3fc6a4; opacity: 1; width: 8px; height: 8px; }
+.model-grid .grid-empty { color: var(--text-dim); font-size: 11px; padding: 6px 2px; }
+.grid-note { color: var(--text-dim); font-size: 10px; min-height: 12px; margin-top: 2px; }

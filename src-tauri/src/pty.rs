@@ -223,12 +223,8 @@ fn agent_command(
     harness: Harness,
     claude_path: Option<&std::path::Path>,
     role: Option<&str>,
-    model: Option<&str>,
+    choice: &crate::factory::LaunchChoice,
 ) -> Result<String, String> {
-    // A model override belongs to a role launch: without a role there is nothing to override.
-    if model.is_some() && role.is_none() {
-        return Err("a model override needs a role".to_string());
-    }
     match harness {
         Harness::Claude => claude_command(
             agent,
@@ -237,19 +233,36 @@ fn agent_command(
             claude_path.ok_or_else(|| "Claude path is required for a Claude spawn".to_string())?,
             role,
             cwd,
-            model,
+            choice,
         ),
         Harness::Pi => {
             let launch = match role {
-                Some(r) => Some(crate::factory::with_model_override(
+                Some(r) => Some(crate::factory::with_choice(
                     crate::factory::resolve_role_launch(agent, r, std::path::Path::new(cwd))?,
-                    model,
-                )?),
+                    choice,
+                )),
                 None => None,
             };
-            pi_command(agent, room, cwd, session_mode, launch.as_ref())
+            let cmd = pi_command(agent, room, cwd, session_mode, launch.as_ref())?;
+            // Without a role the choice is appended (a role already carries it in its own flags).
+            Ok(if role.is_some() { cmd } else { format!("{cmd}{}", choice_flags(true, choice)) })
         }
     }
+}
+
+// The flags of a choice for a launch WITHOUT a role (task 5.5). Empty choice: nothing, so the command is unchanged.
+// Claude: --model, --effort. Pi: --provider, --model, --thinking. Values were validated by launch_choice.
+fn choice_flags(is_pi: bool, c: &crate::factory::LaunchChoice) -> String {
+    let sq = |s: &str| s.replace('\'', r"'\''");
+    let mut f = String::new();
+    if is_pi {
+        if let Some(p) = &c.provider { f.push_str(&format!(" --provider '{}'", sq(p))); }
+    }
+    if let Some(m) = &c.model { f.push_str(&format!(" --model '{}'", sq(m))); }
+    if let Some(e) = &c.effort {
+        f.push_str(&format!(" {} '{}'", if is_pi { "--thinking" } else { "--effort" }, sq(e)));
+    }
+    f
 }
 
 /// Claude Code's skills and commands are reusable by pi as-is: pi implements the
@@ -401,9 +414,9 @@ pub struct PillInfo {
     pub provider: String, // Pi roles only, else empty
 }
 
-fn role_options(spec: &crate::factory::RoleSpec, model_override: Option<&str>) -> Vec<(&'static str, String)> {
-    let model = model_override.map(str::to_string).or_else(|| spec.model.clone()).unwrap_or_default();
-    let provider = if spec.harness == "pi" { spec.provider.clone().unwrap_or_default() } else { String::new() };
+fn role_options(spec: &crate::factory::RoleSpec, choice: &crate::factory::LaunchChoice) -> Vec<(&'static str, String)> {
+    let model = choice.model.clone().or_else(|| spec.model.clone()).unwrap_or_default();
+    let provider = if spec.harness == "pi" { choice.provider.clone().or_else(|| spec.provider.clone()).unwrap_or_default() } else { String::new() };
     vec![("@cubilot_role", spec.name.clone()), ("@cubilot_model", model), ("@cubilot_provider", provider)]
 }
 
@@ -614,24 +627,26 @@ fn claude_command(
     claude_path: &std::path::Path,
     role: Option<&str>,
     cwd: &str,
-    model: Option<&str>,
+    choice: &crate::factory::LaunchChoice,
 ) -> Result<String, String> {
     // Resolved before the mod is staged or anything is written for a role-less spawn: no role, no change.
     let launch = match role {
-        Some(r) => Some(crate::factory::with_model_override(
+        Some(r) => Some(crate::factory::with_choice(
             crate::factory::resolve_role_launch(agent, r, std::path::Path::new(cwd))?,
-            model,
-        )?),
+            choice,
+        )),
         None => None,
     };
-    claude_command_using(
+    let cmd = claude_command_using(
         agent,
         room,
         session_mode,
         claude_path,
         launch.as_ref(),
         &crate::ensure_chatbridge_mod_staged,
-    )
+    )?;
+    // Without a role the choice is appended (a role already carries it in its own flags).
+    Ok(if role.is_some() { cmd } else { format!("{cmd}{}", choice_flags(false, choice)) })
 }
 
 // Mods load unreliably before this: a stale GrowthBook cache can serve
@@ -823,6 +838,9 @@ fn format_claude_command(
             );
             if let Some(m) = &r.model {
                 flags.push_str(&format!("--model '{}' ", sq(m)));
+            }
+            if let Some(e) = &r.effort {
+                flags.push_str(&format!("--effort '{}' ", sq(e)));
             }
             // Always present with a role: the role's list plus the blocked ack_permission.
             let blocked = with_ack_permission_blocked(&r.disallowed_tools, &format!("mcp__chatbridge__{ACK_PERMISSION}"));
@@ -1096,6 +1114,91 @@ fn harness_for_role_with(
     }
 }
 
+// ---- Pi sign-in check (task 3.5) ----
+// A Pi role launch names a provider (openai-codex for the validator and the reviewer). Without a sign-in Pi starts
+// and then fails inside the pane, where the human sees a blank agent. So the check runs BEFORE the tmux session is
+// created: `pi auth check --provider <p> --json` exits 0 with {"status":"ready"}, else exits 1 with
+// {"status":"not_ready","reason":"..."}. The ticket text names `openai`; tasks.md 3.5 and the roles use the role's own
+// provider (`openai-codex`, human decision 2026-10-21), so the check uses that. Never `--credentials`, and nothing
+// from the answer except status and reason is read or logged.
+// 20 s: without --no-refresh the check may refresh an expired OAuth token, which needs the network.
+const PI_AUTH_CHECK_SECS: u64 = 20;
+
+fn auth_check_result(provider: &str, exit_ok: bool, stdout: &str) -> Result<(), String> {
+    let v: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap_or(serde_json::Value::Null);
+    if exit_ok && v.get("status").and_then(|s| s.as_str()) == Some("ready") {
+        return Ok(());
+    }
+    Err(match v.get("reason").and_then(|r| r.as_str()) {
+        Some("credentials_not_configured") => format!(
+            "Pi is not signed in to {provider}. Run `pi` and /login {provider}. Nothing was started."
+        ),
+        Some("provider_not_found") => format!("Pi does not know the provider {provider}. Nothing was started."),
+        Some(other) => format!(
+            "Pi is not ready for {provider} ({other}). Run `pi` and /login {provider}. Nothing was started."
+        ),
+        None => format!(
+            "The Pi sign-in check for {provider} gave no usable answer. Run `pi` and /login {provider}. Nothing was started."
+        ),
+    })
+}
+
+// Runs the check with a time limit (a bad network may hang it). Blocking: call from spawn_blocking.
+pub(crate) fn pi_auth_check(pi: &std::path::Path, provider: &str) -> Result<(), String> {
+    pi_auth_check_with(pi, provider, std::time::Duration::from_secs(PI_AUTH_CHECK_SECS))
+}
+
+fn pi_auth_check_with(pi: &std::path::Path, provider: &str, limit: std::time::Duration) -> Result<(), String> {
+    use std::io::Read as _;
+    let mut child = Command::new(pi)
+        .args(["auth", "check", "--provider", provider, "--json"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Could not run `pi auth check` for {provider} ({e}). Nothing was started."))?;
+    let deadline = std::time::Instant::now() + limit;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(st)) => break st,
+            Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!(
+                    "The Pi sign-in check for {provider} took more than {} seconds. Run `pi` and /login {provider}. Nothing was started.",
+                    limit.as_secs()
+                ));
+            }
+        }
+    };
+    let mut out = String::new();
+    if let Some(mut so) = child.stdout.take() {
+        let _ = so.read_to_string(&mut out);
+    }
+    auth_check_result(provider, status.success(), &out)
+}
+
+// The provider to check for this spawn, if any. A Pi ROLE names one; the human's grid choice may name another, and
+// then THAT one is checked (the user gets the sign-in message for the model they picked). A plain Pi agent with no
+// choice is left alone: it may use any provider, and this check is not its business.
+fn pi_provider_to_check(
+    harness: Harness,
+    role: Option<&str>,
+    choice: &crate::factory::LaunchChoice,
+) -> Result<Option<String>, String> {
+    if harness != Harness::Pi {
+        return Ok(None);
+    }
+    if let Some(p) = &choice.provider {
+        return Ok(Some(p.clone()));
+    }
+    match role {
+        Some(r) => Ok(crate::factory::resolve_role_spec(r)?.provider),
+        None => Ok(None),
+    }
+}
+
 #[tauri::command]
 pub async fn pty_spawn(
     app: AppHandle,
@@ -1107,6 +1210,8 @@ pub async fn pty_spawn(
     harness: Option<String>,
     role: Option<String>,
     model: Option<String>,
+    effort: Option<String>,
+    provider: Option<String>,
 ) -> Result<(), String> {
     // An unknown or council role fails here, before any tmux session exists. No role: nothing changes.
     let role = spawn_role(role)?;
@@ -1117,6 +1222,9 @@ pub async fn pty_spawn(
     // A role's own harness replaces the one the modal asked for (a Pi role builds the Pi command even when the
     // modal says Claude). No role: the requested harness, as before.
     let harness = harness_for_role(harness, role.as_deref())?;
+    // The model x effort grid (task 5.5): only what the human changed arrives here. Checked against the EFFECTIVE
+    // harness, so a Claude effort level on a Pi role (or the reverse) is refused, not guessed.
+    let choice = crate::factory::launch_choice(harness == Harness::Pi, model.as_deref(), provider.as_deref(), effort.as_deref())?;
 
     let resolved_room = match room.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(r) if valid_room_label(r) => r.to_string(),
@@ -1138,6 +1246,13 @@ pub async fn pty_spawn(
     if !existed {
         // Built only for a new session: re-attaching to a live one must not depend on the
         // Claude version check or mod staging.
+        // A Pi role needs its provider signed in: check before any session exists, launch nothing on failure.
+        if let Some(provider) = pi_provider_to_check(harness, role.as_deref(), &choice)? {
+            let pi = crate::resolve_pi_path();
+            tauri::async_runtime::spawn_blocking(move || pi_auth_check(&pi, &provider))
+                .await
+                .map_err(|e| format!("Pi sign-in check worker failed: {e}"))??;
+        }
         let claude_path = match harness {
             Harness::Claude => {
                 let path = resolve_claude_path();
@@ -1157,7 +1272,7 @@ pub async fn pty_spawn(
             harness,
             claude_path.as_deref(),
             role.as_deref(),
-            model.as_deref().map(str::trim).filter(|m| !m.is_empty()),
+            &choice,
         )?;
         let argv = build_spawn_argv(&agent, &cwd, &lang, api_key.as_deref(), &spawn_cmd);
         let argv_refs: Vec<&str> = argv.iter().map(String::as_str).collect();
@@ -1169,7 +1284,7 @@ pub async fn pty_spawn(
         if let Some(r) = &role {
             // Best effort, like the harness record: a missing pill must not fail a launch that already runs.
             if let Ok(spec) = crate::factory::resolve_role_spec(r) {
-                for (k, v) in role_options(&spec, model.as_deref().map(str::trim).filter(|m| !m.is_empty())) {
+                for (k, v) in role_options(&spec, &choice) {
                     if let Err(e) = tmux_run(&["set-option", "-t", &tmux_pane(&agent), k, &v]) {
                         eprintln!("[pty] pty_spawn/{k} (pill only): {e}");
                     }
@@ -2317,37 +2432,138 @@ mod spawn_argv_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    fn choice(model: Option<&str>, provider: Option<&str>, effort: Option<&str>) -> crate::factory::LaunchChoice {
+        crate::factory::LaunchChoice {
+            model: model.map(str::to_string),
+            provider: provider.map(str::to_string),
+            effort: effort.map(str::to_string),
+        }
+    }
+
     #[test]
-    fn a_model_override_changes_model_for_that_launch_only() {
+    fn a_chosen_cell_gives_model_and_effort_for_claude_and_a_default_cell_adds_nothing() {
         use crate::factory::*;
         use std::path::Path;
         let (root, launch) = staged_role("worker", "worker-2");
-        let v = launch.plugin_dir.parent().unwrap().to_path_buf();
         let cmd = |l: &RoleLaunch| format_claude_command("worker-2", "r", None, Path::new("/c"), Path::new("/m"), None, Some(l)).unwrap();
-        assert!(cmd(&launch).contains("--model 'sonnet'"));
-        // test 10: the override replaces --model for this launch
-        let over = with_model_override(launch, Some("opus")).unwrap();
-        let c = cmd(&over);
-        assert!(c.contains("--model 'opus'") && !c.contains("--model 'sonnet'"), "{c}");
-        // ... and only this launch: the role file and the next launch of the role keep the default
-        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
-        let again = role_launch(&load_role_spec("worker", &src, &v).unwrap(), &v, over.settings.clone());
-        assert!(cmd(&again).contains("--model 'sonnet'"));
-        // no override, or a bad one
-        let same = with_model_override(again, None).unwrap();
-        assert!(cmd(&same).contains("--model 'sonnet'"));
-        for bad in ["", "o'pus", "a b", "$(x)", "x;y"] {
-            assert!(with_model_override(role_launch(&load_role_spec("worker", &src, &v).unwrap(), &v, None), Some(bad)).is_err(), "{bad:?}");
-        }
-        // an override with no role is refused, and a Pi role takes it too
-        let err = super::agent_command("a", "r", "/tmp", None, super::Harness::Claude, Some(Path::new("/c")), None, Some("opus")).unwrap_err();
-        assert!(err.contains("needs a role"), "{err}");
-        let (root2, pi) = staged_role("validator", "v");
-        let pi = with_model_override(pi, Some("gpt-5.6-terra")).unwrap();
-        let (_, flags) = super::pi_role_flags(&pi).unwrap();
-        assert!(flags.contains("--model 'gpt-5.6-terra'") && !flags.contains("gpt-5.6-sol"), "{flags}");
+        // the default cell (nothing sent): the role's own model, and no --effort at all
+        let d = cmd(&launch);
+        assert!(d.contains("--model 'sonnet'") && !d.contains("--effort"), "{d}");
+        // a chosen cell: --model and --effort, each once, the role default model replaced
+        let c = cmd(&with_choice(role_launch(&load_role_spec("worker", &Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory"), launch.plugin_dir.parent().unwrap()).unwrap(), launch.plugin_dir.parent().unwrap(), launch.settings.clone()), &choice(Some("opus"), None, Some("high"))));
+        assert!(c.contains("--model 'opus'") && c.contains("--effort 'high'"), "{c}");
+        assert!(!c.contains("--model 'sonnet'") && c.matches("--model").count() == 1 && c.matches("--effort").count() == 1, "{c}");
+        // effort only (same model as the default): no --model change
+        let e = cmd(&with_choice(role_launch(&load_role_spec("worker", &Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory"), launch.plugin_dir.parent().unwrap()).unwrap(), launch.plugin_dir.parent().unwrap(), launch.settings.clone()), &choice(None, None, Some("max"))));
+        assert!(e.contains("--model 'sonnet'") && e.contains("--effort 'max'"), "{e}");
         let _ = std::fs::remove_dir_all(&root);
-        let _ = std::fs::remove_dir_all(&root2);
+    }
+
+    #[test]
+    fn a_chosen_cell_gives_provider_model_and_thinking_for_pi() {
+        use crate::factory::*;
+        let (root, pi) = staged_role("validator", "v");
+        let (_, d) = super::pi_role_flags(&pi).unwrap();
+        // default cell: the role's own values
+        assert!(d.contains("--model 'gpt-5.6-sol'") && d.contains("--thinking 'high'") && d.contains("--provider 'openai-codex'"), "{d}");
+        // a chosen cell: model, provider and the thinking level replace them, each once
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
+        let vd = pi.plugin_dir.parent().unwrap().to_path_buf();
+        let fresh = || role_launch(&load_role_spec("validator", &src, &vd).unwrap(), &vd, None);
+        let (_, c) = super::pi_role_flags(&with_choice(fresh(), &choice(Some("claude-fable-5"), Some("anthropic"), Some("xhigh")))).unwrap();
+        assert!(c.contains("--provider 'anthropic'") && c.contains("--model 'claude-fable-5'") && c.contains("--thinking 'xhigh'"), "{c}");
+        assert!(!c.contains("gpt-5.6-sol") && !c.contains("'high'") && c.matches("--model").count() == 1, "{c}");
+        // thinking only: the role's model and provider stay
+        let (_, t) = super::pi_role_flags(&with_choice(fresh(), &choice(None, None, Some("off")))).unwrap();
+        assert!(t.contains("--model 'gpt-5.6-sol'") && t.contains("--thinking 'off'") && !t.contains("--effort"), "{t}");
+        // only this launch: a fresh launch from the role file has the default again
+        assert!(super::pi_role_flags(&fresh()).unwrap().1.contains("--thinking 'high'"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn without_a_role_a_choice_is_appended_and_an_empty_choice_changes_nothing() {
+        use crate::factory::LaunchChoice;
+        assert_eq!(super::choice_flags(false, &LaunchChoice::default()), "");
+        assert_eq!(super::choice_flags(true, &LaunchChoice::default()), "");
+        assert_eq!(super::choice_flags(false, &choice(Some("opus"), None, Some("high"))), " --model 'opus' --effort 'high'");
+        assert_eq!(
+            super::choice_flags(true, &choice(Some("gpt-5.6-sol"), Some("openai-codex"), Some("high"))),
+            " --provider 'openai-codex' --model 'gpt-5.6-sol' --thinking 'high'"
+        );
+    }
+
+    #[test]
+    fn the_choice_is_checked_for_the_harness_and_a_bad_value_is_refused() {
+        use crate::factory::launch_choice;
+        // blank is "not set"
+        assert_eq!(launch_choice(false, Some(" "), Some(""), None).unwrap(), crate::factory::LaunchChoice::default());
+        // Claude effort levels; "off" and "minimal" are Pi only
+        for e in ["low", "medium", "high", "xhigh", "max"] {
+            assert!(launch_choice(false, Some("opus"), None, Some(e)).is_ok(), "{e}");
+        }
+        for e in ["off", "minimal", "HIGH", "ultra", "high;ls"] {
+            assert!(launch_choice(false, None, None, Some(e)).unwrap_err().contains("invalid effort"), "{e}");
+        }
+        // Pi thinking levels
+        for e in ["off", "minimal", "low", "medium", "high", "xhigh", "max"] {
+            assert!(launch_choice(true, Some("gpt-5.6-sol"), Some("openai-codex"), Some(e)).is_ok(), "{e}");
+        }
+        assert!(launch_choice(true, None, None, Some("ultra")).unwrap_err().contains("invalid thinking level"));
+        // a provider is Pi only, and the model and provider are shell-safe
+        assert!(launch_choice(false, None, Some("openai-codex"), None).unwrap_err().contains("only applies to a Pi launch"));
+        for bad in ["o'pus", "a b", "$(x)", "x;y"] {
+            assert!(launch_choice(true, Some(bad), None, None).is_err(), "model {bad:?}");
+            assert!(launch_choice(true, None, Some(bad), None).is_err(), "provider {bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_bad_model_id_is_refused_and_a_real_one_is_not() {
+        use crate::factory::{launch_choice, valid_model};
+        // the real bad cases: a space, a quote, ";", "$(x)", a newline, a backtick, "|", "&", ">", a tab, a NUL, non-ASCII
+        for bad in ["a b", "o'pus", "x;y", "$(x)", "a\nb", "a\r\nb", "`x`", "a|b", "a&b", "a>b", "a\tb", "a\0b", "mod\u{e9}l", "\"x\""] {
+            assert!(!valid_model(bad), "valid_model {bad:?}");
+            for is_pi in [false, true] {
+                assert!(launch_choice(is_pi, Some(bad), None, None).is_err(), "launch_choice(pi={is_pi}) {bad:?}");
+            }
+        }
+        // a newline at the very end or start is whitespace and is trimmed before the check: the value that is kept
+        // has no newline in it (valid_model itself still refuses the raw string)
+        assert!(!valid_model("a\n") && !valid_model("\na"));
+        assert_eq!(launch_choice(true, Some("a\n"), None, None).unwrap().model.as_deref(), Some("a"));
+        assert_eq!(launch_choice(true, Some("\tgpt-5.6-sol \n"), None, None).unwrap().model.as_deref(), Some("gpt-5.6-sol"));
+        // empty is "not set", not an error: the UI never sends one, and pty_spawn treats blank as no override
+        assert!(!valid_model(""));
+        assert_eq!(launch_choice(true, Some(""), None, None).unwrap().model, None);
+        assert_eq!(launch_choice(true, Some("  "), None, None).unwrap().model, None);
+        // the length limit is 80: 80 passes, 81 is refused (and so is a very long value)
+        assert!(valid_model(&"a".repeat(80)));
+        assert!(!valid_model(&"a".repeat(81)));
+        assert!(launch_choice(true, Some(&"a".repeat(81)), None, None).is_err());
+        assert!(launch_choice(true, Some(&"a".repeat(10_000)), None, None).is_err());
+        // real ids stay valid: uppercase, provider/id, the :thinking shorthand, dots, dashes, underscores
+        for good in ["opus", "claude-fable-5-1", "gpt-5.6-sol", "GPT-4o", "openai-codex/gpt-5.6-sol", "gpt-5.6-sol:high", "a_b.c-d"] {
+            assert!(valid_model(good), "valid_model {good:?}");
+            assert_eq!(launch_choice(true, Some(good), None, None).unwrap().model.as_deref(), Some(good));
+        }
+        // a refused model never reaches a command: the error comes before any flag is built
+        let e = launch_choice(false, Some("x;y"), None, Some("high")).unwrap_err();
+        assert!(e.contains("invalid model"), "{e}");
+    }
+
+    #[test]
+    fn the_chosen_provider_is_the_one_that_gets_the_sign_in_check() {
+        use crate::factory::LaunchChoice;
+        let none = LaunchChoice::default();
+        // no role, no choice: nothing to check; a Claude launch never checks
+        assert_eq!(super::pi_provider_to_check(super::Harness::Pi, None, &none), Ok(None));
+        assert_eq!(super::pi_provider_to_check(super::Harness::Claude, Some("worker"), &none), Ok(None));
+        assert_eq!(super::pi_provider_to_check(super::Harness::Claude, None, &choice(Some("opus"), None, None)), Ok(None));
+        // a chosen model of another provider is checked, with or without a role
+        let c = choice(Some("claude-fable-5"), Some("anthropic"), None);
+        assert_eq!(super::pi_provider_to_check(super::Harness::Pi, None, &c), Ok(Some("anthropic".to_string())));
+        assert_eq!(super::pi_provider_to_check(super::Harness::Pi, Some("validator"), &c), Ok(Some("anthropic".to_string())), "the chosen provider, not the role's");
     }
 
     #[test]
@@ -2357,11 +2573,11 @@ mod spawn_argv_tests {
         let spec = |r: &str| {
             parse_role_spec(r, &std::fs::read_to_string(src.join(r).join(format!("{r}.md"))).unwrap()).unwrap()
         };
-        let w = super::role_options(&spec("worker"), None);
+        let w = super::role_options(&spec("worker"), &Default::default());
         assert_eq!(w, vec![("@cubilot_role", "worker".into()), ("@cubilot_model", "sonnet".into()), ("@cubilot_provider", "".into())]);
-        let w2 = super::role_options(&spec("worker"), Some("opus"));
+        let w2 = super::role_options(&spec("worker"), &choice(Some("opus"), None, None));
         assert_eq!(w2[1], ("@cubilot_model", "opus".to_string()), "the override is what runs");
-        let v = super::role_options(&spec("validator"), None);
+        let v = super::role_options(&spec("validator"), &Default::default());
         assert_eq!((v[1].1.as_str(), v[2].1.as_str()), ("gpt-5.6-sol", "openai-codex"), "a Pi role shows its provider");
         // what tmux prints for three sessions: a Claude role, a Pi role, a plain agent
         let out = "worker-1\tworker\topus\t\nvalidator\tvalidator\tgpt-5.6-sol\topenai-codex\nplain\t\t\t\nbad name!\tworker\tx\t\n";
@@ -2408,6 +2624,70 @@ mod spawn_argv_tests {
         assert!(none.contains("--allowed-tools 'mcp__chatbridge__ack_permission,mcp__chatbridge__post,mcp__chatbridge__post_file'"));
         assert!(!none.contains("--disallowed-tools"), "{none}");
         for r in [root, root2, root3] { let _ = std::fs::remove_dir_all(&r); }
+    }
+
+    #[test]
+    fn the_auth_check_answer_is_read_and_a_failure_names_the_fix() {
+        let ok = r#"{"status":"ready","provider":"openai-codex","authType":"oauth"}"#;
+        assert_eq!(super::auth_check_result("openai-codex", true, ok), Ok(()));
+        // the real shapes of a failure (seen with an empty PI_CODING_AGENT_DIR): exit 1 + not_ready
+        let no_cred = r#"{"status":"not_ready","provider":"openai-codex","reason":"credentials_not_configured"}"#;
+        assert_eq!(
+            super::auth_check_result("openai-codex", false, no_cred).unwrap_err(),
+            "Pi is not signed in to openai-codex. Run `pi` and /login openai-codex. Nothing was started."
+        );
+        let unknown = r#"{"status":"not_ready","provider":"x","reason":"provider_not_found"}"#;
+        assert!(super::auth_check_result("x", false, unknown).unwrap_err().contains("does not know the provider x"));
+        let other = r#"{"status":"not_ready","provider":"p","reason":"token_expired"}"#;
+        let e = super::auth_check_result("p", false, other).unwrap_err();
+        assert!(e.contains("token_expired") && e.contains("/login p"), "{e}");
+        // a "ready" body with a failing exit code, an empty body, garbage and an odd status are all failures
+        assert!(super::auth_check_result("p", false, ok).is_err());
+        assert!(super::auth_check_result("p", true, "").unwrap_err().contains("no usable answer"));
+        assert!(super::auth_check_result("p", true, "not json").is_err());
+        assert!(super::auth_check_result("p", true, r#"{"status":"weird"}"#).is_err());
+        // the answer's other fields (a credential, if pi ever sent one) never reach the error text
+        let leaky = r#"{"status":"not_ready","reason":"x","apiKey":"SECRET-123"}"#;
+        assert!(!super::auth_check_result("p", false, leaky).unwrap_err().contains("SECRET"));
+    }
+
+    #[test]
+    fn pi_auth_check_runs_the_real_command_with_a_fake_pi() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("cubilot-fake-pi-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fake = |name: &str, body: &str| {
+            let p = dir.join(name);
+            std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            p
+        };
+        // exactly `auth check --provider openai-codex --json` (no --no-refresh: pi may refresh an expired token itself,
+        // and no --credentials), nothing else
+        let ready = fake(
+            "pi-ready",
+            r#"[ "$*" = "auth check --provider openai-codex --json" ] && echo '{"status":"ready"}' && exit 0; exit 3"#,
+        );
+        assert_eq!(super::pi_auth_check(&ready, "openai-codex"), Ok(()));
+        let out = fake("pi-out", r#"echo '{"status":"not_ready","reason":"credentials_not_configured"}'; exit 1"#);
+        assert!(super::pi_auth_check(&out, "openai-codex").unwrap_err().contains("is not signed in to openai-codex"));
+        assert!(super::pi_auth_check(&dir.join("missing"), "p").unwrap_err().contains("Could not run"));
+        // a check that hangs is killed at the limit, and the message says so
+        let hang = fake("pi-hang", "sleep 30");
+        let t0 = std::time::Instant::now();
+        let e = super::pi_auth_check_with(&hang, "p", std::time::Duration::from_millis(300)).unwrap_err();
+        assert!(t0.elapsed() < std::time::Duration::from_secs(5), "killed at the limit, not after 30 s");
+        assert!(e.contains("took more than") && e.contains("Nothing was started"), "{e}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn only_a_pi_role_has_a_provider_to_check() {
+        // no role, or a Claude launch: nothing to check, whatever the harness argument said
+        assert_eq!(super::pi_provider_to_check(super::Harness::Pi, None, &Default::default()), Ok(None));
+        assert_eq!(super::pi_provider_to_check(super::Harness::Claude, Some("worker"), &Default::default()), Ok(None));
+        assert_eq!(super::pi_provider_to_check(super::Harness::Claude, None, &Default::default()), Ok(None));
     }
 
     #[test]

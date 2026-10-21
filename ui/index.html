@@ -234,9 +234,11 @@
     <select id="spawn-role-select" style="width:100%;">
       <option value="">None</option>
     </select>
-    <div id="spawn-model-row" style="margin-top:6px;">
-      <label>Model</label>
-      <input id="spawn-model-input" spellcheck="false" autocomplete="off" placeholder="the role's model; empty for none" style="width:100%;" disabled />
+    <div id="spawn-grid-row" style="margin-top:6px;">
+      <label>Model × effort <span id="spawn-grid-count" class="grid-count"></span></label>
+      <input id="spawn-grid-filter" class="grid-filter" spellcheck="false" autocomplete="off" placeholder="type to filter models" hidden />
+      <div id="spawn-grid" class="model-grid" role="grid" aria-label="Model and effort"></div>
+      <div id="spawn-grid-note" class="grid-note"></div>
     </div>
     <div id="spawn-harness-row" style="margin-top:6px;">
       <label style="text-transform:uppercase; letter-spacing:0.1em; font-family:var(--mono); font-size:10px; color:var(--text-dim);">Harness</label>
@@ -450,6 +452,7 @@
 <script src="kinds/ticket.js"></script>
 <script src="terminal/pty.js"></script>
 <script src="terminal/role-memory.js"></script>
+<script src="terminal/model-grid.js"></script>
 <script src="terminal/factory-room.js"></script>
 <script src="terminal/xterm-themes.js"></script>
 <script src="terminal.js"></script>

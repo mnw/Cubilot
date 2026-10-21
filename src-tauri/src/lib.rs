@@ -1,4 +1,5 @@
 mod factory;
+mod models;
 mod pty;
 
 use std::{
@@ -1396,6 +1397,7 @@ pub fn run() {
             open_config_file,
             open_skills_folder,
             list_roles,
+            models::list_models,
             open_global_mcp_config,
             open_in_editor,
             reload_settings,

@@ -412,6 +412,7 @@ pub(crate) struct RoleLaunch {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub thinking: Option<String>,
+    pub effort: Option<String>, // Claude only: set by the human's choice for one launch (roles have no default)
     pub disallowed_tools: Vec<String>, // Claude
     pub exclude_tools: Vec<String>,    // Pi
 }
@@ -428,6 +429,7 @@ pub(crate) fn role_launch(spec: &RoleSpec, version_dir: &Path, settings: Option<
         provider: spec.provider.clone(),
         model: spec.model.clone(),
         thinking: spec.thinking.clone(),
+        effort: None,
         disallowed_tools: spec.disallowed_tools.clone(),
         exclude_tools: spec.exclude_tools.clone(),
     }
@@ -454,16 +456,72 @@ pub(crate) fn valid_model(m: &str) -> bool {
     !m.is_empty() && m.len() <= 80 && m.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b':' | b'/' | b'-'))
 }
 
-// Replaces the model of ONE launch. The role file and the staged version are not touched, so the next launch of the
-// role has its own default again.
-pub(crate) fn with_model_override(mut launch: RoleLaunch, model: Option<&str>) -> Result<RoleLaunch, String> {
-    if let Some(m) = model {
+// What the human picked in the model x effort grid for ONE launch (task 5.5). Every field is optional: only what
+// differs from the role default (or, without a role, what the human picked) is set. `provider` is Pi only.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub(crate) struct LaunchChoice {
+    pub model: Option<String>,
+    pub provider: Option<String>,
+    pub effort: Option<String>,
+}
+
+pub(crate) const CLAUDE_EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+pub(crate) const PI_EFFORTS: [&str; 7] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+// A provider id as pi lists it: lowercase letters, digits and . _ -. It goes into a quoted shell command.
+pub(crate) fn valid_provider(p: &str) -> bool {
+    !p.is_empty() && p.len() <= 40 && p.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+// Blank means not set. Anything else is checked and refused when it is not valid for the harness: a typo must show,
+// not launch a different agent. The Claude effort levels and the Pi thinking levels differ.
+pub(crate) fn launch_choice(
+    is_pi: bool,
+    model: Option<&str>,
+    provider: Option<&str>,
+    effort: Option<&str>,
+) -> Result<LaunchChoice, String> {
+    let clean = |v: Option<&str>| v.map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+    let (model, provider, effort) = (clean(model), clean(provider), clean(effort));
+    if let Some(m) = &model {
         if !valid_model(m) {
             return Err(format!("invalid model: {m:?}"));
         }
-        launch.model = Some(m.to_string());
     }
-    Ok(launch)
+    if let Some(p) = &provider {
+        if !is_pi {
+            return Err(format!("a provider ({p:?}) only applies to a Pi launch"));
+        }
+        if !valid_provider(p) {
+            return Err(format!("invalid provider: {p:?}"));
+        }
+    }
+    if let Some(e) = &effort {
+        let (allowed, what): (&[&str], &str) = if is_pi { (&PI_EFFORTS, "thinking level") } else { (&CLAUDE_EFFORTS, "effort") };
+        if !allowed.contains(&e.as_str()) {
+            return Err(format!("invalid {what} {e:?} (allowed: {})", allowed.join(", ")));
+        }
+    }
+    Ok(LaunchChoice { model, provider, effort })
+}
+
+// Applies the choice to ONE launch. The role file and the staged version are not touched, so the next launch of the
+// role has its own default again. Effort is `--effort` for Claude and the thinking level for Pi.
+pub(crate) fn with_choice(mut launch: RoleLaunch, choice: &LaunchChoice) -> RoleLaunch {
+    if let Some(m) = &choice.model {
+        launch.model = Some(m.clone());
+    }
+    if launch.harness == "pi" {
+        if let Some(p) = &choice.provider {
+            launch.provider = Some(p.clone());
+        }
+        if let Some(e) = &choice.effort {
+            launch.thinking = Some(e.clone());
+        }
+    } else if let Some(e) = &choice.effort {
+        launch.effort = Some(e.clone());
+    }
+    launch
 }
 
 // ---- Role list for the spawn modal (task 5.1) ----
@@ -473,6 +531,7 @@ pub(crate) struct RoleInfo {
     pub harness: String,
     pub provider: Option<String>,
     pub model: Option<String>,
+    pub thinking: Option<String>,
 }
 
 // Single-agent roles that the given staged version contains, sorted by name. A council (a11y, seo), a folder without
@@ -483,7 +542,7 @@ pub(crate) fn list_roles_in(src: &Path, version_dir: &Path) -> Vec<RoleInfo> {
         .flatten()
         .flatten()
         .filter_map(|e| load_role_spec(&e.file_name().to_string_lossy(), src, version_dir).ok())
-        .map(|s| RoleInfo { name: s.name, harness: s.harness, provider: s.provider, model: s.model })
+        .map(|s| RoleInfo { name: s.name, harness: s.harness, provider: s.provider, model: s.model, thinking: s.thinking })
         .collect();
     out.sort_by(|a, b| a.name.cmp(&b.name));
     out

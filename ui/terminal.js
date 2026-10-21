@@ -33,7 +33,10 @@
   const spawnCwdPick  = document.getElementById('spawn-cwd-pick');
   const spawnHarnessPi = document.getElementById('spawn-harness-pi');
   const spawnRoleEl    = document.getElementById('spawn-role-select');
-  const spawnModelEl   = document.getElementById('spawn-model-input');
+  const spawnGridEl    = document.getElementById('spawn-grid');
+  const spawnGridFilterEl = document.getElementById('spawn-grid-filter');
+  const spawnGridCountEl  = document.getElementById('spawn-grid-count');
+  const spawnGridNoteEl   = document.getElementById('spawn-grid-note');
   const spawnHarnessClaude = document.getElementById('spawn-harness-claude');
   let spawnRoles = new Map();
   const spawnRoomEl     = document.getElementById('spawn-room-input');
@@ -149,10 +152,10 @@
     localStorage.setItem('cubilot_agent_cwds', JSON.stringify(cwdCache));
   }
 
-  const { roleMemory, factoryRoom } = window.__CUBILOT_TERM__;
+  const { roleMemory, factoryRoom, modelGrid } = window.__CUBILOT_TERM__;
 
   const {
-    ptySpawn, listRoles, ptyWrite, ptyResize, ptyKill, ptyList,
+    ptySpawn, listRoles, listModels, ptyWrite, ptyResize, ptyKill, ptyList,
     strToB64, b64ToBytes,
   } = window.__CUBILOT_TERM__.pty;
 
@@ -711,7 +714,7 @@
     for (const [agent, t] of tabs) if (t.joinWarnBar && hasJoined(presence, agent)) clearJoinWarning(t);
   };
 
-  async function handleLaunch(agent, cwd, sessionMode = null, room = null, harness = null, role = null, model = null) {
+  async function handleLaunch(agent, cwd, sessionMode = null, room = null, harness = null, role = null, model = null, effort = null, provider = null) {
     if (!_paneEnabled) setPaneEnabled(true);
     const t0 = performance.now();
     const stage = (label) =>
@@ -726,10 +729,10 @@
     t._launchStage = stage;
     try {
       stage('invoke pty_spawn');
-      await ptySpawn(agent, cwd, sessionMode, room, harness, role, model);
+      await ptySpawn(agent, cwd, sessionMode, room, harness, role, model, effort, provider);
       stage('pty_spawn returned');
       rememberCwd(agent, cwd);
-      roleMemory.remember(localStorage, agent, role, model);
+      roleMemory.remember(localStorage, agent, role, { model, provider, effort });
       t.cwd = cwd;
       t.external = false;
       await _connectLiveTab(agent);
@@ -793,6 +796,9 @@
     refreshSpawnRoomDatalist();
     if (spawnSessionContinue) spawnSessionContinue.checked = false;
     if (spawnSessionResume)   spawnSessionResume.checked = false;
+    gridModels = {};   // the model lists (and Pi sign-in marks) are read again each time the modal opens
+    gridSelected = null;
+    if (spawnGridFilterEl) spawnGridFilterEl.value = '';
     refreshSpawnRoles();
     spawnModal.classList.add('open');
     setTimeout(() => spawnAgentEl.focus(), 0);
@@ -810,45 +816,135 @@
       spawnRoleEl.add(new Option(`${r.name}${r.model ? ' (' + r.model + via + ')' : via}`, r.name));
     }
     spawnRoleEl.value = '';
-    onSpawnRoleChange();
-    recallSpawnRole();
+    await onSpawnRoleChange();
+    await recallSpawnRole();
   }
 
-  // The last role and model override used for this agent name, if the role is still staged. Runs when the modal
-  // opens and when the name field is committed (change), never per keystroke, so it does not undo a manual pick.
-  function recallSpawnRole() {
+  // The last role and grid choice used for this agent name, if the role is still staged and its model is still
+  // listed. Runs when the modal opens and when the name field is committed (change), never per keystroke, so it
+  // does not undo a manual pick.
+  async function recallSpawnRole() {
     const m = roleMemory.recall(localStorage, spawnAgentEl.value.trim());
     if (!m || !spawnRoles.has(m.role)) return;
     spawnRoleEl.value = m.role;
-    onSpawnRoleChange();
-    if (m.model && spawnModelEl) spawnModelEl.value = m.model;
+    await onSpawnRoleChange();
+    const sel = modelGrid.selectionFromChoice(buildSpawnGrid(), m);
+    if (sel) { gridSelected = sel; renderSpawnGrid(); }
   }
   spawnAgentEl?.addEventListener('change', recallSpawnRole);
 
-  // The role's harness wins over the radios (the app launches the role's harness), so with a role the radios show
-  // it and are locked; the model field holds the role's model as the default. With "None" nothing is locked and the
-  // model field is off, as before.
-  function onSpawnRoleChange() {
-    const r = spawnRoles.get(spawnRoleEl?.value || '');
+  // ---- The model x effort grid (task 5.5): it replaces the model field of 5.2. ----
+  let gridModels = {};      // harness -> rows from list_models, for this opening of the modal
+  let gridSelected = null;  // { rowKey, effort }
+  const spawnRole = () => spawnRoles.get(spawnRoleEl?.value || '') || null;
+  // The role's harness wins over the radios (the app launches the role's harness).
+  const spawnGridHarness = () => spawnRole()?.harness || (spawnHarnessPi?.checked ? 'pi' : 'claude');
+
+  function buildSpawnGrid() {
+    const harness = spawnGridHarness();
+    return modelGrid.gridModel({ harness, models: gridModels[harness] || [], filter: spawnGridFilterEl?.value || '', role: spawnRole() });
+  }
+
+  async function loadGridModels(harness) {
+    if (gridModels[harness]) return;
+    if (spawnGridNoteEl) spawnGridNoteEl.textContent = harness === 'pi' ? 'Loading Pi models and sign-in state…' : '';
+    try {
+      gridModels[harness] = await listModels(harness);
+    } catch (e) {
+      console.warn('[terminal] list_models failed:', e);
+      gridModels[harness] = [];
+      if (spawnGridNoteEl) spawnGridNoteEl.textContent = `Could not list ${harness} models: ${e?.message ?? e}`;
+      return;
+    }
+    if (spawnGridNoteEl) spawnGridNoteEl.textContent = '';
+  }
+
+  function renderSpawnGrid() {
+    if (!spawnGridEl) return;
+    const grid = buildSpawnGrid();
+    const isPi = grid.harness === 'pi';
+    if (spawnGridFilterEl) spawnGridFilterEl.hidden = !isPi;
+    if (spawnGridCountEl) spawnGridCountEl.textContent = isPi ? `${grid.count.shown}/${grid.count.total}` : '';
+    const cols = `minmax(130px, 1.8fr) repeat(${grid.columns.length}, minmax(28px, 1fr))`;
+    spawnGridEl.textContent = '';
+    const head = document.createElement('div');
+    head.className = 'grid-head';
+    head.style.gridTemplateColumns = cols;
+    head.append(document.createElement('span'));
+    for (const c of grid.columns) { const h = document.createElement('span'); h.textContent = c; head.append(h); }
+    spawnGridEl.append(head);
+    if (!grid.rows.length) {
+      const empty = document.createElement('div');
+      empty.className = 'grid-empty';
+      empty.textContent = grid.count.total ? 'No model matches the filter.' : 'No models.';
+      spawnGridEl.append(empty);
+    }
+    for (const r of grid.rows) {
+      const row = document.createElement('div');
+      row.className = 'grid-row';
+      row.style.gridTemplateColumns = cols;
+      const label = document.createElement('span');
+      label.className = 'row-label' + (r.ready ? '' : ' not-ready') + (grid.defaultCell?.rowKey === r.key ? ' default' : '');
+      label.textContent = r.label;
+      label.title = r.ready ? r.label : `${r.label}: not signed in. A launch with it stops with a sign-in message.`;
+      row.append(label);
+      for (const c of grid.columns) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        const isDefault = grid.defaultCell && grid.defaultCell.rowKey === r.key && grid.defaultCell.effort === c;
+        const isSel = gridSelected && gridSelected.rowKey === r.key && gridSelected.effort === c;
+        b.className = 'cell' + (isDefault ? ' default' : '') + (isSel ? ' selected' : '');
+        b.dataset.row = r.key;
+        b.dataset.effort = c;
+        b.setAttribute('aria-pressed', isSel ? 'true' : 'false');
+        b.title = `${r.label}, ${c}${isDefault ? ' (role default)' : ''}`;
+        row.append(b);
+      }
+      spawnGridEl.append(row);
+    }
+    // A selected row of a provider that is not signed in: say what will happen.
+    const sel = gridSelected && grid.all.find((r) => r.key === gridSelected.rowKey);
+    if (spawnGridNoteEl && gridModels[grid.harness]) {
+      spawnGridNoteEl.textContent = sel && !sel.ready ? `${sel.provider} is not signed in: this launch will stop with a sign-in message.` : '';
+    }
+  }
+
+  spawnGridEl?.addEventListener('click', (e) => {
+    const b = e.target.closest?.('.cell');
+    if (!b) return;
+    const same = gridSelected && gridSelected.rowKey === b.dataset.row && gridSelected.effort === b.dataset.effort;
+    gridSelected = same ? null : { rowKey: b.dataset.row, effort: b.dataset.effort };   // a second click clears it
+    renderSpawnGrid();
+  });
+  spawnGridFilterEl?.addEventListener('input', renderSpawnGrid);
+
+  // Role or harness changed: the rows and columns change, the selection becomes the role's default cell.
+  async function refreshSpawnGrid() {
+    const harness = spawnGridHarness();
+    renderSpawnGrid();
+    await loadGridModels(harness);
+    if (spawnGridHarness() !== harness) return;   // changed again while loading
+    gridSelected = modelGrid.initialSelection(buildSpawnGrid());
+    renderSpawnGrid();
+  }
+
+  // With a role the radios show its harness and are locked; with "None" they are free, as before.
+  async function onSpawnRoleChange() {
+    const r = spawnRole();
     for (const el of [spawnHarnessClaude, spawnHarnessPi]) if (el) el.disabled = !!r;
     if (r) {
       if (spawnHarnessClaude) spawnHarnessClaude.checked = r.harness !== 'pi';
       if (spawnHarnessPi) spawnHarnessPi.checked = r.harness === 'pi';
     }
-    if (spawnModelEl) {
-      spawnModelEl.disabled = !r;
-      spawnModelEl.dataset.default = r?.model || '';
-      spawnModelEl.value = r?.model || '';
-    }
+    gridSelected = null;
+    await refreshSpawnGrid();
   }
   spawnRoleEl?.addEventListener('change', onSpawnRoleChange);
+  spawnHarnessClaude?.addEventListener('change', () => { gridSelected = null; refreshSpawnGrid(); });
+  spawnHarnessPi?.addEventListener('change', () => { gridSelected = null; refreshSpawnGrid(); });
 
-  // The model to send: only a value the user changed (a role with no model default counts any entry as a change).
-  function spawnModelOverride() {
-    if (!spawnRoleEl?.value || !spawnModelEl) return null;
-    const v = spawnModelEl.value.trim();
-    return v && v !== (spawnModelEl.dataset.default || '') ? v : null;
-  }
+  // What the launch sends: only the parts of the chosen cell that differ from the role default, or nothing.
+  const spawnGridChoice = () => modelGrid.choiceFromSelection(buildSpawnGrid(), gridSelected);
 
   function refreshSpawnRoomDatalist() {
     if (!spawnRoomMenu) return;
@@ -970,7 +1066,8 @@
     else if (spawnSessionResume?.checked) sessionMode = 'resume';
     const harness = spawnHarnessPi?.checked ? 'pi' : 'claude';
     closeSpawnModal();
-    await handleLaunch(agent, cwd, sessionMode, room || null, harness, spawnRoleEl?.value || null, spawnModelOverride());
+    const choice = spawnGridChoice();
+    await handleLaunch(agent, cwd, sessionMode, room || null, harness, spawnRoleEl?.value || null, choice?.model || null, choice?.effort || null, choice?.provider || null);
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && spawnModal.classList.contains('open')) closeSpawnModal();

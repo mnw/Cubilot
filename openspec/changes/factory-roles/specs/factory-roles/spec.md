@@ -144,3 +144,22 @@ The app SHALL stage the skills in `<app data>/factory-user/<role>/skills/` on to
 - **AND** the document also has a `present-perfect` hit at line 30
 - **WHEN** the Editor hands the document to the Reviewer
 - **THEN** the Reviewer declines the handoff and names line 30
+
+### Requirement: The human picks the model and the effort for one launch
+
+The spawn modal SHALL show a model × effort grid. The rows SHALL be the models of the selected harness: the Claude models for Claude Code, and for Pi all models that `pi --list-models` reports, with a filter box; a provider that is not signed in SHALL be marked. The columns SHALL be the effort levels of that harness. The role's default cell SHALL be marked. A choice SHALL apply to one launch only.
+
+#### Scenario: A Claude role with a chosen cell
+
+- **WHEN** the human picks opus × high for a `worker` launch
+- **THEN** the command has `--model opus --effort high`
+
+#### Scenario: A Pi role with a chosen cell
+
+- **WHEN** the human picks gpt-5.6-terra × medium for a `validator` launch
+- **THEN** the command has `--model gpt-5.6-terra --thinking medium`
+
+#### Scenario: The default cell adds nothing
+
+- **WHEN** the human keeps the role's default cell
+- **THEN** the command is the same as a launch without a choice
