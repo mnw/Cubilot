@@ -26,7 +26,7 @@ REPO=$(pwd)
 VERSION_TMUX="3.5a"
 VERSION_LIBEVENT="2.1.12-stable"
 
-WORK=$(mktemp -d -t a2a-tmux-build)
+WORK=$(mktemp -d -t cubilot-tmux-build)
 trap "rm -rf $WORK" EXIT
 echo "==> work dir: $WORK"
 cd "$WORK"

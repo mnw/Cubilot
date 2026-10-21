@@ -440,7 +440,7 @@ function slashPickerClose() {
 // =============================================================================
 
 function _ptyBridge() {
-  const pty = window.__A2A_TERM__?.pty;
+  const pty = window.__CUBILOT_TERM__?.pty;
   if (!pty?.ptyCaptureTurn || !pty?.ptyReadCapture || !pty?.ptyWrite || !pty?.strToB64) {
     throw new Error('PTY bridge not available');
   }

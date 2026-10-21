@@ -71,7 +71,7 @@
     return null;
   }
 
-  // Inspect via window.A2A_USAGE._debug.tails['<agent>'] when the regex doesn't match.
+  // Inspect via window.CUBILOT_USAGE._debug.tails['<agent>'] when the regex doesn't match.
   const DEBUG_TAIL_MAX = 8_192;
   const _debug = { tails: {}, captureCount: 0, matchCount: 0 };
 
@@ -86,8 +86,8 @@
     if (!sm && !wm) {
       // Loud signal: section header seen but regex didn't match — adjust the regex.
       if (/Current\s+session/i.test(clean) || /Current\s+week/i.test(clean)) {
-        console.warn(`[A2A_USAGE] /usage text seen on "${agent}" but regex didn't match. ` +
-          `Inspect window.A2A_USAGE._debug.tails["${agent}"]`);
+        console.warn(`[CUBILOT_USAGE] /usage text seen on "${agent}" but regex didn't match. ` +
+          `Inspect window.CUBILOT_USAGE._debug.tails["${agent}"]`);
       }
       return;
     }
@@ -293,7 +293,7 @@
     });
   }
 
-  window.A2A_USAGE = { captureBanner, _debug };
+  window.CUBILOT_USAGE = { captureBanner, _debug };
 
   setInterval(render, RENDER_TICK_MS);
   setInterval(refresh, POLL_MS);

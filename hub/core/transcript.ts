@@ -36,7 +36,7 @@ const _warnedFiles = new Set<string>();
 
 export function transcriptDir(): string {
   if (_dir) return _dir;
-  const override = process.env.A2A_TRANSCRIPTS_DIR;
+  const override = process.env.CUBILOT_TRANSCRIPTS_DIR;
   _dir = override && override.length
     ? override
     : join(process.env.CUBILOT_DATA_DIR || join(homedir(), "Library", "Application Support", "Cubilot"), "transcripts");

@@ -11,10 +11,10 @@ The architectural fix is to control all three layers of the contract — renderi
 ## What Changes
 
 - **NEW Tauri command `pty_capture_turn(agent, input) → CaptureResult`** — a single-turn capture primitive. Resizes the agent's tmux window to a forced large geometry (240×100), tees PTY output to a per-capture file via `tmux pipe-pane`, injects `input` via the existing `pty_write`, waits for a deterministic completion sentinel, restores the window, returns the captured log path.
-- **Per-agent claude settings injection** at spawn — Cubilot writes `~/Library/Application Support/Cubilot/settings/<agent>.json` with a `Stop` hook that `touch`es a sentinel file in `/tmp/a2a/<agent>/signals/` after every claude turn. Same pattern as the existing `--mcp-config <path>` injection (no user-file mutation, scoped via env).
-- **`A2A_AGENT` env var** added to the tmux session env at spawn, scoping the hook's sentinel path per agent.
+- **Per-agent claude settings injection** at spawn — Cubilot writes `~/Library/Application Support/Cubilot/settings/<agent>.json` with a `Stop` hook that `touch`es a sentinel file in `/tmp/cubilot/<agent>/signals/` after every claude turn. Same pattern as the existing `--mcp-config <path>` injection (no user-file mutation, scoped via env).
+- **`CUBILOT_AGENT` env var** added to the tmux session env at spawn, scoping the hook's sentinel path per agent.
 - **Slash-send refactor** — `slash-send.js`'s capture path replaced by a call to `pty_capture_turn`. The byte-stream-listener / quiescence-detector / headless-render / regex-slice pipeline goes away. Markdown wrap + chat post stay.
-- **Per-agent file layout** under `/tmp/a2a/<agent>/`:
+- **Per-agent file layout** under `/tmp/cubilot/<agent>/`:
   - `captures/turn-<epoch>.log` — pipe-pane output (cleanly captured at 240×100 width)
   - `captures/turn-<epoch>.partial.log` — flagged on capture failure for forensics
   - `signals/turn-<epoch>.done` — sentinel file written by claude's Stop hook
@@ -30,7 +30,7 @@ The architectural fix is to control all three layers of the contract — renderi
 
 ## Impact
 
-- **Tauri shell**: new `pty_capture_turn` Tauri command in `src-tauri/src/pty.rs`. New `--settings <path>` flag on the claude invocation in `claude_command()`. New `A2A_AGENT` env var on the tmux session at spawn. New `write_settings_for(agent)` helper that materializes the per-agent claude settings file with the `Stop` hook.
+- **Tauri shell**: new `pty_capture_turn` Tauri command in `src-tauri/src/pty.rs`. New `--settings <path>` flag on the claude invocation in `claude_command()`. New `CUBILOT_AGENT` env var on the tmux session at spawn. New `write_settings_for(agent)` helper that materializes the per-agent claude settings file with the `Stop` hook.
 - **Hub**: no changes — captures happen client-side via the Tauri command, results post to chat via the existing `addMessage` path.
 - **UI**: `ui/features/slash-send.js` simplified — removes `captureSlashResponse`, `captureViaHeadless`, `snapshotResponse`, `stripAnsi`, `stripAndSlice`, `sliceBetweenSlashAndPromptFrame`. Replaced with one Tauri call + ANSI-strip-with-CR-handling on the returned file content.
 - **macOS-specific dependencies**: BSD `date +%s` (whole-second epoch — GNU `%3N` is unsupported), BSD `stat -f %m` for sub-second mtime, `touch`, `mkdir -p`, `sh -c`. All ship with macOS by default. **Do not introduce GNU-userland-only date format strings.**

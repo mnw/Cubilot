@@ -1,6 +1,6 @@
 ## Context
 
-v0.7 shipped the terminal pane and the Activity-Ledger idea was implicit — handoff/interrupt cards rendered inline in the chat column, distinguishable only by border accents. Users reported scanning the chat stream to find "what needs my attention," which is the exact signal a typed-protocol system should make trivial. A mockup on the user's desktop (`~/Desktop/a2achannel-redesign.html`) proposes a three-column layout that separates typed coordination from prose and re-skins the app in warm dark neutrals with a typographic hierarchy.
+v0.7 shipped the terminal pane and the Activity-Ledger idea was implicit — handoff/interrupt cards rendered inline in the chat column, distinguishable only by border accents. Users reported scanning the chat stream to find "what needs my attention," which is the exact signal a typed-protocol system should make trivial. A mockup on the user's desktop proposes a three-column layout that separates typed coordination from prose and re-skins the app in warm dark neutrals with a typographic hierarchy.
 
 Constraints this design must respect:
 - **Vanilla HTML/CSS/JS UI.** No React/Vue/Svelte, no bundler. CLAUDE.md hard rule.
@@ -34,7 +34,7 @@ Constraints this design must respect:
 **What survives from the prototype:**
 - Compact-card styling (`.handoff-card.compact`) was removed.
 - No ledger containers, no `reconcileLedger`, no second-pass rendering — `main.js` renders each handoff/interrupt exactly once, in chat, as it always has.
-- The `+ agent` roster button lives; it dispatches a `CustomEvent('a2a:open-spawn')` that `terminal.js` handles.
+- The `+ agent` roster button lives; it dispatches a `CustomEvent('cubilot:open-spawn')` that `terminal.js` handles.
 
 ### 3. Palette + typography tokens as CSS custom properties
 

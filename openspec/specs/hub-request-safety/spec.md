@@ -23,7 +23,7 @@ The same token is valid whether presented by the webview or by any channel-mode 
 
 #### Scenario: Agent and human tokens are the same
 
-- **GIVEN** `A2A_TOKEN=abc`
+- **GIVEN** `CUBILOT_TOKEN=abc`
 - **WHEN** the webview POSTs `/upload` with `Bearer abc`
 - **AND** a channel-mode sidecar POSTs `/upload` with `Bearer abc`
 - **THEN** both requests succeed
@@ -51,7 +51,7 @@ The hub SHALL reject `POST /send`, `POST /post`, and `POST /remove` requests who
 
 ### Requirement: Upload rejects disallowed MIMEs and mismatched magic bytes
 
-`POST /upload` SHALL accept only the following `Content-Type` values: `image/png`, `image/jpeg`, `image/gif`, `image/webp`. `image/svg+xml` is no longer accepted. The hub SHALL read the first bytes of the uploaded payload and reject the upload with HTTP `400` if the bytes do not match the declared MIME. Payloads larger than `IMAGE_MAX_BYTES` (8 MiB) SHALL be rejected with `413`. On success, the hub SHALL persist the bytes to disk at `<A2A_IMAGES_DIR>/<id>.<ext>` and respond `{ url: "/image/<id>.<ext>", id: "<id>" }`, where `<ext>` is derived from the validated MIME.
+`POST /upload` SHALL accept only the following `Content-Type` values: `image/png`, `image/jpeg`, `image/gif`, `image/webp`. `image/svg+xml` is no longer accepted. The hub SHALL read the first bytes of the uploaded payload and reject the upload with HTTP `400` if the bytes do not match the declared MIME. Payloads larger than `IMAGE_MAX_BYTES` (8 MiB) SHALL be rejected with `413`. On success, the hub SHALL persist the bytes to disk at `<CUBILOT_IMAGES_DIR>/<id>.<ext>` and respond `{ url: "/image/<id>.<ext>", id: "<id>" }`, where `<ext>` is derived from the validated MIME.
 
 #### Scenario: SVG upload is rejected
 
@@ -68,7 +68,7 @@ The hub SHALL reject `POST /send`, `POST /post`, and `POST /remove` requests who
 
 - **WHEN** a client uploads a payload starting with `\x89PNG\r\n\x1a\n...` declared as `image/png`
 - **THEN** the hub responds `200` with `{ url: "/image/<id>.png", id: "<id>" }`
-- **AND** the file `<A2A_IMAGES_DIR>/<id>.png` contains the uploaded bytes
+- **AND** the file `<CUBILOT_IMAGES_DIR>/<id>.png` contains the uploaded bytes
 
 ### Requirement: Uploaded images are served with hardening headers
 

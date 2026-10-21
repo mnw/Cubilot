@@ -83,10 +83,10 @@ describe("agent stream and /remove", () => {
   let hub: HubHandle;
   const STALE_MS = 500;
   beforeAll(async () => {
-    const orig = process.env.A2A_STALE_AGENT_MS;
-    process.env.A2A_STALE_AGENT_MS = String(STALE_MS);       // the app's 15 s, shortened for the test
+    const orig = process.env.CUBILOT_STALE_AGENT_MS;
+    process.env.CUBILOT_STALE_AGENT_MS = String(STALE_MS);       // the app's 15 s, shortened for the test
     try { hub = await spawnHub(); } finally {
-      if (orig === undefined) delete process.env.A2A_STALE_AGENT_MS; else process.env.A2A_STALE_AGENT_MS = orig;
+      if (orig === undefined) delete process.env.CUBILOT_STALE_AGENT_MS; else process.env.CUBILOT_STALE_AGENT_MS = orig;
     }
   });
   afterAll(async () => { await hub.kill(); });

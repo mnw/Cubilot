@@ -21,7 +21,7 @@ export async function spawnHub(opts?: {
   token?: string;
   allowedExtensions?: string;
 }): Promise<HubHandle> {
-  const base = mkdtempSync(join(tmpdir(), "a2a-hub-test-"));
+  const base = mkdtempSync(join(tmpdir(), "cubilot-hub-test-"));
   const ledgerPath = join(base, "ledger.db");
   const attachmentsDir = join(base, "attachments");
   mkdirSync(attachmentsDir, { recursive: true });
@@ -34,12 +34,12 @@ export async function spawnHub(opts?: {
     env: {
       ...process.env,
       PORT: "0",
-      A2A_TOKEN: token,
-      A2A_LEDGER_DB: ledgerPath,
-      A2A_ATTACHMENTS_DIR: attachmentsDir,
-      A2A_HUMAN_NAME: humanName,
-      A2A_DEFAULT_ROOM: defaultRoom,
-      A2A_ALLOWED_EXTENSIONS: opts?.allowedExtensions ?? "jpg,jpeg,png,pdf,md,txt,json",
+      CUBILOT_TOKEN: token,
+      CUBILOT_LEDGER_DB: ledgerPath,
+      CUBILOT_ATTACHMENTS_DIR: attachmentsDir,
+      CUBILOT_HUMAN_NAME: humanName,
+      CUBILOT_DEFAULT_ROOM: defaultRoom,
+      CUBILOT_ALLOWED_EXTENSIONS: opts?.allowedExtensions ?? "jpg,jpeg,png,pdf,md,txt,json",
     },
     stdout: "pipe",
     stderr: "pipe",

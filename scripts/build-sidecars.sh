@@ -16,18 +16,18 @@ mkdir -p src-tauri/binaries
 # Drop any legacy per-role binaries from previous builds.
 rm -f src-tauri/binaries/hub-bin-* src-tauri/binaries/channel-bin-*
 
-echo "building unified a2a-bin..."
+echo "building unified cubilot-bin..."
 bun build ./hub/main.ts \
   --compile \
   --target=bun-darwin-arm64 \
-  --outfile "src-tauri/binaries/a2a-bin-${TRIPLE}"
+  --outfile "src-tauri/binaries/cubilot-bin-${TRIPLE}"
 
-chmod +x "src-tauri/binaries/a2a-bin-${TRIPLE}"
+chmod +x "src-tauri/binaries/cubilot-bin-${TRIPLE}"
 
 # Bun --compile leaves a stale signature from the Bun runtime that macOS
 # rejects (appended JS code invalidates the original sig). Strip + re-sign ad-hoc.
-codesign --remove-signature "src-tauri/binaries/a2a-bin-${TRIPLE}" 2>/dev/null || true
-codesign --force --sign - "src-tauri/binaries/a2a-bin-${TRIPLE}"
+codesign --remove-signature "src-tauri/binaries/cubilot-bin-${TRIPLE}" 2>/dev/null || true
+codesign --force --sign - "src-tauri/binaries/cubilot-bin-${TRIPLE}"
 
 # Pi runtime adapter. Not a compiled binary: pi loads it as a JS module via
 # `pi -e`, so it ships as a bundled single file under resources/. Bundling (vs

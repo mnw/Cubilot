@@ -115,7 +115,7 @@ there is no creation-side idempotency because `id` is server-minted.
 
 ## MCP tools
 
-All tools are exposed by the channel-mode `a2a-bin` sidecar. Every tool call
+All tools are exposed by the channel-mode `cubilot-bin` sidecar. Every tool call
 becomes an authenticated POST to the hub; the sidecar attaches
 `Authorization: Bearer <hub.token>` and retries once on HTTP 401 after
 re-reading the token file (to handle app-restart rotations transparently).
@@ -618,7 +618,7 @@ routing bug would show up as a surge, not silent context pollution.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/room-default` | Returns `{ room: <A2A_DEFAULT_ROOM> }`; read-auth. Used as fallback when an external-spawn channel-bin has no `CHATBRIDGE_ROOM`. |
+| GET | `/room-default` | Returns `{ room: <CUBILOT_DEFAULT_ROOM> }`; read-auth. Used as fallback when an external-spawn channel-bin has no `CHATBRIDGE_ROOM`. |
 
 ### Pause / Resume
 
@@ -665,7 +665,7 @@ replay. The briefing shape:
   "tools": ["post","post_file","send_handoff","accept_handoff",
             "decline_handoff","cancel_handoff","send_interrupt","ack_interrupt"],
   "peers": [{ "name": "alice", "online": true }, { "name": "human", "online": true }],
-  "attachments_dir": "/Users/<you>/a2a-attachments",
+  "attachments_dir": "/Users/<you>/cubilot-attachments",
   "human_name": "human",
   "nutshell": "...current nutshell text, or null...",
   "ts": "HH:MM:SS"

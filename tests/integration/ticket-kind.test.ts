@@ -14,7 +14,7 @@ import { createTicketKind } from "../../hub/kinds/ticket";
 import type { Entry, HubCapabilities, KindModule, Scope } from "../../hub/core/types";
 
 const HUMAN = "human";
-const ATT_DIR = mkdtempSync(join(tmpdir(), "a2a-ticket-att-"));
+const ATT_DIR = mkdtempSync(join(tmpdir(), "cubilot-ticket-att-"));
 const APPROVAL_TOOL = "ticket:done";
 
 type Env = ReturnType<typeof makeEnv>;

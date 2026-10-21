@@ -5,7 +5,7 @@
 `pty_capture_turn` in `src-tauri/src/pty.rs` SHALL be implemented around a `CaptureTransaction` struct. The struct holds owned state for the three capture-related concerns:
 - Geometry (`tmux set-option window-size manual` + `resize-window 240×100`) — restored on Drop
 - Pipe-pane (`tmux pipe-pane -o`) — disabled on Drop
-- Sentinel-watch (`/tmp/a2a/<agent>/signals/`) — observation cleaned up on Drop
+- Sentinel-watch (`/tmp/cubilot/<agent>/signals/`) — observation cleaned up on Drop
 
 `Drop` SHALL run unconditionally on every exit path: success, timeout, error, panic. Cleanup arms MUST execute in declared order; a panic in one arm MUST NOT prevent subsequent arms from running.
 
@@ -22,7 +22,7 @@
 - **GIVEN** the sentinel does not appear within `timeout_ms`
 - **WHEN** `pty_capture_turn` returns with a partial-log path
 - **THEN** all three cleanup arms have executed
-- **AND** the partial-log file is retained at `/tmp/a2a/<agent>/captures/turn-<epoch>.partial.log`
+- **AND** the partial-log file is retained at `/tmp/cubilot/<agent>/captures/turn-<epoch>.partial.log`
 
 #### Scenario: Cleanup runs on panic
 

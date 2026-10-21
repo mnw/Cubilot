@@ -427,10 +427,10 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
 <!-- 6 BUILD ORDER -->
 <section class="sec" aria-labelledby="h-seq">
   <h2 id="h-seq"><span class="num">06</span>Build order</h2>
-  <p class="intro">The migration comes first, then the rebrand, so Cubilot runs beside A2AChannel without touching it. Parts 1 to 5 give a working factory with fresh sessions and safe delivery; Parts 6 to 10 add review format, toolchain, setup and the two councils; 11 to 13 improve it.</p>
+  <p class="intro">The migration comes first, then the rebrand, so Cubilot runs beside the previous app without touching it. Parts 1 to 5 give a working factory with fresh sessions and safe delivery; Parts 6 to 10 add review format, toolchain, setup and the two councils; 11 to 13 improve it.</p>
   <div class="seq">
     <div class="n planned first"><span class="step">Step 0</span><span class="t">Migrate to new repo</span><span class="d">mnw/Cubilot, fresh history, build but do not launch</span></div>
-    <div class="n planned"><span class="step">1</span><span class="t">Rebrand to Cubilot</span><span class="d">own identifier and data folder, side by side with A2AChannel</span><span class="ref">§1</span></div>
+    <div class="n planned"><span class="step">1</span><span class="t">Rebrand to Cubilot</span><span class="d">own identifier and data folder, side by side with the previous app</span><span class="ref">§1</span></div>
     <div class="n planned"><span class="step">2</span><span class="t">Roles</span><span class="d">launch script first, then role launch in the app, no sub-agents</span><span class="ref">§2</span></div>
     <div class="n planned"><span class="step">3</span><span class="t">Ticket grouping</span><span class="d">request_id, blocked_by, draft status</span><span class="ref">§3</span></div>
     <div class="n planned"><span class="step">4</span><span class="t">Session per ticket stage</span><span class="d">ticket runner first, then in the hub; spec review, context pack</span><span class="ref">§4</span></div>
@@ -447,7 +447,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
 </section>
 
 <footer>
-  <span>Sources: <code>factory/README.md</code>, <code>factory/brief/</code> (index + 13 part files; §N = <code>brief/NN-*.md</code>), <code>factory/MIGRATION-BRIEF.md</code>, and the code imported from A2AChannel (branch claude_mods, commit 2133157, see <code>MIGRATION.md</code>).</span>
+  <span>Sources: <code>factory/README.md</code>, <code>factory/brief/</code> (index + 13 part files; §N = <code>brief/NN-*.md</code>), <code>factory/MIGRATION-BRIEF.md</code>, and the code imported from the previous app (branch claude_mods, commit 2133157, see <code>MIGRATION.md</code>).</span>
   <span>Model names are defaults. Check the OpenAI model with <code>pi --list-models</code> before release.</span>
 </footer>
 

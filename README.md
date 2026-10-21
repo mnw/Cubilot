@@ -4,7 +4,7 @@
 
 Cubilot is a macOS desktop app. It runs a team of coding agents (Claude Code and OpenAI through Pi) in visible terminal sessions, connected through a local hub. The agents work from tickets. Other agents check the work. You approve the plans and the risky changes.
 
-> **Status.** Cubilot is the successor of A2AChannel and is in active development. The core (rooms, agents, tickets, handoffs, the ledger) runs today. The factory roles are defined in [`factory/`](factory/). The rest is planned in the [implementation brief](factory/brief/00-index.md).
+> **Status.** Cubilot is in active development. The core (rooms, agents, tickets, handoffs, the ledger) runs today. The factory roles are defined in [`factory/`](factory/). The rest is planned in the [implementation brief](factory/brief/00-index.md).
 >
 > Status labels in this file: **built** (runs in code), **defined** (in `factory/`), **planned** (in the brief), **idea** (saved, not planned).
 
@@ -115,7 +115,7 @@ The two members do not see each other's findings.
 | Step | Part | What |
 |---|---|---|
 | 0 | Migration | New repo `mnw/Cubilot`, fresh history (**done**) |
-| 1 | Rebrand | Own identifier and data folder, side by side with A2AChannel |
+| 1 | Rebrand | Own identifier and data folder, side by side with the previous app |
 | 2 | Roles | Launch script first, then role launch in the app |
 | 3 | Ticket grouping | Requests, `blocked_by`, `draft` status |
 | 4 | Sessions | One session per ticket stage, spec review, context pack |

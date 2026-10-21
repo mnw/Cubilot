@@ -16,7 +16,7 @@
     {
       "identifier": "shell:allow-execute",
       "allow": [
-        { "name": "binaries/a2a-bin", "sidecar": true }
+        { "name": "binaries/cubilot-bin", "sidecar": true }
       ]
     }
   ]

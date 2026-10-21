@@ -1,4 +1,4 @@
-// Summariser dispatcher — picks the adapter named by `A2A_SUMMARISER`.
+// Summariser dispatcher — picks the adapter named by `CUBILOT_SUMMARISER`.
 // v1 ships only the claude adapter; llama-cpp + ollama land in subsequent
 // commits without changing this file's interface.
 
@@ -67,28 +67,28 @@ export function createSummariser(cfg: SummariserConfig): Summariser | null {
 }
 
 export function readSummariserConfigFromEnv(): SummariserConfig {
-  const raw = (process.env.A2A_SUMMARISER ?? "disabled").trim().toLowerCase();
+  const raw = (process.env.CUBILOT_SUMMARISER ?? "disabled").trim().toLowerCase();
   const adapter: SummariserAdapterName =
     raw === "claude" || raw === "llama-cpp" || raw === "ollama" || raw === "disabled"
       ? raw
       : "disabled";
   const cfg: SummariserConfig = { adapter };
 
-  const claudeBin = process.env.A2A_SUMMARISER_CLAUDE_BIN;
+  const claudeBin = process.env.CUBILOT_SUMMARISER_CLAUDE_BIN;
   if (claudeBin) cfg.claudeBinPath = claudeBin;
-  const claudeT = process.env.A2A_SUMMARISER_CLAUDE_TIMEOUT_MS;
+  const claudeT = process.env.CUBILOT_SUMMARISER_CLAUDE_TIMEOUT_MS;
   if (claudeT) {
     const n = Number(claudeT);
     if (Number.isFinite(n) && n > 0) cfg.claudeTimeoutMs = n;
   }
-  const claudeModel = process.env.A2A_SUMMARISER_CLAUDE_MODEL;
+  const claudeModel = process.env.CUBILOT_SUMMARISER_CLAUDE_MODEL;
   if (claudeModel) cfg.claudeModel = claudeModel;
 
-  const ollamaUrl = process.env.A2A_SUMMARISER_OLLAMA_URL;
+  const ollamaUrl = process.env.CUBILOT_SUMMARISER_OLLAMA_URL;
   if (ollamaUrl) cfg.ollamaBaseUrl = ollamaUrl;
-  const ollamaModel = process.env.A2A_SUMMARISER_OLLAMA_MODEL;
+  const ollamaModel = process.env.CUBILOT_SUMMARISER_OLLAMA_MODEL;
   if (ollamaModel) cfg.ollamaModel = ollamaModel;
-  const ollamaT = process.env.A2A_SUMMARISER_OLLAMA_TIMEOUT_MS;
+  const ollamaT = process.env.CUBILOT_SUMMARISER_OLLAMA_TIMEOUT_MS;
   if (ollamaT) {
     const n = Number(ollamaT);
     if (Number.isFinite(n) && n > 0) cfg.ollamaTimeoutMs = n;

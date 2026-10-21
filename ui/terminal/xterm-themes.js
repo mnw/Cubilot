@@ -54,6 +54,6 @@
     return user ? `${user}, ${TERM_BASELINE}` : TERM_BASELINE;
   }
 
-  window.__A2A_TERM__ = window.__A2A_TERM__ || {};
-  window.__A2A_TERM__.xtermThemes = { current, fontSize, fontFamily };
+  window.__CUBILOT_TERM__ = window.__CUBILOT_TERM__ || {};
+  window.__CUBILOT_TERM__.xtermThemes = { current, fontSize, fontFamily };
 })();

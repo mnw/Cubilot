@@ -17,7 +17,7 @@ _(Note: v0.8 already shipped schema v5; bumping to v6 instead of v4 as the origi
 - [x] 2.1 `Agent` type now includes `room: string | null`.
 - [x] 2.2 `ensureAgent(name, room)` persists room on first registration, ignores on reconnect.
 - [x] 2.3 Human registers at startup with `room = null` (super-user in every room).
-- [x] 2.4 `A2A_DEFAULT_ROOM` env (default `"default"`) read at hub startup.
+- [x] 2.4 `CUBILOT_DEFAULT_ROOM` env (default `"default"`) read at hub startup.
 - [x] 2.5 `GET /room-default` (read-auth) returns `{ room }`.
 - [x] 2.6 `/agent-stream?agent=X&room=Y` optional room param; recorded via `ensureAgent`.
 - [x] 2.7 **Added:** `validRoomLabel()` + `resolveRoom()` helpers for input sanitization.

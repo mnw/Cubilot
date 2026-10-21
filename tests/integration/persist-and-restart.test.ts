@@ -20,13 +20,13 @@ async function putJson(
 }
 
 async function spawnWithTranscripts(transcriptsDir: string): Promise<HubHandle> {
-  const orig = process.env.A2A_TRANSCRIPTS_DIR;
-  process.env.A2A_TRANSCRIPTS_DIR = transcriptsDir;
+  const orig = process.env.CUBILOT_TRANSCRIPTS_DIR;
+  process.env.CUBILOT_TRANSCRIPTS_DIR = transcriptsDir;
   try {
     return await spawnHub();
   } finally {
-    if (orig === undefined) delete process.env.A2A_TRANSCRIPTS_DIR;
-    else process.env.A2A_TRANSCRIPTS_DIR = orig;
+    if (orig === undefined) delete process.env.CUBILOT_TRANSCRIPTS_DIR;
+    else process.env.CUBILOT_TRANSCRIPTS_DIR = orig;
   }
 }
 
@@ -35,7 +35,7 @@ describe("room transcript persistence", () => {
   let hub: HubHandle;
 
   beforeAll(async () => {
-    const base = mkdtempSync(join(tmpdir(), "a2a-transcript-test-"));
+    const base = mkdtempSync(join(tmpdir(), "cubilot-transcript-test-"));
     transcriptsDir = join(base, "transcripts");
     mkdirSync(transcriptsDir, { recursive: true });
     hub = await spawnWithTranscripts(transcriptsDir);
@@ -110,7 +110,7 @@ describe("room transcript persistence", () => {
 
 describe("room transcript persistence: hub restart hydration", () => {
   test("entries replay through /stream after hub restart", async () => {
-    const base = mkdtempSync(join(tmpdir(), "a2a-hydrate-test-"));
+    const base = mkdtempSync(join(tmpdir(), "cubilot-hydrate-test-"));
     const transcriptsDir = join(base, "transcripts");
     mkdirSync(transcriptsDir, { recursive: true });
 
@@ -125,13 +125,13 @@ describe("room transcript persistence: hub restart hydration", () => {
         env: {
           ...process.env,
           PORT: "0",
-          A2A_TOKEN: token,
-          A2A_LEDGER_DB: ledgerPath,
-          A2A_ATTACHMENTS_DIR: attachmentsDir,
-          A2A_HUMAN_NAME: "human",
-          A2A_DEFAULT_ROOM: "default",
-          A2A_TRANSCRIPTS_DIR: transcriptsDir,
-          A2A_ALLOWED_EXTENSIONS: "jpg,jpeg,png,pdf,md,txt,json",
+          CUBILOT_TOKEN: token,
+          CUBILOT_LEDGER_DB: ledgerPath,
+          CUBILOT_ATTACHMENTS_DIR: attachmentsDir,
+          CUBILOT_HUMAN_NAME: "human",
+          CUBILOT_DEFAULT_ROOM: "default",
+          CUBILOT_TRANSCRIPTS_DIR: transcriptsDir,
+          CUBILOT_ALLOWED_EXTENSIONS: "jpg,jpeg,png,pdf,md,txt,json",
         },
         stdout: "pipe",
         stderr: "pipe",

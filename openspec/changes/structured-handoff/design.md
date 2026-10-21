@@ -121,7 +121,7 @@ The human participates in the protocol as another named agent. Default name `hum
 ```
 
 The hub:
-- Reads `A2A_HUMAN_NAME` env (set by Rust shell from config, default `"human"`).
+- Reads `CUBILOT_HUMAN_NAME` env (set by Rust shell from config, default `"human"`).
 - At startup, does `ensureAgent(humanName)` and marks that agent **permanent** (stale cleanup skips it).
 - Treats that name identically to any other agent in every query, validation, and broadcast path.
 
@@ -265,7 +265,7 @@ Mode `0600` applied after create; WAL sidecars get the same mode if they exist a
 
 1. User installs the new version.
 2. On first launch: `hub-bin` opens `ledger.db`, runs initial migration (create tables, set `schema_version=1`). Nothing to migrate in.
-3. Rust shell reads `human_name` from `config.json` (or uses `"human"` default); passes it to `hub-bin` via `A2A_HUMAN_NAME`. Hub registers the human in the roster as a permanent member.
+3. Rust shell reads `human_name` from `config.json` (or uses `"human"` default); passes it to `hub-bin` via `CUBILOT_HUMAN_NAME`. Hub registers the human in the roster as a permanent member.
 4. Existing agents' chat stays unchanged. They can start calling the new tools whenever their operator decides.
 5. UI bootstrap fetches `get_human_name` alongside `get_hub_url`; uses it for identity in ack/decline/cancel requests and in the legend.
 

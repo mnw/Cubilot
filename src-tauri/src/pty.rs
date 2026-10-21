@@ -143,86 +143,16 @@ fn mcp_configs_dir() -> PathBuf {
     app_data_dir().join("mcp-configs")
 }
 
-// Per-agent MCP configs written by builds that ran the chatbridge as an MCP server
-// (`A2A_MODE=channel`). Housekeeping, so it never fails a spawn: every error is logged and the
-// entry skipped. `remove` is a parameter so a test can make removal fail.
-fn remove_legacy_mcp_configs(dir: &std::path::Path, remove: &dyn Fn(&std::path::Path) -> std::io::Result<()>) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
-        Err(e) => {
-            eprintln!("[mcp] legacy cleanup: cannot read {}: {e}", dir.display());
-            return;
-        }
-    };
-    for entry in entries {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(e) => {
-                eprintln!("[mcp] legacy cleanup: bad entry in {}: {e}", dir.display());
-                continue;
-            }
-        };
-        let path = entry.path();
-        let is_file = match entry.file_type() {
-            Ok(t) => t.is_file(),
-            Err(e) => {
-                eprintln!("[mcp] legacy cleanup: cannot inspect {}: {e}", path.display());
-                continue;
-            }
-        };
-        let name = entry.file_name();
-        let is_legacy = name != "global.json"
-            && name.to_string_lossy().ends_with(".json")
-            && is_file
-            && match std::fs::read_to_string(&path) {
-                Ok(text) => serde_json::from_str::<serde_json::Value>(&text)
-                    .ok()
-                    .is_some_and(|config| {
-                        let Some(servers) = config.get("mcpServers").and_then(|v| v.as_object()) else {
-                            return false;
-                        };
-                        servers.len() == 1
-                            && servers
-                                .get(RESERVED_MCP_SERVER)
-                                .and_then(|server| server.get("env"))
-                                .and_then(|env| env.get("A2A_MODE"))
-                                .and_then(|mode| mode.as_str())
-                                == Some("channel")
-                    }),
-                Err(e) => {
-                    eprintln!("[mcp] legacy cleanup: cannot read {}: {e}", path.display());
-                    false
-                }
-            };
-        if is_legacy {
-            if let Err(e) = remove(&path) {
-                eprintln!("[mcp] could not remove legacy MCP config {}: {e}", path.display());
-            }
-        }
-    }
-}
-
 // Global MCP servers for claude agents, as a standalone --mcp-config file. Atomic (tmpfile +
 // rename) because concurrent spawns rewrite it. `prompts` is Cubilot's own slash-picker key,
-// not part of the MCP schema, so it is stripped. Empty map: no file, no flag. Only writing
-// global.json can fail the call; the legacy cleanup cannot.
+// not part of the MCP schema, so it is stripped. Empty map: no file, no flag.
 fn write_global_mcp_config(
     dir: &std::path::Path,
-    servers: serde_json::Map<String, serde_json::Value>,
-) -> Result<Option<PathBuf>, String> {
-    write_global_mcp_config_with(dir, servers, &|p| std::fs::remove_file(p))
-}
-
-fn write_global_mcp_config_with(
-    dir: &std::path::Path,
     mut servers: serde_json::Map<String, serde_json::Value>,
-    remove: &dyn Fn(&std::path::Path) -> std::io::Result<()>,
 ) -> Result<Option<PathBuf>, String> {
     use std::io::Write as _;
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     let path = dir.join("global.json");
-    remove_legacy_mcp_configs(dir, remove);
     if servers.is_empty() {
         let _ = std::fs::remove_file(&path);
         return Ok(None);
@@ -320,7 +250,7 @@ fn agent_command(
 /// name present there still beats both; `--skill` is additive, never exclusive.
 /// Which harness a live session is running, read back from tmux rather than kept in
 /// memory: sessions outlive the app. `pty_spawn` records it as the session option
-/// `@a2a_harness`; that is authoritative. Sessions from older builds have no option, so
+/// `@cubilot_harness`; that is authoritative. Sessions from older builds have no option, so
 /// they fall back to inspecting the start command, and there only the executable counts
 /// (never substrings, which agent names and room labels can contain).
 fn harness_from_option(value: &str) -> Option<Harness> {
@@ -431,7 +361,7 @@ pub fn pane_harness(agent: &str) -> Harness {
     if !valid_agent_name(agent) {
         return Harness::Claude;
     }
-    if let Some(h) = tmux_run(&["show-options", "-v", "-t", &tmux_pane(agent), "@a2a_harness"])
+    if let Some(h) = tmux_run(&["show-options", "-v", "-t", &tmux_pane(agent), "@cubilot_harness"])
         .ok()
         .and_then(|v| harness_from_option(&v))
     {
@@ -1041,8 +971,8 @@ pub async fn pty_spawn(
         let argv_refs: Vec<&str> = argv.iter().map(String::as_str).collect();
         tmux_run(&argv_refs)?;
         // Authoritative harness record; pane_harness falls back to the command only without it.
-        if let Err(e) = tmux_run(&["set-option", "-t", &tmux_pane(&agent), "@a2a_harness", harness.as_str()]) {
-            eprintln!("[pty] pty_spawn/@a2a_harness (falls back to command inspection): {e}");
+        if let Err(e) = tmux_run(&["set-option", "-t", &tmux_pane(&agent), "@cubilot_harness", harness.as_str()]) {
+            eprintln!("[pty] pty_spawn/@cubilot_harness (falls back to command inspection): {e}");
         }
         if let Err(e) = tmux_run(&["set-option", "-t", &tmux_pane(&agent), "status", "off"]) {
             eprintln!("[pty] pty_spawn/status-off (best-effort): {e}");
@@ -1133,7 +1063,7 @@ pub fn pty_spawn_shell(
     let shell_cmd = format!("'{}' -il", user_shell.replace('\'', r"'\''"));
 
     // .zshrc checks $CUBILOT_SHELL to scope Cubilot-only theming.
-    let a2a_marker_env = "CUBILOT_SHELL=1";
+    let cubilot_marker_env = "CUBILOT_SHELL=1";
 
     let existed_shell = ensure_session_configured(name, &lang)?;
     if existed_shell {
@@ -1147,7 +1077,7 @@ pub fn pty_spawn_shell(
             "-e", "COLORTERM=truecolor",
             "-e", &lang_env,
             "-e", &lc_all_env,
-            "-e", a2a_marker_env,
+            "-e", cubilot_marker_env,
             "-x", "80",
             "-y", "24",
             "-c", &home,
@@ -1314,7 +1244,7 @@ pub struct CaptureResult {
 }
 
 fn captures_dir(agent: &str) -> PathBuf {
-    PathBuf::from("/tmp/a2a").join(agent).join("captures")
+    PathBuf::from("/tmp/cubilot").join(agent).join("captures")
 }
 
 fn epoch_ms() -> u64 {
@@ -1530,12 +1460,12 @@ pub fn pty_tap_read(agent: String, duration_ms: Option<u32>) -> Result<String, S
     Ok(tmux_run(&["capture-pane", "-p", "-t", &tmux_pane(&agent)]).unwrap_or_default())
 }
 
-// /tmp/a2a/ path-prefix guard prevents arbitrary file read via JS misuse.
+// /tmp/cubilot/ path-prefix guard prevents arbitrary file read via JS misuse.
 #[tauri::command]
 pub fn pty_read_capture(log_path: String, max_bytes: Option<u32>) -> Result<String, String> {
     let cap = max_bytes.map(|n| n as usize).unwrap_or(CAPTURE_READ_MAX_BYTES);
     let path = std::path::Path::new(&log_path);
-    if !path.starts_with("/tmp/a2a/") {
+    if !path.starts_with("/tmp/cubilot/") {
         return Err(format!("path outside capture dir: {log_path}"));
     }
     let bytes = std::fs::read(path).map_err(|e| format!("read {log_path}: {e}"))?;
@@ -1594,7 +1524,7 @@ mod capture_tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("a2a-prune-test-{}-{}", epoch_ms(), n));
+        let dir = std::env::temp_dir().join(format!("cubilot-prune-test-{}-{}", epoch_ms(), n));
         std::fs::create_dir_all(&dir).unwrap();
         for i in 0..5 {
             let p = dir.join(format!("turn-{i}.log"));
@@ -1610,7 +1540,7 @@ mod capture_tests {
 
     #[test]
     fn prune_ignores_partial_files() {
-        let dir = std::env::temp_dir().join(format!("a2a-prune-partial-{}", epoch_ms()));
+        let dir = std::env::temp_dir().join(format!("cubilot-prune-partial-{}", epoch_ms()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("turn-1.log"), b"x").unwrap();
         std::fs::write(dir.join("turn-2.partial.log"), b"x").unwrap();
@@ -1823,7 +1753,7 @@ mod spawn_argv_tests {
         build_spawn_argv, check_claude_version, claude_command_using, claude_resource_flags,
         command_executable, ensure_claude_version, format_claude_command, parse_claude_version,
         read_claude_version, read_claude_version_with_timeout, harness_from_command, harness_from_option,
-        parse_global_mcp_servers, write_global_mcp_config, write_global_mcp_config_with, Harness,
+        parse_global_mcp_servers, write_global_mcp_config, Harness,
     };
 
     #[test]
@@ -1922,25 +1852,13 @@ mod spawn_argv_tests {
     }
 
     #[test]
-    fn global_mcp_file_is_filtered_private_atomic_and_removes_legacy_configs() {
+    fn global_mcp_file_is_filtered_private_and_atomic() {
         use std::os::unix::fs::PermissionsExt;
         let raw = r#"{"_comment":"x","mcpServers":{"chatbridge":{"command":"evil"},"context7":{"command":"c7","prompts":["p"]},"serena":{"command":"s"}}}"#;
         let servers = parse_global_mcp_servers(raw, "test");
-        let root = std::env::temp_dir().join(format!("a2a-gmcp-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("cubilot-gmcp-{}", std::process::id()));
         let dir = root.join("mcp-configs");
-        let outside = root.join("outside.json");
         let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&dir).unwrap();
-        let legacy = r#"{"mcpServers":{"chatbridge":{"env":{"A2A_MODE":"channel"}}}}"#;
-        let other_mode = r#"{"mcpServers":{"chatbridge":{"env":{"A2A_MODE":"hub"}}}}"#;
-        let unrelated = r#"{"mcpServers":{"context7":{"command":"c7"}}}"#;
-        let mixed = r#"{"mcpServers":{"chatbridge":{"env":{"A2A_MODE":"channel"}},"context7":{"command":"c7"}}}"#;
-        std::fs::write(dir.join("alice.json"), legacy).unwrap();
-        std::fs::write(dir.join("mixed.json"), mixed).unwrap();
-        std::fs::write(dir.join("bob.json"), other_mode).unwrap();
-        std::fs::write(dir.join("keep.json"), unrelated).unwrap();
-        std::fs::write(dir.join("notes.txt"), "keep").unwrap();
-        std::fs::write(&outside, "keep").unwrap();
         let path = write_global_mcp_config(&dir, servers).unwrap().expect("file written");
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.contains("chatbridge"), "{text}");
@@ -1950,12 +1868,6 @@ mod spawn_argv_tests {
         let names: Vec<_> = v["mcpServers"].as_object().unwrap().keys().cloned().collect();
         assert_eq!(names, vec!["context7", "serena"]);
         assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
-        assert!(!dir.join("alice.json").exists());
-        assert!(dir.join("mixed.json").exists(), "mixed MCP config must be preserved");
-        assert!(dir.join("bob.json").exists());
-        assert!(dir.join("keep.json").exists());
-        assert!(dir.join("notes.txt").exists());
-        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep");
         let leftovers = std::fs::read_dir(&dir).unwrap()
             .filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().contains(".tmp-")).count();
         assert_eq!(leftovers, 0);
@@ -1969,49 +1881,18 @@ mod spawn_argv_tests {
     }
 
     #[test]
-    fn legacy_cleanup_failures_are_logged_and_never_fail_the_write() {
-        use std::cell::RefCell;
-        let root = std::env::temp_dir().join(format!("a2a-gmcp-fail-{}", std::process::id()));
-        let dir = root.join("mcp-configs");
+    fn global_mcp_write_fails_only_when_the_dir_cannot_be_created() {
+        let root = std::env::temp_dir().join(format!("cubilot-gmcp-fail-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&dir).unwrap();
-        let legacy = r#"{"mcpServers":{"chatbridge":{"env":{"A2A_MODE":"channel"}}}}"#;
-        for name in ["alice.json", "bob.json", "carol.json"] {
-            std::fs::write(dir.join(name), legacy).unwrap();
-        }
+        std::fs::create_dir_all(&root).unwrap();
         let servers = || parse_global_mcp_servers(r#"{"mcpServers":{"context7":{"command":"c7"}}}"#, "test");
-
-        // One file cannot be removed: the others still go, and global.json is still written.
-        let tried = RefCell::new(Vec::<String>::new());
-        let flaky = |p: &std::path::Path| {
-            let name = p.file_name().unwrap().to_string_lossy().into_owned();
-            tried.borrow_mut().push(name.clone());
-            if name == "alice.json" {
-                Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "locked"))
-            } else {
-                std::fs::remove_file(p)
-            }
-        };
-        let path = write_global_mcp_config_with(&dir, servers(), &flaky).unwrap().expect("global.json is written");
-        assert!(path.exists());
-        assert!(dir.join("alice.json").exists(), "the file that could not be removed stays");
-        assert!(!dir.join("bob.json").exists() && !dir.join("carol.json").exists());
-        assert_eq!(tried.borrow().len(), 3, "every legacy file was tried");
-
-        // Nothing can be removed at all: still Ok, and still writes.
-        let never = |_: &std::path::Path| Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "locked"));
-        assert!(write_global_mcp_config_with(&dir, servers(), &never).unwrap().is_some());
-
-        // Nothing to write: a failed cleanup is still not an error.
-        assert!(write_global_mcp_config_with(&dir, Default::default(), &never).unwrap().is_none());
-
-        // The directory cannot even be listed (it is a file): the cleanup is skipped. Only the
-        // write of global.json fails, and it says so.
+        // The directory is a file: the write of global.json fails, and it says so.
         let not_a_dir = root.join("file-not-dir");
         std::fs::write(&not_a_dir, "x").unwrap();
-        let err = write_global_mcp_config_with(&not_a_dir, servers(), &never).unwrap_err();
+        let err = write_global_mcp_config(&not_a_dir, servers()).unwrap_err();
         assert!(err.contains("create") && err.contains("file-not-dir"), "{err}");
-        assert!(write_global_mcp_config_with(&not_a_dir, Default::default(), &never).unwrap().is_none());
+        // Nothing to write: no error.
+        assert!(write_global_mcp_config(&not_a_dir, Default::default()).unwrap().is_none());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -2046,7 +1927,7 @@ mod spawn_argv_tests {
     #[test]
     fn harness_fallback_detects_real_tmux_quoted_pi_command() {
         // Captured from bundled tmux 3.5a: list-panes -F "#{pane_start_command}".
-        let tmux_output = "\"CHATBRIDGE_AGENT='a' CHATBRIDGE_ROOM='r' '/tmp/a2a-r1.Yv1ksV/pi' --no-approve -e '/ext.js'\"\n";
+        let tmux_output = "\"CHATBRIDGE_AGENT='a' CHATBRIDGE_ROOM='r' '/tmp/cubilot-r1.Yv1ksV/pi' --no-approve -e '/ext.js'\"\n";
         assert_eq!(harness_from_command(tmux_output), Harness::Pi);
     }
 
@@ -2090,7 +1971,7 @@ mod spawn_argv_tests {
     fn claude_version_errors_include_path_and_output() {
         use std::os::unix::fs::PermissionsExt;
         use std::time::Duration;
-        let dir = std::env::temp_dir().join(format!("a2a-claude-ver-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cubilot-claude-ver-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let fake = |name: &str, body: &str| {
@@ -2148,7 +2029,7 @@ mod spawn_argv_tests {
     fn claude_resource_flags_only_emits_paths_that_exist() {
         // A blank project has no .claude/ at all — pi must not be handed paths
         // that aren't there, or it emits a diagnostic on every launch.
-        let empty = std::env::temp_dir().join("a2a-res-flags-empty");
+        let empty = std::env::temp_dir().join("cubilot-res-flags-empty");
         std::fs::create_dir_all(&empty).unwrap();
         let flags = claude_resource_flags(empty.to_str().unwrap());
         assert!(
@@ -2157,7 +2038,7 @@ mod spawn_argv_tests {
         );
 
         // With .claude/skills present, it is passed as --skill.
-        let proj = std::env::temp_dir().join("a2a-res-flags-proj");
+        let proj = std::env::temp_dir().join("cubilot-res-flags-proj");
         std::fs::create_dir_all(proj.join(".claude/skills")).unwrap();
         let flags = claude_resource_flags(proj.to_str().unwrap());
         assert!(
@@ -2165,7 +2046,7 @@ mod spawn_argv_tests {
             "project skills dir not picked up: {flags}"
         );
         assert!(
-            !flags.contains("--prompt-template ") || !flags.contains("a2a-res-flags-proj/.claude/commands"),
+            !flags.contains("--prompt-template ") || !flags.contains("cubilot-res-flags-proj/.claude/commands"),
             "emitted a commands dir that does not exist: {flags}"
         );
 

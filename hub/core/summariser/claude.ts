@@ -69,7 +69,7 @@ export function createClaudeSummariser(opts: ClaudeSummariserOptions = {}): Summ
       : FALLBACK_PATHS.join(", ");
     throw new SummariserUnavailableError(
       `claude binary not found (probed: ${probed}). ` +
-        `Install Claude Code from https://claude.com/claude-code or set A2A_SUMMARISER_CLAUDE_BIN to the binary path.`,
+        `Install Claude Code from https://claude.com/claude-code or set CUBILOT_SUMMARISER_CLAUDE_BIN to the binary path.`,
     );
   }
   // Re-bind to a non-null const so TypeScript's flow analysis can narrow the

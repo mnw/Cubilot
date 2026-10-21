@@ -30,12 +30,12 @@ Trust-on-self-assertion applies to the `by` field on the verdict route: validate
 
 ### Requirement: `claude/channel/permission` capability requires hub bearer-token auth
 
-chatbridge SHALL NOT declare the `claude/channel/permission` capability if the hub's bearer-token auth on mutating routes is disabled. This is a deploy-time invariant, not a runtime check — the hub's `A2A_TOKEN` env is always set by the Rust shell in the shipping configuration, so the capability is safe to declare unconditionally. A future deployment mode that disables auth would need to remove the capability declaration in tandem.
+chatbridge SHALL NOT declare the `claude/channel/permission` capability if the hub's bearer-token auth on mutating routes is disabled. This is a deploy-time invariant, not a runtime check — the hub's `CUBILOT_TOKEN` env is always set by the Rust shell in the shipping configuration, so the capability is safe to declare unconditionally. A future deployment mode that disables auth would need to remove the capability declaration in tandem.
 
 This requirement is documented as a hard rule in `CLAUDE.md` so a future refactor that relaxes auth does not accidentally expose the permission-relay path to unauthenticated callers.
 
 #### Scenario: Capability is safe in the shipping config
 
 - **GIVEN** Cubilot running under its default configuration
-- **THEN** `A2A_TOKEN` is set, all mutating routes enforce bearer auth
+- **THEN** `CUBILOT_TOKEN` is set, all mutating routes enforce bearer auth
 - **AND** chatbridge's capability declaration is safe — no unauthenticated path to verdict submission exists

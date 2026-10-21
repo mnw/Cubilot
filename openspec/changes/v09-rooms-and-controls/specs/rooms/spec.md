@@ -19,7 +19,7 @@ The ledger `agents` table SHALL gain a `room TEXT` column (NOT NULL except for t
 
 - **GIVEN** channel-bin has `CHATBRIDGE_AGENT=legacy` and no `CHATBRIDGE_ROOM`
 - **WHEN** it connects to `/agent-stream?agent=legacy`
-- **THEN** the hub reads `A2A_DEFAULT_ROOM` env (default `"default"`)
+- **THEN** the hub reads `CUBILOT_DEFAULT_ROOM` env (default `"default"`)
 - **AND** the agent is registered with that room
 
 #### Scenario: Human is in every room

@@ -39,7 +39,7 @@ This is also the feature that makes Cubilot meaningfully different from an MCP m
 ## Impact
 
 - **Code**:
-  - `src-tauri/src/lib.rs` — resolve ledger DB path, resolve human name from config, pass both to sidecar via `A2A_LEDGER_DB` and `A2A_HUMAN_NAME` env, expose `get_human_name` Tauri command.
+  - `src-tauri/src/lib.rs` — resolve ledger DB path, resolve human name from config, pass both to sidecar via `CUBILOT_LEDGER_DB` and `CUBILOT_HUMAN_NAME` env, expose `get_human_name` Tauri command.
   - `hub/hub.ts` — open `bun:sqlite` database, migrate schema, register the human identity in the roster at startup (never stale-cleaned), add `/handoffs` routes, add 5-second expiry sweep, extend `handleAgentStream` to push replay on connect, add new SSE event kinds with `version` field, extend `requireJsonBody` call sites to parameterize the cap.
   - `hub/channel.ts` — add four MCP tools (`send_handoff`, `accept_handoff`, `decline_handoff`, `cancel_handoff`), parse structured channel notifications, forward to the model via `notifications/claude/channel` preserving `kind`, `handoff_id`, `version`, and other attributes as channel `meta`.
   - `ui/index.html` — read human name from `get_human_name` Tauri command at bootstrap; use it as the UI's identity in Accept/Decline/Cancel requests; add handoff card renderer with version-based reconciliation; render cards for `handoff.new` / `handoff.update`.

@@ -6,11 +6,11 @@
 - [x] 1.4 Store resolved human name in `HubState` (new `human_name: Mutex<Option<String>>`).
 - [x] 1.5 Add `#[tauri::command] fn get_human_name` returning the stored name.
 - [x] 1.6 Register the new command in `generate_handler!`.
-- [x] 1.7 Pass env vars to sidecar: `A2A_LEDGER_DB=<ledger path>` and `A2A_HUMAN_NAME=<human name>`.
+- [x] 1.7 Pass env vars to sidecar: `CUBILOT_LEDGER_DB=<ledger path>` and `CUBILOT_HUMAN_NAME=<human name>`.
 
 ## 2. Hub — database open + schema migration
 
-- [x] 2.1 Import `bun:sqlite`; open `Database(process.env.A2A_LEDGER_DB, { create: true })`.
+- [x] 2.1 Import `bun:sqlite`; open `Database(process.env.CUBILOT_LEDGER_DB, { create: true })`.
 - [x] 2.2 Set `PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON`.
 - [x] 2.3 `chmod 0o600` on the DB file and on `-wal` / `-shm` sidecars once present.
 - [x] 2.4 Migration runner: check `meta.schema_version`; apply `v1` if missing.
@@ -21,7 +21,7 @@
 
 ## 3. Hub — human registration in roster
 
-- [x] 3.1 Read `A2A_HUMAN_NAME` at startup; fail loud if missing.
+- [x] 3.1 Read `CUBILOT_HUMAN_NAME` at startup; fail loud if missing.
 - [x] 3.2 Add a `permanentAgents: Set<string>` to hub state; populate with `HUMAN_NAME`.
 - [x] 3.3 `ensureAgent(HUMAN_NAME)` at startup.
 - [x] 3.4 Modify stale-cleanup logic to skip `permanentAgents` members.

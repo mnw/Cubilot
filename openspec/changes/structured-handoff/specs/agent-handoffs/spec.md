@@ -2,11 +2,11 @@
 
 ### Requirement: Human is a first-class roster identity
 
-The hub SHALL resolve a human identity name at startup from the `A2A_HUMAN_NAME` environment variable (set by the Rust shell from `config.json` → `human_name`, default `"human"`). The hub SHALL register that name in the roster as a permanent member (excluded from stale cleanup) and SHALL treat it identically to any other agent in queries, validation, mentions, and broadcast targeting. If the configured name equals any reserved word (`you`, `all`, `system`) or fails the existing `AGENT_NAME_RE` pattern, the hub SHALL refuse to start with a clear error.
+The hub SHALL resolve a human identity name at startup from the `CUBILOT_HUMAN_NAME` environment variable (set by the Rust shell from `config.json` → `human_name`, default `"human"`). The hub SHALL register that name in the roster as a permanent member (excluded from stale cleanup) and SHALL treat it identically to any other agent in queries, validation, mentions, and broadcast targeting. If the configured name equals any reserved word (`you`, `all`, `system`) or fails the existing `AGENT_NAME_RE` pattern, the hub SHALL refuse to start with a clear error.
 
 #### Scenario: Default human identity registered at startup
 
-- **WHEN** the hub starts with no `A2A_HUMAN_NAME` env set
+- **WHEN** the hub starts with no `CUBILOT_HUMAN_NAME` env set
 - **THEN** the roster contains an agent named `"human"` immediately after startup, never to be stale-cleaned
 
 #### Scenario: Configured human name honored

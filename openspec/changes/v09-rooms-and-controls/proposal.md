@@ -1,6 +1,6 @@
 ## Why
 
-Cubilot is single-roster and single-nutshell by design: every agent in the window sees every message, and the project summary is global. That worked when an A2A session equalled one project, but in practice the human runs several projects in parallel from the same window. With the current flat room, backend chatter from project A pollutes the context of every agent in project B — and the nutshell that helps onboard new agents to project A is actively misleading to agents in project B. Starting a second Cubilot instance is not a workaround: the hub socket, discovery files, tmux socket, and ledger are all at fixed paths, so two instances fight over the same state.
+Cubilot is single-roster and single-nutshell by design: every agent in the window sees every message, and the project summary is global. That worked when a Cubilot session equalled one project, but in practice the human runs several projects in parallel from the same window. With the current flat room, backend chatter from project A pollutes the context of every agent in project B — and the nutshell that helps onboard new agents to project A is actively misleading to agents in project B. Starting a second Cubilot instance is not a workaround: the hub socket, discovery files, tmux socket, and ledger are all at fixed paths, so two instances fight over the same state.
 
 v0.9 introduces **rooms** as a first-class protocol primitive so one Cubilot window can host multiple isolated projects without cross-project context leakage, and adds a per-room **pause / resume** control that lets the human halt and restart work across a whole room with one click (reusing the existing interrupt primitive).
 
@@ -45,7 +45,7 @@ v0.9 introduces **rooms** as a first-class protocol primitive so one Cubilot win
 - HTTP (additive): every mutating endpoint that already accepts `from`/`by` now enforces room membership; `GET /nutshell?room=<label>`; `POST /interrupts` accepts an optional `rooms: [<label>]` bulk-target shape for the pause/resume buttons.
 - SSE: every event on `/stream` and `/agent-stream` gains a `room` field. UI filters client-side; channel-bin filters server-side at the agent boundary.
 - MCP (additive): agents receive `room` as a `<channel room="...">` attribute on each forwarded event so claude can reason about cross-room peers when explicitly addressed.
-- Env: new `CHATBRIDGE_ROOM` in the per-agent MCP config; `A2A_DEFAULT_ROOM` accepted by the hub sidecar as fallback for external-spawn agents.
+- Env: new `CHATBRIDGE_ROOM` in the per-agent MCP config; `CUBILOT_DEFAULT_ROOM` accepted by the hub sidecar as fallback for external-spawn agents.
 
 **Ledger:**
 - schema_version 3 → 4, additive. `room TEXT NOT NULL DEFAULT 'default'` on agents, events, handoffs, interrupts. Nutshell table key changes from `id=0` to `room TEXT PRIMARY KEY`. Existing nutshell content moves to `room='default'`.

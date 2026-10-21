@@ -1,6 +1,6 @@
 ## Why
 
-The current v0.7 UI is functional but visually unremarkable — a single Catppuccin-Mocha-tinted chat column with inline handoff/interrupt cards, a terminal pane bolted on the right. A design mockup (`~/Desktop/a2achannel-redesign.html`) proposes a warm-neutral palette, typographic hierarchy (serif for branding/nutshell, mono for identity + protocol text, sans for body), and integrated roster/nutshell/status in the header. The goal is a visual refresh that changes the look without touching behaviour.
+The current v0.7 UI is functional but visually unremarkable — a single Catppuccin-Mocha-tinted chat column with inline handoff/interrupt cards, a terminal pane bolted on the right. A design mockup proposes a warm-neutral palette, typographic hierarchy (serif for branding/nutshell, mono for identity + protocol text, sans for body), and integrated roster/nutshell/status in the header. The goal is a visual refresh that changes the look without touching behaviour.
 
 ## What Changes
 
@@ -28,7 +28,7 @@ The current v0.7 UI is functional but visually unremarkable — a single Catppuc
 **Code:**
 - `ui/index.html` — restructured DOM: header row (brand + status cluster + roster), nutshell strip between header and main, two-column `.app-body` (`.chat-col | .splitter | .terminal-col`). All IDs consumed by `main.js` / `terminal.js` preserved.
 - `ui/style.css` — wholesale rewrite around new CSS custom properties (`--bg`, `--bg-raised`, `--bg-elev`, `--bg-inset`, `--line`, `--text`, `--text-muted`, `--text-dim`, `--orange`, `--amber`, `--green`, `--red`, `--blue`, `--purple`, `--pink`, `--teal`, `--mono`, `--serif`, `--sans`). Existing class names kept where semantically equivalent.
-- `ui/main.js` — small edits only: fix a handful of inline `var(--ctp-*)` references to use the new tokens, update the status-pill text to `<N>/<M> agents · hub :<port>`, wire the new `+ agent` button (dispatches a `CustomEvent('a2a:open-spawn')` that `terminal.js` listens for). Everything else — SSE handlers, handoff/interrupt/nutshell lifecycle, composer logic, reconnection state — untouched.
+- `ui/main.js` — small edits only: fix a handful of inline `var(--ctp-*)` references to use the new tokens, update the status-pill text to `<N>/<M> agents · hub :<port>`, wire the new `+ agent` button (dispatches a `CustomEvent('cubilot:open-spawn')` that `terminal.js` listens for). Everything else — SSE handlers, handoff/interrupt/nutshell lifecycle, composer logic, reconnection state — untouched.
 - `ui/fonts/` — add `Inter-*.woff2`, `Fraunces-*.woff2`, `JetBrainsMono-*.woff2` (self-hosted; licenses: OFL). Existing CaskaydiaMono files can stay as a fallback or be removed in a follow-up.
 - `ui/terminal.js` — only if class names change around `terminal-col` / `terminal-tabs` / `terminal-body`. If kept identical, no diff required.
 

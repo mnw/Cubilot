@@ -300,7 +300,7 @@ describe("ticket ids are path-encoded", () => {
 });
 
 describe("attach_ticket_file", () => {
-  const UP = { status: 200, body: { url: "/image/abc123.pdf", path: "/Users/x/a2a-attachments/abc123.pdf" } };
+  const UP = { status: 200, body: { url: "/image/abc123.pdf", path: "/Users/x/cubilot-attachments/abc123.pdf" } };
   const attach = (f: ReturnType<typeof fake>, args: Record<string, unknown> = {}) =>
     run("attach_ticket_file", f.host, { ticket_id: TID, path: "/tmp/report.pdf", ...args });
 
@@ -311,7 +311,7 @@ describe("attach_ticket_file", () => {
     expect(f.calls[0].body).toBe("/tmp/report.pdf");
     expect(f.calls[1].body).toEqual({ by: "alice", url: "/image/abc123.pdf", name: "report.pdf" });
     expect(text).toContain("attached report.pdf");
-    expect(text).toContain("/Users/x/a2a-attachments/abc123.pdf");           // the path the agent can read
+    expect(text).toContain("/Users/x/cubilot-attachments/abc123.pdf");           // the path the agent can read
   });
 
   test("a 250-character file name is cut to 200 characters before the upload, keeping the extension", async () => {

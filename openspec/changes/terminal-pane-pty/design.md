@@ -10,7 +10,7 @@ Current constraints:
 - macOS ARM64 only.
 - Vanilla HTML/CSS/JS in `ui/` (no framework, no bundler).
 - Ad-hoc codesign; no Apple notarization in the build pipeline.
-- Bun-compiled `a2a-bin` for hub and channel modes stays untouched — this feature is shell-side only.
+- Bun-compiled `cubilot-bin` for hub and channel modes stays untouched — this feature is shell-side only.
 - Bundle ceiling ~150 MB; v0.6.0 sits ~130 MB, v0.7 adds ~1.4 MB.
 
 ## Goals / Non-Goals
@@ -282,7 +282,7 @@ These were found during v0.7 integration and changed the implementation from the
 6. **tmux's alt-screen buffer doesn't flush to a fresh attach client.** Claude renders server-side fine, but the xterm stays blank until SIGWINCH triggers a redraw. Fix: after the output-scan dismisses the warning, we send a resize cycle (rows ±1) to force a full redraw. A 15 s fallback cycle covers edge cases where the warning never appears (claude error before startup).
 7. **`new-session` needs `-x 80 -y 24` explicit dimensions.** Tauri's Rust shell has no controlling TTY; without explicit dimensions tmux tries to probe the invoking terminal via `TIOCGWINSZ` and errors "open terminal failed: not a terminal". Dimensions are just defaults — our PTY resize fires SIGWINCH to the real xterm size immediately after attach.
 8. **tmux argv must be a single shell-command, not split.** `/bin/sh -c "<joined-argv>"` is how tmux runs the command. Passing `zsh`, `-ic`, `command-string` as three argv gets joined to `zsh -ic command-string`, which /bin/sh then tokenizes — zsh sees only `command-string`'s first word as its script and silently drops the rest. Fix: concatenate into a single argv with proper single-quote escaping around the inner command.
-9. **Orphan hubs are a dev-process footgun.** `pkill a2achannel` (the `install.sh` shortcut I kept using) doesn't always trigger Tauri's Exit handler that kills the hub sidecar. Orphan hubs stay alive on their port; new `channel-bin` SSE connections glue to them instead of the current hub. Always use `./scripts/install.sh` (it has an orphan-sweep pass). Added as a CLAUDE.md hard rule.
+9. **Orphan hubs are a dev-process footgun.** `pkill cubilot` (the `install.sh` shortcut I kept using) doesn't always trigger Tauri's Exit handler that kills the hub sidecar. Orphan hubs stay alive on their port; new `channel-bin` SSE connections glue to them instead of the current hub. Always use `./scripts/install.sh` (it has an orphan-sweep pass). Added as a CLAUDE.md hard rule.
 
 ## Open Questions
 

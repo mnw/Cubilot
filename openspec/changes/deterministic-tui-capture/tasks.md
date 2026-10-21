@@ -2,14 +2,14 @@
 
 - [ ] 1.1 Confirm the user's claude binary at the configured `claude_path` accepts `--settings <path>` (run `claude --help | grep -- --settings`). Document the version. If absent: pivot to fallback (user-side install) per design.md §D3.
 - [ ] 1.2 Confirm BSD `date +%s` produces a valid epoch on the user's macOS — `date +%s` should output 10 digits. Confirm `stat -f %m <file>` produces sub-second mtime as a float (modern APFS).
-- [ ] 1.3 Run the proposed Stop-hook command manually in a shell to verify file creation: `A2A_AGENT=test sh -c 'mkdir -p /tmp/a2a/$A2A_AGENT/signals && touch /tmp/a2a/$A2A_AGENT/signals/turn-$(date +%s).done'` then `ls -la /tmp/a2a/test/signals/`.
+- [ ] 1.3 Run the proposed Stop-hook command manually in a shell to verify file creation: `CUBILOT_AGENT=test sh -c 'mkdir -p /tmp/cubilot/$CUBILOT_AGENT/signals && touch /tmp/cubilot/$CUBILOT_AGENT/signals/turn-$(date +%s).done'` then `ls -la /tmp/cubilot/test/signals/`.
 
 ## 2. Per-agent settings file
 
 - [ ] 2.1 Add `settings_dir()` helper to `src-tauri/src/pty.rs` returning `app_data_dir().join("settings")`. Mirror `mcp_configs_dir()`.
 - [ ] 2.2 Add `write_settings_for(agent: &str) -> Result<PathBuf, String>` that materializes `~/Library/Application Support/Cubilot/settings/<agent>.json` (mode 0600) with the exact JSON content from design.md §D3 — `Stop` hook with the BSD-compatible command. Atomic write via tmpfile + rename.
 - [ ] 2.3 In `claude_command()` in `pty.rs`, append `--settings '<settings_path>'` after the existing `--mcp-config` argument (call `write_settings_for(agent)` to materialize the file before building the command string).
-- [ ] 2.4 In the tmux `new-session` invocation, add `-e A2A_AGENT=<agent>` alongside the existing `-e TERM=...` etc. Use the same name validation (`valid_agent_name()`) before substitution.
+- [ ] 2.4 In the tmux `new-session` invocation, add `-e CUBILOT_AGENT=<agent>` alongside the existing `-e TERM=...` etc. Use the same name validation (`valid_agent_name()`) before substitution.
 
 ## 3. Capture orchestrator (`pty_capture_turn`)
 
@@ -17,7 +17,7 @@
 - [ ] 3.2 Add `pty_capture_turn(state: State<PtyRegistry>, agent: String, input: String, timeout_ms: Option<u32>) -> Result<CaptureResult, String>` Tauri command. Use the timeout default of 60000ms.
 - [ ] 3.3 Inside `pty_capture_turn`:
   - Validate agent name via existing `valid_agent_name()`.
-  - Compute paths: capture_dir = `/tmp/a2a/<agent>/captures/`, signals_dir = `/tmp/a2a/<agent>/signals/`. `mkdir -p` both.
+  - Compute paths: capture_dir = `/tmp/cubilot/<agent>/captures/`, signals_dir = `/tmp/cubilot/<agent>/signals/`. `mkdir -p` both.
   - Compute `start_instant = SystemTime::now()` and the corresponding `start_ms`.
   - Compute `log_path = capture_dir/turn-<start_ms>.log` (touch the empty file).
 - [ ] 3.4 Enable pipe-pane via `tmux_run(["pipe-pane", "-o", "-t", agent, &format!("cat >> {}", shell_escape(log_path))])`.
@@ -32,11 +32,11 @@
 
 ## 4. UI integration
 
-- [ ] 4.1 Add a JS wrapper in `ui/terminal/pty.js` exposing `ptyCaptureTurn(agent, input, timeoutMs?) → Promise<CaptureResult>` via `window.__A2A_TERM__.pty.ptyCaptureTurn`.
+- [ ] 4.1 Add a JS wrapper in `ui/terminal/pty.js` exposing `ptyCaptureTurn(agent, input, timeoutMs?) → Promise<CaptureResult>` via `window.__CUBILOT_TERM__.pty.ptyCaptureTurn`.
 - [ ] 4.2 In `ui/features/slash-send.js`:
   - Replace the `captureSlashResponse` event-listener path with a call to `ptyCaptureTurn(agent, input, 60000)`.
   - On success: `await fetch('file://' + result.log_path)` is not available from the webview; instead, add a new Tauri command `pty_read_capture(log_path) → String` that reads + returns the file contents (with size cap, e.g. 256 KiB) so the JS layer can post-process.
-  - Apply the existing CR-overwrite handler + ANSI strip + slice-to-divider to the file content. Post to chat as `[a2a-capture]\n\`\`\`\n<body>\n\`\`\``.
+  - Apply the existing CR-overwrite handler + ANSI strip + slice-to-divider to the file content. Post to chat as `[cubilot-capture]\n\`\`\`\n<body>\n\`\`\``.
   - Remove the dead code: `captureSlashResponse`, `captureViaHeadless`, `snapshotResponse`, `stripAndSlice`, `sliceBetweenSlashAndPromptFrame`, `readBufferLines`, `captureBaseline`. (Keep `stripAnsi` — still needed for the file-content post-processing.)
 - [ ] 4.3 Tighten the audit row text — now that the chat post is deterministic (no quiescence guess), the audit can include "captured to <log_path>" for forensics.
 
@@ -48,7 +48,7 @@
 
 - [ ] 6.1 Unit-test the path computation + mtime filtering logic in isolation (Rust side, mocked filesystem). Cover: stale sentinels ignored, freshest matching wins, no-files-yet returns None.
 - [ ] 6.2 Integration test in `tests/integration/pty-plumbing.test.ts` (extends the existing pattern): spawn a tmux session, write a known fixture program that prints content + a Stop-hook-equivalent file touch on completion, run `pty_capture_turn`, assert the captured file contains the expected bytes and the timing meets the budget.
-- [ ] 6.3 Manual smoke against a live agent: `/context @<agent>` → chat shows the full panel without truncation, log file at `/tmp/a2a/<agent>/captures/turn-*.log` contains the byte stream.
+- [ ] 6.3 Manual smoke against a live agent: `/context @<agent>` → chat shows the full panel without truncation, log file at `/tmp/cubilot/<agent>/captures/turn-*.log` contains the byte stream.
 - [ ] 6.4 Regression: verify existing tmux-attach + xterm rendering still works (the visible client should NOT show flicker outside of slash-send windows). Run a normal `claude` interaction with no slash sends.
 
 ## 7. Documentation

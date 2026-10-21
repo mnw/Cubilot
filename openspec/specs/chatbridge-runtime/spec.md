@@ -311,10 +311,10 @@ After a fresh spawn, the terminal tab SHALL show a visible warning if the agent 
 
 ### Requirement: The MCP chatbridge path is removed
 
-The codebase SHALL NOT contain the MCP chatbridge sidecar (`hub/channel.ts`, `hub/channel/tail.ts`, `hub/channel/permission-relay.ts`), the `A2A_MODE=channel` mode of `a2a-bin`, any MCP server configuration that carries the chatbridge (per-agent MCP configs included), the `--dangerously-load-development-channels` flag, the PTY output scan that dismisses the dev-channels confirm prompt, or the fixed cold-start delay before tailing.
+The codebase SHALL NOT contain the MCP chatbridge sidecar (`hub/channel.ts`, `hub/channel/tail.ts`, `hub/channel/permission-relay.ts`), the `CUBILOT_MODE=channel` mode of `cubilot-bin`, any MCP server configuration that carries the chatbridge (per-agent MCP configs included), the `--dangerously-load-development-channels` flag, the PTY output scan that dismisses the dev-channels confirm prompt, or the fixed cold-start delay before tailing.
 
 #### Scenario: Unknown mode
 
-- **WHEN** `a2a-bin` starts with `A2A_MODE=channel`
+- **WHEN** `cubilot-bin` starts with `CUBILOT_MODE=channel`
 - **THEN** it exits with the unknown-mode error
 

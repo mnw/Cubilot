@@ -16,12 +16,12 @@ For each agent spawned via `pty_spawn`, the claude command line SHALL include `-
 - **THEN** the shell logs a warning recommending the user install the Stop hook to `~/.claude/settings.json` manually
 - **AND** the agent still spawns successfully (without deterministic capture support)
 
-### Requirement: The agent's tmux session SHALL include `A2A_AGENT=<name>` in its env at spawn
+### Requirement: The agent's tmux session SHALL include `CUBILOT_AGENT=<name>` in its env at spawn
 
-The `tmux new-session -e A2A_AGENT=<name>` flag SHALL be set so the Stop hook command can scope its sentinel-file writes per agent. This is in addition to the existing `CHATBRIDGE_AGENT` and `CHATBRIDGE_ROOM` env vars (which scope the channel-bin MCP sidecar). `A2A_AGENT` is independent — it is consumed by the Stop hook command in the per-agent settings file, not by chatbridge.
+The `tmux new-session -e CUBILOT_AGENT=<name>` flag SHALL be set so the Stop hook command can scope its sentinel-file writes per agent. This is in addition to the existing `CHATBRIDGE_AGENT` and `CHATBRIDGE_ROOM` env vars (which scope the channel-bin MCP sidecar). `CUBILOT_AGENT` is independent — it is consumed by the Stop hook command in the per-agent settings file, not by chatbridge.
 
-#### Scenario: A2A_AGENT env is set on the tmux session
+#### Scenario: CUBILOT_AGENT env is set on the tmux session
 - **WHEN** `pty_spawn(agent="bob", ...)` is called
-- **THEN** the resulting `tmux new-session` invocation includes `-e A2A_AGENT=bob`
-- **AND** any process spawned inside that session inherits `A2A_AGENT=bob` in its env
-- **AND** the Stop hook command can resolve `$A2A_AGENT` to `"bob"` when it fires
+- **THEN** the resulting `tmux new-session` invocation includes `-e CUBILOT_AGENT=bob`
+- **AND** any process spawned inside that session inherits `CUBILOT_AGENT=bob` in its env
+- **AND** the Stop hook command can resolve `$CUBILOT_AGENT` to `"bob"` when it fires

@@ -61,7 +61,7 @@ Subtasks in §2 and §4 that built the ledger UI were completed-then-reverted. T
 
 - [x] 5.1 Remove the stale header comment about `dead` state + Restart (lines mentioning held-pane semantics) — state machine is `external | launching | live` only since v0.7 final cleanup.
 - [x] 5.2 Rename internal section header `// --- Spawn / Launch / Restart / Kill ---` to `// --- Spawn / Launch / Kill ---`. No behaviour change.
-- [x] 5.3 Expose `openSpawnModal` to the window so `main.js`'s `+ agent` button can invoke it: `window.openSpawnModal = openSpawnModal;` near the bottom of the IIFE. Alternative: emit a `CustomEvent('a2a:open-spawn')` on document and listen from both places.
+- [x] 5.3 Expose `openSpawnModal` to the window so `main.js`'s `+ agent` button can invoke it: `window.openSpawnModal = openSpawnModal;` near the bottom of the IIFE. Alternative: emit a `CustomEvent('cubilot:open-spawn')` on document and listen from both places.
 - [x] 5.4 Verify every class name the JS references against the refreshed stylesheet (`terminal-tab`, `terminal-tab-new`, `state-dot`, `close-x`, `active`, `data-state=...`).
 
 ## 6. Manual smoke test

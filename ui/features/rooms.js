@@ -131,7 +131,7 @@ function applyRoomFilter() {
   }
   if (typeof renderNutshell === 'function') renderNutshell();
   // Notify terminal pane: hiding active tab via CSS alone leaves wrong xterm pane showing.
-  document.dispatchEvent(new CustomEvent('a2a:room-filter', {
+  document.dispatchEvent(new CustomEvent('cubilot:room-filter', {
     detail: { room: SELECTED_ROOM === ROOM_ALL ? null : SELECTED_ROOM },
   }));
 }

@@ -24,7 +24,7 @@ The rule, abbreviated: a finding becomes a cycle only if it (a) addresses a CLAU
 
 **Filed:** 2026-05-11 (post-2a code audit, finding #2).
 
-**Sketch:** Persistent state under `~/Library/Application Support/Cubilot/` is split between `lib.rs` (attachments, transcripts, hub.url, hub.token) and `pty.rs` (mcp-configs, settings, tmux.sock). Ephemeral state under `/tmp/a2a/<agent>/` is implicit in `pty.rs`'s capture and signals helpers. Tests in `tests/helpers/hub.ts:24–27` hardcode their own temp dirs because there's no path-resolution Module to override.
+**Sketch:** Persistent state under `~/Library/Application Support/Cubilot/` is split between `lib.rs` (attachments, transcripts, hub.url, hub.token) and `pty.rs` (mcp-configs, settings, tmux.sock). Ephemeral state under `/tmp/cubilot/<agent>/` is implicit in `pty.rs`'s capture and signals helpers. Tests in `tests/helpers/hub.ts:24–27` hardcode their own temp dirs because there's no path-resolution Module to override.
 
 **Why not actioned:** Pure organizational-locality cleanup. No CLAUDE.md hard rule at risk. No production bug class. Test-surface improvement is real (single path-override point for hermetic test runs) but currently the per-test temp-dir dance works.
 

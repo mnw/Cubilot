@@ -133,8 +133,8 @@ describe("pty plumbing — tmux session contract", () => {
     // The calls pty.rs makes, with {S} = session-only target, {P} = pane/window/option target.
     const calls: Array<{ label: string; argv: string[]; mustFailForPrefix: boolean }> = [
       { label: "has-session", argv: ["has-session", "-t", "{S}"], mustFailForPrefix: true },
-      { label: "set @a2a_harness", argv: ["set-option", "-t", "{P}", "@a2a_harness", "pi"], mustFailForPrefix: true },
-      { label: "show-options @a2a_harness", argv: ["show-options", "-v", "-t", "{P}", "@a2a_harness"], mustFailForPrefix: true },
+      { label: "set @cubilot_harness", argv: ["set-option", "-t", "{P}", "@cubilot_harness", "pi"], mustFailForPrefix: true },
+      { label: "show-options @cubilot_harness", argv: ["show-options", "-v", "-t", "{P}", "@cubilot_harness"], mustFailForPrefix: true },
       { label: "list-panes", argv: ["list-panes", "-t", "{P}", "-F", "#{pane_start_command}"], mustFailForPrefix: true },
       { label: "set-option", argv: ["set-option", "-t", "{P}", "status", "off"], mustFailForPrefix: true },
       { label: "set-option -w", argv: ["set-option", "-w", "-t", "{P}", "window-size", "latest"], mustFailForPrefix: true },
@@ -171,10 +171,10 @@ describe("pty plumbing — tmux session contract", () => {
     test("a session named Dev can be created beside Dev1 and each is addressed exactly", async () => {
       await h.spawnSession("Dev1", ["-c", "/tmp"]);
       await h.spawnSession("Dev", ["-c", "/tmp"]);
-      expect((await h.run(["set-option", "-t", "=Dev:", "@a2a_harness", "pi"])).exitCode).toBe(0);
-      expect((await h.run(["set-option", "-t", "=Dev1:", "@a2a_harness", "claude"])).exitCode).toBe(0);
-      expect((await h.run(["show-options", "-v", "-t", "=Dev:", "@a2a_harness"])).stdout.trim()).toBe("pi");
-      expect((await h.run(["show-options", "-v", "-t", "=Dev1:", "@a2a_harness"])).stdout.trim()).toBe("claude");
+      expect((await h.run(["set-option", "-t", "=Dev:", "@cubilot_harness", "pi"])).exitCode).toBe(0);
+      expect((await h.run(["set-option", "-t", "=Dev1:", "@cubilot_harness", "claude"])).exitCode).toBe(0);
+      expect((await h.run(["show-options", "-v", "-t", "=Dev:", "@cubilot_harness"])).stdout.trim()).toBe("pi");
+      expect((await h.run(["show-options", "-v", "-t", "=Dev1:", "@cubilot_harness"])).stdout.trim()).toBe("claude");
       expect((await h.run(["kill-session", "-t", "=Dev"])).exitCode).toBe(0);
       expect((await h.run(["has-session", "-t", "=Dev1"])).exitCode).toBe(0);
     });

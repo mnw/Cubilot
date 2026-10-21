@@ -4,7 +4,7 @@ Cubilot keeps the chat log in memory only (`chatLog: Entry[]` in `hub/hub.ts`). 
 
 Adjacent state is already well-organized:
 - **SQLite (`ledger.db`)** owns structured kinds: `events` table + per-kind derived tables (`handoffs`, `interrupts`, `permissions`, `nutshell`). All ACID, all queryable.
-- **Filesystem (`~/a2a-attachments/`)** owns blob attachments, mode 0600.
+- **Filesystem (`~/cubilot-attachments/`)** owns blob attachments, mode 0600.
 - **In-memory** owns chatLog, ROSTER, presenceState, briefedAgents.
 
 The CLAUDE.md hard rule "Never persist the roster or chat log without being asked" was deliberate — it defends against privacy leaks, schema migration burden, and unbounded disk growth. The user has now asked, but the rule's spirit (default off, opt-in deliberate) should survive into the new design.

@@ -23,7 +23,7 @@ export type TmuxHarness = {
 };
 
 export function resolveTmuxBin(): string {
-  const override = process.env.A2A_TMUX?.trim();
+  const override = process.env.CUBILOT_TMUX?.trim();
   if (override && existsSync(override)) return override;
   if (existsSync(BUNDLED_TMUX)) return BUNDLED_TMUX;
   // system fallback — assumes tmux on PATH

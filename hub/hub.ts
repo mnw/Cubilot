@@ -1,5 +1,5 @@
 // Cubilot hub. Dynamic roster; any agent that hits /agent-stream?agent=<n> auto-registers.
-// Env vars: PORT, A2A_TOKEN, A2A_ATTACHMENTS_DIR, A2A_LEDGER_DB, A2A_HUMAN_NAME, A2A_ALLOWED_EXTENSIONS.
+// Env vars: PORT, CUBILOT_TOKEN, CUBILOT_ATTACHMENTS_DIR, CUBILOT_LEDGER_DB, CUBILOT_HUMAN_NAME, CUBILOT_ALLOWED_EXTENSIONS.
 
 import { Database } from "bun:sqlite";
 import { chmodSync } from "node:fs";
@@ -85,42 +85,38 @@ import {
 process.umask(0o077);
 
 const PORT = Number(process.env.PORT ?? 8011);
-const AUTH_TOKEN = (process.env.A2A_TOKEN ?? "").trim();
-const ATTACHMENTS_DIR = (
-  process.env.A2A_ATTACHMENTS_DIR ??
-  process.env.A2A_IMAGES_DIR ?? // legacy env var from ≤ v0.4.x
-  ""
-).trim();
-const LEDGER_DB = (process.env.A2A_LEDGER_DB ?? "").trim();
-const HUMAN_NAME = (process.env.A2A_HUMAN_NAME ?? "human").trim();
-const DEFAULT_ROOM = (process.env.A2A_DEFAULT_ROOM ?? "default").trim() || "default";
+const AUTH_TOKEN = (process.env.CUBILOT_TOKEN ?? "").trim();
+const ATTACHMENTS_DIR = (process.env.CUBILOT_ATTACHMENTS_DIR ?? "").trim();
+const LEDGER_DB = (process.env.CUBILOT_LEDGER_DB ?? "").trim();
+const HUMAN_NAME = (process.env.CUBILOT_HUMAN_NAME ?? "human").trim();
+const DEFAULT_ROOM = (process.env.CUBILOT_DEFAULT_ROOM ?? "default").trim() || "default";
 const HISTORY_LIMIT = (() => {
-  const raw = process.env.A2A_CHAT_HISTORY_LIMIT;
+  const raw = process.env.CUBILOT_CHAT_HISTORY_LIMIT;
   const n = raw ? Number(raw) : NaN;
   if (Number.isFinite(n) && n >= 10 && n <= 100_000) return Math.floor(n);
   return 1000;
 })();
 const AGENT_QUEUE_MAX = 500;
 const UI_QUEUE_MAX = 500;
-// A2A_STALE_AGENT_MS shortens it for tests; the app never sets it.
-const STALE_AGENT_MS = Number(process.env.A2A_STALE_AGENT_MS) > 0 ? Number(process.env.A2A_STALE_AGENT_MS) : 15_000;
+// CUBILOT_STALE_AGENT_MS shortens it for tests; the app never sets it.
+const STALE_AGENT_MS = Number(process.env.CUBILOT_STALE_AGENT_MS) > 0 ? Number(process.env.CUBILOT_STALE_AGENT_MS) : 15_000;
 const SWEEP_INTERVAL_MS = 5_000;
 import type { HandoffStatus } from "./kinds/handoff";
-const ALLOWED_EXTENSIONS = buildAllowedExtensions(process.env.A2A_ALLOWED_EXTENSIONS);
+const ALLOWED_EXTENSIONS = buildAllowedExtensions(process.env.CUBILOT_ALLOWED_EXTENSIONS);
 
 if (!AUTH_TOKEN) {
   console.error(
-    "[hub] A2A_TOKEN env not set — mutating routes will reject all requests",
+    "[hub] CUBILOT_TOKEN env not set — mutating routes will reject all requests",
   );
 }
 if (!ATTACHMENTS_DIR) {
   console.error(
-    "[hub] A2A_ATTACHMENTS_DIR env not set — uploads will fail",
+    "[hub] CUBILOT_ATTACHMENTS_DIR env not set — uploads will fail",
   );
 }
 if (!LEDGER_DB) {
   console.error(
-    "[hub] A2A_LEDGER_DB env not set — handoff routes will be disabled",
+    "[hub] CUBILOT_LEDGER_DB env not set — handoff routes will be disabled",
   );
 }
 
@@ -170,7 +166,7 @@ if (ledgerDb) {
   });
 }
 
-// Pluggable Summariser — env-driven adapter (A2A_SUMMARISER, default disabled).
+// Pluggable Summariser — env-driven adapter (CUBILOT_SUMMARISER, default disabled).
 let summariser: Summariser | null = null;
 let roomSummariser: RoomSummariserT | null = null;
 if (ledgerDb) {
@@ -188,7 +184,7 @@ if (ledgerDb) {
     });
     console.log(`[summariser] enabled adapter=${sCfg.adapter} model=${summariser.modelId}`);
   } else {
-    console.log(`[summariser] disabled (A2A_SUMMARISER=${sCfg.adapter})`);
+    console.log(`[summariser] disabled (CUBILOT_SUMMARISER=${sCfg.adapter})`);
   }
 }
 
@@ -340,7 +336,7 @@ if (validName(HUMAN_NAME)) {
   ensureAgent(HUMAN_NAME, null);
   console.log(`[hub] human registered as "${HUMAN_NAME}" (permanent, all rooms)`);
 } else {
-  console.error(`[hub] invalid A2A_HUMAN_NAME "${HUMAN_NAME}" — human not registered`);
+  console.error(`[hub] invalid CUBILOT_HUMAN_NAME "${HUMAN_NAME}" — human not registered`);
 }
 
 const sweepTimer = setInterval(() => {

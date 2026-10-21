@@ -15,11 +15,11 @@ The single in-process orchestrator (`hub-bin`, compiled from `hub/hub.ts`). Owns
 _Avoid_: server, backend, broker, daemon.
 
 **Sidecar**:
-Any helper binary spawned by the **Shell** or by an **Agent**'s MCP config. The two sidecars are `a2a-bin` (in hub mode = the **Hub**) and `a2a-bin` (in channel mode = the **Channel**).
+Any helper binary spawned by the **Shell** or by an **Agent**'s MCP config. The two sidecars are `cubilot-bin` (in hub mode = the **Hub**) and `cubilot-bin` (in channel mode = the **Channel**).
 _Avoid_: subprocess, helper, child process.
 
 **Channel**:
-The per-**Agent** MCP **Sidecar** (`a2a-bin` in channel mode). Tails `/agent-stream`, exposes the `post` tool, relays the `claude/channel/permission` capability. One **Channel** per **Agent** session.
+The per-**Agent** MCP **Sidecar** (`cubilot-bin` in channel mode). Tails `/agent-stream`, exposes the `post` tool, relays the `claude/channel/permission` capability. One **Channel** per **Agent** session.
 _Avoid_: bridge, transport, MCP server (too generic — "Channel" is the *named* sidecar).
 
 **Webview**:
@@ -33,7 +33,7 @@ A Claude Code session running under a **Tab**, identified by a name. Auto-regist
 _Avoid_: bot, worker, AI, session (ambiguous).
 
 **Human**:
-The permanent **Roster** member representing the user. Name comes from `A2A_HUMAN_NAME` (default `"human"`). Registered at **Hub** start, never expires, has `room = null` so it's implicitly in every **Room**. The only sender allowed to mutate cross-**Room** or broadcast `target: "all"` with an explicit `room`.
+The permanent **Roster** member representing the user. Name comes from `CUBILOT_HUMAN_NAME` (default `"human"`). Registered at **Hub** start, never expires, has `room = null` so it's implicitly in every **Room**. The only sender allowed to mutate cross-**Room** or broadcast `target: "all"` with an explicit `room`.
 _Avoid_: user (overloaded with auth/principal), operator, owner.
 
 **Roster**:
@@ -113,7 +113,7 @@ The in-memory ring buffer of free-form messages (`chat_history_limit` cap, defau
 _Avoid_: messages, conversation (singular feels too narrow — there are many **Rooms**).
 
 **Attachment**:
-A file uploaded via `POST /upload` and persisted at `<A2A_ATTACHMENTS_DIR>/<id>.<ext>`. Allowlist is by extension, configured in `config.yml`. Referenced in chat text as `[attachment: <path>]`; **Agents** receive absolute paths, the **Webview** receives `/image/<id>.<ext>` URLs.
+A file uploaded via `POST /upload` and persisted at `<CUBILOT_ATTACHMENTS_DIR>/<id>.<ext>`. Allowlist is by extension, configured in `config.yml`. Referenced in chat text as `[attachment: <path>]`; **Agents** receive absolute paths, the **Webview** receives `/image/<id>.<ext>` URLs.
 _Avoid_: upload, file, blob.
 
 **Broadcast scope**:
@@ -127,7 +127,7 @@ _Avoid_: command, shortcut.
 ### Capture & PTY
 
 **Capture**:
-A deterministic single-turn TUI **Capture** primitive (`pty_capture_turn`). Coordinates geometry (tmux `set-option window-size manual` + `resize-window 240×100`), output (`tmux pipe-pane -o`), and completion (Stop-hook sentinel poll) atomically. Writes to `/tmp/a2a/<agent>/captures/turn-<epoch>.log`.
+A deterministic single-turn TUI **Capture** primitive (`pty_capture_turn`). Coordinates geometry (tmux `set-option window-size manual` + `resize-window 240×100`), output (`tmux pipe-pane -o`), and completion (Stop-hook sentinel poll) atomically. Writes to `/tmp/cubilot/<agent>/captures/turn-<epoch>.log`.
 _Avoid_: snapshot (collides with the deleted scraper), screenshot, dump.
 
 ## Relationships

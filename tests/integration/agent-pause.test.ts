@@ -139,12 +139,12 @@ describe("pause audit entries are ambient", () => {
   let hub: HubHandle;
   let dir: string;
   beforeAll(async () => {
-    dir = mkdtempSync(join(tmpdir(), "a2a-pause-transcript-"));
+    dir = mkdtempSync(join(tmpdir(), "cubilot-pause-transcript-"));
     mkdirSync(dir, { recursive: true });
-    const orig = process.env.A2A_TRANSCRIPTS_DIR;
-    process.env.A2A_TRANSCRIPTS_DIR = dir;
+    const orig = process.env.CUBILOT_TRANSCRIPTS_DIR;
+    process.env.CUBILOT_TRANSCRIPTS_DIR = dir;
     try { hub = await spawnHub(); } finally {
-      if (orig === undefined) delete process.env.A2A_TRANSCRIPTS_DIR; else process.env.A2A_TRANSCRIPTS_DIR = orig;
+      if (orig === undefined) delete process.env.CUBILOT_TRANSCRIPTS_DIR; else process.env.CUBILOT_TRANSCRIPTS_DIR = orig;
     }
   });
   afterAll(async () => { await hub.kill(); });

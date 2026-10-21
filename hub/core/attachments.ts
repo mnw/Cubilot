@@ -42,7 +42,7 @@ export const EXT_TO_MIME: Record<string, string> = {
 export const IMAGE_URL_RE = /^\/image\/[A-Za-z0-9_-]+\.[a-z0-9]{1,10}$/i;
 const IMAGE_PATH_SEGMENT_RE = /^[A-Za-z0-9_-]+\.[a-z0-9]{1,10}$/i;
 
-// Build the runtime allowlist from A2A_ALLOWED_EXTENSIONS env; falls back to the
+// Build the runtime allowlist from CUBILOT_ALLOWED_EXTENSIONS env; falls back to the
 // defaults. Validation mirrors the Rust shell's (lowercase alnum, ≤10 chars, no dots).
 export function buildAllowedExtensions(envValue: string | undefined): Set<string> {
   const fromEnv = (envValue ?? "").split(",")

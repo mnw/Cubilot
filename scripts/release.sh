@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# release.sh — one-shot release pipeline for A2AChannel
+# release.sh — one-shot release pipeline for Cubilot
 #
 # Usage:
 #   ./scripts/release.sh 0.7.1
@@ -12,12 +12,12 @@
 #   1.  Validates arguments and environment (gh CLI, jq, git clean, etc.)
 #   2.  Bumps version in package.json, src-tauri/tauri.conf.json, Cargo.toml
 #   3.  Commits and tags (v<version>)
-#   4.  Runs ./scripts/install.sh — builds A2AChannel.app
-#   5.  Zips /Applications/A2AChannel.app into dist/
+#   4.  Runs ./scripts/install.sh — builds Cubilot.app
+#   5.  Zips /Applications/Cubilot.app into dist/
 #   6.  Computes SHA256
 #   7.  Pushes the commit + tag
 #   8.  Creates GitHub release, uploads the zip
-#   9.  Updates the Cask file in the homebrew-a2achannel tap
+#   9.  Updates the Cask file in the homebrew-cubilot tap
 #  10.  Commits and pushes the cask bump
 #
 # Configure the two variables below once for your setup.
@@ -26,14 +26,14 @@ set -euo pipefail
 
 # ─── configure these ─────────────────────────────────────────────────────────
 readonly GITHUB_USER="${GITHUB_USER:-mnw}"
-readonly TAP_REPO_PATH="${TAP_REPO_PATH:-$HOME/Code/homebrew-a2achannel}"
+readonly TAP_REPO_PATH="${TAP_REPO_PATH:-$HOME/Code/homebrew-cubilot}"
 # ─────────────────────────────────────────────────────────────────────────────
 
 readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly DIST_DIR="${REPO_ROOT}/dist"
-readonly APP_NAME="A2AChannel"
+readonly APP_NAME="Cubilot"
 readonly APP_BUNDLE="/Applications/${APP_NAME}.app"
-readonly CASK_NAME="a2achannel"
+readonly CASK_NAME="cubilot"
 
 # ─── colours (only if stdout is a tty) ──────────────────────────────────────
 if [[ -t 1 ]]; then
@@ -144,7 +144,7 @@ if [[ -f src-tauri/Cargo.toml ]]; then
   if [[ -f src-tauri/Cargo.lock ]]; then
     cargo update --manifest-path src-tauri/Cargo.toml --workspace --offline >/dev/null 2>&1 \
       || die "cargo update failed — cannot sync Cargo.lock to $VERSION"
-    grep -q "^version = \"${VERSION}\"$" <(grep -A1 '^name = "a2achannel"$' src-tauri/Cargo.lock) \
+    grep -q "^version = \"${VERSION}\"$" <(grep -A1 '^name = "cubilot"$' src-tauri/Cargo.lock) \
       || die "Cargo.lock did not pick up $VERSION"
     ok "Cargo.lock → $VERSION"
   fi
@@ -157,7 +157,7 @@ git add package.json src-tauri/tauri.conf.json
 [[ -f src-tauri/Cargo.lock ]] && git add src-tauri/Cargo.lock
 
 git commit -m "release: ${VERSION}" >/dev/null
-git tag -a "$TAG" -m "A2AChannel ${VERSION}"
+git tag -a "$TAG" -m "Cubilot ${VERSION}"
 ok "committed + tagged $TAG"
 
 # ─── build ──────────────────────────────────────────────────────────────────
@@ -207,8 +207,8 @@ gh release create "$TAG" "$ZIP_PATH" \
   --notes "$RELEASE_NOTES"
 ok "release $TAG created"
 
-RELEASE_URL="https://github.com/${GITHUB_USER}/A2AChannel/releases/tag/${TAG}"
-DOWNLOAD_URL="https://github.com/${GITHUB_USER}/A2AChannel/releases/download/${TAG}/${ZIP_NAME}"
+RELEASE_URL="https://github.com/${GITHUB_USER}/Cubilot/releases/tag/${TAG}"
+DOWNLOAD_URL="https://github.com/${GITHUB_USER}/Cubilot/releases/download/${TAG}/${ZIP_NAME}"
 info "release:  $RELEASE_URL"
 info "download: $DOWNLOAD_URL"
 

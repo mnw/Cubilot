@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# bootstrap-tap.sh — one-time setup for the homebrew-a2achannel tap
+# bootstrap-tap.sh — one-time setup for the homebrew-cubilot tap
 #
 # Creates the GitHub repo, writes the initial Cask file, and commits it.
 # Run this once, before the first ./scripts/release.sh.
@@ -12,11 +12,11 @@ set -euo pipefail
 
 # ─── configure ──────────────────────────────────────────────────────────────
 readonly GITHUB_USER="${GITHUB_USER:-mnw}"
-readonly TAP_REPO_PATH="${TAP_REPO_PATH:-$HOME/Code/homebrew-a2achannel}"
-readonly MAIN_REPO="A2AChannel"
+readonly TAP_REPO_PATH="${TAP_REPO_PATH:-$HOME/Code/homebrew-cubilot}"
+readonly MAIN_REPO="Cubilot"
 # ─────────────────────────────────────────────────────────────────────────────
 
-readonly TAP_REPO_NAME="homebrew-a2achannel"
+readonly TAP_REPO_NAME="homebrew-cubilot"
 
 if [[ -t 1 ]]; then
   C_ORANGE=$'\033[38;5;215m'; C_GREEN=$'\033[38;5;114m'
@@ -42,7 +42,7 @@ if gh repo view "${GITHUB_USER}/${TAP_REPO_NAME}" >/dev/null 2>&1; then
 else
   gh repo create "${GITHUB_USER}/${TAP_REPO_NAME}" \
     --public \
-    --description "Homebrew tap for A2AChannel" \
+    --description "Homebrew tap for Cubilot" \
     --disable-issues=false
   ok "repo created"
 fi
@@ -61,74 +61,74 @@ fi
 # ─── initialise contents ────────────────────────────────────────────────────
 mkdir -p Casks
 
-if [[ ! -f Casks/a2achannel.rb ]]; then
-  step "writing initial Casks/a2achannel.rb"
-  cat > Casks/a2achannel.rb <<EOF
-cask "a2achannel" do
+if [[ ! -f Casks/cubilot.rb ]]; then
+  step "writing initial Casks/cubilot.rb"
+  cat > Casks/cubilot.rb <<EOF
+cask "cubilot" do
   version "0.0.0"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
 
-  url "https://github.com/${GITHUB_USER}/${MAIN_REPO}/releases/download/v#{version}/A2AChannel-#{version}.zip"
-  name "A2AChannel"
+  url "https://github.com/${GITHUB_USER}/${MAIN_REPO}/releases/download/v#{version}/Cubilot-#{version}.zip"
+  name "Cubilot"
   desc "Typed handoffs between Claude Code agents with a desktop coordination room"
   homepage "https://github.com/${GITHUB_USER}/${MAIN_REPO}"
 
   depends_on macos: ">= :sonoma"
   depends_on arch: :arm64
 
-  app "A2AChannel.app"
+  app "Cubilot.app"
 
   zap trash: [
-    "~/Library/Application Support/A2AChannel",
-    "~/Library/Saved Application State/com.a2achannel.app.savedState",
+    "~/Library/Application Support/Cubilot",
+    "~/Library/Saved Application State/com.mnw.cubilot.savedState",
   ]
 
   caveats <<~EOS
-    A2AChannel is ad-hoc signed. Homebrew strips the quarantine attribute
+    Cubilot is ad-hoc signed. Homebrew strips the quarantine attribute
     automatically, so the first launch should work without a Gatekeeper
     prompt. If you ever see an "unidentified developer" dialog, run:
 
-      xattr -dr com.apple.quarantine /Applications/A2AChannel.app
+      xattr -dr com.apple.quarantine /Applications/Cubilot.app
   EOS
 end
 EOF
-  ok "wrote Casks/a2achannel.rb (placeholder version)"
+  ok "wrote Casks/cubilot.rb (placeholder version)"
 else
-  ok "Casks/a2achannel.rb already exists — not overwriting"
+  ok "Casks/cubilot.rb already exists — not overwriting"
 fi
 
 if [[ ! -f README.md ]]; then
   step "writing README.md"
   cat > README.md <<EOF
-# homebrew-a2achannel
+# homebrew-cubilot
 
-Homebrew tap for [A2AChannel](https://github.com/${GITHUB_USER}/${MAIN_REPO}) — typed handoffs between Claude Code agents.
+Homebrew tap for [Cubilot](https://github.com/${GITHUB_USER}/${MAIN_REPO}) — typed handoffs between Claude Code agents.
 
 ## Install
 
 \`\`\`bash
-brew tap ${GITHUB_USER}/a2achannel
-brew install --cask a2achannel
+brew tap ${GITHUB_USER}/cubilot
+brew install --cask cubilot
 \`\`\`
 
 ## Upgrade
 
 \`\`\`bash
-brew upgrade --cask a2achannel
+brew upgrade --cask cubilot
 \`\`\`
 
 ## Uninstall
 
 \`\`\`bash
-brew uninstall --cask a2achannel
-brew untap ${GITHUB_USER}/a2achannel
+brew uninstall --cask cubilot
+brew untap ${GITHUB_USER}/cubilot
 \`\`\`
 EOF
   ok "wrote README.md"
 fi
 
 if [[ ! -f LICENSE ]]; then
-  step "writing LICENSE (MIT, mirrors A2AChannel)"
+  step "writing LICENSE (MIT, mirrors Cubilot)"
   YEAR="$(date +%Y)"
   cat > LICENSE <<EOF
 MIT License

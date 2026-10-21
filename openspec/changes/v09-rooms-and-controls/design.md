@@ -1,6 +1,6 @@
 ## Context
 
-v0.8 (permission-relay) ships a fourth coordination primitive on top of the v0.7 foundation. The hub still assumes a single flat room: `agents` is a `Map<name, Agent>`, `nutshell` is single-row, every SSE event broadcasts to every subscriber, and the ledger has no notion of scope. This worked while the product assumption was "one A2A window = one project". In practice the human runs 2-4 projects concurrently and the flat room becomes noisy enough that agents waste context tokens filtering out chatter not meant for them, and the shared nutshell becomes a lowest-common-denominator description that helps no project.
+v0.8 (permission-relay) ships a fourth coordination primitive on top of the v0.7 foundation. The hub still assumes a single flat room: `agents` is a `Map<name, Agent>`, `nutshell` is single-row, every SSE event broadcasts to every subscriber, and the ledger has no notion of scope. This worked while the product assumption was "one Cubilot window = one project". In practice the human runs 2-4 projects concurrently and the flat room becomes noisy enough that agents waste context tokens filtering out chatter not meant for them, and the shared nutshell becomes a lowest-common-denominator description that helps no project.
 
 The upstream channels-reference ["Gate inbound messages"](https://code.claude.com/docs/en/channels-reference#gate-inbound-messages) pattern is the canonical way channel-bin servers defend against prompt injection — validate the sender identity before forwarding to claude's context. We reuse the same shape for room isolation: channel-bin's second-line defense is to drop any inbound event whose `room` attribute doesn't match its configured `CHATBRIDGE_ROOM`.
 
@@ -116,9 +116,9 @@ The human is in every room. The human's UI does client-side filtering when a spe
 - *Human has an explicit list of rooms.* Rejected — the human is by definition in every room; enumerating them is both redundant and prone to drift when new rooms are created.
 - *Special-case the human's name in every broadcast.* Rejected — same effect but uses the name as implicit policy. Fragile if `human_name` is changed via config.
 
-### D9. External-spawn fallback: `A2A_DEFAULT_ROOM` env on the hub.
+### D9. External-spawn fallback: `CUBILOT_DEFAULT_ROOM` env on the hub.
 
-**Decision**: Agents launched by users from their own terminal (not via the + agent button) don't know their room — the spawning user types `claude --mcp-config ... server:chatbridge` from some shell. Their channel-bin has no `CHATBRIDGE_ROOM`. In that case, channel-bin falls back to reading the hub's `A2A_DEFAULT_ROOM` via `GET /room-default` at startup. Hub's default is `"default"`. Users who want external-spawn sessions to land in a specific room edit config.json (`"default_room": "mobile"`).
+**Decision**: Agents launched by users from their own terminal (not via the + agent button) don't know their room — the spawning user types `claude --mcp-config ... server:chatbridge` from some shell. Their channel-bin has no `CHATBRIDGE_ROOM`. In that case, channel-bin falls back to reading the hub's `CUBILOT_DEFAULT_ROOM` via `GET /room-default` at startup. Hub's default is `"default"`. Users who want external-spawn sessions to land in a specific room edit config.json (`"default_room": "mobile"`).
 
 **Alternatives considered**:
 - *Refuse to register external-spawn agents without an explicit room.* Rejected — breaks the classic "my-terminal claude" workflow. The v0.7 "roster is dynamic" invariant says any connect auto-registers.

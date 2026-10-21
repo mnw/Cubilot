@@ -79,7 +79,7 @@
   function setPaneEnabled(on) {
     _paneEnabled = on;
     applyPaneClass();
-    document.dispatchEvent(new CustomEvent('a2a:right-pane', { detail: { pane: on ? 'terminal' : null } }));
+    document.dispatchEvent(new CustomEvent('cubilot:right-pane', { detail: { pane: on ? 'terminal' : null } }));
   }
   function applySplit() {
     const raw = localStorage.getItem(SPLIT_KEY);
@@ -90,7 +90,7 @@
   applyPaneClass();
   applySplit();
 
-  // The right pane shows the board or the terminal, never both (see a2a:right-pane in ticket.js).
+  // The right pane shows the board or the terminal, never both (see cubilot:right-pane in ticket.js).
   function onTerminalToggle() {
     const boardOpen = body.classList.contains('board-open');
     setPaneEnabled(boardOpen ? true : !_paneEnabled);
@@ -106,7 +106,7 @@
     applyPaneClass();
   }
   toggleBtn?.addEventListener('click', onTerminalToggle);
-  document.addEventListener('a2a:right-pane', onRightPane);
+  document.addEventListener('cubilot:right-pane', onRightPane);
 
   let dragStart = null;
   // The splitter is visible for the terminal and for the board, so both can start a drag.
@@ -148,11 +148,11 @@
   const {
     ptySpawn, ptyWrite, ptyResize, ptyKill, ptyList,
     strToB64, b64ToBytes,
-  } = window.__A2A_TERM__.pty;
+  } = window.__CUBILOT_TERM__.pty;
 
-  const currentXtermTheme = window.__A2A_TERM__.xtermThemes.current;
-  const currentXtermFontSize = window.__A2A_TERM__.xtermThemes.fontSize;
-  const currentXtermFontFamily = window.__A2A_TERM__.xtermThemes.fontFamily;
+  const currentXtermTheme = window.__CUBILOT_TERM__.xtermThemes.current;
+  const currentXtermFontSize = window.__CUBILOT_TERM__.xtermThemes.fontSize;
+  const currentXtermFontFamily = window.__CUBILOT_TERM__.xtermThemes.fontFamily;
   function applyXtermThemeToAll() {
     const theme = currentXtermTheme();
     const fontSize = currentXtermFontSize();
@@ -176,7 +176,7 @@
       }
     }
   }
-  document.addEventListener('a2a:theme-changed', applyXtermThemeToAll);
+  document.addEventListener('cubilot:theme-changed', applyXtermThemeToAll);
 
   // Mirrors Rust SHELL_SESSION_NAME; never filtered by room, never closed from UI.
   const SHELL_NAME = 'shell';
@@ -633,7 +633,7 @@
       }
       t.term?.write(bytes);
       maybeFlagAttention(t, agent, bytes);
-      window.A2A_USAGE?.captureBanner(t, agent, bytes);
+      window.CUBILOT_USAGE?.captureBanner(t, agent, bytes);
     });
     t.exitUnlisten = await listen(`pty://exit/${agent}`, () => {
       removeTab(agent);
@@ -842,10 +842,10 @@
     if (!spawnRoomMenu.contains(e.target) && e.target !== spawnRoomBtn
         && !spawnRoomBtn?.contains(e.target)) closeSpawnRoomMenu();
   });
-  document.addEventListener('a2a:open-spawn', () => openSpawnModal());
+  document.addEventListener('cubilot:open-spawn', () => openSpawnModal());
 
   // Refocus on room change: tab `display:none` hides chrome but pane stays visible.
-  document.addEventListener('a2a:room-filter', (e) => {
+  document.addEventListener('cubilot:room-filter', (e) => {
     const filterRoom = e?.detail?.room ?? null;
     const visible = (agentName) => {
       const t = tabs.get(agentName);
@@ -1015,7 +1015,7 @@
   }
 
   // Read-only accessor for slash-send's response capture: returns Terminal or null.
-  window.__A2A_TERM__.getTerm = (agent) => {
+  window.__CUBILOT_TERM__.getTerm = (agent) => {
     const tab = tabs.get(agent);
     return tab?.term || null;
   };

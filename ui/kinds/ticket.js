@@ -24,7 +24,7 @@ const TicketBoard = (() => {
 
   // Board filters (blast radius, priority, show archived, show cancelled), kept per room in localStorage. No filter = all five
   // priorities ticked and radius "all". An unticked-everything choice is honoured: it shows nothing.
-  const FILTER_KEY = (r) => `a2a_board_filter:${r}`;
+  const FILTER_KEY = (r) => `cubilot_board_filter:${r}`;
   const RADII = ['all', 'low', 'high'];
   const defaultFilter = () => ({ radius: 'all', priorities: Object.keys(PRIORITIES), showArchived: false, showCancelled: false });
   function sanitizeFilter(f) {
@@ -1100,11 +1100,11 @@ const TicketBoard = (() => {
     toggle?.addEventListener('click', () => {
       const open = !document.body.classList.contains('board-open');
       setOpen(open);
-      document.dispatchEvent(new CustomEvent('a2a:right-pane', { detail: { pane: open ? 'board' : null } }));
+      document.dispatchEvent(new CustomEvent('cubilot:right-pane', { detail: { pane: open ? 'board' : null } }));
       if (open) load();
     });
     // The terminal took the right pane: close the board.
-    document.addEventListener('a2a:right-pane', (e) => {
+    document.addEventListener('cubilot:right-pane', (e) => {
       if (e.detail?.pane === 'terminal') { setOpen(false); setFilterPanel(false); }
     });
     for (const v of RADII) {
@@ -1164,7 +1164,7 @@ const TicketBoard = (() => {
     d?.addEventListener('cancel', (e) => { if (saving) e.preventDefault(); });  // Escape
     d?.addEventListener('close', restoreFocus);
     // The form belongs to the room it was opened for: a room change discards it.
-    document.addEventListener('a2a:room-filter', () => { closeNew(); setFilterPanel(false); load(); });
+    document.addEventListener('cubilot:room-filter', () => { closeNew(); setFilterPanel(false); load(); });
   }
 
   // main.js calls this when the UI stream (re)opens. Ambient entries (ticket.archived, room.lead) are not

@@ -1,6 +1,6 @@
 // Ollama HTTP adapter — talks to a local ollama service over HTTP.
 // User runs `ollama serve` separately (or via brew services); Cubilot
-// detects via A2A_SUMMARISER=ollama. No binary bundling, no auth surface
+// detects via CUBILOT_SUMMARISER=ollama. No binary bundling, no auth surface
 // (loopback only), no API key.
 //
 // API contract: we use /api/generate (not /api/chat) deliberately. /api/chat
@@ -22,7 +22,7 @@ import {
 export type OllamaSummariserOptions = {
   // Default: http://127.0.0.1:11434 (ollama's standard).
   baseUrl?: string;
-  // Default: gemma4:e2b. User overrides via A2A_SUMMARISER_MODEL.
+  // Default: gemma4:e2b. User overrides via CUBILOT_SUMMARISER_MODEL.
   model?: string;
   // Hard timeout per call. Default: 120s (cold-start + generation budget).
   timeoutMs?: number;

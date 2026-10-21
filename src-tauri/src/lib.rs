@@ -74,7 +74,7 @@ struct AppConfig {
     #[serde(default)]
     chat_history_limit: Option<u32>,
     // Phase 3: room-summary adapter selection. Forwarded to the hub sidecar
-    // as A2A_SUMMARISER + adapter-specific env vars.
+    // as CUBILOT_SUMMARISER + adapter-specific env vars.
     #[serde(default)]
     summariser: Option<SummariserConfig>,
 }
@@ -205,33 +205,33 @@ fn resolve_summariser_config() -> SummariserConfig {
 fn apply_summariser_env(mut cmd: Command) -> Command {
     let cfg = resolve_summariser_config();
     if let Some(adapter) = cfg.adapter.as_deref() {
-        cmd = cmd.env("A2A_SUMMARISER", adapter);
+        cmd = cmd.env("CUBILOT_SUMMARISER", adapter);
     }
     if let Some(bin) = cfg.claude_bin.as_deref() {
         if !bin.trim().is_empty() {
-            cmd = cmd.env("A2A_SUMMARISER_CLAUDE_BIN", bin.trim());
+            cmd = cmd.env("CUBILOT_SUMMARISER_CLAUDE_BIN", bin.trim());
         }
     }
     if let Some(t) = cfg.claude_timeout_ms {
-        cmd = cmd.env("A2A_SUMMARISER_CLAUDE_TIMEOUT_MS", t.to_string());
+        cmd = cmd.env("CUBILOT_SUMMARISER_CLAUDE_TIMEOUT_MS", t.to_string());
     }
     if let Some(model) = cfg.claude_model.as_deref() {
         if !model.trim().is_empty() {
-            cmd = cmd.env("A2A_SUMMARISER_CLAUDE_MODEL", model.trim());
+            cmd = cmd.env("CUBILOT_SUMMARISER_CLAUDE_MODEL", model.trim());
         }
     }
     if let Some(url) = cfg.ollama_url.as_deref() {
         if !url.trim().is_empty() {
-            cmd = cmd.env("A2A_SUMMARISER_OLLAMA_URL", url.trim());
+            cmd = cmd.env("CUBILOT_SUMMARISER_OLLAMA_URL", url.trim());
         }
     }
     if let Some(model) = cfg.ollama_model.as_deref() {
         if !model.trim().is_empty() {
-            cmd = cmd.env("A2A_SUMMARISER_OLLAMA_MODEL", model.trim());
+            cmd = cmd.env("CUBILOT_SUMMARISER_OLLAMA_MODEL", model.trim());
         }
     }
     if let Some(t) = cfg.ollama_timeout_ms {
-        cmd = cmd.env("A2A_SUMMARISER_OLLAMA_TIMEOUT_MS", t.to_string());
+        cmd = cmd.env("CUBILOT_SUMMARISER_OLLAMA_TIMEOUT_MS", t.to_string());
     }
     cmd
 }
@@ -296,7 +296,7 @@ fn default_attachments_dir() -> PathBuf {
     // Top-level ~/ avoids macOS TCC — ~/Documents etc. block the agent's Read tool.
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("a2a-attachments")
+        .join("cubilot-attachments")
 }
 
 fn default_claude_path() -> PathBuf {
@@ -579,7 +579,7 @@ fn render_seed_yaml(
          # Optional. Exported to spawned claude sessions if non-empty.\n\
          {api_line}\n\
          \n\
-         # Where uploaded files persist. null → ~/a2a-attachments.\n\
+         # Where uploaded files persist. null → ~/cubilot-attachments.\n\
          {attachments_line}\n\
          \n\
          # Allowed upload extensions. Lowercase, no leading dot.\n\
@@ -1124,19 +1124,19 @@ fn reload_settings(
 
     let shell = handle.shell();
     let mut cmd = shell
-        .sidecar("a2a-bin")
+        .sidecar("cubilot-bin")
         .map_err(|e| format!("sidecar builder: {e}"))?
         .env("PORT", port.to_string())
-        .env("A2A_MODE", "hub")
+        .env("CUBILOT_MODE", "hub")
         .env("CUBILOT_DATA_DIR", app_data_dir().to_string_lossy().to_string())
-        .env("A2A_TOKEN", &token)
-        .env("A2A_ATTACHMENTS_DIR", attachments_dir.to_string_lossy().to_string())
-        .env("A2A_LEDGER_DB", ledger_path.to_string_lossy().to_string())
-        .env("A2A_HUMAN_NAME", &human_name)
-        .env("A2A_ALLOWED_EXTENSIONS", extensions.join(","))
-        .env("A2A_CHAT_HISTORY_LIMIT", chat_history_limit.to_string());
+        .env("CUBILOT_TOKEN", &token)
+        .env("CUBILOT_ATTACHMENTS_DIR", attachments_dir.to_string_lossy().to_string())
+        .env("CUBILOT_LEDGER_DB", ledger_path.to_string_lossy().to_string())
+        .env("CUBILOT_HUMAN_NAME", &human_name)
+        .env("CUBILOT_ALLOWED_EXTENSIONS", extensions.join(","))
+        .env("CUBILOT_CHAT_HISTORY_LIMIT", chat_history_limit.to_string());
     cmd = apply_summariser_env(cmd);
-    let (rx, child) = cmd.spawn().map_err(|e| format!("spawn a2a-bin: {e}"))?;
+    let (rx, child) = cmd.spawn().map_err(|e| format!("spawn cubilot-bin: {e}"))?;
 
     let new_info = HubInfo {
         url: url.clone(),
@@ -1440,20 +1440,20 @@ pub fn run() {
 
             let shell = handle.shell();
             let mut cmd = shell
-                .sidecar("a2a-bin")
+                .sidecar("cubilot-bin")
                 .map_err(|e| format!("sidecar builder: {e}"))?
                 .env("PORT", port.to_string())
-                .env("A2A_MODE", "hub")
+                .env("CUBILOT_MODE", "hub")
                 .env("CUBILOT_DATA_DIR", app_data_dir().to_string_lossy().to_string())
-                .env("A2A_TOKEN", &token)
-                .env("A2A_ATTACHMENTS_DIR", attachments_dir.to_string_lossy().to_string())
-                .env("A2A_LEDGER_DB", ledger_path.to_string_lossy().to_string())
-                .env("A2A_HUMAN_NAME", &human_name)
-                .env("A2A_ALLOWED_EXTENSIONS", extensions.join(","))
-                .env("A2A_CHAT_HISTORY_LIMIT", chat_history_limit.to_string());
+                .env("CUBILOT_TOKEN", &token)
+                .env("CUBILOT_ATTACHMENTS_DIR", attachments_dir.to_string_lossy().to_string())
+                .env("CUBILOT_LEDGER_DB", ledger_path.to_string_lossy().to_string())
+                .env("CUBILOT_HUMAN_NAME", &human_name)
+                .env("CUBILOT_ALLOWED_EXTENSIONS", extensions.join(","))
+                .env("CUBILOT_CHAT_HISTORY_LIMIT", chat_history_limit.to_string());
             cmd = apply_summariser_env(cmd);
 
-            let (rx, child) = cmd.spawn().map_err(|e| format!("spawn a2a-bin: {e}"))?;
+            let (rx, child) = cmd.spawn().map_err(|e| format!("spawn cubilot-bin: {e}"))?;
 
             {
                 let state = handle.state::<HubState>();
@@ -1522,7 +1522,7 @@ mod chatbridge_mod_tests {
     use std::sync::atomic::AtomicBool;
 
     fn scratch(name: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("a2a-mod-{name}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("cubilot-mod-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         d

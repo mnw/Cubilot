@@ -129,7 +129,7 @@ All kinds SHALL be imported and listed in `hub/kinds/index.ts` as a `readonly Ki
 
 #### Scenario: Bun compile inlines every kind statically
 
-- **WHEN** `bun build --compile` produces `a2a-bin`
+- **WHEN** `bun build --compile` produces `cubilot-bin`
 - **THEN** the resulting binary contains all kind modules inline (verified by absence of dynamic `import()` calls in the kind-loading path)
 
 ### Requirement: Replay order across kinds is undefined

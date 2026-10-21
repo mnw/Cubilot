@@ -33,7 +33,7 @@
       "icons/icon.icns"
     ],
     "externalBin": [
-      "binaries/a2a-bin"
+      "binaries/cubilot-bin"
     ],
     "resources": [
       "resources/tmux",

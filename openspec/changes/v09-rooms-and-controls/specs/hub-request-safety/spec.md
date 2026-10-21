@@ -34,7 +34,7 @@ The trust-on-self-assertion model (CLAUDE.md) is unchanged: the hub does not cry
 
 ### Requirement: `GET /room-default` is read-authenticated and returns the fallback room
 
-A new read endpoint `GET /room-default` SHALL return `{ room: "<label>" }` where `<label>` is the hub's `A2A_DEFAULT_ROOM` env value (default `"default"`). The endpoint SHALL accept the same authentication as other read routes (Authorization bearer OR `?token=` query param). The endpoint is used by channel-bin to resolve a fallback room when `CHATBRIDGE_ROOM` is not set in its environment.
+A new read endpoint `GET /room-default` SHALL return `{ room: "<label>" }` where `<label>` is the hub's `CUBILOT_DEFAULT_ROOM` env value (default `"default"`). The endpoint SHALL accept the same authentication as other read routes (Authorization bearer OR `?token=` query param). The endpoint is used by channel-bin to resolve a fallback room when `CHATBRIDGE_ROOM` is not set in its environment.
 
 #### Scenario: Read-auth applies
 

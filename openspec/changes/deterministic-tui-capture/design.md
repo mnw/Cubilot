@@ -42,13 +42,13 @@ All three are cleanly available via the bundled tmux + claude's documented hook 
 The capture orchestrator coordinates three tmux/claude levers in a fixed sequence:
 
 ```
-prepare paths     → /tmp/a2a/<agent>/{captures,signals}/
+prepare paths     → /tmp/cubilot/<agent>/{captures,signals}/
 record start_ms   → for sentinel mtime filtering
 pipe-pane on      → tmux pipe-pane -o -t <agent> "cat >> <log_file>"
 window-size manual → tmux set-option -t <agent> window-size manual
 resize-window     → tmux resize-window -t <agent> -x 240 -y 100
 inject input      → pty_write(agent, input)
-wait sentinel     → poll /tmp/a2a/<agent>/signals/turn-*.done with mtime > start_ms
+wait sentinel     → poll /tmp/cubilot/<agent>/signals/turn-*.done with mtime > start_ms
 stabilize         → 75ms sleep (final repaint absorption)
 pipe-pane off     → tmux pipe-pane -t <agent>
 window-size auto  → tmux set-option -t <agent> window-size automatic
@@ -70,10 +70,10 @@ Claude Code's hook system fires user-defined commands on lifecycle events (`PreT
 Hook command (macOS-compatible):
 
 ```sh
-sh -c 'mkdir -p /tmp/a2a/$A2A_AGENT/signals && touch /tmp/a2a/$A2A_AGENT/signals/turn-$(date +%s).done'
+sh -c 'mkdir -p /tmp/cubilot/$CUBILOT_AGENT/signals && touch /tmp/cubilot/$CUBILOT_AGENT/signals/turn-$(date +%s).done'
 ```
 
-- `$A2A_AGENT` injected at tmux session spawn via `new-session -e A2A_AGENT=<name>` (existing pattern, mirrors `CHATBRIDGE_AGENT`/`CHATBRIDGE_ROOM`).
+- `$CUBILOT_AGENT` injected at tmux session spawn via `new-session -e CUBILOT_AGENT=<name>` (existing pattern, mirrors `CHATBRIDGE_AGENT`/`CHATBRIDGE_ROOM`).
 - `touch` creates the file; filesystem mtime carries sub-second precision (APFS).
 - Polling logic on hub-bin side: `stat -f %m <file>` to read mtime as a float; first file with `mtime > start_instant` wins.
 
@@ -104,7 +104,7 @@ Contents:
   "hooks": {
     "Stop": [
       {
-        "command": "sh -c 'mkdir -p /tmp/a2a/$A2A_AGENT/signals && touch /tmp/a2a/$A2A_AGENT/signals/turn-$(date +%s).done'"
+        "command": "sh -c 'mkdir -p /tmp/cubilot/$CUBILOT_AGENT/signals && touch /tmp/cubilot/$CUBILOT_AGENT/signals/turn-$(date +%s).done'"
       }
     ]
   }
@@ -135,7 +135,7 @@ The hook uses whole-second epoch for the FILENAME (uniqueness within a turn) and
 
 ```rust
 loop {
-  let entries = fs::read_dir(format!("/tmp/a2a/{agent}/signals/"))?;
+  let entries = fs::read_dir(format!("/tmp/cubilot/{agent}/signals/"))?;
   for entry in entries {
     let mtime = entry.metadata()?.modified()?;
     if mtime > start_instant { return Ok(entry.path()); }
@@ -161,13 +161,13 @@ The primitive is intentionally generic: `input` is the bytes injected into the a
 ### D6. Concurrency model
 
 - **Per-agent: serialized.** Claude itself is single-threaded per session — only one turn in flight. The slash-send queue in `slash-send.js` already enforces this.
-- **Cross-agent: parallel.** `/usage @all` to a 4-agent room fires 4 `pty_capture_turn` calls in parallel. Per-agent paths (`/tmp/a2a/<agent>/...`) prevent collision.
+- **Cross-agent: parallel.** `/usage @all` to a 4-agent room fires 4 `pty_capture_turn` calls in parallel. Per-agent paths (`/tmp/cubilot/<agent>/...`) prevent collision.
 
 The orchestrator is a pure function of (agent, input, timestamps). No shared state across agents. No locks needed.
 
 ### D7. Log retention: ephemeral with 10-deep forensic buffer
 
-Captured logs land in `/tmp/a2a/<agent>/captures/turn-<epoch>.log`. Default `/tmp` cleanup on reboot handles persistence. On top:
+Captured logs land in `/tmp/cubilot/<agent>/captures/turn-<epoch>.log`. Default `/tmp` cleanup on reboot handles persistence. On top:
 
 - After each successful capture, **prune captures older than the 10 most recent for that agent**. Cheap (≤10 stat calls).
 - Failed/partial captures retained as `turn-<epoch>.partial.log` — not pruned by the success-path cleanup; only reboot wipes them.
@@ -187,7 +187,7 @@ No durable persistence. No configurable location. No archival.
 
 - **User typing during capture** → keystrokes go to the agent's PTY between resize and restore. Could conflict with the claude prompt re-render. **Mitigation**: document as expected. Pragmatically, captures are short (200–500ms) and the user is reading chat, not the xterm.
 
-- **`/tmp/a2a/` directory pileup across reboots** → if user has uptime in days/weeks, captures accumulate. **Mitigation**: 10-deep prune per agent on success-path. Failed captures (.partial) accumulate until reboot — acceptable.
+- **`/tmp/cubilot/` directory pileup across reboots** → if user has uptime in days/weeks, captures accumulate. **Mitigation**: 10-deep prune per agent on success-path. Failed captures (.partial) accumulate until reboot — acceptable.
 
 - **claude version drift** → hook semantics, `--settings` flag, slash command output formats can all change between releases. **Mitigation**: integration tests exercising the full capture flow against a live agent are the regression guard. Documented in tasks.md §6.
 

@@ -28,8 +28,8 @@ This wraps the three writes in a single transaction (consistent with the handoff
 
 #### Scenario: Accepted edit updates the nutshell
 
-- **GIVEN** `nutshell.text = "MVP of A2A coordination app"` and `version = 3`
-- **WHEN** agent `alice` sends a handoff to `human` with `task="[nutshell] add v0.6 scope"` and `context={patch: "MVP of A2A coordination app. v0.6: terminal pane, interrupts, nutshell."}`
+- **GIVEN** `nutshell.text = "MVP of Cubilot coordination app"` and `version = 3`
+- **WHEN** agent `alice` sends a handoff to `human` with `task="[nutshell] add v0.6 scope"` and `context={patch: "MVP of Cubilot coordination app. v0.6: terminal pane, interrupts, nutshell."}`
 - **AND** the human accepts that handoff
 - **THEN** `nutshell.text` becomes the patch
 - **AND** `nutshell.version` becomes `4`

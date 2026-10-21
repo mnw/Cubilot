@@ -6,7 +6,7 @@
 // multiplies every --fs-* by var(--ui-font-scale). This module just sets
 // data-theme on <body> and writes --ui-font-scale to the document root.
 //
-// Exposes window.A2A_UI = { apply, reload }.
+// Exposes window.CUBILOT_UI = { apply, reload }.
 
 (function uiSettings() {
   const VALID = ['default', 'rose-pine-dawn', 'rose-pine-moon'];
@@ -19,7 +19,7 @@
       document.body.setAttribute('data-theme', safe);
     }
     document.dispatchEvent(
-      new CustomEvent('a2a:theme-changed', { detail: { theme: safe } })
+      new CustomEvent('cubilot:theme-changed', { detail: { theme: safe } })
     );
   }
 
@@ -70,7 +70,7 @@
     }
   }
 
-  window.A2A_UI = { apply, reload };
+  window.CUBILOT_UI = { apply, reload };
 
   // Boot: pull settings from the shell as soon as Tauri is ready.
   if (window.__TAURI__) {

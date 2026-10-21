@@ -808,7 +808,7 @@ describe("board filters", () => {
   test("the choice is saved per room and restored on the room's return", async () => {
     await show(...board());
     ctx.TicketBoard.setFilter({ radius: "high", priorities: ["low"] });
-    expect(JSON.parse(store.get("a2a_board_filter:r")!)).toEqual({ radius: "high", priorities: ["low"], showArchived: false, showCancelled: false });
+    expect(JSON.parse(store.get("cubilot_board_filter:r")!)).toEqual({ radius: "high", priorities: ["low"], showArchived: false, showCancelled: false });
     ctx.SELECTED_ROOM = "r2";
     await ctx.TicketBoard.load();
     expect(ctx.TicketBoard._filter()).toEqual({ radius: "all", priorities: all5, showArchived: false, showCancelled: false });   // another room starts clean
@@ -817,15 +817,15 @@ describe("board filters", () => {
     await ctx.TicketBoard.load();
     expect(ctx.TicketBoard._filter()).toEqual({ radius: "high", priorities: ["low"], showArchived: false, showCancelled: false });
     expect(radio()).toBe("high");                                      // the controls follow the room
-    expect(JSON.parse(store.get("a2a_board_filter:r2")!)).toEqual({ radius: "low", priorities: all5, showArchived: false, showCancelled: false });
+    expect(JSON.parse(store.get("cubilot_board_filter:r2")!)).toEqual({ radius: "low", priorities: all5, showArchived: false, showCancelled: false });
   });
 
   test("damaged storage falls back to no filter; unknown values are dropped", () => {
-    store.set("a2a_board_filter:r", "{not json");
+    store.set("cubilot_board_filter:r", "{not json");
     expect(ctx.TicketBoard.readFilter("r")).toEqual({ radius: "all", priorities: all5, showArchived: false, showCancelled: false });
-    store.set("a2a_board_filter:r", JSON.stringify({ radius: "extreme", priorities: ["high", "bogus", "constructor"] }));
+    store.set("cubilot_board_filter:r", JSON.stringify({ radius: "extreme", priorities: ["high", "bogus", "constructor"] }));
     expect(ctx.TicketBoard.readFilter("r")).toEqual({ radius: "all", priorities: ["high"], showArchived: false, showCancelled: false });
-    store.set("a2a_board_filter:r", JSON.stringify({ radius: "low", priorities: "high" }));
+    store.set("cubilot_board_filter:r", JSON.stringify({ radius: "low", priorities: "high" }));
     expect(ctx.TicketBoard.readFilter("r")).toEqual({ radius: "low", priorities: all5, showArchived: false, showCancelled: false });
     expect(ctx.TicketBoard.sanitizeFilter(null)).toEqual({ radius: "all", priorities: all5, showArchived: false, showCancelled: false });
   });
@@ -941,8 +941,8 @@ describe("archived tickets", () => {
     els["ticket-show-cancelled"].checked = true;
     els["ticket-show-cancelled"].handlers.change({ target: els["ticket-show-cancelled"] });
     expect(ctx.TicketBoard._filter().showCancelled).toBe(true);
-    expect(JSON.parse(store.get("a2a_board_filter:r")!).showCancelled).toBe(true);
-    store.set("a2a_board_filter:r", JSON.stringify({ radius: "all", priorities: ["high"], showCancelled: 1 }));
+    expect(JSON.parse(store.get("cubilot_board_filter:r")!).showCancelled).toBe(true);
+    store.set("cubilot_board_filter:r", JSON.stringify({ radius: "all", priorities: ["high"], showCancelled: 1 }));
     expect(ctx.TicketBoard.readFilter("r").showCancelled).toBe(false);          // non-boolean reads as off
   });
 
@@ -998,8 +998,8 @@ describe("archived tickets", () => {
   test("Show archived is kept per room and a non-boolean stored value reads as off", async () => {
     await show(mk("a", "done"));
     set({ showArchived: true });
-    expect(JSON.parse(store.get("a2a_board_filter:r")!).showArchived).toBe(true);
-    store.set("a2a_board_filter:r", JSON.stringify({ radius: "all", priorities: ["high"], showArchived: "yes" }));
+    expect(JSON.parse(store.get("cubilot_board_filter:r")!).showArchived).toBe(true);
+    store.set("cubilot_board_filter:r", JSON.stringify({ radius: "all", priorities: ["high"], showArchived: "yes" }));
     expect(ctx.TicketBoard.readFilter("r").showArchived).toBe(false);
   });
 });
@@ -1690,7 +1690,7 @@ describe("room lead in the top bar", () => {
 
   test("it follows a room change (the room filter event) and shows the new room's lead", async () => {
     ctx.SELECTED_ROOM = "r2";
-    await ctx.TicketBoard.load();                                               // a2a:room-filter runs load()
+    await ctx.TicketBoard.load();                                               // cubilot:room-filter runs load()
     await settle();
     expect(leadFetches).toContain("/rooms/r2/lead");
     expect(wrap().hidden).toBe(false);
@@ -1852,10 +1852,10 @@ describe("filters panel", () => {
 
   test("a room change closes the panel; closing the board (the terminal takes the pane) does too", async () => {
     btn().handlers.click();
-    for (const fn of docListeners["a2a:room-filter"] ?? []) fn({});
+    for (const fn of docListeners["cubilot:room-filter"] ?? []) fn({});
     expect(panel().hidden).toBe(true);
     btn().handlers.click();
-    for (const fn of docListeners["a2a:right-pane"] ?? []) fn({ detail: { pane: "terminal" } });
+    for (const fn of docListeners["cubilot:right-pane"] ?? []) fn({ detail: { pane: "terminal" } });
     expect(panel().hidden).toBe(true);
   });
 

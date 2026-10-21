@@ -11,7 +11,7 @@ The briefing shape:
   "room": "neb-2026",
   "tools": ["post", "post_file", "send_handoff", "accept_handoff", "decline_handoff", "cancel_handoff", "send_interrupt", "ack_interrupt"],
   "peers": [{ "name": "qa", "online": true, "room": "neb-2026" }, { "name": "<human_name>", "online": true, "room": null }],
-  "attachments_dir": "/Users/<user>/a2a-attachments",
+  "attachments_dir": "/Users/<user>/cubilot-attachments",
   "human_name": "human",
   "nutshell": "auth rework in progress" ,
   "ts": "14:22:03"
@@ -47,9 +47,9 @@ Fields specific to rooms:
 
 ### Requirement: Per-agent MCP config includes `CHATBRIDGE_ROOM`
 
-The generated per-agent MCP config at `~/Library/Application Support/Cubilot/mcp-configs/<agent>.json` SHALL include `CHATBRIDGE_ROOM` in the `env` block of the chatbridge server entry, alongside the existing `A2A_MODE` and `CHATBRIDGE_AGENT` keys. The value is the agent's room as chosen in the spawn modal (or the git-root basename fallback).
+The generated per-agent MCP config at `~/Library/Application Support/Cubilot/mcp-configs/<agent>.json` SHALL include `CHATBRIDGE_ROOM` in the `env` block of the chatbridge server entry, alongside the existing `CUBILOT_MODE` and `CHATBRIDGE_AGENT` keys. The value is the agent's room as chosen in the spawn modal (or the git-root basename fallback).
 
-External-spawn agents (launched from the user's own terminal with a hand-edited `.mcp.json` that lacks `CHATBRIDGE_ROOM`) SHALL fall back to the hub's `A2A_DEFAULT_ROOM` env at channel-bin startup. The fallback SHALL be fetched via a new read-auth endpoint `GET /room-default` returning `{ room: "<label>" }`.
+External-spawn agents (launched from the user's own terminal with a hand-edited `.mcp.json` that lacks `CHATBRIDGE_ROOM`) SHALL fall back to the hub's `CUBILOT_DEFAULT_ROOM` env at channel-bin startup. The fallback SHALL be fetched via a new read-auth endpoint `GET /room-default` returning `{ room: "<label>" }`.
 
 #### Scenario: Spawn modal writes MCP config with room
 
@@ -60,7 +60,7 @@ External-spawn agents (launched from the user's own terminal with a hand-edited 
 #### Scenario: External-spawn falls back to default
 
 - **GIVEN** a `.mcp.json` exists in the user's project dir with `CHATBRIDGE_AGENT=legacy` but no `CHATBRIDGE_ROOM`
-- **AND** the hub has `A2A_DEFAULT_ROOM=brand`
+- **AND** the hub has `CUBILOT_DEFAULT_ROOM=brand`
 - **WHEN** claude spawns channel-bin
 - **THEN** channel-bin queries `GET /room-default?token=...`
 - **AND** registers with the hub as `agent=legacy, room=brand`

@@ -88,7 +88,7 @@ Sends require explicit targeting:
 | Composer text | What happens |
 |---|---|
 | `/clear` | refused — `specify @agent or @all` |
-| `/context @builder` | bytes typed into `builder`'s xterm; response mirrored back to chat as a `[a2a-capture]` code block |
+| `/context @builder` | bytes typed into `builder`'s xterm; response mirrored back to chat as a `[cubilot-capture]` code block |
 | `/clear @all` | bytes typed into every live, non-busy agent in the room |
 | `/openspec-propose ... @planner` | bytes typed; ` - answer in chatbridge` auto-appended so the agent posts its result back via `mcp__chatbridge__post` |
 
@@ -119,7 +119,7 @@ After each send the audit row reports the actual mode each agent landed on (`Pla
 
 ## Quickstart
 
-1. Install: `brew tap mnw/a2achannel && brew trust mnw/a2achannel && brew install --cask a2achannel`. Launch the app.
+1. Install: `brew tap mnw/cubilot && brew trust mnw/cubilot && brew install --cask cubilot`. Launch the app.
 2. Click **`+ agent`** in the header, enter a name, pick the **harness** (`claude` or `pi`), the project directory, then **Launch**. Cubilot spawns the chosen agent binary inside a bundled tmux session in an embedded terminal tab. No `.mcp.json` editing, no separate terminal.
 3. Repeat for each agent. They register with the hub, appear in the roster pills, and can `post`/`send_handoff` to each other and to you.
 
@@ -137,14 +137,14 @@ The harness is captured at spawn and immutable for the session — changing it m
 ### Homebrew (recommended)
 
 ```bash
-brew tap mnw/a2achannel
-brew trust mnw/a2achannel
-brew install --cask a2achannel
+brew tap mnw/cubilot
+brew trust mnw/cubilot
+brew install --cask cubilot
 ```
 
 `brew trust` is required: Homebrew refuses to load casks from third-party taps until you explicitly trust them. Without it the install fails with `Refusing to load cask … from untrusted tap`.
 
-Apple Silicon macOS only. `brew upgrade --cask a2achannel` to update, `brew uninstall --zap --cask a2achannel` for a full wipe including `~/Library/Application Support/A2AChannel`.
+Apple Silicon macOS only. `brew upgrade --cask cubilot` to update, `brew uninstall --zap --cask cubilot` for a full wipe including `~/Library/Application Support/Cubilot`.
 
 Ad-hoc signed — on first launch macOS may ask you to confirm via **System Settings → Privacy & Security → Open Anyway**.
 
@@ -223,7 +223,7 @@ Edit, click **↻** in the header to reload — hub restarts with the new values
 │  Cubilot.app  (Tauri 2 — native macOS)                   │
 │                                                             │
 │  ┌─────────────────────┐        ┌───────────────────────┐   │
-│  │ Webview             │◄─SSE───┤ a2a-bin (hub mode)    │   │
+│  │ Webview             │◄─SSE───┤ cubilot-bin (hub mode)    │   │
 │  │  chat  | term pane  ├─POST──►│  Bun sidecar          │   │
 │  │  (xterm.js in pane) │        │  127.0.0.1:<dynamic>  │   │
 │  └──────┬──────────────┘        │  SQLite ledger        │   │
@@ -235,13 +235,13 @@ Edit, click **↻** in the header to reload — hub restarts with the new values
 │  │ registry     │   (shared sock)   │        │              │
 │  └──────────────┘                   │        │ stdio        │
 │                                     │        ▼              │
-│                                     │   a2a-bin (channel)   │
+│                                     │   cubilot-bin (channel)   │
 └─────────────────────────────────────┼────────┬──────────────┘
                                       │        │ SSE + POST
         (agents from external terminals)       │
         ┌──────────────────────────────┼───────┤
   ┌─────▼──────────┐  ┌────────────────▼───┐  ┌▼───────────────┐
-  │ a2a-bin        │  │ a2a-bin            │  │ a2a-bin        │
+  │ cubilot-bin        │  │ cubilot-bin            │  │ cubilot-bin        │
   │ (channel mode) │  │ (channel mode)     │  │ (channel mode) │
   │ agent=alice    │  │ agent=bob (ext)    │  │ agent=…        │
   └─────┬──────────┘  └───┬────────────────┘  └─┬──────────────┘
@@ -254,9 +254,9 @@ Edit, click **↻** in the header to reload — hub restarts with the new values
 
 </details>
 
-**a2a-bin (hub mode)** — HTTP + SSE server on a dynamic loopback port. Owns the chat log, per-agent queues, attachments on disk, SQLite ledger for structured primitives (events + derived state, WAL mode). Bearer-token auth on all routes; read routes also accept `?token=` for `EventSource` and `<img>`.
+**cubilot-bin (hub mode)** — HTTP + SSE server on a dynamic loopback port. Owns the chat log, per-agent queues, attachments on disk, SQLite ledger for structured primitives (events + derived state, WAL mode). Bearer-token auth on all routes; read routes also accept `?token=` for `EventSource` and `<img>`.
 
-**a2a-bin (channel mode)** — MCP server, one per Claude Code session. Reads the discovery files at `~/Library/Application Support/Cubilot/hub.{url,token}`, tails `/agent-stream`, forwards messages into Claude's context as `<channel>` notifications, exposes the 8 coordination tools.
+**cubilot-bin (channel mode)** — MCP server, one per Claude Code session. Reads the discovery files at `~/Library/Application Support/Cubilot/hub.{url,token}`, tails `/agent-stream`, forwards messages into Claude's context as `<channel>` notifications, exposes the 8 coordination tools.
 
 **Webview** — vanilla HTML/CSS/JS, no framework. `main.js` orchestrates SSE + chat + nutshell; each structured Kind (handoff, interrupt, permission) lives under `ui/kinds/<kind>.js` and self-registers with `KindCardRenderer` so `main.js` dispatches by prefix instead of branching per kind. `terminal.js` owns the PTY pane + xterm.js lifecycle. Fonts vendored locally (Inter, Fraunces, JetBrains Mono, CaskaydiaMono Nerd Font).
 
@@ -278,7 +278,7 @@ Full protocol schemas, endpoints, and state machines: [`docs/PROTOCOL.md`](PROTO
 | Agent posts but never receives | Same cause as "agent pill never appears" | — |
 | "unidentified developer" dialog | Ad-hoc signing + Gatekeeper | `xattr -dr com.apple.quarantine /Applications/Cubilot.app`, or right-click → Open once |
 | Terminal tab blank after Launch | Claude's alt-screen buffer didn't flush | Click inside the xterm and press Enter, or drag the window edge to force SIGWINCH |
-| Multiple `a2a-bin` hubs listening | `pkill cubilot` bypassed Tauri's cleanup, orphaning the old hub | Always use `./scripts/install.sh` (has orphan-sweep); to recover, `pgrep -fl a2a-bin`, kill the hubs with `A2A_MODE=hub`, relaunch |
+| Multiple `cubilot-bin` hubs listening | `pkill cubilot` bypassed Tauri's cleanup, orphaning the old hub | Always use `./scripts/install.sh` (has orphan-sweep); to recover, `pgrep -fl cubilot-bin`, kill the hubs with `CUBILOT_MODE=hub`, relaunch |
 
 ## Limitations
 

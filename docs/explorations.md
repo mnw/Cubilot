@@ -5,7 +5,7 @@
 
 ## Background
 
-A2AChannel today has three input surfaces per agent: chat (free-text + structured kinds — works), the embedded xterm tab (where the human types slash commands like `/clear`, `/usage`, `/opsx:explore` directly into claude — works), and nothing in between. The question explored: **could we drive an agent's slash commands from the chat composer instead of switching to its terminal tab?**
+Cubilot today has three input surfaces per agent: chat (free-text + structured kinds — works), the embedded xterm tab (where the human types slash commands like `/clear`, `/usage`, `/opsx:explore` directly into claude — works), and nothing in between. The question explored: **could we drive an agent's slash commands from the chat composer instead of switching to its terminal tab?**
 
 Two architectural attempts. Both deferred to the terminal in the end.
 
@@ -50,11 +50,11 @@ Invalid API key · Fix external API key
 
 Slash commands that are local data lookups (`/context`, `/usage`) succeeded — they don't call the Anthropic API. The moment claude needed to generate a conversational response (i.e., made an actual API call), it failed with "Invalid API key."
 
-The cause is policy-enforced. A2AChannel's Max-subscription model relies on the interactive `claude` CLI authenticating via macOS Keychain and propagating an `sk-cp-…` OAuth token to its child processes (which is how the existing `channel-bin` MCP sidecar inherits auth). The SDK runs claude in **headless mode**, which doesn't go through that auth flow. Anthropic's documented position: SDK consumers use `ANTHROPIC_API_KEY` (pay-per-token), and *"third-party developers should not offer claude.ai login or rate limits for their products, including agents built on the Claude Agent SDK."* The subscription token is for the interactive CLI; SDK is API-key territory.
+The cause is policy-enforced. Cubilot's Max-subscription model relies on the interactive `claude` CLI authenticating via macOS Keychain and propagating an `sk-cp-…` OAuth token to its child processes (which is how the existing `channel-bin` MCP sidecar inherits auth). The SDK runs claude in **headless mode**, which doesn't go through that auth flow. Anthropic's documented position: SDK consumers use `ANTHROPIC_API_KEY` (pay-per-token), and *"third-party developers should not offer claude.ai login or rate limits for their products, including agents built on the Claude Agent SDK."* The subscription token is for the interactive CLI; SDK is API-key territory.
 
 We considered extracting the OAuth token from Keychain and injecting it as `ANTHROPIC_API_KEY` for SDK queries. Rejected — using a subscription token from a non-CLI context is the kind of pattern Anthropic's anti-abuse systems are designed to flag, and the downside (account suspension) is much worse than the upside (one-spike validation).
 
-The architecture is technically sound. The commercial model isn't compatible with how A2AChannel currently positions itself: install the app, run on your existing Max plan. SDK mode would require a separate `ANTHROPIC_API_KEY` per user, turning a free-with-Max tool into a pay-per-token tool. That's a different product.
+The architecture is technically sound. The commercial model isn't compatible with how Cubilot currently positions itself: install the app, run on your existing Max plan. SDK mode would require a separate `ANTHROPIC_API_KEY` per user, turning a free-with-Max tool into a pay-per-token tool. That's a different product.
 
 ## Decision
 
@@ -63,7 +63,7 @@ Slash commands stay in the terminal. The xterm tab next to each agent is the can
 What survives from the exploration:
 
 - **Both branches preserved on GitHub** — `commands` and `sdk-pivot` — as documented dead-ends with working code anyone can read or rerun.
-- **Architectural map** of what an SDK-native A2AChannel would look like (smaller codebase, terminal-quality back-and-forth in chat, clean structured tool-call rendering) — kept on `sdk-pivot` for the day Anthropic ships subscription auth for the SDK.
+- **Architectural map** of what an SDK-native Cubilot would look like (smaller codebase, terminal-quality back-and-forth in chat, clean structured tool-call rendering) — kept on `sdk-pivot` for the day Anthropic ships subscription auth for the SDK.
 - **Hard-won knowledge** that the chatbridge MCP sidecar + tmux + PTY model isn't accidental — it's the *only* path that uses the user's existing Max subscription without commercial repackaging. The complexity buys the auth model.
 
 What lives on `main` after PR #2 was merged:

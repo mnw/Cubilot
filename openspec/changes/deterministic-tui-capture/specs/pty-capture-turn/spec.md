@@ -9,15 +9,15 @@ A new Tauri command `pty_capture_turn(agent: String, input: String, timeout_ms: 
 #### Scenario: Slash command capture against a live agent
 - **GIVEN** an agent `foo` is running in a tmux session with the per-agent settings file installed (Stop hook present)
 - **WHEN** the host calls `pty_capture_turn("foo", "/context\r", null)`
-- **THEN** the command returns a `CaptureResult` whose `log_path` points to a file under `/tmp/a2a/foo/captures/turn-<epoch>.log`
+- **THEN** the command returns a `CaptureResult` whose `log_path` points to a file under `/tmp/cubilot/foo/captures/turn-<epoch>.log`
 - **AND** the file contains the full rendered `/context` panel including all MCP tools, custom agents, skills, and plugins
 - **AND** no truncation occurs regardless of the visible xterm's actual width
 
 #### Scenario: Cross-agent parallel capture
 - **GIVEN** four agents `alice`, `bob`, `carol`, `dave` running in the same room
 - **WHEN** four `pty_capture_turn` calls fire in parallel, one per agent
-- **THEN** each call writes its own log file under `/tmp/a2a/<agent>/captures/`
-- **AND** each call observes its own per-agent sentinel under `/tmp/a2a/<agent>/signals/`
+- **THEN** each call writes its own log file under `/tmp/cubilot/<agent>/captures/`
+- **AND** each call observes its own per-agent sentinel under `/tmp/cubilot/<agent>/signals/`
 - **AND** no path collision or sentinel cross-talk occurs
 
 #### Scenario: Capture timeout when sentinel never arrives
@@ -62,7 +62,7 @@ The fixed 240×100 dimensions are sufficient for every documented claude built-i
 Before injecting `input`, the orchestrator SHALL enable a per-capture pipe with:
 
 ```
-tmux pipe-pane -o -t <agent> "cat >> /tmp/a2a/<agent>/captures/turn-<epoch>.log"
+tmux pipe-pane -o -t <agent> "cat >> /tmp/cubilot/<agent>/captures/turn-<epoch>.log"
 ```
 
 The `-o` flag toggles the pipe; subsequent `tmux pipe-pane -t <agent>` (no arg) disables it. The captured file contains the byte stream claude wrote during the turn, with full fidelity (no truncation from quiescence detection, no ANSI dropped at capture time).
@@ -82,7 +82,7 @@ The `-o` flag toggles the pipe; subsequent `tmux pipe-pane -t <agent>` (no arg) 
 
 ### Requirement: The capture orchestrator SHALL detect turn completion via a filesystem sentinel written by claude's `Stop` hook
 
-Each agent's claude session SHALL be launched with a per-agent settings file that registers a `Stop` hook. When claude completes a turn, the hook SHALL `touch` a sentinel file under `/tmp/a2a/<A2A_AGENT>/signals/turn-<epoch>.done`. The orchestrator SHALL poll the agent's signals directory at 50ms intervals after `pty_write` returns, and SHALL accept the FIRST sentinel file whose mtime is greater than the orchestrator's recorded `start_instant`.
+Each agent's claude session SHALL be launched with a per-agent settings file that registers a `Stop` hook. When claude completes a turn, the hook SHALL `touch` a sentinel file under `/tmp/cubilot/<CUBILOT_AGENT>/signals/turn-<epoch>.done`. The orchestrator SHALL poll the agent's signals directory at 50ms intervals after `pty_write` returns, and SHALL accept the FIRST sentinel file whose mtime is greater than the orchestrator's recorded `start_instant`.
 
 The sentinel filename uses whole-second epoch (`date +%s`); the actual completion ordering is determined by APFS sub-second mtime via `stat -f %m`. **The hook command MUST use BSD-userland `date` syntax only** — `%3N` and `%N` are GNU-only and produce literal output on macOS.
 
@@ -90,24 +90,24 @@ The sentinel filename uses whole-second epoch (`date +%s`); the actual completio
 - **GIVEN** the per-agent Stop hook is installed
 - **AND** the capture orchestrator records `start_instant` immediately before `pty_write`
 - **WHEN** claude finishes the turn and the Stop hook fires
-- **THEN** a file appears under `/tmp/a2a/<agent>/signals/` with mtime > start_instant
+- **THEN** a file appears under `/tmp/cubilot/<agent>/signals/` with mtime > start_instant
 - **AND** the orchestrator detects this file within 50ms of its appearance
 - **AND** proceeds to the stabilization-delay step
 
 #### Scenario: Stale sentinels from previous turns are ignored
-- **GIVEN** the agent has had previous turns whose sentinel files still exist in `/tmp/a2a/<agent>/signals/`
+- **GIVEN** the agent has had previous turns whose sentinel files still exist in `/tmp/cubilot/<agent>/signals/`
 - **WHEN** a new capture starts at `start_instant`
 - **THEN** only sentinel files with mtime > start_instant are eligible
 - **AND** older sentinels are skipped during polling
 
 ### Requirement: Cubilot SHALL inject the per-agent claude settings file at agent spawn
 
-For each agent spawn, the Tauri shell SHALL materialize a per-agent settings file at `~/Library/Application Support/Cubilot/settings/<agent>.json` containing the `Stop` hook command. The claude invocation SHALL include `--settings <path>` referencing this file (mirrors the existing `--mcp-config <path>` pattern). The agent's tmux session SHALL be spawned with `A2A_AGENT=<name>` in its env so the hook command can scope its sentinel writes per-agent.
+For each agent spawn, the Tauri shell SHALL materialize a per-agent settings file at `~/Library/Application Support/Cubilot/settings/<agent>.json` containing the `Stop` hook command. The claude invocation SHALL include `--settings <path>` referencing this file (mirrors the existing `--mcp-config <path>` pattern). The agent's tmux session SHALL be spawned with `CUBILOT_AGENT=<name>` in its env so the hook command can scope its sentinel writes per-agent.
 
 #### Scenario: Settings file is materialized at every spawn
 - **WHEN** `pty_spawn(agent, cwd, ...)` is invoked
 - **THEN** the file `~/Library/Application Support/Cubilot/settings/<agent>.json` is written (mode 0600)
-- **AND** the file's `Stop` hook command references `$A2A_AGENT` for path scoping
+- **AND** the file's `Stop` hook command references `$CUBILOT_AGENT` for path scoping
 - **AND** the claude invocation includes `--settings <that path>`
 
 #### Scenario: Stale settings files self-heal
@@ -121,7 +121,7 @@ For each agent spawn, the Tauri shell SHALL materialize a per-agent settings fil
 The orchestrator SHALL prune captures older than the 10 most recent successful ones for each agent on every successful capture. Failed captures (`.partial.log` suffix) SHALL NOT be pruned by the success path; they remain until OS-level `/tmp` cleanup (typically reboot) for forensic inspection.
 
 #### Scenario: Successful captures rotate at 10-deep
-- **GIVEN** the directory `/tmp/a2a/<agent>/captures/` contains 12 successful capture log files
+- **GIVEN** the directory `/tmp/cubilot/<agent>/captures/` contains 12 successful capture log files
 - **WHEN** a new successful capture writes the 13th file
 - **THEN** the orchestrator removes the 3 oldest successful captures
 - **AND** exactly 10 successful captures remain (plus any `.partial.log` files unaffected)

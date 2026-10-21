@@ -34,7 +34,7 @@
       agent, input, timeoutMs: timeoutMs ?? null,
     });
   }
-  // Path must start with /tmp/a2a/; maxBytes defaults to 256 KiB.
+  // Path must start with /tmp/cubilot/; maxBytes defaults to 256 KiB.
   async function ptyReadCapture(logPath, maxBytes) {
     return _invoke()('pty_read_capture', {
       logPath, maxBytes: maxBytes ?? null,
@@ -64,8 +64,8 @@
     return bytes;
   }
 
-  window.__A2A_TERM__ = window.__A2A_TERM__ || {};
-  window.__A2A_TERM__.pty = {
+  window.__CUBILOT_TERM__ = window.__CUBILOT_TERM__ || {};
+  window.__CUBILOT_TERM__.pty = {
     ptySpawn, ptyWrite, ptyResize, ptyKill, ptyList,
     ptyCaptureTurn, ptyReadCapture, ptyHealGeometry, ptyTapRead,
     strToB64, b64ToBytes,

@@ -171,6 +171,6 @@
 
   // Refresh whenever the selected room changes. rooms.js dispatches a custom
   // event after switching; fall back to a small interval if that's missing.
-  document.addEventListener('a2a:room-filter', refresh);
+  document.addEventListener('cubilot:room-filter', refresh);
   setTimeout(refresh, 500);
 })();

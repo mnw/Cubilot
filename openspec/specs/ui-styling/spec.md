@@ -193,7 +193,7 @@ The JS file set includes at minimum:
 - `main.js` — orchestrator: bootstrap, SSE `connect`, `handleEvent` dispatch, settings + reload buttons, title-bar drag fallback.
 - `kinds/{handoff,interrupt,permission}.js` (already extracted in v0.9.5) — per-kind card renderers.
 - `terminal.js` — terminal pane orchestrator (IIFE-wrapped).
-- `terminal/pty.js` — `ptySpawn`, `ptyWrite`, `ptyResize`, `ptyKill`, `ptyList` Tauri-invoke wrappers + base64 helpers, exposed via `window.__A2A_TERM__.pty`.
+- `terminal/pty.js` — `ptySpawn`, `ptyWrite`, `ptyResize`, `ptyKill`, `ptyList` Tauri-invoke wrappers + base64 helpers, exposed via `window.__CUBILOT_TERM__.pty`.
 
 No file SHALL exceed 500 lines after this change.
 

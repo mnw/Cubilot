@@ -22,7 +22,7 @@ No work in §§1–7 may start until §0 is fully green. This is the explicit le
 - [x] 1.1 Run `./scripts/build-tmux.sh`; confirm output lands at `src-tauri/resources/tmux` (~1.1 MB, `file` reports Mach-O ARM64 executable, `tmux -V` prints `tmux 3.5a`).
 - [x] 1.2 Add `src-tauri/resources/` to the Tauri bundle config in `src-tauri/tauri.conf.json` under `bundle.resources` so the binary ships inside `.app/Contents/Resources/`.
 - [x] 1.3 Update `scripts/install.sh` to call `scripts/build-tmux.sh` before `tauri build` (only if `src-tauri/resources/tmux` is missing — rebuilding on every install is wasteful). Update `build-tmux.sh`'s existing `codesign --force --sign -` call to remain authoritative for the nested binary; do NOT rely on the outer `codesign --deep` alone.
-- [x] 1.4 Add a Rust helper `resolve_tmux_bin()` in `src-tauri/src/lib.rs` mirroring `resolve_a2a_bin()`: check `Contents/Resources/tmux` first, then `src-tauri/resources/tmux` for `tauri dev`.
+- [x] 1.4 Add a Rust helper `resolve_tmux_bin()` in `src-tauri/src/lib.rs` mirroring `resolve_cubilot_bin()`: check `Contents/Resources/tmux` first, then `src-tauri/resources/tmux` for `tauri dev`.
 - [x] 1.5 Update `.gitignore` to exclude `src-tauri/resources/tmux` (we don't check the binary in; it's built via the script).
 - [x] 1.6 Document the socket location — `~/Library/Application Support/Cubilot/tmux.sock` — in README under a new "Terminal pane" section. Include the external-attach command. *(Deferred to §6.1 — avoid double-editing README.)*
 - [x] 1.7 Verify nested codesign survives in the installed `.app`: `codesign --verify --deep --strict --verbose=2 /Applications/Cubilot.app` must pass, and `codesign -dvvv /Applications/Cubilot.app/Contents/Resources/tmux` must show the ad-hoc signature written by `build-tmux.sh`. Failing this check is a release blocker — library-validation surfaces here. *(Deferred — runs after §7.2 install.)*
@@ -69,7 +69,7 @@ No work in §§1–7 may start until §0 is fully green. This is the explicit le
 
 ## 5. Testing matrix
 
-- [x] 5.0 Explicit spawn smoke test: `+ New agent` → name `alice`, cwd `/tmp/a2a-smoke-alice` (empty dir). Confirm `.mcp.json` is written; claude starts; channel-bin registers; legend pill goes online; xterm shows claude's prompt.
+- [x] 5.0 Explicit spawn smoke test: `+ New agent` → name `alice`, cwd `/tmp/cubilot-smoke-alice` (empty dir). Confirm `.mcp.json` is written; claude starts; channel-bin registers; legend pill goes online; xterm shows claude's prompt.
 - [~] 5.0a DROPPED: no merge path exists per Finding 4: pre-populate a cwd with `.mcp.json` containing an unrelated `mcpServers.fakehub` entry. Run `+ New agent` targeting that dir. Confirm the merge modal appears; on accept, `fakehub` is preserved and `chatbridge` is added with the right `CHATBRIDGE_AGENT`.
 - [x] 5.0b Reactive path smoke test: with Cubilot running and the pane open, run `claude` in a separate Terminal.app from a dir whose `.mcp.json` has `CHATBRIDGE_AGENT=bob`. Confirm that `bob` appears in the pane as an `external`-state tab with the documented status line; no xterm mounts; no PTY is allocated by Cubilot.
 - [x] 5.1 Single-agent end-to-end: toggle pane on, Launch `alice`, type `/help` in the xterm, observe Claude Code response.

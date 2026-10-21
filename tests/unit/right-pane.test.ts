@@ -67,7 +67,7 @@ beforeEach(() => {
   vm.runInContext(
     "let _paneEnabled = false; function paneEnabled() { return _paneEnabled; }" +
       slice("applyPaneClass") + slice("setPaneEnabled") + slice("onSplitterDown") + slice("onTerminalToggle") + slice("onRightPane") +
-      "var dragStart = null; applyPaneClass(); document.addEventListener('a2a:right-pane', onRightPane);" +
+      "var dragStart = null; applyPaneClass(); document.addEventListener('cubilot:right-pane', onRightPane);" +
       "globalThis.__term = onTerminalToggle;",
     ctx,
   );

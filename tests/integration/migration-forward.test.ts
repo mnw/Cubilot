@@ -9,11 +9,11 @@ async function bootHubAgainstLedger(ledgerPath: string, baseDir: string): Promis
     env: {
       ...process.env,
       PORT: "0",
-      A2A_TOKEN: "testmig",
-      A2A_LEDGER_DB: ledgerPath,
-      A2A_ATTACHMENTS_DIR: baseDir,
-      A2A_HUMAN_NAME: "human",
-      A2A_DEFAULT_ROOM: "default",
+      CUBILOT_TOKEN: "testmig",
+      CUBILOT_LEDGER_DB: ledgerPath,
+      CUBILOT_ATTACHMENTS_DIR: baseDir,
+      CUBILOT_HUMAN_NAME: "human",
+      CUBILOT_DEFAULT_ROOM: "default",
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -49,7 +49,7 @@ async function bootHubAgainstLedger(ledgerPath: string, baseDir: string): Promis
 
 describe("ledger migration forward-compat", () => {
   test("fresh ledger migrates from scratch to current version", async () => {
-    const base = mkdtempSync(join(tmpdir(), "a2a-mig-fresh-"));
+    const base = mkdtempSync(join(tmpdir(), "cubilot-mig-fresh-"));
     const path = join(base, "ledger.db");
 
     await bootHubAgainstLedger(path, base);
@@ -84,7 +84,7 @@ describe("ledger migration forward-compat", () => {
     // current hub once to get v6, then manually rewind schema_version to 5
     // and re-drop the room columns + nutshell key. That's fragile; cleaner
     // to directly seed v5 schema by hand.
-    const base = mkdtempSync(join(tmpdir(), "a2a-mig-v5-"));
+    const base = mkdtempSync(join(tmpdir(), "cubilot-mig-v5-"));
     const path = join(base, "ledger.db");
 
     // Construct a v5 ledger: full tables from v1–v5, no room columns, nutshell with id=0.

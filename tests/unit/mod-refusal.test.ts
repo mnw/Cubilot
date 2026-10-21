@@ -139,7 +139,7 @@ describe("curl isolation (real curl)", () => {
   const server = Bun.serve({ port: 0, fetch: () => new Response("hello") });
   afterAll(() => server.stop(true));
   const deadProxy = "http://127.0.0.1:1";                        // nothing listens: any use of it fails
-  const home = mkdtempSync(join(tmpdir(), "a2a-curlrc-"));
+  const home = mkdtempSync(join(tmpdir(), "cubilot-curlrc-"));
   writeFileSync(join(home, ".curlrc"), `proxy = "${deadProxy}"\noutput = "/dev/null"\n`);   // a hostile user config
   const env = { PATH: process.env.PATH ?? "", HOME: home, http_proxy: deadProxy, HTTP_PROXY: deadProxy, all_proxy: deadProxy, ALL_PROXY: deadProxy };
 
