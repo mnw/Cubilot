@@ -2,7 +2,7 @@
 
 - [x] 1.1 Replace the `HUB_PORT: &str = "8011"` constant in `src-tauri/src/lib.rs` with a runtime-computed port
 - [x] 1.2 Add a helper that binds `TcpListener::bind("127.0.0.1:0")`, reads `local_addr().port()`, and drops the listener
-- [x] 1.3 Add a helper that resolves the discovery-file path via `dirs::data_dir()` joined with `A2AChannel/hub.url`
+- [x] 1.3 Add a helper that resolves the discovery-file path via `dirs::data_dir()` joined with `Cubilot/hub.url`
 - [x] 1.4 Implement atomic discovery-file write: write to `hub.url.tmp` in the same directory, then `std::fs::rename` onto `hub.url` (ensure parent dir exists first)
 - [x] 1.5 In `setup()`, call the port helper before spawning the sidecar, persist the port in a `Mutex<Option<u16>>` app state, write the discovery file, then spawn `hub-bin` with `PORT=<port>` env
 - [x] 1.6 Log the chosen port to stdout so it appears in `hub.log` for troubleshooting
@@ -24,7 +24,7 @@
 ## 4. channel.ts — discovery-file fallback
 
 - [x] 4.1 Add a `resolveHubUrl()` helper that implements the lookup priority: env var > discovery file > null
-- [x] 4.2 Resolve the discovery-file path using `os.homedir() + '/Library/Application Support/A2AChannel/hub.url'`
+- [x] 4.2 Resolve the discovery-file path using `os.homedir() + '/Library/Application Support/Cubilot/hub.url'`
 - [x] 4.3 In `tailHub()`, call `resolveHubUrl()` at the start of each loop iteration (not just once at startup) so stale URLs self-heal
 - [x] 4.4 If `resolveHubUrl()` returns null, log a `[channel] hub not found, waiting...` line once per retry cycle and proceed with the 2s backoff
 - [x] 4.5 Leave the existing reconnect backoff unchanged (2s); rely on it for convergence
@@ -37,16 +37,16 @@
 
 ## 6. Documentation
 
-- [x] 6.1 Update `CLAUDE.md` hard rules: remove the "port 8011 in three places" rule; replace with a rule about the discovery file contract (`~/Library/Application Support/A2AChannel/hub.url` is the single source of truth, do not hardcode the port anywhere)
+- [x] 6.1 Update `CLAUDE.md` hard rules: remove the "port 8011 in three places" rule; replace with a rule about the discovery file contract (`~/Library/Application Support/Cubilot/hub.url` is the single source of truth, do not hardcode the port anywhere)
 - [x] 6.2 Update `CLAUDE.md` architecture section to describe the port-discovery flow
 - [x] 6.3 Update `README.md` "Wiring an agent" section: the MCP config no longer contains a `CHATBRIDGE_HUB` entry
-- [x] 6.4 Update `README.md` troubleshooting: if the user sees "hub not found" retries, check that `A2AChannel.app` is running and the discovery file exists
+- [x] 6.4 Update `README.md` troubleshooting: if the user sees "hub not found" retries, check that `Cubilot.app` is running and the discovery file exists
 
 ## 7. Verification
 
-- [x] 7.1 Build via `./scripts/install.sh`; confirm `A2AChannel.app` starts and the chosen port appears in `~/Library/Logs/A2AChannel/hub.log`
-- [x] 7.2 Confirm `~/Library/Application Support/A2AChannel/hub.url` contains `http://127.0.0.1:<port>` matching the log
-- [x] 7.3 Confirm `curl $(cat ~/Library/Application\ Support/A2AChannel/hub.url)/agents` returns the roster
+- [x] 7.1 Build via `./scripts/install.sh`; confirm `Cubilot.app` starts and the chosen port appears in `~/Library/Logs/Cubilot/hub.log`
+- [x] 7.2 Confirm `~/Library/Application Support/Cubilot/hub.url` contains `http://127.0.0.1:<port>` matching the log
+- [x] 7.3 Confirm `curl $(cat ~/Library/Application\ Support/Cubilot/hub.url)/agents` returns the roster
 - [ ] 7.4 Hold port 8011 with `nc -l 8011 &` before launching the app; confirm the app starts on a different port without error
 - [ ] 7.5 Paste the MCP template from the modal into a test project's `.mcp.json`; confirm no `CHATBRIDGE_HUB` key is present
 - [ ] 7.6 Start a Claude session with that `.mcp.json`; confirm agent registers and appears in the UI within 2–4 seconds

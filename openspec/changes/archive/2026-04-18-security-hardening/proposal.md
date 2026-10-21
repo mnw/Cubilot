@@ -37,6 +37,6 @@ A code review of the v0.3.0 release identified a coherent class of issues rooted
   - `ui/index.html` — receive token from `get_hub_url`, attach `Authorization` header on every mutating fetch, validate image URLs before rendering, DOM-trim messages, rebuild `NAMES`/`COLORS`, delegated click handler, parse error JSON, log parse failures.
   - `src-tauri/tauri.conf.json` — CSP unchanged (tightening deferred).
 - **APIs**: new header requirement on four endpoints; new response code `413` on bodies over 256 KiB; new response code `401` on auth failure. New Tauri command return shape: `get_hub_url` returns `{ url, token }` instead of a bare URL string.
-- **Filesystem**: new file `~/Library/Application Support/A2AChannel/hub.token` (mode `0600`); `hub.url` permission tightened to `0600`; `hub.log` rotated on startup if oversized.
+- **Filesystem**: new file `~/Library/Application Support/Cubilot/hub.token` (mode `0600`); `hub.url` permission tightened to `0600`; `hub.log` rotated on startup if oversized.
 - **Backwards compatibility**: existing `.mcp.json` files continue to work (v0.3.0 channel-bin also gets the auth changes — they're either both on or both off; there is no mixed-version support scenario because the Tauri app ships both at once).
 - **Docs**: `README.md` troubleshooting additions, `CLAUDE.md` hard-rule additions (auth header requirement, SVG excluded, body cap).

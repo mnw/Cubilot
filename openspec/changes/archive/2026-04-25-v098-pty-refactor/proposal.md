@@ -40,7 +40,7 @@ None. The PTY-pairing behavior already ships and is covered by the existing `ter
 
 **Test infrastructure:**
 - Tests need the bundled tmux binary or a system tmux on PATH. Prefer bundled — matches shipped behavior.
-- Tests run in a hermetic temp dir with a test-scoped socket (`/tmp/a2achannel-test-<pid>.sock`). `kill-server` on teardown.
+- Tests run in a hermetic temp dir with a test-scoped socket (`/tmp/cubilot-test-<pid>.sock`). `kill-server` on teardown.
 - Bun test runs the TypeScript side; it shells out to tmux directly rather than driving pty.rs via the Tauri runtime (that would need a headless Tauri harness — out of scope).
 
 **Risk assessment:**

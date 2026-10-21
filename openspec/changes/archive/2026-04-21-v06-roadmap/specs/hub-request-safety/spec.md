@@ -61,7 +61,7 @@ The same token is valid whether presented by the webview or by any channel-mode 
 
 #### Scenario: Agent and human tokens are the same
 
-- **GIVEN** `A2A_TOKEN=abc`
+- **GIVEN** `CUBILOT_TOKEN=abc`
 - **WHEN** the webview POSTs `/upload` with `Bearer abc`
 - **AND** a channel-mode sidecar POSTs `/upload` with `Bearer abc`
 - **THEN** both requests succeed

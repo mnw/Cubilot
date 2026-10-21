@@ -55,7 +55,7 @@ Constraints (from CLAUDE.md + the repo's baseline):
 
 ### 2. Hermetic tmux socket per test
 
-**Decision:** Each test sets `tmux -S /tmp/a2achannel-test-<pid>-<counter>.sock …`. Teardown runs `tmux -S <sock> kill-server`. Tests never touch `~/Library/Application Support/A2AChannel/tmux.sock` (the production path).
+**Decision:** Each test sets `tmux -S /tmp/cubilot-test-<pid>-<counter>.sock …`. Teardown runs `tmux -S <sock> kill-server`. Tests never touch `~/Library/Application Support/Cubilot/tmux.sock` (the production path).
 
 **Rationale:**
 - Isolation: no cross-test contamination, no interaction with a running app.
@@ -156,6 +156,6 @@ Tests 1-3 exercise `resolve_utf8_locale` directly (pure). Tests 4-6 exercise tmu
 
 3. **Parallel test execution — safe?** Bun test runs tests in parallel by default. Each test uses a PID-scoped socket, so in principle yes. Verify: run the suite 10× with `--preload` and check for flakes.
 
-4. **Should the test suite's tmux binary path be overridable via env (`A2A_TMUX=/usr/local/bin/tmux`)?** Yes, for developer flexibility. Default: `src-tauri/resources/tmux`, fallback system.
+4. **Should the test suite's tmux binary path be overridable via env (`CUBILOT_TMUX=/usr/local/bin/tmux`)?** Yes, for developer flexibility. Default: `src-tauri/resources/tmux`, fallback system.
 
 5. **Does this change need a CLAUDE.md update to reinforce the test-first rule for pty.rs?** Yes — add "any change to pty.rs's spawn/attach/stream helpers SHALL have integration test coverage before the change ships" to the hard rules section. Prevents the next audit from repeating the same deferral cycle.

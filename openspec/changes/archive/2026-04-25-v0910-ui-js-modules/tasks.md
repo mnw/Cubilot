@@ -38,7 +38,7 @@
 ## 4. terminal.js extractions
 
 - [x] 4.1 Create `ui/terminal/` directory.
-- [x] 4.2 Create `ui/terminal/pty.js` — Tauri-invoke wrappers + base64 helpers. Exposed via `window.__A2A_TERM__.pty`. Header included. terminal.js destructures from the namespace.
+- [x] 4.2 Create `ui/terminal/pty.js` — Tauri-invoke wrappers + base64 helpers. Exposed via `window.__CUBILOT_TERM__.pty`. Header included. terminal.js destructures from the namespace.
 - [x] 4.3 Click-through gate (batched with §3 release).
 - [~] 4.4 **Deferred** — `maybeFlagAttention` / `maybeAutoDismissDevChannels` use IIFE-scoped state (`tabs`, `activeAgent`, the per-tab `_launchStage`/`warningDismissed` properties, `ptyWrite`/`ptyResize`/`strToB64` already-bound). Lifting them out cleanly requires either passing 6+ params per call or a sibling-shared mutable namespace. Net cost > value for ~50 lines. Reopen if/when the scanners get more complex.
 - [~] 4.5 N/A (4.4 deferred).
@@ -60,7 +60,7 @@
 - [ ] 6.4 `./scripts/install.sh` runs cleanly; orphan-hub sweep kills the v0.9.9 sidecar; v0.9.10 .app launches.
 - [ ] 6.5 Manual click-through gate (full smoke from §3.4 + §4.5 + §4.7 once more on the installed build).
 - [ ] 6.6 Git tag `v0.9.10`, push, GitHub release with the per-section delta + the file-count + per-file-line-count summary in the release notes.
-- [ ] 6.7 Brew cask bump (`~/Code/homebrew-a2achannel/Casks/a2achannel.rb` — version + sha256).
+- [ ] 6.7 Brew cask bump (`~/Code/homebrew-cubilot/Casks/cubilot.rb` — version + sha256).
 - [ ] 6.8 `openspec archive v0910-ui-js-modules --yes`.
 
 ## 7. Rollback path (only if click-through reveals a regression)

@@ -6,8 +6,8 @@ On top of that, a review found standalone issues whose cost is low but whose fix
 
 The current architecture:
 - Rust shell owns the hub lifecycle, mints the port, writes `hub.url`, exposes `get_hub_url()` to the webview, kills the child on exit.
-- Bun sidecar (`a2a-bin`) runs the hub HTTP/SSE server, owns chat log, roster, images.
-- `channel-bin` (same binary, `A2A_MODE=channel`) is spawned by Claude Code per session, reads `hub.url`, tails `/agent-stream`, posts via `/post`.
+- Bun sidecar (`cubilot-bin`) runs the hub HTTP/SSE server, owns chat log, roster, images.
+- `channel-bin` (same binary, `CUBILOT_MODE=channel`) is spawned by Claude Code per session, reads `hub.url`, tails `/agent-stream`, posts via `/post`.
 - Webview loads `index.html` from the Tauri bundle, fetches URL via `invoke`, then connects to the hub directly over HTTP.
 
 Threat model: a **local adversary with browser control** (malicious webpage the user visits, or hostile iframe/extension) is in scope. A local adversary with shell access on the same account is out of scope — they can read any app data regardless. Remote network adversaries are out of scope as long as we stay bound to `127.0.0.1`.
@@ -34,7 +34,7 @@ Threat model: a **local adversary with browser control** (malicious webpage the 
 
 ### 1. Token shape, storage, and rotation
 
-A single 32-byte URL-safe base64 string (≈43 chars printable), generated via `getrandom`/OsRng at Rust-shell startup, held in memory for the process lifetime, and written to disk at `~/Library/Application Support/A2AChannel/hub.token` with `0o600` permissions.
+A single 32-byte URL-safe base64 string (≈43 chars printable), generated via `getrandom`/OsRng at Rust-shell startup, held in memory for the process lifetime, and written to disk at `~/Library/Application Support/Cubilot/hub.token` with `0o600` permissions.
 
 **Rotation:** the token is re-minted on every app launch. No persistence across app restarts. Consumers (`channel-bin`, webview) must be prepared to re-read the file on auth failure.
 

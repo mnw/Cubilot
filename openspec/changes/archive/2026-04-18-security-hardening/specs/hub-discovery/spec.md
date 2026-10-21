@@ -2,12 +2,12 @@
 
 ### Requirement: Hub URL is published to a discovery file
 
-On successful hub startup, the Rust shell SHALL write the hub URL to `~/Library/Application Support/A2AChannel/hub.url`. The file SHALL contain exactly the URL (e.g. `http://127.0.0.1:54831`), optionally terminated by a newline. The parent directory SHALL be created if it does not exist. The write SHALL be atomic: the Rust shell SHALL write to a temporary file in the same directory and rename it over the target. The discovery file SHALL be created with file mode `0600` (owner read/write only) so that other local users cannot observe the running hub's URL.
+On successful hub startup, the Rust shell SHALL write the hub URL to `~/Library/Application Support/Cubilot/hub.url`. The file SHALL contain exactly the URL (e.g. `http://127.0.0.1:54831`), optionally terminated by a newline. The parent directory SHALL be created if it does not exist. The write SHALL be atomic: the Rust shell SHALL write to a temporary file in the same directory and rename it over the target. The discovery file SHALL be created with file mode `0600` (owner read/write only) so that other local users cannot observe the running hub's URL.
 
 #### Scenario: Discovery file is written on first launch
 
 - **WHEN** the app starts for the first time on a machine
-- **AND** `~/Library/Application Support/A2AChannel/` does not yet exist
+- **AND** `~/Library/Application Support/Cubilot/` does not yet exist
 - **THEN** the directory is created
 - **AND** `hub.url` is written with content matching the hub's actual URL
 - **AND** `hub.url` has filesystem mode `0600`
@@ -24,12 +24,12 @@ On successful hub startup, the Rust shell SHALL write the hub URL to `~/Library/
 
 ### Requirement: Hub publishes an auth token alongside the URL
 
-On successful hub startup, the Rust shell SHALL mint a cryptographically-random token (at least 32 bytes of entropy, URL-safe base64 encoded) and write it to `~/Library/Application Support/A2AChannel/hub.token`. The file SHALL contain exactly the token, optionally terminated by a newline. The write SHALL be atomic. The token file SHALL be created with file mode `0600`. The token SHALL be re-minted on every app launch (no persistence across restarts).
+On successful hub startup, the Rust shell SHALL mint a cryptographically-random token (at least 32 bytes of entropy, URL-safe base64 encoded) and write it to `~/Library/Application Support/Cubilot/hub.token`. The file SHALL contain exactly the token, optionally terminated by a newline. The write SHALL be atomic. The token file SHALL be created with file mode `0600`. The token SHALL be re-minted on every app launch (no persistence across restarts).
 
 #### Scenario: Token file created at startup
 
 - **WHEN** the app starts
-- **THEN** `~/Library/Application Support/A2AChannel/hub.token` exists with mode `0600`
+- **THEN** `~/Library/Application Support/Cubilot/hub.token` exists with mode `0600`
 - **AND** its contents match `/^[A-Za-z0-9_-]{40,}\n?$/`
 - **AND** the contents differ from any token written by a previous app session
 

@@ -60,11 +60,11 @@ Constraints (from CLAUDE.md and the repo's baseline):
 
 ### 3. Single-IIFE-per-file is preserved where it already exists
 
-**Decision:** `ui/usage.js` and `ui/terminal.js` are both wrapped in IIFEs that expose a small surface to `window.A2A_*`. Continue that pattern for any module that genuinely needs internal state isolation. For modules whose entire content already lives in the global lexical scope (chat-row rendering, escape helpers, room filter), don't wrap — that would just churn diff lines.
+**Decision:** `ui/usage.js` and `ui/terminal.js` are both wrapped in IIFEs that expose a small surface to `window.CUBILOT_*`. Continue that pattern for any module that genuinely needs internal state isolation. For modules whose entire content already lives in the global lexical scope (chat-row rendering, escape helpers, room filter), don't wrap — that would just churn diff lines.
 
 **Rationale:**
 - The IIFE wrapper buys encapsulation. Most modules don't need it (they're already calling globals declared by main.js).
-- Wrapping everything would require defining `window.A2A_*` shims for every helper, adding lines without value.
+- Wrapping everything would require defining `window.CUBILOT_*` shims for every helper, adding lines without value.
 
 ### 4. Three-tier load order
 
@@ -139,10 +139,10 @@ Constraints (from CLAUDE.md and the repo's baseline):
 
 ### 8. terminal.js keeps its IIFE; sibling files extend it
 
-**Decision:** `ui/terminal.js` already wraps everything in `(function terminalPane() { … })()`. The three extractions move OUT of that IIFE into sibling files, so they need to expose their surface via `window.__A2A_TERM__` (or similar). The IIFE in terminal.js then reads from that shared namespace.
+**Decision:** `ui/terminal.js` already wraps everything in `(function terminalPane() { … })()`. The three extractions move OUT of that IIFE into sibling files, so they need to expose their surface via `window.__CUBILOT_TERM__` (or similar). The IIFE in terminal.js then reads from that shared namespace.
 
 **Rationale:**
-- Today `terminal.js` is the only IIFE-wrapped UI file with substantial logic. Reaching across the IIFE boundary requires a window-level shim, same approach `ui/usage.js` uses (`window.A2A_USAGE.captureBanner`).
+- Today `terminal.js` is the only IIFE-wrapped UI file with substantial logic. Reaching across the IIFE boundary requires a window-level shim, same approach `ui/usage.js` uses (`window.CUBILOT_USAGE.captureBanner`).
 - Keeps terminal.js's existing encapsulation; doesn't break the working pattern.
 
 ## Risks / Trade-offs
@@ -157,7 +157,7 @@ Constraints (from CLAUDE.md and the repo's baseline):
 **Mitigation:** Tier 1 holds the most-shared helpers (text utilities, HTTP, state). Anything in tier 2 can freely use tier 1. Within tier 2, modules that depend on each other (composer → mentions, attachments) load in dependency order.
 
 **[Risk] terminal.js's IIFE-wrapped state means extracted siblings can't reach across.**
-**Mitigation:** `window.__A2A_TERM__` shim, same shape `window.A2A_USAGE` uses. Adds a few lines of glue per cross-call.
+**Mitigation:** `window.__CUBILOT_TERM__` shim, same shape `window.CUBILOT_USAGE` uses. Adds a few lines of glue per cross-call.
 
 **[Trade-off] More files, more `<script>` tags. Larger HTTP cost on first load.**
 **Rationale:** Tauri serves from local resources at near-zero latency. The cost is invisible. Long-term maintenance benefit dwarfs it.
@@ -189,10 +189,10 @@ Constraints (from CLAUDE.md and the repo's baseline):
 
 1. **Should we adopt JSDoc `@ts-check` headers per module?** Would let `bun x tsc --noEmit` catch type drift even without a TS migration. **Leaning yes** for the foundation tier (text.js, http.js, state.js), **no** for renderers (the DOM-handle types would be noisy). Defer the decision; can layer in later without affecting this change.
 
-2. **`window.__A2A_TERM__` vs. multiple smaller globals.** Either works; the namespace is cleaner. Going with `window.__A2A_TERM__ = { pty: {…}, scan: {…}, modal: {…} }` mirroring the file structure.
+2. **`window.__CUBILOT_TERM__` vs. multiple smaller globals.** Either works; the namespace is cleaner. Going with `window.__CUBILOT_TERM__ = { pty: {…}, scan: {…}, modal: {…} }` mirroring the file structure.
 
 3. **Should `bootstrap()` move out of main.js?** It's the boot entry. Lives in main.js as the orchestrator's job. No move.
 
 4. **Element handles in state.js — what if a future feature dynamically adds an element?** Add a `lookupEl(id)` helper that does a fresh `document.getElementById` and warns if missing; modules can use it for late-arriving elements. Out of scope for this change; just write a comment in state.js noting the convention.
 
-5. **Should terminal.js's IIFE be kept or unwrapped?** **Kept.** Unwrapping would force every helper inside it to become a named global, polluting the page namespace. The shim approach (`window.__A2A_TERM__`) is cheaper.
+5. **Should terminal.js's IIFE be kept or unwrapped?** **Kept.** Unwrapping would force every helper inside it to become a named global, polluting the page namespace. The shim approach (`window.__CUBILOT_TERM__`) is cheaper.

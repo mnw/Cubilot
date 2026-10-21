@@ -45,7 +45,7 @@ The hub's `/upload` route SHALL authenticate the same bearer token whether it or
 
 #### Scenario: Same token works from both clients
 
-- **GIVEN** a running hub with `A2A_TOKEN=abc`
+- **GIVEN** a running hub with `CUBILOT_TOKEN=abc`
 - **WHEN** the webview POSTs to `/upload` with `Authorization: Bearer abc`
 - **THEN** the upload succeeds
 - **WHEN** a channel-mode sidecar POSTs to `/upload` with `Authorization: Bearer abc`

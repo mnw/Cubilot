@@ -25,7 +25,7 @@ This is deliberately scoped **after** v0.9.5 kind-runtime ships. v0.9.5 is a JS/
 
 ### New Capabilities
 
-- `ui-styling`: the structural organization of `ui/styles/` (token file, shared primitives, per-surface files, animation file) and the shared primitives (`dropdown`, `card`, modal shell) that compose the A2AChannel UI. Governs how future UI surfaces are added without re-expanding the monolithic stylesheet.
+- `ui-styling`: the structural organization of `ui/styles/` (token file, shared primitives, per-surface files, animation file) and the shared primitives (`dropdown`, `card`, modal shell) that compose the Cubilot UI. Governs how future UI surfaces are added without re-expanding the monolithic stylesheet.
 
 ### Modified Capabilities
 

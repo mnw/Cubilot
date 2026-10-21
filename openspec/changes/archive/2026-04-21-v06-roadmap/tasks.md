@@ -33,7 +33,7 @@
 
 **For v0.7:**
 - Write a minimal standalone PoC first (portable-pty + xterm.js in a trivial Tauri window) and validate the full input/output loop end-to-end.
-- Only after the PoC is green, integrate into A2AChannel.
+- Only after the PoC is green, integrate into Cubilot.
 - Budget devtools access from day 1 so we can see runtime errors instead of guessing at Tauri arg-naming conventions.
 
 ## 4. Interrupt messages

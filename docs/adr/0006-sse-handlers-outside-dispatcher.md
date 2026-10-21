@@ -1,6 +1,6 @@
 # SSE long-lived handlers (/stream, /agent-stream) live outside the HubFeature dispatcher
 
-`architecture-cycle-2a` carves all of A2AChannel's HTTP routes into HubFeature modules under `hub/features/` consumed by a single dispatcher (`hub/core/dispatcher.ts`). The dispatcher applies per-route auth + body-size caps + ledger guards before invoking the handler. Two routes — `/stream` (Webview SSE) and `/agent-stream` (per-Agent SSE) — are NOT registered as HubFeature route entries and do NOT go through `dispatcher.dispatch`. Instead they live in `hub/features/streams.ts` as a separate `StreamHandlers` shape and are wired directly into the `Bun.serve` `fetch(req)` URL match in `hub.ts`.
+`architecture-cycle-2a` carves all of Cubilot's HTTP routes into HubFeature modules under `hub/features/` consumed by a single dispatcher (`hub/core/dispatcher.ts`). The dispatcher applies per-route auth + body-size caps + ledger guards before invoking the handler. Two routes — `/stream` (Webview SSE) and `/agent-stream` (per-Agent SSE) — are NOT registered as HubFeature route entries and do NOT go through `dispatcher.dispatch`. Instead they live in `hub/features/streams.ts` as a separate `StreamHandlers` shape and are wired directly into the `Bun.serve` `fetch(req)` URL match in `hub.ts`.
 
 ## Considered Options
 

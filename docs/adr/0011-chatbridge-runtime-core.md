@@ -16,9 +16,9 @@ Claude Code 2.1.287 ships mods: in-process function-hook plugins (`register(on)`
 - **`hub/channel/core.ts` owns policy**: room gate, briefing/nutshell text, one message envelope, delivery mode (`context` / `steer` / `wake`), and the post-delivery check (a chat message addressed directly to the agent, once read, gets one nudge if the run that read it ends without a hub-acknowledged `post` or `post_file`). Adapters implement the `Host` contract in `hub/channel/host.ts` (request, stream, upload, deliver, log) and wire runtime events to `onRunEnd` / `onToolResult`. Nothing else.
 - **`tools.ts` and `hub-client.ts` do I/O through the `Host`**, not `node:*` or global `fetch`, because the mod runs with no Node and no network.
 - **Claude adapter** is `hub/channel/claude-mod/register.ts`: tools via `$.tool.register` (names stay `mcp__chatbridge__*`), instructions via `prompt.compose`, the hub stream via `curl` under `$.process.spawn` (`$.http.fetch` buffers and takes no timeout), delivery via `$.session.append` / `$.prompt.submit`. Every hub request is a bounded `curl`.
-- **Identity by env** (`CHATBRIDGE_AGENT`, `CHATBRIDGE_ROOM`), like pi. `pty.rs` launches `claude --plugin-dir <staged mod>`; the mod is staged to `~/Library/Application Support/A2AChannel/chatbridge-mod/` because Claude Code writes type files into every loaded plugin dir.
+- **Identity by env** (`CHATBRIDGE_AGENT`, `CHATBRIDGE_ROOM`), like pi. `pty.rs` launches `claude --plugin-dir <staged mod>`; the mod is staged to `~/Library/Application Support/Cubilot/chatbridge-mod/` because Claude Code writes type files into every loaded plugin dir.
 - **Permission relay moves to the `classic.PermissionRequest` hook**: POST `/permissions`, wait on the new `GET /permissions/:id/wait`, dismiss on timeout and fall back to the local dialog.
-- **Removed**: `hub/channel.ts`, `tail.ts`, `permission-relay.ts`, `A2A_MODE=channel`, per-agent `mcp-configs/<agent>.json` (the `--mcp-config` flag now carries only the user's global servers, chatbridge filtered), the dev-channels flag, the PTY output scan, and the 10 s warm-up.
+- **Removed**: `hub/channel.ts`, `tail.ts`, `permission-relay.ts`, `CUBILOT_MODE=channel`, per-agent `mcp-configs/<agent>.json` (the `--mcp-config` flag now carries only the user's global servers, chatbridge filtered), the dev-channels flag, the PTY output scan, and the 10 s warm-up.
 
 ## Consequences
 
@@ -34,11 +34,11 @@ Claude Code 2.1.287 ships mods: in-process function-hook plugins (`register(on)`
 
 ## Spike evidence (2026-10-13, Claude Code 2.1.287, pi 0.87.1)
 
-Isolated standalone hub on port 8100, data under `/tmp/a2a-spike`. Recorded in `openspec/changes/chatbridge-claude-mod/design.md`, "Spike results".
+Isolated standalone hub on port 8100, data under `/tmp/cubilot-spike`. Recorded in `openspec/changes/chatbridge-claude-mod/design.md`, "Spike results".
 
-- Non-interactive load, no warm-up window (a message 20 ms after `session.start` started a turn), run-level signals (`turn.complete` once per run), long-lived `curl` stream from `session.start` (still receiving heartbeats at 3m45s): `/tmp/a2a-spike/events.log`, `/tmp/a2a-spike/debug*.log`, `/tmp/a2a-spike/evidence/run-claude.*`, `/tmp/a2a-spike/evidence/run-longevity.debug.log`.
-- `PermissionRequest` hook held 30 s on `$.process.run` with no budget error: `/tmp/a2a-spike/evidence/run-permission-1.debug.log`.
-- pi `message_start` carries the envelope; `turn_end` fires per iteration, `agent_end` once per run: `/tmp/a2a-spike/pi-events.log`, `/tmp/a2a-spike/evidence/run-pi.log`.
+- Non-interactive load, no warm-up window (a message 20 ms after `session.start` started a turn), run-level signals (`turn.complete` once per run), long-lived `curl` stream from `session.start` (still receiving heartbeats at 3m45s): `/tmp/cubilot-spike/events.log`, `/tmp/cubilot-spike/debug*.log`, `/tmp/cubilot-spike/evidence/run-claude.*`, `/tmp/cubilot-spike/evidence/run-longevity.debug.log`.
+- `PermissionRequest` hook held 30 s on `$.process.run` with no budget error: `/tmp/cubilot-spike/evidence/run-permission-1.debug.log`.
+- pi `message_start` carries the envelope; `turn_end` fires per iteration, `agent_end` once per run: `/tmp/cubilot-spike/pi-events.log`, `/tmp/cubilot-spike/evidence/run-pi.log`.
 - One first-ever launch in an untrusted folder logged no `session.start` after the trust answer and did not reproduce; tracked as test-matrix row M30. These files are in `/tmp` and not durable; the findings are copied into `design.md`.
 
 ## Recorded by

@@ -10,7 +10,7 @@ The briefing shape:
   "type": "briefing",
   "tools": ["post", "post_file", "send_handoff", "accept_handoff", "decline_handoff", "cancel_handoff", "send_interrupt", "ack_interrupt"],
   "peers": [{ "name": "alice", "online": true }, { "name": "human", "online": true }],
-  "attachments_dir": "/Users/<user>/a2a-attachments",
+  "attachments_dir": "/Users/<user>/cubilot-attachments",
   "human_name": "human",
   "nutshell": "..." ,
   "ts": "14:22:03"

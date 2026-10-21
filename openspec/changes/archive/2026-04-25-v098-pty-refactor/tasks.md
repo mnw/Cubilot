@@ -1,6 +1,6 @@
 ## 1. Test harness
 
-- [x] 1.1 Write `tests/helpers/tmux.ts` — exports `async function tmuxSocket(): Promise<{ sock: string, tmux: string, teardown: () => Promise<void> }>`. Resolves the tmux binary (bundled at `src-tauri/resources/tmux` first, `A2A_TMUX` env override, system `tmux` fallback). Mints a PID-scoped socket path. Teardown calls `tmux -S <sock> kill-server` and ignores `no server running`.
+- [x] 1.1 Write `tests/helpers/tmux.ts` — exports `async function tmuxSocket(): Promise<{ sock: string, tmux: string, teardown: () => Promise<void> }>`. Resolves the tmux binary (bundled at `src-tauri/resources/tmux` first, `CUBILOT_TMUX` env override, system `tmux` fallback). Mints a PID-scoped socket path. Teardown calls `tmux -S <sock> kill-server` and ignores `no server running`.
 - [x] 1.2 Helper smoke-tested during §2 scenario runs — no throwaway test needed since the real integration tests exercise the full create → attach → teardown lifecycle.
 - [x] 1.3 Parallel-safety: each test gets a unique socket via `process.pid` + counter. Verified green under Bun's default concurrent runner.
 
@@ -28,7 +28,7 @@ Target file: `tests/integration/pty-plumbing.test.ts`.
 
 ## 4. Extract `configure_existing_session`
 
-- [x] 4.1 Two inlined "reattach-config" blocks identified in `pty_spawn` and `pty_spawn_shell`. Shell-tab has two extras (`allow-passthrough on`, `A2ACHANNEL_SHELL=1` env) — kept inline after the shared helper call.
+- [x] 4.1 Two inlined "reattach-config" blocks identified in `pty_spawn` and `pty_spawn_shell`. Shell-tab has two extras (`allow-passthrough on`, `CUBILOT_SHELL=1` env) — kept inline after the shared helper call.
 - [x] 4.2 Added `fn configure_existing_session(name: &str, lang: &str)` covering the 6 shared `tmux_run` calls (remain-on-exit off, status off, TERM + COLORTERM + LANG + LC_ALL).
 - [x] 4.3 Call sites reduced to one-liners.
 - [x] 4.4 `cargo check` clean. `bun test` — 54/54 green.
@@ -46,7 +46,7 @@ Target file: `tests/integration/pty-plumbing.test.ts`.
 - [x] 6.2 Launch the app. Spawn a fresh agent via the "+ agent" button. Verify claude launches, banner renders Braille / Nerd glyphs correctly (not `____`), stdio streams live into the tab.
 - [x] 6.3 Spawn the shell tab. Verify it opens, `$SHELL` runs, the tab is interactive.
 - [x] 6.4 Kill the agent externally (`tmux kill-session -t <agent>` from another terminal). Verify the UI tab transitions to `data-state="dead"` within 5 seconds and shows the Restart affordance.
-- [x] 6.5 Kill A2AChannel.app, relaunch. Verify the previously-live agent's tab auto-attaches (the tmux session survived the app restart, attach-on-startup reconnects).
+- [x] 6.5 Kill Cubilot.app, relaunch. Verify the previously-live agent's tab auto-attaches (the tmux session survived the app restart, attach-on-startup reconnects).
 - [x] 6.6 No regressions surfaced — extraction stays. (Rollback path: `git revert` the extraction commits; tests stay.)
 
 ## 7. Documentation
@@ -61,5 +61,5 @@ Target file: `tests/integration/pty-plumbing.test.ts`.
 - [x] 8.3 `cargo check` clean.
 - [x] 8.4 `./scripts/install.sh` ran cleanly (orphan-hub sweep killed the v0.9.7 sidecar, v0.9.8 .app launched). Manual click-through user-gated per §6.
 - [ ] 8.5 Git tag `v0.9.8`, push, GitHub release with the per-section delta + the test scenarios as the release-note proof of coverage.
-- [ ] 8.6 Brew cask bump (`~/Code/homebrew-a2achannel/Casks/a2achannel.rb` — `version` + `sha256`).
+- [ ] 8.6 Brew cask bump (`~/Code/homebrew-cubilot/Casks/cubilot.rb` — `version` + `sha256`).
 - [ ] 8.7 `openspec archive v098-pty-refactor --yes`.

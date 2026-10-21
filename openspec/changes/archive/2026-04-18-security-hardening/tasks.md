@@ -2,10 +2,10 @@
 
 - [x] 1.1 Add a dependency-free random helper: generate 32 random bytes via `getrandom` crate (or stdlib `std::env::random` alt). Encode as URL-safe base64 with no padding.
 - [x] 1.2 In `setup()`, mint the token once and store it in `HubState` alongside the existing `url`.
-- [x] 1.3 Write `~/Library/Application Support/A2AChannel/hub.token` with mode `0o600` via an atomic write helper (analogous to existing `write_discovery_file`).
+- [x] 1.3 Write `~/Library/Application Support/Cubilot/hub.token` with mode `0o600` via an atomic write helper (analogous to existing `write_discovery_file`).
 - [x] 1.4 Tighten `hub.url` to mode `0o600` on write (modify `write_discovery_file`).
 - [x] 1.5 Change `get_hub_url` Tauri command to return a serde-serialized struct `{ url: String, token: String }` instead of a bare string.
-- [x] 1.6 Pass the token to the hub sidecar via env var `A2A_TOKEN=<token>` on spawn.
+- [x] 1.6 Pass the token to the hub sidecar via env var `CUBILOT_TOKEN=<token>` on spawn.
 - [x] 1.7 Replace shutdown-path `.unwrap()` on mutex locks with `.unwrap_or_else(|e| e.into_inner())` in `RunEvent::ExitRequested` / `CloseRequested` / `Destroyed` handlers.
 
 ## 2. Rust shell — log rotation at startup
@@ -16,7 +16,7 @@
 
 ## 3. Hub — auth middleware
 
-- [x] 3.1 Read `A2A_TOKEN` from env at hub startup; hold in a module-level constant.
+- [x] 3.1 Read `CUBILOT_TOKEN` from env at hub startup; hold in a module-level constant.
 - [x] 3.2 Write a small `requireAuth(req: Request): Response | null` helper: returns a `401` Response if `Authorization` header is missing, malformed, or token mismatch; returns `null` otherwise.
 - [x] 3.3 Use constant-time comparison (`crypto.timingSafeEqual` via `Buffer` equivalents in Bun; or a manual byte-XOR reducer if Bun does not expose it).
 - [x] 3.4 Call `requireAuth` at the top of `/send`, `/post`, `/remove`, `/upload` handlers. Return the `401` Response if non-null.
@@ -107,7 +107,7 @@
 - [x] 15.9 Register agent `Drupal`; send `POST /post` with `from: "Drupal", to: "you", text: "hi"` → confirm 200; send `POST /post` with `to: "Drupal"` from another agent → confirm message is enqueued.
 - [x] 15.10 `POST /send` with `targets: ["all", "NonExistent"]` → confirm 400.
 - [ ] 15.11 Start a Claude Code session; round-trip a message; confirm agent pill appears green; confirm message visible in app.
-- [ ] 15.12 Restart A2AChannel; verify active Claude session reconnects within one backoff cycle; verify token rotated in `hub.token`; verify `channel-bin` sends the new token (check `hub.log` for no 401s post-reconnect).
+- [ ] 15.12 Restart Cubilot; verify active Claude session reconnects within one backoff cycle; verify token rotated in `hub.token`; verify `channel-bin` sends the new token (check `hub.log` for no 401s post-reconnect).
 - [ ] 15.13 Send 3000 messages rapidly via script; confirm `#messages` in the DOM tops out at ~2000 children (inspect via webview devtools if available, or document as manual-visual check).
 - [x] 15.14 Rotate `hub.log` by padding to > 10 MiB, restart app, verify `hub.log.1` exists and new `hub.log` starts small.
 - [ ] 15.15 Run an unauthenticated cross-origin fetch from a test HTML page served on a different localhost port: confirm `/send` fails with 401 and no chat entry is created.

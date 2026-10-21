@@ -20,7 +20,7 @@ Bun has built-in filesystem APIs (`Bun.file`) and standard fs. SQLite is not inv
 
 **Non-Goals:**
 - Network / LAN exposure. Hub stays bound to `127.0.0.1`.
-- Multiple concurrent A2AChannel instances as a supported feature (nothing prevents it structurally, but the discovery file's single-writer semantics mean the last writer wins).
+- Multiple concurrent Cubilot instances as a supported feature (nothing prevents it structurally, but the discovery file's single-writer semantics mean the last writer wins).
 - Authentication, TLS, or signed discovery files. Same trust model as today.
 - Windows/Linux/Intel-Mac support. macOS arm64 only.
 - Agent-side history replay or persistence (separate explorations, already decided against).
@@ -38,7 +38,7 @@ The Rust shell binds a `TcpListener` on `127.0.0.1:0`, reads the assigned port, 
 
 **Alternative considered:** a proper port-handoff via fd-passing. Too much machinery for a loopback-only app.
 
-### 2. Discovery file at `~/Library/Application Support/A2AChannel/hub.url`
+### 2. Discovery file at `~/Library/Application Support/Cubilot/hub.url`
 
 Single-line file containing the full URL (`http://127.0.0.1:61234\n`). Chosen over a richer JSON format for bootstrapping simplicity — we can upgrade later without breaking the single-line reader.
 
@@ -60,7 +60,7 @@ Single-line file containing the full URL (`http://127.0.0.1:61234\n`). Chosen ov
 fn resolveHubUrl():
   1. if process.env.CHATBRIDGE_HUB is non-empty:
        return that value
-  2. read ~/Library/Application Support/A2AChannel/hub.url:
+  2. read ~/Library/Application Support/Cubilot/hub.url:
        if exists and valid URL:
          return its contents
   3. return null
@@ -101,9 +101,9 @@ Modal UX: no change visible to the user, other than the JSON template being one 
 
 ## Risks / Trade-offs
 
-- **Stale discovery file after a crash** → channel-bin re-reads on every retry. Worst case: users see ECONNREFUSED in agent logs until A2AChannel restarts. Acceptable.
+- **Stale discovery file after a crash** → channel-bin re-reads on every retry. Worst case: users see ECONNREFUSED in agent logs until Cubilot restarts. Acceptable.
 
-- **Two A2AChannel instances** → second overwrites the discovery file; the first's agents reconnect to the second. Discouraged but not prevented. If this becomes a real scenario, a PID check or file lock could be added later.
+- **Two Cubilot instances** → second overwrites the discovery file; the first's agents reconnect to the second. Discouraged but not prevented. If this becomes a real scenario, a PID check or file lock could be added later.
 
 - **TOCTOU between Rust port-bind and sidecar port-bind** → Unlikely on a cooperating-processes loopback scenario. Mitigation path exists (retry with jitter in the sidecar) if ever observed.
 
@@ -111,7 +111,7 @@ Modal UX: no change visible to the user, other than the JSON template being one 
 
 - **CSP wildcard broadens local attack surface** → Discussed above. Acceptable for a local-first app with a trusted codebase. Document in CLAUDE.md so future contributors don't tighten it back without thinking.
 
-- **Discovery file location is macOS-specific** → Hardcoded to `~/Library/Application Support/A2AChannel/`. Matches the existing macOS-only stance. If we ever port to Linux/Windows, `dirs::data_dir()` already abstracts this in Rust and `os.homedir()` + platform detection would do it in Bun.
+- **Discovery file location is macOS-specific** → Hardcoded to `~/Library/Application Support/Cubilot/`. Matches the existing macOS-only stance. If we ever port to Linux/Windows, `dirs::data_dir()` already abstracts this in Rust and `os.homedir()` + platform detection would do it in Bun.
 
 ## Migration Plan
 

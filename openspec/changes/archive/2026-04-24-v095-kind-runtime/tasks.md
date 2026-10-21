@@ -114,7 +114,7 @@ Goal: move the least-entangled helpers out first. Each step is mechanical; tests
 ## 13. Release
 
 - [x] 13.1 Version bumped to `0.9.5` in `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `hub/channel.ts`.
-- [x] 13.2 `./scripts/install.sh` ran multiple times during T10/T11 validation; final build mtime 2026-04-24 17:18. `/Applications/A2AChannel.app` contains the shipped binary.
+- [x] 13.2 `./scripts/install.sh` ran multiple times during T10/T11 validation; final build mtime 2026-04-24 17:18. `/Applications/Cubilot.app` contains the shipped binary.
 - [x] 13.3 `bun test` suite green — 47 pass / 0 fail / 184 expect() calls / 2.27s against the current source tree. The spawn-hub helper is hermetic; point at the installed build by setting `CHATBRIDGE_HUB` if desired.
-- [x] 13.4 Git tag `v0.9.5` pushed to origin; GitHub release live at https://github.com/mnw/A2AChannel/releases/tag/v0.9.5 with `A2AChannel-0.9.5.zip` (sha256 `a287d55fa805864efd000713dfac820b9cbd61ef1cc4d8cb7814d98325ca39a1`).
+- [x] 13.4 Git tag `v0.9.5` pushed to origin; GitHub release live at https://github.com/mnw/Cubilot/releases/tag/v0.9.5 with `Cubilot-0.9.5.zip` (sha256 `a287d55fa805864efd000713dfac820b9cbd61ef1cc4d8cb7814d98325ca39a1`).
 - [ ] 13.5 Archive this OpenSpec change (`openspec archive v095-kind-runtime`). **User-gated** — ready to run now that 13.4 shipped.

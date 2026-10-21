@@ -5,14 +5,14 @@
 The bridge core, on every runtime, SHALL determine the hub URL using the following priority order:
 
 1. If the `CHATBRIDGE_HUB` environment variable is set and non-empty, use it verbatim.
-2. Otherwise, read `~/Library/Application Support/A2AChannel/hub.url` through `Host.readText` and use its contents (trimmed of whitespace).
+2. Otherwise, read `~/Library/Application Support/Cubilot/hub.url` through `Host.readText` and use its contents (trimmed of whitespace).
 3. Otherwise (file missing, empty, or unreadable), treat as connection failure and apply the backoff-and-retry loop.
 
 On connection failure or stream end, the bridge SHALL re-run the resolution on each retry attempt so that stale URLs self-heal once the app restarts.
 
 #### Scenario: Bridge with no env var finds the running hub
 
-- **GIVEN** `A2AChannel.app` is running and has written `hub.url`
+- **GIVEN** `Cubilot.app` is running and has written `hub.url`
 - **AND** an agent starts without `CHATBRIDGE_HUB`
 - **WHEN** the bridge starts
 - **THEN** it reads `hub.url`, connects to that URL, and registers the agent
@@ -20,7 +20,7 @@ On connection failure or stream end, the bridge SHALL re-run the resolution on e
 #### Scenario: Bridge started before the app converges once the app starts
 
 - **GIVEN** an agent's bridge started with no `CHATBRIDGE_HUB` env
-- **AND** `A2AChannel.app` was not running at that moment
+- **AND** `Cubilot.app` was not running at that moment
 - **WHEN** the app is launched 30 seconds later
 - **THEN** the bridge's next retry (within its 2-second backoff interval) reads the now-present `hub.url`
 - **AND** connects successfully

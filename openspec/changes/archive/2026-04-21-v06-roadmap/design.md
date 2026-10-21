@@ -2,12 +2,12 @@
 
 v0.5.0 shipped the coordination layer (typed handoffs, SQLite ledger, security hardening, attachment allowlist). An external contributor (PR #1) surfaced real workflow gaps — the human can't send slash commands, can't answer interactive permission prompts, can't observe raw agent output — and proposed a PTY-owned rewrite. That rewrite is an overcommit; the gaps are real but addressable with a smaller intervention.
 
-This change groups six improvements that together raise the coordination workspace to a more useful day-to-day tool while keeping the "A2AChannel is an MCP-based coordination layer on top of user-managed sessions" positioning intact. Items are ordered by compounding value — UI polish first because everything else benefits, terminal pane early because it unblocks observability, deeper protocol additions (interrupt, nutshell) last because they require stabler UI around them.
+This change groups six improvements that together raise the coordination workspace to a more useful day-to-day tool while keeping the "Cubilot is an MCP-based coordination layer on top of user-managed sessions" positioning intact. Items are ordered by compounding value — UI polish first because everything else benefits, terminal pane early because it unblocks observability, deeper protocol additions (interrupt, nutshell) last because they require stabler UI around them.
 
 Current constraints:
 - macOS ARM64 only.
 - Vanilla HTML/CSS/JS in `ui/` — no framework, no bundler.
-- Bun-compiled `a2a-bin` dispatches hub and channel modes from one binary.
+- Bun-compiled `cubilot-bin` dispatches hub and channel modes from one binary.
 - Bundle size ceiling is informal but should stay under ~150 MB.
 
 ## Goals / Non-Goals
@@ -21,7 +21,7 @@ Current constraints:
 
 **Non-Goals:**
 - Multi-room chat (PR #1). Deferred.
-- A2AChannel spawning / managing the `claude` process lifecycle end-to-end. tmux is a deliberate indirection that lets users retain control.
+- Cubilot spawning / managing the `claude` process lifecycle end-to-end. tmux is a deliberate indirection that lets users retain control.
 - Cryptographic per-sidecar identity. Still trust-on-self-assertion.
 - Windows / Linux / Intel Mac support.
 - Real-time multi-cursor or live collaborative editing of the nutshell.
@@ -59,7 +59,7 @@ Current constraints:
 
 ### 3. Terminal projection via tmux
 
-**Decision:** Bundle a static tmux binary under `src-tauri/resources/`. `a2a-bin` gains a new mode (`A2A_MODE=pty`) that orchestrates tmux sessions: spawn `tmux new-session -d -s <agentId> -s <cwd> claude --dangerously-load-development-channels`, list active sessions, attach via tmux control-mode and stream bytes over Tauri events to the webview. UI renders with `xterm.js`.
+**Decision:** Bundle a static tmux binary under `src-tauri/resources/`. `cubilot-bin` gains a new mode (`CUBILOT_MODE=pty`) that orchestrates tmux sessions: spawn `tmux new-session -d -s <agentId> -s <cwd> claude --dangerously-load-development-channels`, list active sessions, attach via tmux control-mode and stream bytes over Tauri events to the webview. UI renders with `xterm.js`.
 
 **Alternatives considered:**
 - Custom PTY wrapper in Rust/Go (rejected — reimplements session continuity, which is tmux's killer feature).
@@ -68,10 +68,10 @@ Current constraints:
 
 **Details:**
 - **Binary sourcing:** Build tmux 3.5a statically linked for `aarch64-apple-darwin` once; check in the binary under `src-tauri/resources/tmux`. Document the build command in `scripts/build-tmux.sh` for reproducibility.
-- **Session naming:** one session per agent, name = agent name (validated against `AGENT_NAME_RE`). The user can still `tmux attach -t <agent>` from their own terminal via the bundled tmux's socket; expose the socket path as `~/.config/A2AChannel/tmux.sock` and document.
+- **Session naming:** one session per agent, name = agent name (validated against `AGENT_NAME_RE`). The user can still `tmux attach -t <agent>` from their own terminal via the bundled tmux's socket; expose the socket path as `~/.config/Cubilot/tmux.sock` and document.
 - **Control mode:** The webview-side pane uses `tmux -C attach-session -t <agent>` over a child process (IPC via Tauri shell plugin); parse `%output` blocks into `xterm.js`. `send-keys` for stdin from the pane.
 - **Race between user terminal and webview pane:** Accept tmux's native multi-client behavior — both clients can type; document that the user should only use one at a time when running interactive prompts. Not solving with an ownership toggle in v0.6.
-- **Lifecycle:** A2AChannel does NOT kill sessions on app quit. tmux sessions detach and persist. A2AChannel reattaches on next launch. Explicit "kill session" button in UI (per-tab) for the user to tear down.
+- **Lifecycle:** Cubilot does NOT kill sessions on app quit. tmux sessions detach and persist. Cubilot reattaches on next launch. Explicit "kill session" button in UI (per-tab) for the user to tear down.
 - **Session discovery on app launch:** `tmux -S <sock> list-sessions` gives the current set; populate the right-pane tab bar from that list.
 - **xterm.js sourcing:** Single-file ESM from GitHub releases, checked in under `ui/vendor/xterm.js`. No CDN.
 
@@ -123,7 +123,7 @@ Current constraints:
 
 ## Risks / Trade-offs
 
-**[Risk] tmux version drift / CVEs** → Mitigation: document the exact tmux version in `scripts/build-tmux.sh`; audit CVE list at release time; plan a rebuild cadence (on major A2AChannel releases or when a CVE affects the bundled version).
+**[Risk] tmux version drift / CVEs** → Mitigation: document the exact tmux version in `scripts/build-tmux.sh`; audit CVE list at release time; plan a rebuild cadence (on major Cubilot releases or when a CVE affects the bundled version).
 
 **[Risk] tmux `send-keys` / control-mode interface isn't a stable ABI** → Mitigation: scope the integration narrowly to `new-session`, `list-sessions`, `attach -C`, `send-keys`, `kill-session`. Avoid fancier features (panes, windows) that change between versions. If tmux's control-mode output format changes, update our parser.
 
@@ -155,4 +155,4 @@ Current constraints:
 1. **Should the terminal pane be always-visible or opt-in?** Always-visible makes it feel like a core feature; opt-in keeps the simpler chat UI for users who don't want it. Recommend: opt-in toggle in header, persisted to localStorage.
 2. **Nutshell edit approval — just the human, or any two peers can ratify?** v0.6 says "human only" for simplicity. Revisit if team size grows.
 3. **xterm.js theming to match Catppuccin Mocha** — straightforward with the xterm.js theme API but needs a bit of CSS plumbing. Call it out in tasks.md.
-4. **Per-session tmux socket vs. one shared socket** — one shared socket is simpler (all sessions listed together), per-session is more isolated. Recommend: one shared socket at `~/.config/A2AChannel/tmux.sock`.
+4. **Per-session tmux socket vs. one shared socket** — one shared socket is simpler (all sessions listed together), per-session is more isolated. Recommend: one shared socket at `~/.config/Cubilot/tmux.sock`.

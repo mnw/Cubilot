@@ -2,7 +2,7 @@
 
 ### Requirement: CSS is organized into semantic files under `ui/styles/`
 
-The A2AChannel UI SHALL ship CSS as a set of semantic files under `ui/styles/`, each scoped to a single concern, loaded by `ui/index.html` via individual `<link rel="stylesheet">` tags in a deterministic order.
+The Cubilot UI SHALL ship CSS as a set of semantic files under `ui/styles/`, each scoped to a single concern, loaded by `ui/index.html` via individual `<link rel="stylesheet">` tags in a deterministic order.
 
 The file set includes at minimum:
 

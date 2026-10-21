@@ -24,16 +24,16 @@ The app is macOS-only, single-user, local-loopback, and just shipped v0.3.0 → 
 
 ## Decisions
 
-### 1. Default folder: `~/Documents/A2AChannel/images/`
+### 1. Default folder: `~/Documents/Cubilot/images/`
 
-Chosen over `~/Pictures/`, `~/Library/…`, and `~/.a2achannel/` for three reasons:
+Chosen over `~/Pictures/`, `~/Library/…`, and `~/.cubilot/` for three reasons:
 - **Discoverable.** `~/Documents` is where non-technical users look first.
-- **Not app data.** `~/Library/Application Support/A2AChannel/` already holds secrets (the token) and discovery state. Mixing user content there muddies the boundary.
+- **Not app data.** `~/Library/Application Support/Cubilot/` already holds secrets (the token) and discovery state. Mixing user content there muddies the boundary.
 - **`~/Pictures` is too narrow.** User content that happens to be images includes screenshots, annotated diagrams, sketches, etc. `Documents/` is the right scope.
 
 Alternative considered: user's **current working directory** at app launch. Rejected — non-deterministic, would break on app relaunches from Finder (cwd = `/`).
 
-### 2. Config mechanism: single-file JSON at `~/Library/Application Support/A2AChannel/config.json`
+### 2. Config mechanism: single-file JSON at `~/Library/Application Support/Cubilot/config.json`
 
 Shape:
 ```json
@@ -178,7 +178,7 @@ No schema versioning (v1). If the file is malformed, ignore and use defaults; lo
 ## Migration Plan
 
 1. Build + install the new version.
-2. On first launch, Rust creates `~/Documents/A2AChannel/images/` (if missing), writes default `config.json` (if missing), starts the hub with `A2A_IMAGES_DIR` set.
+2. On first launch, Rust creates `~/Documents/Cubilot/images/` (if missing), writes default `config.json` (if missing), starts the hub with `CUBILOT_IMAGES_DIR` set.
 3. In-memory image cache is gone. The chat log is already reset on restart, so no stale `/image/<id>` references survive — none to break.
 4. Existing active Claude sessions continue with their existing channel-bin (not restarted). New images uploaded from the webview will reach those agents as absolute paths; old image references are moot because the old hub is gone.
 5. No user action required beyond launching.

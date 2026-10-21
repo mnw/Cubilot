@@ -2,7 +2,7 @@
 
 Two runtimes join a room today, through two unrelated adapters:
 
-- **Claude** — `hub/channel.ts` (MCP stdio server, `A2A_MODE=channel` of `a2a-bin`) + `tail.ts` + `permission-relay.ts`. Spawned via a per-agent `--mcp-config` and `--dangerously-load-development-channels server:chatbridge`. Every hub event becomes one `notifications/claude/channel`, which Claude Code renders as a `<channel …>` tag and always treats the same way. The flag forces a confirm prompt (`ui/terminal.js` scans PTY output to dismiss it) and fresh sessions swallow notifications for ~10 s (`channel.ts` delays the tail).
+- **Claude** — `hub/channel.ts` (MCP stdio server, `CUBILOT_MODE=channel` of `cubilot-bin`) + `tail.ts` + `permission-relay.ts`. Spawned via a per-agent `--mcp-config` and `--dangerously-load-development-channels server:chatbridge`. Every hub event becomes one `notifications/claude/channel`, which Claude Code renders as a `<channel …>` tag and always treats the same way. The flag forces a confirm prompt (`ui/terminal.js` scans PTY output to dismiss it) and fresh sessions swallow notifications for ~10 s (`channel.ts` delays the tail).
 - **Pi** — `hub/channel/pi-extension.ts`, in-process, loaded with `pi -e`. Already delivers by urgency (`steer` / `followUp` / no-wake context) and renders its own `[kind · from …]` header. Its briefing renderer is a copy of `tail.ts`'s.
 
 Both share `tools.ts` (tool schemas + handlers) and `hub-client.ts` (discovery, auth, 401 retry), which import `node:fs`, `node:os`, `node:path` and global `fetch`.
@@ -97,7 +97,7 @@ Keys are emitted only when present, in a fixed order: `id from to room kind <id-
 
 ### D5. Identity by env, like pi
 
-`pty.rs` builds `CHATBRIDGE_AGENT='…' CHATBRIDGE_ROOM='…' '<claude>' [--continue|--resume] --plugin-dir '<mod>' --allowed-tools 'mcp__chatbridge__ack_permission,mcp__chatbridge__post,mcp__chatbridge__post_file'`. The mod reads identity with `$.env.get`. The plugin is named `chatbridge`, so its tools are listed as `mcp__chatbridge__<name>` and the allow-list is unchanged. `write_mcp_config_for` and the per-agent chatbridge MCP configs go away. The user's global MCP servers (the A2AChannel `mcp.json`) are unrelated to the chatbridge and keep reaching Claude agents: each spawn writes them, `chatbridge` filtered out, to one generated `mcp-configs/global.json` passed with `--mcp-config` (omitted when there are none).
+`pty.rs` builds `CHATBRIDGE_AGENT='…' CHATBRIDGE_ROOM='…' '<claude>' [--continue|--resume] --plugin-dir '<mod>' --allowed-tools 'mcp__chatbridge__ack_permission,mcp__chatbridge__post,mcp__chatbridge__post_file'`. The mod reads identity with `$.env.get`. The plugin is named `chatbridge`, so its tools are listed as `mcp__chatbridge__<name>` and the allow-list is unchanged. `write_mcp_config_for` and the per-agent chatbridge MCP configs go away. The user's global MCP servers (the Cubilot `mcp.json`) are unrelated to the chatbridge and keep reaching Claude agents: each spawn writes them, `chatbridge` filtered out, to one generated `mcp-configs/global.json` passed with `--mcp-config` (omitted when there are none).
 
 ### D6. Instructions
 
@@ -162,7 +162,7 @@ Not equivalent to the old allow-list: `--allowed-tools` pre-approved only `post`
 - `hub/channel/pi-extension.ts` → `src-tauri/resources/pi-extension.js` (unchanged).
 - `hub/channel/claude-mod/register.ts` → `src-tauri/resources/chatbridge-mod.js`, one file like `pi-extension.js`. The plugin's two JSON files are compiled into the Rust shell with `include_str!` from `hub/channel/claude-mod/` (single source; avoids bundling a dot-directory as a Tauri resource).
 
-A mod can only import files inside its own folder, so bundling is required. `lib.rs` resolves the bundled mod with the same candidate paths it uses for `pi-extension.js`, then **copies it to `~/Library/Application Support/A2AChannel/chatbridge-mod/` at startup** (replacing the previous copy) and passes that path to `--plugin-dir`. Claude Code writes `.claude-plugin/types/`, `.gitignore` and `tsconfig.json` into every `--plugin-dir` folder it loads (observed in the mod smoke test), so pointing it inside the signed `.app` would modify the bundle. `get_mcp_template` returns the `--plugin-dir` launch line for external sessions.
+A mod can only import files inside its own folder, so bundling is required. `lib.rs` resolves the bundled mod with the same candidate paths it uses for `pi-extension.js`, then **copies it to `~/Library/Application Support/Cubilot/chatbridge-mod/` at startup** (replacing the previous copy) and passes that path to `--plugin-dir`. Claude Code writes `.claude-plugin/types/`, `.gitignore` and `tsconfig.json` into every `--plugin-dir` folder it loads (observed in the mod smoke test), so pointing it inside the signed `.app` would modify the bundle. `get_mcp_template` returns the `--plugin-dir` launch line for external sessions.
 
 ### D10. Tests
 
@@ -196,7 +196,7 @@ Rollback: the work lives on `claude_mods`; `main` keeps the MCP path until merge
 
 ## Spike results (2026-10-13, Claude Code 2.1.287, pi 0.87.1)
 
-Run against an isolated standalone hub (port 8100, data under `/tmp/a2a-spike`), bundled tmux on its own socket. Evidence: `/tmp/a2a-spike/events.log`, `pi-events.log`, `debug*.log`.
+Run against an isolated standalone hub (port 8100, data under `/tmp/cubilot-spike`), bundled tmux on its own socket. Evidence: `/tmp/cubilot-spike/events.log`, `pi-events.log`, `debug*.log`.
 
 1. **Non-interactive load — answered.** `claude --plugin-dir <mod>` loads the hooks module with no question (`hooks module spike@inline loaded (worker …)`). In a never-trusted folder, hooks modules wait for the workspace-trust answer and load as soon as it is given; that prompt exists today on the MCP path too. One first-ever launch in an untrusted folder logged no `session.start` after trust; not reproduced on a second untrusted folder → matrix row M30.
 2. **Delivery timing — answered.** `session.start` → stream connected in 10 ms; a message sent 20 ms later started a turn. No warm-up window: the fixed 10 s delay goes.

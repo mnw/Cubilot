@@ -2,7 +2,7 @@
 
 ### Requirement: Upload rejects disallowed MIMEs and mismatched magic bytes
 
-`POST /upload` SHALL accept only the following `Content-Type` values: `image/png`, `image/jpeg`, `image/gif`, `image/webp`. `image/svg+xml` is no longer accepted. The hub SHALL read the first bytes of the uploaded payload and reject the upload with HTTP `400` if the bytes do not match the declared MIME. Payloads larger than `IMAGE_MAX_BYTES` (8 MiB) SHALL be rejected with `413`. On success, the hub SHALL persist the bytes to disk at `<A2A_IMAGES_DIR>/<id>.<ext>` and respond `{ url: "/image/<id>.<ext>", id: "<id>" }`, where `<ext>` is derived from the validated MIME.
+`POST /upload` SHALL accept only the following `Content-Type` values: `image/png`, `image/jpeg`, `image/gif`, `image/webp`. `image/svg+xml` is no longer accepted. The hub SHALL read the first bytes of the uploaded payload and reject the upload with HTTP `400` if the bytes do not match the declared MIME. Payloads larger than `IMAGE_MAX_BYTES` (8 MiB) SHALL be rejected with `413`. On success, the hub SHALL persist the bytes to disk at `<CUBILOT_IMAGES_DIR>/<id>.<ext>` and respond `{ url: "/image/<id>.<ext>", id: "<id>" }`, where `<ext>` is derived from the validated MIME.
 
 #### Scenario: SVG upload is rejected
 
@@ -19,7 +19,7 @@
 
 - **WHEN** a client uploads a payload starting with `\x89PNG\r\n\x1a\n...` declared as `image/png`
 - **THEN** the hub responds `200` with `{ url: "/image/<id>.png", id: "<id>" }`
-- **AND** the file `<A2A_IMAGES_DIR>/<id>.png` contains the uploaded bytes
+- **AND** the file `<CUBILOT_IMAGES_DIR>/<id>.png` contains the uploaded bytes
 
 ### Requirement: `/send` rejects non-local image URLs
 

@@ -2,7 +2,7 @@
 
 - [x] 1.1 Minimal mod: `session.start` spawns `curl -sN -H @-` against a running hub's `/agent-stream`, logs each piece with `$.ui.log` → verify: pieces keep arriving 2+ minutes after `session.start` returned
 - [x] 1.2 Same mod: on first stream piece, `$.prompt.submit({ text })` and `$.session.append` of a user row → verify: an idle session starts a turn from the submit; the appended row is visible to the model next turn; nothing is lost in the first 10 s after spawn; three un-awaited submits issued while busy run in call order
-- [x] 1.3 Launch it as A2AChannel would: tmux, `CHATBRIDGE_AGENT=… claude --plugin-dir <spike>` → verify: the mod loads with no interactive question; record what (if anything) enables function hooks non-interactively
+- [x] 1.3 Launch it as Cubilot would: tmux, `CHATBRIDGE_AGENT=… claude --plugin-dir <spike>` → verify: the mod loads with no interactive question; record what (if anything) enables function hooks non-interactively
 - [x] 1.4 Register one tool + `tool.call` hook + `turn.complete` hook → verify: model sees `mcp__<plugin>__<name>`; `turn.complete` fires once per run (not per model request) for submit-started turns, including a run with several tool calls; the `$.prompt.submit` promise resolves as that turn starts; the `tool.call` hook sees the handler's outcome
 - [x] 1.5 `classic.PermissionRequest` hook that awaits a 30 s `curl` via `$.process.run` then answers `{ decision: { behavior: "allow" } }` → verify: no budget error; tool proceeds without a dialog
 - [x] 1.5b pi side: a throwaway extension logs `message_start` and `agent_end` for a `sendUserMessage` delivery during a multi-tool run → verify: `message_start` carries the user text; `agent_end` fires once per run
@@ -49,7 +49,7 @@
 ## 6. Build, spawn and packaging cutover
 
 - [x] 6.1 `scripts/build-sidecars.sh`: bundle `hub/channel/claude-mod/register.ts` (`bun build --format=esm --target=browser`) to `src-tauri/resources/chatbridge-mod.js`; gitignore it
-- [x] 6.2 Tauri resources gain `resources/chatbridge-mod.js`. `lib.rs` resolves it with the same candidate paths as `pi-extension.js`, then at startup materializes the plugin folder atomically at `~/Library/Application Support/A2AChannel/chatbridge-mod/`: build it in a sibling temp dir (`.claude-plugin/plugin.json` and `hooks/hooks.json` written from `include_str!` of the repo files under `hub/channel/claude-mod/`, `hooks/register.js` copied from the resource), then rename over the old one. Never point `--plugin-dir` into the `.app` (Claude Code writes type files into the loaded folder) → verify: after a spawn, `codesign --verify --deep /Applications/A2AChannel.app` passes and the staged folder has the three files
+- [x] 6.2 Tauri resources gain `resources/chatbridge-mod.js`. `lib.rs` resolves it with the same candidate paths as `pi-extension.js`, then at startup materializes the plugin folder atomically at `~/Library/Application Support/Cubilot/chatbridge-mod/`: build it in a sibling temp dir (`.claude-plugin/plugin.json` and `hooks/hooks.json` written from `include_str!` of the repo files under `hub/channel/claude-mod/`, `hooks/register.js` copied from the resource), then rename over the old one. Never point `--plugin-dir` into the `.app` (Claude Code writes type files into the loaded folder) → verify: after a spawn, `codesign --verify --deep /Applications/Cubilot.app` passes and the staged folder has the three files
 - [x] 6.3 `pty.rs::claude_command`: env identity + `--plugin-dir`, keep `--allowed-tools`, drop the chatbridge MCP config and the dev-channels flag, keep the user's global MCP servers via one generated `mcp-configs/global.json` (`--mcp-config`, chatbridge filtered); delete `write_mcp_config_for` and the `mcp-configs` dir helper; update the unit tests near `pty.rs:1451`
 - [x] 6.4 `tests/integration/pty-plumbing.test.ts`: spawn-command assertion expects `--plugin-dir`, no dev-channels flag, and `--mcp-config` only for the global-servers file → verify: suite passes
 - [x] 6.5 `lib.rs::get_mcp_template` returns the launch line per the hub-discovery spec; update `ui/features/mcp-modal.js` copy and the header button's title/aria-label
@@ -60,10 +60,10 @@
 
 ## 7. Remove the MCP path
 
-- [x] 7.1 Delete `hub/channel.ts`, `hub/channel/tail.ts`, `hub/channel/permission-relay.ts`; drop `A2A_MODE=channel` from `hub/main.ts`
+- [x] 7.1 Delete `hub/channel.ts`, `hub/channel/tail.ts`, `hub/channel/permission-relay.ts`; drop `CUBILOT_MODE=channel` from `hub/main.ts`
 - [x] 7.2 Remove the dev-channels output scan and its resize-cycle from `ui/terminal.js` (touch only that helper; the branch carries unrelated uncommitted WIP in this file)
 - [x] 7.3 Remove `@modelcontextprotocol/sdk` (and `zod` if now unused) from `package.json` → verify: `bun install`, `tsc --noEmit`, `./scripts/build-sidecars.sh` all clean
-- [x] 7.4 `grep -rn "dangerously-load-development-channels\|notifications/claude/channel\|A2A_MODE=channel\|modelcontextprotocol" hub src-tauri ui scripts tests` returns nothing
+- [x] 7.4 `grep -rn "dangerously-load-development-channels\|notifications/claude/channel\|CUBILOT_MODE=channel\|modelcontextprotocol" hub src-tauri ui scripts tests` returns nothing
 
 ## 8. Verification and docs
 
