@@ -93,7 +93,7 @@ export function modeFor(evt: BridgeEvent, agent: string): DeliveryMode {
 }
 
 export function renderBriefing(evt: BridgeEvent, agent: string, room: string): string {
-  const parts: string[] = [`[A2AChannel briefing] You are "${agent}" in room "${room}".`];
+  const parts: string[] = [`[Cubilot briefing] You are "${agent}" in room "${room}".`];
   if (evt.human_name) parts.push(`The human's name is "${evt.human_name}".`);
   if (evt.peers?.length) {
     const online = evt.peers.filter((p) => p.online).map((p) => p.name);
@@ -142,7 +142,7 @@ export function renderEnvelope(evt: BridgeEvent, room: string): string {
 
 export function renderEvent(evt: BridgeEvent, agent: string, room: string): string {
   if (evt.type === "briefing") return renderBriefing(evt, agent, room);
-  if (evt.type === "nutshell.updated") return `[A2AChannel nutshell update]\n${evt.text ?? ""}`;
+  if (evt.type === "nutshell.updated") return `[Cubilot nutshell update]\n${evt.text ?? ""}`;
   return `${renderEnvelope(evt, room)}\n${evt.text ?? ""}`;
 }
 
@@ -227,7 +227,7 @@ export function startBridge(host: Host, opts: BridgeOpts): Bridge {
       if (!hub) {
         if (!loggedMissingOnce) {
           host.log(
-            `[channel] hub not found; waiting for A2AChannel.app to start (expects ${URL_PATH} and ${TOKEN_PATH})`,
+            `[channel] hub not found; waiting for Cubilot.app to start (expects ${URL_PATH} and ${TOKEN_PATH})`,
           );
           loggedMissingOnce = true;
         }

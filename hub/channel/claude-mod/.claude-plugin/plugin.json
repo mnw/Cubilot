@@ -1,9 +1,9 @@
 {
   "name": "chatbridge",
   "version": "0.1.0",
-  "description": "A2AChannel chatbridge: joins this Claude Code session to an A2AChannel room.",
+  "description": "Cubilot chatbridge: joins this Claude Code session to a Cubilot room.",
   "author": {
-    "name": "A2AChannel"
+    "name": "Cubilot"
   },
   "types": "./types/index.d.ts"
 }

@@ -84,9 +84,9 @@ export default function (pi: any): void {
   const host: Host = nodeHost(async (d) => {
     if (d.mode === "context") {
       // Context never yields a user message_start, so its onRead is not queued.
-      const [customType, display] = d.text.startsWith("[A2AChannel briefing]")
+      const [customType, display] = d.text.startsWith("[Cubilot briefing]")
         ? ["chatbridge.briefing", "Briefing"]
-        : d.text.startsWith("[A2AChannel nutshell update]")
+        : d.text.startsWith("[Cubilot nutshell update]")
           ? ["chatbridge.nutshell.updated", "Nutshell"]
           : ["chatbridge.context", "Chatbridge"];
       await pi.sendMessage(
