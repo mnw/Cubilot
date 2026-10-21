@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cubilot Factory Map</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a plant-floor schematic. Stacked layers, then role stations, then flow lines, then the build sequence.
+   Status is encoded in the border: solid = built, solid tint = defined, dashed = planned, dotted = idea. */
+:root{
+  --bg:#edf0f2; --panel:#ffffff; --panel-2:#f6f8f9; --ink:#1a2228; --muted:#57636c; --line:#c7cfd5;
+  --accent:#c8501c;
+  --built:#2d7a4c; --built-t:#e3f1e8;
+  --defined:#2560a3; --defined-t:#e3ecf7;
+  --planned:#9a6200; --planned-t:#fbf1dd;
+  --idea:#6f7a83; --idea-t:#eef0f2;
+  --ff-display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --ff-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --ff-mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#11161a; --panel:#182025; --panel-2:#1d262c; --ink:#e3e8eb; --muted:#97a2aa; --line:#2d373e;
+  --accent:#ee7a45;
+  --built:#5cc189; --built-t:#16291f;
+  --defined:#6aa4e6; --defined-t:#16243a;
+  --planned:#e2aa3e; --planned-t:#2c2412;
+  --idea:#8f9aa3; --idea-t:#1f262b;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#11161a; --panel:#182025; --panel-2:#1d262c; --ink:#e3e8eb; --muted:#97a2aa; --line:#2d373e;
+  --accent:#ee7a45;
+  --built:#5cc189; --built-t:#16291f;
+  --defined:#6aa4e6; --defined-t:#16243a;
+  --planned:#e2aa3e; --planned-t:#2c2412;
+  --idea:#8f9aa3; --idea-t:#1f262b;
+  color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--ff-body);font-size:14px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 48px}
+.wrap{max-width:1180px;margin:0 auto;display:grid;gap:40px}
+h1,h2,h3{font-family:var(--ff-display);font-weight:600;letter-spacing:.01em;margin:0;text-wrap:balance}
+h1{font-size:clamp(34px,5vw,52px);line-height:1}
+h2{font-size:26px;display:flex;align-items:baseline;gap:12px}
+h2 .num{font-family:var(--ff-mono);font-size:13px;color:var(--accent);font-weight:500}
+h3{font-size:18px}
+p{margin:0}
+.muted{color:var(--muted)}
+code,.mono{font-family:var(--ff-mono);font-size:12.5px}
+.eyebrow{font-family:var(--ff-mono);font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)}
+
+header{display:grid;gap:14px}
+header .sub{max-width:70ch;color:var(--muted)}
+
+/* Legend / filter */
+.legend{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.legend .lab{font-family:var(--ff-mono);font-size:12px;color:var(--muted);margin-right:4px}
+.lg{font:500 13px var(--ff-body);color:var(--ink);background:var(--panel);border:2px solid var(--line);border-radius:6px;padding:4px 10px;cursor:pointer;display:inline-flex;gap:8px;align-items:center}
+.lg[aria-pressed="true"]{outline:2px solid var(--accent);outline-offset:1px}
+.lg:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.lg .sw{width:14px;height:14px;border-radius:3px;border:2px solid}
+.lg.built .sw{border-style:solid;border-color:var(--built);background:var(--built-t)}
+.lg.defined .sw{border-style:solid;border-color:var(--defined);background:var(--defined-t)}
+.lg.planned .sw{border-style:dashed;border-color:var(--planned);background:var(--planned-t)}
+.lg.idea .sw{border-style:dotted;border-color:var(--idea);background:var(--idea-t)}
+.lg.clear{border-style:solid}
+
+/* Status nodes */
+.n{border:2px solid var(--line);border-radius:6px;padding:7px 10px;background:var(--panel);min-width:0;transition:opacity .2s}
+.n .t{font-weight:600;font-size:13.5px;display:block}
+.n .d{font-size:12.5px;color:var(--muted);display:block}
+.n .ref{font-family:var(--ff-mono);font-size:11px;color:var(--muted)}
+.built{border-color:var(--built);border-style:solid;background:var(--built-t)}
+.defined{border-color:var(--defined);border-style:solid;background:var(--defined-t)}
+.planned{border-color:var(--planned);border-style:dashed;background:var(--planned-t)}
+.idea{border-color:var(--idea);border-style:dotted;background:var(--idea-t)}
+.lg.built,.lg.defined,.lg.planned,.lg.idea{background:var(--panel);border-color:var(--line);border-style:solid}
+body.filter-built .n:not(.built),body.filter-defined .n:not(.defined),body.filter-planned .n:not(.planned),body.filter-idea .n:not(.idea){opacity:.22}
+@media (prefers-reduced-motion: reduce){.n{transition:none}}
+
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px;display:grid;gap:14px;min-width:0}
+.sec{display:grid;gap:14px}
+.intro{max-width:75ch;color:var(--muted)}
+
+/* System map */
+.layers{display:grid;gap:10px}
+.layer{display:grid;grid-template-columns:150px 1fr;gap:12px;align-items:start;border-top:1px solid var(--line);padding-top:10px}
+.layer:first-child{border-top:0;padding-top:0}
+.layer .lname{font-family:var(--ff-display);font-weight:600;font-size:16px;line-height:1.15}
+.layer .lname small{display:block;font-family:var(--ff-mono);font-weight:400;font-size:11px;color:var(--muted)}
+.row{display:flex;flex-wrap:wrap;gap:8px}
+.row .n{flex:1 1 170px}
+@media (max-width:640px){.layer{grid-template-columns:1fr}}
+
+/* Roles */
+.roles{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.role{display:grid;gap:8px;align-content:start}
+.role .head{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.role h3{font-size:21px}
+.role .model{font-family:var(--ff-mono);font-size:12px;padding:2px 7px;border-radius:4px;border:1px solid var(--line);background:var(--panel-2);white-space:nowrap}
+.role .model.oa{border-color:var(--accent);color:var(--accent)}
+.role .job{font-size:13px}
+.role dl{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin:0;font-size:12.5px}
+.role dt{color:var(--muted);font-family:var(--ff-mono);font-size:11.5px;padding-top:1px}
+.role dd{margin:0}
+.track{font-family:var(--ff-mono);font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+
+/* Flows */
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:6px}
+.flow .n{flex:0 1 auto;max-width:220px}
+.arrow{align-self:center;color:var(--muted);font-family:var(--ff-mono);font-size:14px}
+.gate{font-family:var(--ff-mono);font-size:11px;color:var(--accent);display:block;margin-top:2px}
+.loop{font-size:12.5px;color:var(--muted);border-left:2px solid var(--line);padding-left:10px}
+.loop b{color:var(--ink);font-weight:600}
+.twocol{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:820px){.twocol{grid-template-columns:1fr}}
+
+/* Jev table */
+.tbl-wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:640px;font-size:13px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-family:var(--ff-mono);font-size:11.5px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+td .pill{display:inline-block;font-family:var(--ff-mono);font-size:11px;padding:1px 7px;border-radius:10px;border:1.5px solid}
+.pill.planned{border-style:dashed}
+.pill.idea{border-style:dotted}
+.pill.none{border-color:var(--built);color:var(--built)}
+.pill.code{border-color:var(--planned);color:var(--planned)}
+
+/* Sequence */
+.seq{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;counter-reset:s}
+.seq .n{display:grid;gap:3px;align-content:start}
+.seq .n .step{font-family:var(--ff-mono);font-size:11px;color:var(--accent)}
+.seq .n.first{box-shadow:0 0 0 2px var(--accent) inset}
+
+footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">Cubilot · The Continuous Software Foundry · state on 21 October 2026</div>
+  <h1>Cubilot Factory Map</h1>
+  <p class="sub">The whole factory on one page: what runs in the code today, what is defined in the <code>factory/</code> folder, what the implementation brief plans, and which ideas are only saved. Click a status to highlight it.</p>
+  <div class="legend" role="group" aria-label="Highlight by status">
+    <span class="lab">Highlight:</span>
+    <button class="lg built" data-f="built" aria-pressed="false" type="button"><span class="sw"></span>Built in code</button>
+    <button class="lg defined" data-f="defined" aria-pressed="false" type="button"><span class="sw"></span>Defined in factory/</button>
+    <button class="lg planned" data-f="planned" aria-pressed="false" type="button"><span class="sw"></span>Planned in brief</button>
+    <button class="lg idea" data-f="idea" aria-pressed="false" type="button"><span class="sw"></span>Idea, saved</button>
+    <button class="lg clear" data-f="" aria-pressed="true" type="button">Show all</button>
+  </div>
+</header>
+
+<!-- 1 SYSTEM MAP -->
+<section class="sec" aria-labelledby="h-map">
+  <h2 id="h-map"><span class="num">01</span>System map</h2>
+  <p class="intro">From the human at the top to the models at the bottom. References in brackets (§N) point to part N of the implementation brief, <code>factory/brief/NN-*.md</code>.</p>
+  <div class="panel layers">
+
+    <div class="layer"><div class="lname">Human<small>you</small></div>
+      <div class="row">
+        <div class="n built"><span class="t">Desktop app window</span><span class="d">macOS, Apple Silicon only</span></div>
+        <div class="n idea"><span class="t">Browser and phone access</span><span class="d">Over Tailscale, pairing by QR code</span><span class="ref">§12</span></div>
+        <div class="n built"><span class="t">Approval gate</span><span class="d">High blast-radius tickets need your Allow</span></div>
+      </div></div>
+
+    <div class="layer"><div class="lname">UI<small>ui/ webview</small></div>
+      <div class="row">
+        <div class="n built"><span class="t">Chat, roster, rooms</span><span class="d">Pause, mentions, attachments</span></div>
+        <div class="n built"><span class="t">Terminal panes</span><span class="d">xterm per agent, tmux sessions</span></div>
+        <div class="n built"><span class="t">Ticket kanban board</span><span class="d">Uncommitted work, moves with the migration</span></div>
+        <div class="n planned"><span class="t">Role dropdown in spawn modal</span><span class="d">Harness and model shown, model override</span><span class="ref">§2 step 4</span></div>
+        <div class="n planned"><span class="t">Setup and admin screen</span><span class="d">Choose components, see the plan, approve, live log; accounts, projects, backup, updates, checks (Doctor)</span><span class="ref">§8 §7</span></div>
+        <div class="n planned"><span class="t">Dashboard tab</span><span class="d">Waiting for you, Stuck, Flow, Quality, Cost</span><span class="ref">§11</span></div>
+      </div></div>
+
+    <div class="layer"><div class="lname">Shell<small>src-tauri/ Rust</small></div>
+      <div class="row">
+        <div class="n built"><span class="t">PTY and tmux control</span><span class="d">Launch, write, resize, kill agents</span></div>
+        <div class="n built"><span class="t">Plugin staging</span><span class="d">Chatbridge mod into app data</span></div>
+        <div class="n planned"><span class="t">Role plugin staging</span><span class="d">One plugin per role: skills and hooks, no sub-agents</span><span class="ref">§2 step 1</span></div>
+        <div class="n planned"><span class="t">Session per ticket stage</span><span class="d">Hub launches a fresh visible session per stage, closes it on result</span><span class="ref">§4</span></div>
+        <div class="n planned"><span class="t">Internal remote + Deliver</span><span class="d">Bare repos in app data, factory clone (no client remote), delivery clone, leak gate</span><span class="ref">§5</span></div>
+        <div class="n planned"><span class="t">Backup and restore</span><span class="d">One folder, restic hourly to one target, 3-step restore</span><span class="ref">§5</span></div>
+        <div class="n idea"><span class="t">Move terminal layer into hub</span><span class="d">Shell becomes thin, Linux becomes possible</span><span class="ref">§12</span></div>
+      </div></div>
+
+    <div class="layer"><div class="lname">Hub<small>hub/ Bun, 127.0.0.1</small></div>
+      <div class="row">
+        <div class="n built"><span class="t">Ledger (SQLite)</span><span class="d">Events, durable state, replay</span></div>
+        <div class="n built"><span class="t">Kinds</span><span class="d">Handoff, interrupt, permission, ticket</span></div>
+        <div class="n built"><span class="t">Room lead, nutshell, summariser</span><span class="d">Briefing on connect</span></div>
+        <div class="n planned"><span class="t">Review kind</span><span class="d">Structured verdicts, Warp review.json format</span><span class="ref">§2 §11 §6</span></div>
+        <div class="n planned"><span class="t">Triage states, spec stage</span><span class="d">Ready / spec / needs info / wait</span><span class="ref">§6</span></div>
+        <div class="n planned"><span class="t">Dashboard route</span><span class="d">Read-only, per room</span><span class="ref">§11</span></div>
+        <div class="n planned"><span class="t">Context pack</span><span class="d">Stable prefix first (cache), primer, graph query, signatures, stage notes; no model</span><span class="ref">§4</span></div>
+        <div class="n idea"><span class="t">Requests and tasks</span><span class="d">blocked_by, context checkpoint at each task done</span><span class="ref">§3</span></div>
+        <div class="n idea"><span class="t">Jev decision points</span><span class="d">Narrow typed decisions, see section 05</span></div>
+      </div></div>
+
+    <div class="layer"><div class="lname">Bridges<small>hub/channel</small></div>
+      <div class="row">
+        <div class="n built"><span class="t">Claude Code mod</span><span class="d">Chatbridge tools: post, handoff, tickets</span></div>
+        <div class="n built"><span class="t">Pi extension</span><span class="d">Same tools inside Pi</span></div>
+        <div class="n defined"><span class="t">Editor ASD-STE100 hook</span><span class="d">Blocks handoff to reviewer on lint failures, tested</span></div>
+      </div></div>
+
+    <div class="layer"><div class="lname">Agents<small>9 per team</small></div>
+      <div class="row">
+        <div class="n defined"><span class="t">Claude Code roles</span><span class="d">Orchestrator, Worker ×N, Tester ×N, Writer, Editor</span></div>
+        <div class="n defined"><span class="t">Pi roles</span><span class="d">Validator, Reviewer</span></div>
+        <div class="n planned"><span class="t">Launch with a role</span><span class="d">--plugin-dir, --append-system-prompt-file, --model</span><span class="ref">§2</span></div>
+        <div class="n planned"><span class="t">Worktree per agent run</span><span class="d">Workers own one, Testers and Validator get a temporary one</span><span class="ref">§7</span></div>
+      </div></div>
+
+    <div class="layer"><div class="lname">Toolchain<small>code intelligence</small></div>
+      <div class="row">
+        <div class="n built"><span class="t">Graphify, rg, fd, Serena</span><span class="d">On your Mac, set up by hand in ~/.agents</span></div>
+        <div class="n planned"><span class="t">App-bundled toolchain</span><span class="d">Pinned in toolchain.lock, installed by the app</span><span class="ref">§7</span></div>
+        <div class="n planned"><span class="t">Mutation tools per project</span><span class="d">Infection, StrykerJS, mutmut, PIT, cargo-mutants</span><span class="ref">§13</span></div>
+        <div class="n planned"><span class="t">jtt survivor triage</span><span class="d">Off by default for client code</span><span class="ref">§13</span></div>
+      </div></div>
+
+    <div class="layer"><div class="lname">Models<small>providers</small></div>
+      <div class="row">
+        <div class="n built"><span class="t">Anthropic via Claude Code</span><span class="d">Your subscription, official CLI only</span></div>
+        <div class="n planned"><span class="t">OpenAI via Pi</span><span class="d">API key in Keychain, for the challengers</span><span class="ref">§2 finding 6</span></div>
+        <div class="n planned"><span class="t">Jev via OpenRouter</span><span class="d">jev-1.13, typed answers only</span><span class="ref">§13</span></div>
+      </div></div>
+
+  </div>
+</section>
+
+<!-- 2 ROLES -->
+<section class="sec" aria-labelledby="h-roles">
+  <h2 id="h-roles"><span class="num">02</span>Roles, models and skills</h2>
+  <p class="intro">Each role file and its skills exist in <code>factory/&lt;role&gt;/</code>. Launching an agent with its role is planned work (§2). Core skills listed; optional skills are in the factory README.</p>
+  <div class="roles">
+
+    <article class="n defined role">
+      <div class="head"><h3>Orchestrator</h3><span class="model">Claude · opus</span></div>
+      <span class="track">Both tracks · room lead</span>
+      <p class="job">Turns requests into tickets with checkable criteria, assigns, unblocks, decides disputes, escalates to you.</p>
+      <dl><dt>skills</dt><dd>planning-and-task-breakdown, context-engineering, intent-driven-development, team-agent-orchestration, project-manager-senior</dd>
+      <dt>optional</dt><dd>interview-me, constraint-driven-development, architecture-decision-records</dd>
+      <dt>never</dt><dd>writes code or docs, tests, reviews</dd></dl>
+    </article>
+
+    <article class="n defined role">
+      <div class="head"><h3>Worker ×N</h3><span class="model">Claude · sonnet</span></div>
+      <span class="track">Technical track · developer</span>
+      <p class="job">Tests first, implements on its own branch and worktree, kills surviving mutants, answers findings with fixes or evidence.</p>
+      <dl><dt>skills</dt><dd>test-driven-development, incremental-implementation, debugging-and-error-recovery, git-workflow-and-versioning, search-first, coding-standards, minimal-change-engineer</dd>
+      <dt>optional</dt><dd>api-design (merged), deprecation-and-migration, frontend-ui-engineering, code-simplification, cms-developer (Drupal)</dd>
+      <dt>never</dt><dd>merges, releases, judges own work</dd></dl>
+    </article>
+
+    <article class="n defined role">
+      <div class="head"><h3>Tester ×N</h3><span class="model">Claude · haiku</span></div>
+      <span class="track">Technical track · small hands</span>
+      <p class="job">Runs build, lint, types, tests, e2e and mutation testing. Writes the raw report. Never says PASS or FAIL.</p>
+      <dl><dt>skills</dt><dd>verification-loop, mutation-testing (own), evidence-collector</dd>
+      <dt>never</dt><dd>judges, edits product code</dd></dl>
+    </article>
+
+    <article class="n defined role">
+      <div class="head"><h3>Validator</h3><span class="model oa">OpenAI · Pi</span></div>
+      <span class="track">Technical track · challenger</span>
+      <p class="job">Challenges everyone: tickets, diffs, reports, its own verdict. Applies the mutation rules. Final PASS or FAIL on code.</p>
+      <dl><dt>skills</dt><dd>code-review (merged), security-and-hardening, ai-regression-testing, intent-driven-development, silent-failure-hunter, pr-test-analyzer, reality-checker</dd>
+      <dt>optional</dt><dd>constraint-driven-development, code-simplification, php/typescript-reviewer, accessibility</dd>
+      <dt>never</dt><dd>edits files, runs changed code</dd></dl>
+    </article>
+
+    <article class="n defined role">
+      <div class="head"><h3>Writer</h3><span class="model">Claude · sonnet</span></div>
+      <span class="track">Writing track</span>
+      <p class="job">Drafts docs from the code and sources. Runs its own commands, samples and link check before hand-in.</p>
+      <dl><dt>skills</dt><dd>documentation-and-adrs, documentation-lookup, docs-governance, technical-writer, codebase-onboarding-engineer</dd>
+      <dt>[spec] tickets</dt><dd>spec-driven-development, constraint-driven-development</dd>
+      <dt>never</dt><dd>changes product code, publishes</dd></dl>
+    </article>
+
+    <article class="n defined role">
+      <div class="head"><h3>Editor</h3><span class="model">Claude · sonnet</span></div>
+      <span class="track">Writing track</span>
+      <p class="job">Edits in place: structure, ASD-STE100, terminology, accessible markup. Only role that runs the language skills.</p>
+      <dl><dt>skills</dt><dd>humanizer → asd-ste100 → clean-user-facing-text</dd>
+      <dt>gate</dt><dd>ste-lint hook, exit 0 to hand in</dd>
+      <dt>never</dt><dd>changes technical meaning</dd></dl>
+    </article>
+
+    <article class="n defined role">
+      <div class="head"><h3>Reviewer</h3><span class="model oa">OpenAI · Pi</span></div>
+      <span class="track">Writing track · final gate</span>
+      <p class="job">Checks technical accuracy against the code, completeness for the reader and scope. APPROVE or CHANGES.</p>
+      <dl><dt>skills</dt><dd>code-explorer, technical-writer, comment-analyzer (optional)</dd>
+      <dt>never</dt><dd>edits files</dd></dl>
+    </article>
+
+    <article class="n defined role">
+      <div class="head"><h3>SEO council</h3><span class="model">Claude + OpenAI</span></div>
+      <span class="track">SEO track · 4 seats</span>
+      <p class="job">Capture (sonnet) makes one evidence pack. Two members (sonnet, OpenAI on Pi) analyse it blind. Chair (opus) sorts findings: agreed, single (checked), conflict (to you).</p>
+      <dl><dt>skills</dt><dd>seo-research, seo-audit, seo-geo-aeo, seo-content, seo-plan, seo-verticals (fold 26 suite skills)</dd>
+      <dt>never</dt><dd>changes code or content, ranking guarantees, one SEO score</dd></dl>
+    </article>
+
+    <article class="n defined role">
+      <div class="head"><h3>Accessibility &amp; usability council</h3><span class="model">Claude + OpenAI</span></div>
+      <span class="track">Accessibility track · 4 seats</span>
+      <p class="job">Capture runs axe-core, keyboard, contrast, viewport scans and reads Figma frames and documents. Two members review blind to WCAG 2.2 AA / EN 301 549 plus usability heuristics. Chair sorts findings and merges the manual checks for you.</p>
+      <dl><dt>skills</dt><dd>a11y-web-audit, a11y-design-review, usability-review, a11y-documents, a11y-compliance</dd>
+      <dt>tools</dt><dd>Accessibility Agents MCP (axe-core), Playwright MCP, Figma MCP, veraPDF (optional)</dd>
+      <dt>never</dt><dd>changes code or designs, states conformance, one score</dd></dl>
+    </article>
+
+  </div>
+</section>
+
+<!-- 3 WORKFLOWS -->
+<section class="sec" aria-labelledby="h-flows">
+  <h2 id="h-flows"><span class="num">03</span>Workflows</h2>
+
+  <div class="panel">
+    <h3>Intake</h3>
+    <div class="flow">
+      <div class="n built"><span class="t">Your request</span><span class="d">in chat</span></div><span class="arrow">→</span>
+      <div class="n planned"><span class="t">Orchestrator triage</span><span class="d">exactly one readiness state</span><span class="ref">§6</span></div><span class="arrow">→</span>
+      <div class="n planned"><span class="t">Ready to spec</span><span class="d">spec ticket, OpenSpec</span><span class="gate">gate: you approve the spec</span></div><span class="arrow">→</span>
+      <div class="n built"><span class="t">Draft tickets</span><span class="d">[code] or [doc], criteria, blocked_by, blast radius</span></div><span class="arrow">→</span>
+      <div class="n defined"><span class="t">Validator spec review</span><span class="d">coverage, checkable criteria, size, deps, spec vs code, risks</span><span class="gate">high radius: you approve the plan</span><span class="ref">§4</span></div><span class="arrow">→</span>
+      <div class="n planned"><span class="t">Queued</span><span class="d">tracks can start</span></div>
+    </div>
+    <p class="loop"><b>Spec review FAIL</b> returns to the Orchestrator with findings and questions for you; the follow-up review checks only the changes. <b>Two FAILs</b> on one plan go to you. <b>Needs info</b> goes back to you with questions. <b>Wait to implement</b> tells you why. Neither creates a ticket.</p>
+  </div>
+
+  <div class="twocol">
+    <div class="panel">
+      <h3>Technical track</h3>
+      <div class="flow">
+        <div class="n defined"><span class="t">Worker</span><span class="d">tests + code, in_review</span></div><span class="arrow">→</span>
+        <div class="n defined"><span class="t">Testers</span><span class="d">suite, e2e, mutation</span></div><span class="arrow">→</span>
+        <div class="n defined"><span class="t">Validator</span><span class="d">criteria, mutants, diff</span></div><span class="arrow">→</span>
+        <div class="n built"><span class="t">Done</span><span class="gate">high radius: your Allow</span></div>
+      </div>
+      <p class="loop"><b>FAIL</b> returns to the Worker with findings. <b>Two loops</b> without agreement go to the Orchestrator, then to you. Follow-up reviews check only the new changes (§6).</p>
+    </div>
+    <div class="panel">
+      <h3>Writing track</h3>
+      <div class="flow">
+        <div class="n defined"><span class="t">Writer</span><span class="d">draft, samples, links</span></div><span class="arrow">→</span>
+        <div class="n defined"><span class="t">Editor</span><span class="d">language pass</span><span class="gate">hook: ste-lint must pass</span></div><span class="arrow">→</span>
+        <div class="n defined"><span class="t">Reviewer</span><span class="d">accuracy, completeness</span></div><span class="arrow">→</span>
+        <div class="n built"><span class="t">Done</span></div>
+      </div>
+      <p class="loop"><b>CHANGES</b> returns to the Writer, who sends large rewrites back through the Editor.</p>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>SEO track</h3>
+    <div class="flow">
+      <div class="n defined"><span class="t">SEO capture</span><span class="d">evidence pack + manifest hashes</span></div><span class="arrow">→</span>
+      <div class="n defined"><span class="t">Members, blind</span><span class="d">seo-claude ∥ seo-openai, same evidence</span></div><span class="arrow">→</span>
+      <div class="n defined"><span class="t">SEO chair</span><span class="d">agreed · single (checked) · conflict</span></div><span class="arrow">→</span>
+      <div class="n planned"><span class="t">Orchestrator</span><span class="d">actions → draft [code]/[doc] tickets</span><span class="gate">conflicts: you decide</span><span class="ref">§10</span></div>
+    </div>
+    <p class="loop">After a release, a new <b>[seo] check</b> ticket runs the council again on fresh evidence.</p>
+  </div>
+
+  <div class="panel">
+    <h3>Accessibility track</h3>
+    <div class="flow">
+      <div class="n defined"><span class="t">a11y capture</span><span class="d">axe-core, keyboard, contrast, viewport; Figma; PDF/Office</span></div><span class="arrow">→</span>
+      <div class="n defined"><span class="t">Members, blind</span><span class="d">a11y-claude ∥ a11y-openai, same evidence</span></div><span class="arrow">→</span>
+      <div class="n defined"><span class="t">a11y chair</span><span class="d">agreed · single (checked) · conflict + manual checks</span></div><span class="arrow">→</span>
+      <div class="n planned"><span class="t">Orchestrator</span><span class="d">actions → draft tickets</span><span class="gate">manual checks: you, with axe DevTools / screen readers</span><span class="ref">§9</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 4 MUTATION PIPELINE -->
+<section class="sec" aria-labelledby="h-mut">
+  <h2 id="h-mut"><span class="num">04</span>Mutation testing pipeline</h2>
+  <p class="intro">Runs inside the technical track, on the files the ticket changed only (§13). The triage step sends code to TypeSafe through OpenRouter, so a project setting keeps it off by default.</p>
+  <div class="panel">
+    <div class="flow">
+      <div class="n planned"><span class="t">Doctor: project check</span><span class="d">stack from composer.json, package.json…; tool and PCOV/Xdebug present</span></div><span class="arrow">→</span>
+      <div class="n defined"><span class="t">Tester: mutation run</span><span class="d">Infection, StrykerJS, mutmut, PIT, cargo-mutants; JSON report</span></div><span class="arrow">→</span>
+      <div class="n planned"><span class="t">Tester: jtt triage</span><span class="d">Jev answers 12 questions per survivor</span><span class="gate">only if mutation_triage = on</span></div><span class="arrow">→</span>
+      <div class="n planned"><span class="t">Bands</span><span class="d">act · review · ignore</span></div><span class="arrow">→</span>
+      <div class="n defined"><span class="t">Validator</span><span class="d">advisory: suggestions only · enforce: open act blocks unless marked equivalent</span></div><span class="arrow">→</span>
+      <div class="n defined"><span class="t">Worker</span><span class="d">writes killing tests from agent-prompt.md</span></div>
+    </div>
+    <div class="twocol">
+      <p class="loop"><b>Mode per project:</b> <code>mutation_mode: off | advisory | enforce</code>, default <code>off</code>. Advisory first, to learn the real scores. Fast suites only (unit + kernel), 15-min time budget, a partial result never blocks. No jtt for PHP/Drupal → in <code>enforce</code> the Validator applies the project's <code>mutation_threshold</code>, set from the advisory results.</p>
+      <p class="loop"><b>Data:</b> scores and act/review/ignore counts go into the review kind, and the dashboard Quality panel shows them per code ticket (§11).</p>
+    </div>
+  </div>
+</section>
+
+<!-- 5 JEV -->
+<section class="sec" aria-labelledby="h-jev">
+  <h2 id="h-jev"><span class="num">05</span>Jev decision points</h2>
+  <p class="intro">Jev returns typed answers only: a choice, a probability or a score, with no text. Code builds the state, Jev decides, code acts. Each point must beat a simple rule before it stays.</p>
+  <div class="panel tbl-wrap">
+    <table>
+      <thead><tr><th>Where</th><th>Question</th><th>Data sent</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr class="n planned" style="display:table-row;border:0;background:none"><td>Mutation survivors</td><td>act / review / ignore</td><td><span class="pill code">code snippets</span></td><td><span class="pill planned" style="border-color:var(--planned);color:var(--planned)">planned §13</span></td></tr>
+        <tr class="n idea" style="display:table-row;border:0;background:none"><td>Context checkpoints</td><td>none / compact / clear, per agent at a ticket boundary</td><td><span class="pill none">numbers only</span></td><td><span class="pill idea" style="border-color:var(--idea);color:var(--idea)">idea §3</span></td></tr>
+        <tr class="n idea" style="display:table-row;border:0;background:none"><td>Loop escalation</td><td>will this FAIL loop converge, or escalate now?</td><td><span class="pill none">counts only</span></td><td><span class="pill idea" style="border-color:var(--idea);color:var(--idea)">idea</span></td></tr>
+        <tr class="n idea" style="display:table-row;border:0;background:none"><td>Model routing</td><td>haiku / sonnet / opus for this ticket</td><td><span class="pill code">ticket text</span></td><td><span class="pill idea" style="border-color:var(--idea);color:var(--idea)">idea</span></td></tr>
+        <tr class="n idea" style="display:table-row;border:0;background:none"><td>Stuck detection</td><td>stuck, looping or slow?</td><td><span class="pill none">activity metrics</span></td><td><span class="pill idea" style="border-color:var(--idea);color:var(--idea)">idea §11</span></td></tr>
+        <tr class="n idea" style="display:table-row;border:0;background:none"><td>Notification priority</td><td>notify the phone now, or batch?</td><td><span class="pill none">metadata</span></td><td><span class="pill idea" style="border-color:var(--idea);color:var(--idea)">idea §12</span></td></tr>
+        <tr class="n idea" style="display:table-row;border:0;background:none"><td>Triage pre-check</td><td>four readiness states, as a hint</td><td><span class="pill code">request text</span></td><td><span class="pill idea" style="border-color:var(--idea);color:var(--idea)">idea §6</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="loop"><b>Not for Jev:</b> writing, summarising, reviewing, approving permissions, weak-test detection.</p>
+</section>
+
+<!-- 6 BUILD ORDER -->
+<section class="sec" aria-labelledby="h-seq">
+  <h2 id="h-seq"><span class="num">06</span>Build order</h2>
+  <p class="intro">The migration comes first, then the rebrand, so Cubilot runs beside A2AChannel without touching it. Parts 1 to 5 give a working factory with fresh sessions and safe delivery; Parts 6 to 10 add review format, toolchain, setup and the two councils; 11 to 13 improve it.</p>
+  <div class="seq">
+    <div class="n planned first"><span class="step">Step 0</span><span class="t">Migrate to new repo</span><span class="d">mnw/Cubilot, fresh history, build but do not launch</span></div>
+    <div class="n planned"><span class="step">1</span><span class="t">Rebrand to Cubilot</span><span class="d">own identifier and data folder, side by side with A2AChannel</span><span class="ref">§1</span></div>
+    <div class="n planned"><span class="step">2</span><span class="t">Roles</span><span class="d">launch script first, then role launch in the app, no sub-agents</span><span class="ref">§2</span></div>
+    <div class="n planned"><span class="step">3</span><span class="t">Ticket grouping</span><span class="d">request_id, blocked_by, draft status</span><span class="ref">§3</span></div>
+    <div class="n planned"><span class="step">4</span><span class="t">Session per ticket stage</span><span class="d">ticket runner first, then in the hub; spec review, context pack</span><span class="ref">§4</span></div>
+    <div class="n planned"><span class="step">5</span><span class="t">Delivery and backup</span><span class="d">hourly backup at once; internal remote, Deliver step, leak gate</span><span class="ref">§5</span></div>
+    <div class="n planned"><span class="step">6</span><span class="t">Warp patterns</span><span class="d">triage, spec stage, review.json, trust boundary</span><span class="ref">§6</span></div>
+    <div class="n planned"><span class="step">7</span><span class="t">Toolchain</span><span class="d">bundled tools, worktrees, Serena limits</span><span class="ref">§7</span></div>
+    <div class="n planned"><span class="step">8</span><span class="t">Setup and admin</span><span class="d">components, accounts, projects, Doctor</span><span class="ref">§8</span></div>
+    <div class="n planned"><span class="step">9</span><span class="t">Accessibility council</span><span class="d">builds the council form; axe-core, Figma</span><span class="ref">§9</span></div>
+    <div class="n planned"><span class="step">10</span><span class="t">SEO council</span><span class="d">same council form</span><span class="ref">§10</span></div>
+    <div class="n planned"><span class="step">11</span><span class="t">Dashboard</span><span class="d">waiting for you, stuck, flow, quality, cost</span><span class="ref">§11</span></div>
+    <div class="n idea"><span class="step">12</span><span class="t">Hub-first and Linux</span><span class="d">terminal layer into hub, browser access</span><span class="ref">§12</span></div>
+    <div class="n planned"><span class="step">13</span><span class="t">Mutation testing</span><span class="d">advisory first, opt-in, last because of risk</span><span class="ref">§13</span></div>
+  </div>
+</section>
+
+<footer>
+  <span>Sources: <code>factory/README.md</code>, <code>factory/brief/</code> (index + 13 part files; §N = <code>brief/NN-*.md</code>), <code>factory/MIGRATION-BRIEF.md</code>, and the code imported from A2AChannel (branch claude_mods, commit 2133157, see <code>MIGRATION.md</code>).</span>
+  <span>Model names are defaults. Check the OpenAI model with <code>pi --list-models</code> before release.</span>
+</footer>
+
+</div>
+
+<script>
+(function(){
+  var btns=document.querySelectorAll('.lg');
+  function apply(f){
+    document.body.classList.remove('filter-built','filter-defined','filter-planned','filter-idea');
+    if(f) document.body.classList.add('filter-'+f);
+    btns.forEach(function(b){b.setAttribute('aria-pressed', String((b.dataset.f||'')===f));});
+    try{localStorage.setItem('ffmap-filter',f)}catch(e){}
+  }
+  btns.forEach(function(b){b.addEventListener('click',function(){apply(b.dataset.f||'')})});
+  var saved='';try{saved=localStorage.getItem('ffmap-filter')||''}catch(e){}
+  if(['built','defined','planned','idea'].indexOf(saved)>-1) apply(saved);
+})();
+</script>
+
+</body>
+</html>

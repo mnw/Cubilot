@@ -79,7 +79,9 @@ Change both sides together. The Pi extension finds the prefixes by text.
 - `src-tauri/src/lib.rs`: the config header (line 567), the MCP template comment (line 1078), the comment at line 1340.
 - Comments in `hub/main.ts`, `hub/hub.ts`, `hub/core/summariser/*.ts`, `hub/channel/*.ts`, `src-tauri/src/pty.rs`.
 - `scripts/check-mod.sh:8`: the default path.
-- Documents: `README.md`, `CONTEXT.md`, `CLAUDE.md`, `docs/PROTOCOL.md`, `docs/README.md`, `docs/architecture/`, the living specs in `openspec/specs/`, and the open changes in `openspec/changes/` (not `archive/`).
+- `docs/GUIDE.md` is the old README, moved from the repo root. Fix its relative links.
+- Documents: `docs/GUIDE.md`, `CONTEXT.md`, `CLAUDE.md`, `docs/PROTOCOL.md`, `docs/README.md`, `docs/architecture/`, the living specs in `openspec/specs/`, and the open changes in `openspec/changes/` (not `archive/`).
+- `README.md` is already the Cubilot README. Change it only to fix a wrong fact, and say so in your report.
 - Do not edit the `src-tauri/gen/` files by hand. The build makes them again.
 - Commit: `docs(rebrand): rename the product to Cubilot in UI text and documents`.
 
