@@ -5,14 +5,14 @@ Scope: roles, rebrand, toolchain, dashboard, mutation testing, context checkpoin
 Status: research and design only. This brief does not change app code.
 Date: 2026-10-16. Line numbers refer to the working tree on that date, with the uncommitted ticket-kind work.
 
-**First: migrate to the new repo.** Follow `../MIGRATION-BRIEF.md` before any part of this brief. The parts below happen in the new repo.
+**Migration: done** on 2026-10-21. The source of the code is in `../../MIGRATION.md`.
 
 ## Goal
 
-The app changes its name from A2AChannel to Cubilot (Part 1). The app must also launch any agent with a factory role, and must launch a full factory team in one action. A role gives the agent its instructions, its model, its tool limits and only its own skills. The role definitions and skills are in `factory/` (see `README.md`).
+The app has the name Cubilot (Part 1, done). The app must also launch any agent with a factory role, and must launch a full factory team in one action. A role gives the agent its instructions, its model, its tool limits and only its own skills. The role definitions and skills are in `factory/` (see `README.md`).
 
 The brief has thirteen parts. The numbers follow the build order (decision 2026-10-19). Each part is one file in this folder:
-1. [01-rebrand.md](01-rebrand.md): Rebrand to Cubilot. Cubilot gets its own identifier and data folder, and runs side by side with A2AChannel. First, because work continues in A2AChannel and the later parts use the new names.
+1. [01-rebrand.md](01-rebrand.md): Rebrand to Cubilot (done). The names in use, the open items, and how to retire the previous app.
 2. [02-factory-roles.md](02-factory-roles.md): Factory roles: launch agents with a role. First, use a launch script, before the app work.
 3. [03-ticket-grouping-checkpoints.md](03-ticket-grouping-checkpoints.md): Ticket grouping: requests, `blocked_by` and the `draft` status. The context checkpoints stay an idea.
 4. [04-sessions.md](04-sessions.md): Visible sessions: no sub-agents, and one new session for each ticket stage. First, use a ticket runner outside the app.
@@ -29,6 +29,6 @@ The brief has thirteen parts. The numbers follow the build order (decision 2026-
 ## How to use these files
 
 - Each part is complete in its file. It names other parts as "Part N". Find Part N in the list above.
-- Build order: the migration (`../MIGRATION-BRIEF.md`) first, then the parts in their number order. Parts 2 and 4 have a fast path outside the app: a launch script and a ticket runner. You can set up the hourly backup of Part 5 at once.
+- Build order: the parts in their number order. Parts 2 and 4 have a fast path outside the app: a launch script and a ticket runner. You can set up the hourly backup of Part 5 at once.
 - Why this order: Parts 1 to 5 make a working factory with fresh sessions and safe delivery. Parts 6 to 10 add the review format, the toolchain, the setup screen and the two councils. Parts 11 to 13 are improvements, the Linux move, and the part with the most risk.
-- The order of Parts 1 and 2 changed on 2026-10-21: the rebrand is now first. The full brief as one file, as it was on 2026-10-19, is in `../archive/IMPLEMENTATION-BRIEF-2026-10-19.md`. Do not edit the archive. Edit the part files. The archive uses the old part numbers. Old Parts 1 to 13 are now Parts 2, 1, 7, 11, 13, 3, 12, 6, 4, 5, 8, 10 and 9.
+- The order of Parts 1 and 2 changed on 2026-10-21: the rebrand is now first.

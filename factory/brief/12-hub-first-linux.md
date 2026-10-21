@@ -63,7 +63,7 @@ Found in the code on 2026-10-17:
 
 | Area | Where | Fix |
 |---|---|---|
-| Data folder hard-coded as a macOS path | `hub/channel/hub-client.ts:9` (`DISCOVERY_DIR`), `hub/core/transcript.ts:42`. The Rust side uses `dirs::data_dir()` (`src-tauri/src/lib.rs:242`), which is `~/.local/share` on Linux. The bridge then looks in the wrong folder and does not find the hub. | One source for the data folder. The hub and the bridge read it from an environment variable (for example `A2A_DATA_DIR`). The rebrand adds this variable (Part 1, item 3.1). |
+| Data folder hard-coded as a macOS path | `hub/channel/hub-client.ts:9` (`DISCOVERY_DIR`), `hub/core/transcript.ts:42`. The Rust side uses `dirs::data_dir()` (`src-tauri/src/lib.rs:242`), which is `~/.local/share` on Linux. The bridge then looks in the wrong folder and does not find the hub. | One source for the data folder. The hub and the bridge read it from the environment variable `CUBILOT_DATA_DIR`. The rebrand added this variable (Part 1). |
 | Other macOS paths | Logs `~/Library/Logs` (`lib.rs:666`). Pi `~/Library/pnpm/bin/pi` (`lib.rs:326`). Claude `/opt/homebrew/bin/claude` (`hub/core/summariser/claude.ts:49`). | Use the standard folders of the platform. Find `claude` and `pi` on `PATH`. |
 | Bundled binaries for macOS ARM only | `src-tauri/resources/tmux` is a Mach-O arm64 file. `scripts/build-sidecars.sh:22` uses `--target=bun-darwin-arm64`. | Build the hub for each platform (`bun-linux-x64`, `bun-linux-arm64`, `bun-darwin-arm64`). On Linux, use tmux from the system package manager. The Doctor (Part 7) checks it. |
 | `open` command | `lib.rs:1062`, `lib.rs:1087` | Use `xdg-open` on a Linux desktop. In the browser UI, show the path. |

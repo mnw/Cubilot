@@ -16,7 +16,7 @@ On 2026-10-18 two skills in `factory/` were updated to the current upstream vers
 1. Copy the full folders, not only `SKILL.md`. The `asd-ste100` folder contains the linter `scripts/ste-lint.py`. The `humanizer` folder contains the license.
 2. Claude Code:
    ```bash
-   cd ~/Workspace/A2A-app/factory
+   cd ~/Workspace/cubilot/factory
    rsync -a --exclude .DS_Store editor/skills/humanizer  ~/.claude/skills/
    rsync -a --exclude .DS_Store editor/skills/asd-ste100 ~/.claude/skills/
    ```

@@ -115,7 +115,7 @@ The two members do not see each other's findings.
 | Step | Part | What |
 |---|---|---|
 | 0 | Migration | New repo `mnw/Cubilot`, fresh history (**done**) |
-| 1 | Rebrand | Own identifier and data folder, side by side with the previous app |
+| 1 | Rebrand | Own identifier and data folder, side by side with the previous app (**done**) |
 | 2 | Roles | Launch script first, then role launch in the app |
 | 3 | Ticket grouping | Requests, `blocked_by`, `draft` status |
 | 4 | Sessions | One session per ticket stage, spec review, context pack |

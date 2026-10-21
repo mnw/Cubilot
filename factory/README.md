@@ -21,9 +21,7 @@ factory/
     <role>.md          the role definition (frontmatter + added system prompt)
     skills/<name>/     skills for this role (SKILL.md + references)
     hooks/             hooks that enforce a gate (Editor only today)
-  MIGRATION-BRIEF.md        move to the new repo (do this first)
   brief/                    how to build the factory into the app: 00-index.md and one file for each part
-  archive/                  the full brief as one file (2026-10-19), read only
   work/                     OpenSpec changes drafted from the brief, one for each part (tasks to build)
   SKILL-UPDATES.md          updated skills to copy to the local skill folders
   seo/council.yaml          the seats of the SEO council
