@@ -3,7 +3,7 @@
 (function usagePill() {
   const POLL_MS = 60_000;
   const RENDER_TICK_MS = 60_000;
-  const BANNER_KEY = 'a2achannel_usage_banner';
+  const BANNER_KEY = 'cubilot_usage_banner';
 
   const sessionEl = document.getElementById('usage-session');
   const weeklyEl  = document.getElementById('usage-weekly');

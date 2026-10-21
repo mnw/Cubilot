@@ -39,7 +39,7 @@ export function transcriptDir(): string {
   const override = process.env.A2A_TRANSCRIPTS_DIR;
   _dir = override && override.length
     ? override
-    : join(homedir(), "Library", "Application Support", "A2AChannel", "transcripts");
+    : join(process.env.CUBILOT_DATA_DIR || join(homedir(), "Library", "Application Support", "Cubilot"), "transcripts");
   return _dir;
 }
 

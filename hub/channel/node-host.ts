@@ -5,6 +5,7 @@ import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename } from "node:path";
 import type { Host } from "./host";
+import { expandPath } from "./hub-client";
 
 const REQUEST_MS = 15_000;
 const UPLOAD_MS = 60_000;
@@ -17,7 +18,7 @@ export function nodeHost(deliver: Host["deliver"]): Host {
   return {
     async readText(path) {
       try {
-        return readFileSync(path.startsWith("~/") ? homedir() + path.slice(1) : path, "utf8");
+        return readFileSync(expandPath(path, homedir(), process.env.CUBILOT_DATA_DIR), "utf8");
       } catch {
         return null;
       }

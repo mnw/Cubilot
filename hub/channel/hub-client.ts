@@ -5,10 +5,19 @@
 
 import type { Host, HttpResult } from "./host";
 
-// "~/" is expanded by Host.readText, so this module needs no home-dir lookup.
-export const DISCOVERY_DIR = "~/Library/Application Support/A2AChannel";
+// The discovery files are in the app data folder. Host.readText expands this
+// prefix with expandPath(), so this module needs no env or home-dir lookup.
+export const DISCOVERY_DIR = "$CUBILOT_DATA_DIR";
 export const URL_PATH = `${DISCOVERY_DIR}/hub.url`;
 export const TOKEN_PATH = `${DISCOVERY_DIR}/hub.token`;
+const DEFAULT_DATA_DIR = "~/Library/Application Support/Cubilot";
+
+// Expand a leading DISCOVERY_DIR, then a leading "~/". `dataDir` is the
+// CUBILOT_DATA_DIR env. When it is empty, use DEFAULT_DATA_DIR.
+export function expandPath(path: string, home: string, dataDir: string | undefined): string {
+  if (path.startsWith(`${DISCOVERY_DIR}/`)) path = (dataDir || DEFAULT_DATA_DIR) + path.slice(DISCOVERY_DIR.length);
+  return path.startsWith("~/") ? home + path.slice(1) : path;
+}
 
 export type HubInfo = { url: string; token: string };
 

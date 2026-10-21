@@ -62,10 +62,10 @@
     return LOADING_VERBS[i];
   }
 
-  const SPLIT_KEY = 'a2achannel_terminal_split';
+  const SPLIT_KEY = 'cubilot_terminal_split';
 
-  localStorage.removeItem('a2achannel_terminal_enabled');
-  localStorage.removeItem('a2achannel_ui_version');
+  localStorage.removeItem('cubilot_terminal_enabled');
+  localStorage.removeItem('cubilot_ui_version');
   let _paneEnabled = false;
 
   function paneEnabled() {
@@ -139,10 +139,10 @@
 
   const tabs = new Map();
   let activeAgent = null;
-  let cwdCache = JSON.parse(localStorage.getItem('a2achannel_agent_cwds') || '{}');
+  let cwdCache = JSON.parse(localStorage.getItem('cubilot_agent_cwds') || '{}');
   function rememberCwd(agent, cwd) {
     cwdCache[agent] = cwd;
-    localStorage.setItem('a2achannel_agent_cwds', JSON.stringify(cwdCache));
+    localStorage.setItem('cubilot_agent_cwds', JSON.stringify(cwdCache));
   }
 
   const {

@@ -119,7 +119,7 @@ const EMOJIS = [
 const NAMES = { you: 'You', system: 'System', all: 'All' };
 
 // ROOM_ALL = "show every room"; human is super-user across rooms, filter is view-only.
-const SELECTED_ROOM_KEY = 'a2achannel_selected_room';
+const SELECTED_ROOM_KEY = 'cubilot_selected_room';
 const ROOM_ALL = '__ALL__';
 let SELECTED_ROOM = localStorage.getItem(SELECTED_ROOM_KEY) || ROOM_ALL;
 

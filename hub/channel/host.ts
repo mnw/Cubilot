@@ -7,7 +7,8 @@ export type DeliveryMode = "context" | "steer" | "wake";
 export type HttpResult = { status: number; text: string };
 
 export type Host = {
-  // Leading "~/" expands to the user's home dir, so core code needs no node:os.
+  // Expands the path with expandPath() from hub-client.ts: a leading
+  // "$CUBILOT_DATA_DIR/" and a leading "~/". Core code needs no node:os or env.
   // Returns null when the file is missing or unreadable.
   readText(path: string): Promise<string | null>;
   // Every request is bounded: timeoutMs defaults to 15 000.

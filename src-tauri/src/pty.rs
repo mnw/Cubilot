@@ -924,6 +924,9 @@ fn build_spawn_argv(
     argv.push(format!("LANG={lang}"));
     argv.push("-e".to_string());
     argv.push(format!("LC_ALL={lang}"));
+    // The bridge finds the hub discovery files in this folder.
+    argv.push("-e".to_string());
+    argv.push(format!("CUBILOT_DATA_DIR={}", app_data_dir().display()));
     if let Some(key) = api_key {
         argv.push("-e".to_string());
         argv.push(format!("ANTHROPIC_API_KEY={key}"));
@@ -1129,14 +1132,14 @@ pub fn pty_spawn_shell(
     // -il for parity with Terminal.app; explicit -i so plugin `[[ -o interactive ]]` guards fire.
     let shell_cmd = format!("'{}' -il", user_shell.replace('\'', r"'\''"));
 
-    // .zshrc checks $A2ACHANNEL_SHELL to scope A2AChannel-only theming.
-    let a2a_marker_env = "A2ACHANNEL_SHELL=1";
+    // .zshrc checks $CUBILOT_SHELL to scope Cubilot-only theming.
+    let a2a_marker_env = "CUBILOT_SHELL=1";
 
     let existed_shell = ensure_session_configured(name, &lang)?;
     if existed_shell {
         // allow-passthrough lets yazi's DA1/DSR probes reach xterm.js (silences "response timeout").
         let _ = tmux_run(&["set-option", "-t", &tmux_pane(name), "allow-passthrough", "on"]);
-        let _ = tmux_run(&["set-environment", "-t", &tmux_session(name), "A2ACHANNEL_SHELL", "1"]);
+        let _ = tmux_run(&["set-environment", "-t", &tmux_session(name), "CUBILOT_SHELL", "1"]);
     } else {
         let args: Vec<&str> = vec![
             "new-session", "-d", "-s", name,
@@ -1837,6 +1840,7 @@ mod spawn_argv_tests {
         assert!(joined.contains("COLORTERM=truecolor"), "missing COLORTERM env: {joined}");
         assert!(joined.contains("LANG=en_US.UTF-8"), "missing LANG env: {joined}");
         assert!(joined.contains("LC_ALL=en_US.UTF-8"), "missing LC_ALL env: {joined}");
+        assert!(joined.contains("CUBILOT_DATA_DIR="), "missing CUBILOT_DATA_DIR env: {joined}");
     }
 
     #[test]
@@ -1869,7 +1873,7 @@ mod spawn_argv_tests {
         // The v0.6 regression: a spawn cmd containing quoted paths-with-spaces was being
         // tokenized by /bin/sh's argv-join. The fix is to pass spawn_cmd as a SINGLE
         // tmux argv element so tmux sees it as one shell-quoted command-string argument.
-        let spawn_cmd = "CHATBRIDGE_AGENT='alice' CHATBRIDGE_ROOM='EU Space' '/Users/me/bin/claude' --plugin-dir '/Users/me/Application Support/A2AChannel/chatbridge-mod' --allowed-tools 'mcp__chatbridge__post'";
+        let spawn_cmd = "CHATBRIDGE_AGENT='alice' CHATBRIDGE_ROOM='EU Space' '/Users/me/bin/claude' --plugin-dir '/Users/me/Application Support/Cubilot/chatbridge-mod' --allowed-tools 'mcp__chatbridge__post'";
         let argv = build_spawn_argv("alice", "/tmp", "en_US.UTF-8", None, spawn_cmd);
         let last = argv.last().unwrap();
         // The spawn_cmd appears verbatim as a SINGLE argv element — quotes, spaces, and all.
@@ -1885,11 +1889,11 @@ mod spawn_argv_tests {
         let cmd = format_claude_command(
             "Dev 1", "EU Space", Some("resume"),
             Path::new("/Users/me/bin/claude"),
-            Path::new("/Users/me/Library/Application Support/A2AChannel/chatbridge-mod"),
+            Path::new("/Users/me/Library/Application Support/Cubilot/chatbridge-mod"),
             None,
         ).unwrap();
         assert!(cmd.starts_with("CHATBRIDGE_AGENT='Dev 1' CHATBRIDGE_ROOM='EU Space' '/Users/me/bin/claude' --resume --plugin-dir '"), "{cmd}");
-        assert!(cmd.contains("--plugin-dir '/Users/me/Library/Application Support/A2AChannel/chatbridge-mod'"), "{cmd}");
+        assert!(cmd.contains("--plugin-dir '/Users/me/Library/Application Support/Cubilot/chatbridge-mod'"), "{cmd}");
         assert!(cmd.contains("--allowed-tools 'mcp__chatbridge__ack_permission,mcp__chatbridge__post,mcp__chatbridge__post_file'"), "{cmd}");
         assert!(!cmd.contains(concat!("--mcp", "-config")), "{cmd}");
         assert!(!cmd.contains(concat!("dangerously", "-load-development-channels")), "{cmd}");
@@ -1904,12 +1908,12 @@ mod spawn_argv_tests {
         use std::path::Path;
         let cmd = format_claude_command(
             "alice", "r", None, Path::new("/c"), Path::new("/m"),
-            Some(Path::new("/Users/me/Application Support/A2AChannel/mcp-configs/global.json")),
+            Some(Path::new("/Users/me/Application Support/Cubilot/mcp-configs/global.json")),
         ).unwrap();
         let flag = concat!("--mcp", "-config");
         assert_eq!(cmd.matches(flag).count(), 1, "{cmd}");
         assert!(
-            cmd.contains(&format!("--plugin-dir '/m' {flag} '/Users/me/Application Support/A2AChannel/mcp-configs/global.json' --allowed-tools")),
+            cmd.contains(&format!("--plugin-dir '/m' {flag} '/Users/me/Application Support/Cubilot/mcp-configs/global.json' --allowed-tools")),
             "{cmd}"
         );
         let argv = build_spawn_argv("alice", "/tmp", "en_US.UTF-8", None, &cmd);

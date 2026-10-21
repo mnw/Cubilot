@@ -239,7 +239,7 @@ fn apply_summariser_env(mut cmd: Command) -> Command {
 pub(crate) fn app_data_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("A2AChannel")
+        .join("Cubilot")
 }
 
 fn config_file() -> PathBuf {
@@ -663,8 +663,8 @@ fn yaml_string(v: &str) -> String {
 
 fn logs_dir() -> PathBuf {
     dirs::home_dir()
-        .map(|h| h.join("Library/Logs/A2AChannel"))
-        .unwrap_or_else(|| PathBuf::from("/tmp/A2AChannel-logs"))
+        .map(|h| h.join("Library/Logs/Cubilot"))
+        .unwrap_or_else(|| PathBuf::from("/tmp/Cubilot-logs"))
 }
 
 pub(crate) fn resolve_tmux_bin() -> Result<PathBuf, String> {
@@ -1128,6 +1128,7 @@ fn reload_settings(
         .map_err(|e| format!("sidecar builder: {e}"))?
         .env("PORT", port.to_string())
         .env("A2A_MODE", "hub")
+        .env("CUBILOT_DATA_DIR", app_data_dir().to_string_lossy().to_string())
         .env("A2A_TOKEN", &token)
         .env("A2A_ATTACHMENTS_DIR", attachments_dir.to_string_lossy().to_string())
         .env("A2A_LEDGER_DB", ledger_path.to_string_lossy().to_string())
@@ -1351,7 +1352,7 @@ fn get_mcp_template() -> Result<String, String> {
 pub fn run() {
     // Wipe WKWebView disk cache before webview creation; otherwise stale assets persist.
     if let Some(cache_root) = dirs::cache_dir() {
-        let base = cache_root.join("com.mnw.a2achannel/WebKit");
+        let base = cache_root.join("com.mnw.cubilot/WebKit");
         let _ = fs::remove_dir_all(base.join("NetworkCache"));
         let _ = fs::remove_dir_all(base.join("CacheStorage"));
     }
@@ -1443,6 +1444,7 @@ pub fn run() {
                 .map_err(|e| format!("sidecar builder: {e}"))?
                 .env("PORT", port.to_string())
                 .env("A2A_MODE", "hub")
+                .env("CUBILOT_DATA_DIR", app_data_dir().to_string_lossy().to_string())
                 .env("A2A_TOKEN", &token)
                 .env("A2A_ATTACHMENTS_DIR", attachments_dir.to_string_lossy().to_string())
                 .env("A2A_LEDGER_DB", ledger_path.to_string_lossy().to_string())

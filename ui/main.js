@@ -42,8 +42,8 @@ async function loadNutshell(room) {
 }
 
 // (session, lastSeenId) persists across restarts; hub restart mints new session → reset lastSeenId.
-let serverSession = localStorage.getItem('a2achannel_session') || '';
-let lastSeenId = parseInt(localStorage.getItem('a2achannel_last_event_id') || '0', 10) || 0;
+let serverSession = localStorage.getItem('cubilot_session') || '';
+let lastSeenId = parseInt(localStorage.getItem('cubilot_last_event_id') || '0', 10) || 0;
 
 function handleEvent(data) {
   if (!data) return;
@@ -51,8 +51,8 @@ function handleEvent(data) {
     if (data.id !== serverSession) {
       serverSession = data.id;
       lastSeenId = 0;
-      localStorage.setItem('a2achannel_session', serverSession);
-      localStorage.setItem('a2achannel_last_event_id', '0');
+      localStorage.setItem('cubilot_session', serverSession);
+      localStorage.setItem('cubilot_last_event_id', '0');
     }
     return;
   }
@@ -62,7 +62,7 @@ function handleEvent(data) {
   if (typeof data.id === 'number') {
     if (data.id <= lastSeenId) return;
     lastSeenId = data.id;
-    localStorage.setItem('a2achannel_last_event_id', String(lastSeenId));
+    localStorage.setItem('cubilot_last_event_id', String(lastSeenId));
   }
   // Registry dispatch — every registered Kind matches by prefix. Returns true if
   // a renderer handled the event, false otherwise (fall through to addMessage).
@@ -249,7 +249,7 @@ if (reloadBtn) {
       messagesEl.innerHTML = '';
       lastFrom = null;
       lastSeenId = 0;
-      localStorage.setItem('a2achannel_last_event_id', '0');
+      localStorage.setItem('cubilot_last_event_id', '0');
       interruptCards.clear();
       permissionCards.clear();
       nutshellByRoom.clear();

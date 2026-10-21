@@ -3,24 +3,6 @@
 version = 4
 
 [[package]]
-name = "a2achannel"
-version = "0.12.0"
-dependencies = [
- "base64 0.22.1",
- "dirs 5.0.1",
- "libc",
- "portable-pty",
- "serde",
- "serde_json",
- "serde_yml",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-shell",
- "tokio",
-]
-
-[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -492,6 +474,24 @@ name = "ctor-proc-macro"
 version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52560adf09603e58c9a7ee1fe1dcb95a16927b17c127f0ac02d6e768a0e25bc1"
+
+[[package]]
+name = "cubilot"
+version = "0.12.0"
+dependencies = [
+ "base64 0.22.1",
+ "dirs 5.0.1",
+ "libc",
+ "portable-pty",
+ "serde",
+ "serde_json",
+ "serde_yml",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-shell",
+ "tokio",
+]
 
 [[package]]
 name = "darling"

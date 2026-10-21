@@ -15,7 +15,7 @@ import type { DeliveryMode, Host, HttpResult } from "../host";
 import { startBridge, type Bridge } from "../core";
 import { CHATBRIDGE_TOOLS, findTool } from "../tools";
 import { buildInstructions } from "../instructions";
-import { authedGet, authedPost, resolveHub } from "../hub-client";
+import { authedGet, authedPost, expandPath, resolveHub } from "../hub-client";
 
 const TOOL_PREFIX = "mcp__chatbridge__";
 const REQUEST_MS = 15_000;
@@ -129,7 +129,7 @@ export function fitPreview(
 }
 
 // The one place `$` becomes a Host. Everything else sees only `host`.
-function makeHost($: any, home: string): Host {
+function makeHost($: any, home: string, dataDir: string): Host {
   let streamFailing = false; // a failure was logged and no data has arrived since
   async function curl(lines: string[], timeoutMs: number): Promise<HttpResult> {
     const config = curlConfig([...lines, `max-time = ${Math.ceil(timeoutMs / 1000)}`, 'write-out = "\\n%{http_code}"', "silent", "show-error"]);
@@ -169,7 +169,7 @@ function makeHost($: any, home: string): Host {
   return {
     async readText(path) {
       try {
-        return await $.fs.read(path.startsWith("~/") ? home + path.slice(1) : path);
+        return await $.fs.read(expandPath(path, home, dataDir));
       } catch {
         return null;
       }
@@ -319,8 +319,9 @@ export function register(on: On): void {
     const room = ((await $.env.get("CHATBRIDGE_ROOM")) ?? "").trim() || "default";
     const hubEnv = ((await $.env.get("CHATBRIDGE_HUB")) ?? "").trim();
     const home = (await $.env.get("HOME")) ?? "";
+    const dataDir = ((await $.env.get("CUBILOT_DATA_DIR")) ?? "").trim();
     identity = { agent, room, hubEnv };
-    host = makeHost($, home);
+    host = makeHost($, home, dataDir);
     for (const t of CHATBRIDGE_TOOLS) {
       await $.tool.register({ name: t.name, description: t.description, inputSchema: t.inputSchema as Record<string, unknown> });
     }

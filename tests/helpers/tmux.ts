@@ -32,7 +32,7 @@ export function resolveTmuxBin(): string {
 
 export async function tmuxSocket(): Promise<TmuxHarness> {
   const tmux = resolveTmuxBin();
-  const sock = `/tmp/a2achannel-test-${process.pid}-${counter++}.sock`;
+  const sock = `/tmp/cubilot-test-${process.pid}-${counter++}.sock`;
 
   const run = async (args: string[]) => {
     const p = spawn([tmux, "-S", sock, ...args], {
