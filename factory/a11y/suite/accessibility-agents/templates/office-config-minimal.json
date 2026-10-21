@@ -1,0 +1,20 @@
+{
+  "$schema": "./.github/schemas/office-config.schema.json",
+  "version": "1.0",
+  "description": "Minimal profile — errors only. Best for triaging large document libraries to find the worst problems first.",
+  "docx": {
+    "enabled": true,
+    "disabledRules": [],
+    "severityFilter": ["error"]
+  },
+  "xlsx": {
+    "enabled": true,
+    "disabledRules": [],
+    "severityFilter": ["error"]
+  },
+  "pptx": {
+    "enabled": true,
+    "disabledRules": [],
+    "severityFilter": ["error"]
+  }
+}

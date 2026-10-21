@@ -1,0 +1,113 @@
+/* ── macOS title-bar strip (titleBarStyle: Overlay) ───────────
+   28px-tall band at the very top, padding-left clears traffic lights.
+   The whole strip is data-tauri-drag-region; only the right-side button
+   opts out (Tauri excludes interactive elements automatically). The header
+   below it is unchanged. */
+.titlebar {
+  flex: 0 0 var(--size-28);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  /* 80px left clears the macOS traffic-light cluster — platform constant, not
+     a design-token value. Kept as a literal because it tracks Apple's metrics. */
+  padding: 0 var(--sp-10) 0 80px;
+  background: var(--bg-raised);
+  border-bottom: var(--border-1) solid var(--line);
+}
+/* Title-bar buttons render as bare icons — no border, no background. Hover
+   only nudges the icon's color, so the strip stays visually quiet. */
+.titlebar-button.icon-btn {
+  width: var(--size-22);
+  height: var(--size-22);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--text-dim);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.titlebar-button.icon-btn:hover {
+  background: transparent;
+  color: var(--text);
+}
+
+/* ── Main two-column layout (chat | splitter | terminal) ───── */
+.app-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── App footer: thin status strip at the bottom of the window.
+   Holds the usage pill (left) + connection/agents pill (right). Sits
+   outside .app-body so the chat scroll area never overlaps it. */
+.app-footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-12);
+  padding: var(--sp-4) var(--sp-12);
+  background: var(--bg-elev);
+  border-top: var(--border-1) solid var(--line);
+  font-size: var(--fs-xs);
+  line-height: 1;
+}
+/* Pill chrome inside the footer is already provided by usage.css /
+   dropdown.css — the footer is just the band that holds them. The
+   only override: drop the pill borders so the strip reads as one row
+   instead of two separate pills floating in a band. */
+.app-footer .usage-pill,
+.app-footer .status-pill {
+  border: none;
+  background: transparent;
+  padding: 0 var(--sp-4);
+}
+body.no-terminal .splitter,
+body.no-terminal .terminal-col { display: none; }
+body.no-terminal .chat-col { flex: 1 1 auto; }
+body:not(.no-terminal) .chat-col {
+  flex: 0 0 calc(var(--split, 50%));
+  min-width: 0;
+}
+
+
+/* ── Splitter ──────────────────────────────────────────────── */
+.splitter {
+  flex: 0 0 var(--size-6);
+  background: var(--line-soft);
+  cursor: col-resize;
+  position: relative;
+  transition: background var(--motion-fast);
+}
+/* Vertical grip dots in the middle of the splitter so the drag
+   affordance is discoverable without making the strip thicker. */
+.splitter::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: var(--size-2);
+  height: var(--size-28);
+  background-image: linear-gradient(to bottom, currentColor var(--size-2), transparent var(--size-2));
+  background-size: var(--size-2) var(--size-6);
+  background-repeat: repeat-y;
+  color: var(--text-dim);
+  pointer-events: none;
+  transition: color var(--motion-fast), height var(--motion-fast);
+}
+.splitter:hover { background: var(--bg-elev); }
+.splitter:hover::before { color: var(--orange); height: var(--size-36); }
+.splitter.dragging { background: var(--orange); }
+.splitter.dragging::before { color: var(--bg-inset); height: var(--size-40); }
+
+
+@media (max-width: 1024px) {
+  .brand-meta { display: none; }
+}

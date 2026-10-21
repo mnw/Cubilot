@@ -1,0 +1,371 @@
+/* ── Chat column ───────────────────────────────────────────── */
+.chat-col {
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  border-right: var(--border-1) solid var(--line);
+  min-height: 0;
+  overflow: hidden;
+}
+#messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-16) var(--sp-20) var(--sp-20);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  scroll-behavior: smooth;
+  min-height: 0;
+}
+
+.msg {
+  display: flex;
+  gap: var(--sp-12);
+  align-items: flex-start;
+  padding: var(--sp-6) 0;
+  animation: fade-in var(--motion-medium) ease;
+  max-width: 100%;
+}
+/* Human messages sit on the right, flipped so the avatar anchors the
+   right edge and the bubble aligns right — mirrors the familiar chat
+   UX where "self" is on the right. */
+.msg.from-you {
+  flex-direction: row-reverse;
+}
+.msg.from-you .msg-content { align-items: flex-end; }
+.msg.from-you .msg-header { justify-content: flex-end; }
+.msg.from-you .msg-ts { margin-left: 0; margin-right: auto; }
+.msg-avatar {
+  width: var(--size-28);
+  height: var(--size-28);
+  border-radius: var(--radius-circle);
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--bg-inset);
+  background: var(--line);
+  margin-top: var(--sp-2);
+  user-select: none;
+  text-transform: uppercase;
+}
+.msg-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+  max-width: calc(100% - var(--size-28) - var(--sp-12));
+  flex: 1;
+}
+.msg-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-6);
+}
+.msg-name {
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  color: var(--text);
+  letter-spacing: 0;
+}
+.msg-ts { font-family: var(--mono); font-size: var(--fs-2xs); color: var(--text-dim); margin-left: auto; }
+.msg-to { font-family: var(--mono); font-size: var(--fs-2xs); color: var(--text-dim); }
+
+.msg-body {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  font-size: var(--fs-2xl);
+  line-height: var(--lh-loose);
+  color: var(--text);
+  padding: var(--sp-9) var(--sp-13);
+  background: var(--bg-raised);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-md) var(--radius-xl) var(--radius-xl) var(--radius-xl);
+  word-break: break-word;
+  white-space: pre-wrap;
+  /* Anchor for the hover-revealed copy buttons on agent messages. */
+  position: relative;
+}
+
+/* Copy-to-clipboard buttons on agent messages — top-right + bottom-right of the
+   bubble, hidden until the row is hovered. Two positions because long messages
+   put the bottom corner closer to where the cursor lands when reading. */
+.msg-copy-btn {
+  position: absolute;
+  right: var(--size-4);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-20);
+  height: var(--size-20);
+  padding: 0;
+  background: transparent;
+  border: var(--border-1) solid transparent;
+  color: var(--text-dim);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--motion-fast), background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
+}
+.msg-copy-top    { top: var(--size-4); }
+.msg-copy-bottom { bottom: var(--size-4); }
+.msg:hover .msg-copy-btn { opacity: 0.45; }
+.msg-copy-btn:hover {
+  opacity: 1;
+  color: var(--text);
+  background: color-mix(in oklab, var(--text-dim) 18%, transparent);
+  border-color: var(--line);
+}
+.msg-copy-btn:focus-visible {
+  opacity: 1;
+  outline: none;
+  border-color: var(--orange);
+}
+.msg-body code {
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+  background: var(--bg-elev);
+  padding: var(--sp-1) var(--sp-5);
+  border-radius: var(--radius-sm);
+  color: var(--code-text);
+}
+/* Fenced code blocks (md-code wrapper around <pre><code>). When a message
+   contains a fenced code block, the bubble grows to span the full width of
+   the messages column (minus the avatar gutter); the code block itself
+   has no frame of its own — the bubble's existing 1px border is the only
+   frame, and the code area sits flush inside it. */
+.msg-body:has(pre.md-code) {
+  width: 100%;
+  max-width: 100%;
+  padding: var(--sp-6) var(--sp-8);
+}
+.msg-body pre.md-code {
+  margin: 0;
+  padding: var(--sp-2) 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.msg-body pre.md-code code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  white-space: pre;
+  display: block;
+  font-size: var(--fs-base);
+  line-height: 1.5;
+}
+.msg-body code.md-inline {
+  font-size: var(--fs-base);
+}
+
+/* Self (human) messages — right-aligned with orange-tinted bubble
+   whose tail sits on the upper-right corner. */
+.msg.from-you .msg-name { color: var(--orange); }
+.msg.from-you .msg-body {
+  background: color-mix(in oklab, var(--orange) 12%, transparent);
+  border-color: color-mix(in oklab, var(--orange) 30%, transparent);
+  border-radius: var(--radius-xl) var(--radius-md) var(--radius-xl) var(--radius-xl);
+}
+
+/* System messages — red-tinted italic bubble. */
+.msg.from-system .msg-name { color: var(--red); }
+.msg.from-system .msg-body {
+  color: var(--text-muted);
+  font-style: italic;
+  background: color-mix(in oklab, var(--red) 8%, transparent);
+  border-color: color-mix(in oklab, var(--red) 22%, transparent);
+}
+
+.msg-body img {
+  display: block;
+  max-width: var(--size-360);
+  max-height: var(--size-320);
+  margin-top: var(--sp-6);
+  border-radius: var(--radius-lg);
+  border: var(--border-1) solid var(--line);
+  cursor: zoom-in;
+}
+
+.msg-body .msg-link {
+  color: var(--blue);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--blue) 40%, transparent);
+  text-underline-offset: var(--size-2);
+  word-break: break-all;
+}
+.msg-body .msg-link:hover { text-decoration-color: var(--blue); }
+
+.msg-body .msg-link-copy {
+  display: inline-block;
+  width: var(--size-14);
+  height: var(--size-14);
+  background-color: var(--blue);
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'/><path d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'/></svg>");
+          mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'/><path d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'/></svg>");
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-size: contain; mask-size: contain;
+  -webkit-mask-position: center; mask-position: center;
+  border: none;
+  padding: 0;
+  margin-left: var(--sp-5);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--motion-fast), background-color var(--motion-fast), transform var(--motion-fast);
+  vertical-align: calc(-1 * var(--size-2));
+}
+.msg:hover .msg-body .msg-link-copy { opacity: 0.75; }
+.msg-body .msg-link-copy:hover { opacity: 1; background-color: var(--orange); transform: scale(1.08); }
+.msg-body .msg-link-copy.copied { opacity: 1; background-color: var(--green); }
+
+.attachment-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-8);
+  margin-top: var(--sp-6);
+  padding: var(--sp-6) var(--sp-10);
+  background: var(--bg-elev);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-lg);
+  text-decoration: none;
+  color: var(--text);
+  font-size: var(--fs-base);
+  max-width: var(--size-360);
+  transition: background var(--motion-fast), border-color var(--motion-fast);
+}
+.attachment-link:hover { background: var(--bg-hover); border-color: var(--line-hover); }
+.attachment-link-ext {
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: var(--sp-2) var(--sp-6);
+  border-radius: var(--radius-sm);
+  background: var(--orange);
+  color: var(--bg-inset);
+}
+.attachment-link-name { word-break: break-all; }
+
+.mention {
+  color: var(--orange);
+  font-weight: 500;
+  padding: 0 var(--sp-2);
+}
+
+.sep { height: var(--size-1); background: var(--line-soft); margin: var(--sp-6) 0; }
+
+/* Per-kind card CSS — see ui/kinds/{handoff,interrupt,permission}.css (v0.9.5). */
+
+
+/* ── Drop overlay + copy toast ─────────────────────────────── */
+#drop-overlay {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in oklab, var(--bg) 78%, transparent);
+  border: var(--border-2) dashed color-mix(in oklab, var(--orange) 50%, transparent);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  color: var(--orange);
+  font-family: var(--mono);
+  font-size: var(--fs-3xl);
+  z-index: var(--z-toast);
+  pointer-events: none;
+}
+#drop-overlay.visible { display: flex; }
+
+#copy-toast {
+  position: fixed;
+  top: var(--size-60);
+  left: 50%;
+  transform: translate(-50%, calc(-1 * var(--sp-8)));
+  background: var(--orange);
+  color: var(--bg-inset);
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: var(--sp-7) var(--sp-16);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-base) ease, transform var(--motion-base) ease;
+  z-index: var(--z-drop-overlay);
+  white-space: nowrap;
+}
+#copy-toast.visible { opacity: 1; transform: translate(-50%, 0); }
+
+.room-persistence {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  padding: var(--sp-8) var(--sp-12);
+  border-bottom: var(--border-1) solid var(--line);
+  font-size: var(--fs-base);
+  color: var(--text);
+}
+.room-persistence .rp-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-8);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  font-weight: 500;
+}
+.room-persistence .rp-toggle-track {
+  position: relative;
+  display: inline-block;
+  width: 32px;
+  height: 18px;
+  background: var(--bg-elev);
+  border: var(--border-1) solid var(--line);
+  border-radius: 9px;
+  transition: background var(--motion-base) ease;
+}
+.room-persistence .rp-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  background: var(--text-dim);
+  border-radius: 50%;
+  transition: transform var(--motion-base) ease, background var(--motion-base) ease;
+}
+.room-persistence .rp-toggle-btn[aria-pressed="true"] .rp-toggle-track {
+  background: color-mix(in oklab, var(--orange) 30%, transparent);
+  border-color: var(--orange);
+}
+.room-persistence .rp-toggle-btn[aria-pressed="true"] .rp-toggle-thumb {
+  transform: translateX(14px);
+  background: var(--orange);
+}
+.room-persistence .rp-meta,
+.room-persistence .rp-summary-meta {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+}
+.room-persistence .rp-clear-btn {
+  background: transparent;
+  border: var(--border-1) solid var(--line);
+  color: var(--text-dim);
+  padding: var(--sp-4) var(--sp-12);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--fs-sm);
+}
+.room-persistence .rp-clear-btn:hover { color: var(--red); border-color: var(--red); }
+

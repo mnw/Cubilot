@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A2AChannel</title>
+<!-- v0.9.6 semantic split. Order: foundations → primitives → feature surfaces → kinds. -->
+<link rel="stylesheet" href="styles/fonts.css">
+<link rel="stylesheet" href="styles/tokens.css">
+<link rel="stylesheet" href="styles/reset.css">
+<link rel="stylesheet" href="styles/animations.css">
+<link rel="stylesheet" href="styles/layout.css">
+<link rel="stylesheet" href="styles/scrollbars.css">
+<link rel="stylesheet" href="styles/dropdown.css">
+<link rel="stylesheet" href="styles/modals.css">
+<link rel="stylesheet" href="styles/header.css">
+<link rel="stylesheet" href="styles/composer.css">
+<link rel="stylesheet" href="styles/chat.css">
+<link rel="stylesheet" href="styles/terminal.css">
+<link rel="stylesheet" href="styles/usage.css">
+<link rel="stylesheet" href="styles/kinds.css">
+<link rel="stylesheet" href="vendor/xterm/xterm.css">
+</head>
+<body class="no-terminal">
+
+<!-- macOS title-bar strip. Lives at the very top of the window (top: 0)
+     because tauri.conf has titleBarStyle: Overlay — the webview extends into
+     the OS title-bar zone. Traffic lights render on top of this strip on the
+     left; the rest is data-tauri-drag-region so the user can still drag the
+     window. The single button on the right opts out of drag automatically
+     (Tauri excludes interactive elements). -->
+<div class="titlebar" data-tauri-drag-region>
+  <button type="button" class="icon-btn titlebar-button" id="reveal-btn" title="Claude launch command" aria-label="Claude launch command"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></button>
+  <button type="button" class="icon-btn titlebar-button" id="mcp-global-btn" title="Edit global MCP servers (shared by all agents)" aria-label="Edit global MCP servers"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="5" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><line x1="6.7" y1="7.2" x2="10.3" y2="10.8"/><line x1="6.7" y1="16.8" x2="10.3" y2="13.2"/><line x1="13.7" y1="10.8" x2="17.3" y2="7.2"/><line x1="13.7" y1="13.2" x2="17.3" y2="16.8"/></svg></button>
+  <button type="button" class="icon-btn titlebar-button" id="settings-btn" title="Open config.yml in your default editor" aria-label="Open settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+  <button type="button" class="icon-btn titlebar-button" id="reload-btn" title="Apply settings changes — restarts the hub, no app relaunch needed" aria-label="Reload settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
+  </div>
+
+<header>
+  <div class="header-row">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+          <rect x="2" y="4" width="28" height="20" rx="5" fill="none" stroke="#d97757" stroke-width="2"/>
+          <path d="M 10 24 L 8 29 L 14 24" fill="none" stroke="#d97757" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <circle cx="11" cy="14" r="1.6" fill="#d97757"/>
+          <circle cx="16" cy="14" r="1.6" fill="#e8a857"/>
+          <circle cx="21" cy="14" r="1.6" fill="#7fb069"/>
+        </svg>
+      </div>
+    </div>
+
+    <div class="roster">
+      <span class="roster-label">Room</span>
+      <div class="legend" id="legend"></div>
+      <button type="button" class="add-agent" id="add-agent-btn" title="Launch a new agent">+ agent</button>
+      <label class="roster-lead" id="ticket-lead-wrap" for="ticket-lead" hidden>Lead
+        <select id="ticket-lead" title="The room lead triages unassigned tickets"><option value="">No lead</option></select></label>
+    </div>
+
+    <div class="status-cluster">
+      <div class="room-controls" id="room-controls" title="Filter the view to a single room">
+        <button type="button" class="icon-btn" id="board-toggle-btn" title="Toggle the ticket board for the selected room" aria-label="Toggle ticket board" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="13" rx="1"/></svg></button>
+        <button type="button" class="icon-btn" id="terminal-toggle-btn" title="Toggle terminal pane" aria-label="Toggle terminal pane"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></button>
+        <div class="room-wrap">
+          <select id="room-switcher" class="visually-hidden" tabindex="-1" aria-hidden="true"></select>
+          <button type="button" class="room-display" id="room-display" aria-haspopup="listbox" aria-expanded="false">
+            <span class="room-display-text">All rooms</span>
+            <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="room-menu" id="room-menu" role="listbox"></div>
+        </div>
+        <button type="button" class="icon-btn" id="pause-room-btn" title="Pause all agents in the selected room. Agents finish their current tool call before stopping." aria-label="Pause room" disabled>
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+        </button>
+        <button type="button" class="icon-btn" id="resume-room-btn" title="Resume all agents in the selected room" aria-label="Resume room" disabled>
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="nutshell" id="nutshell" style="display:none;">
+  <div class="nutshell-label">Nutshell</div>
+  <div class="nutshell-body empty" id="nutshell-body">No project summary yet — agents or the human can propose one.</div>
+  <div class="nutshell-meta" id="nutshell-meta"></div>
+  <button type="button" class="nutshell-edit-btn" id="nutshell-edit-btn" title="Propose a nutshell edit">Edit</button>
+</div>
+
+<div class="room-persistence" id="room-persistence" style="display:none;">
+  <button type="button" class="rp-toggle-btn" id="rp-toggle-input" aria-pressed="false" title="Toggle persistent JSONL transcript for this room">
+    <span class="rp-toggle-track"><span class="rp-toggle-thumb"></span></span>
+    <span class="rp-toggle-label">Persist chat transcript</span>
+  </button>
+  <div class="rp-meta" id="rp-meta"></div>
+  <button type="button" class="rp-clear-btn" id="rp-clear-btn" style="display:none;" title="Archive the active transcript to a rotated chunk and start fresh. Past data is preserved on disk; the chat window resets; agents see fresh context on restart.">Archive &amp; reset</button>
+  <button type="button" class="rp-toggle-btn" id="rp-summary-input" aria-pressed="false" style="display:none;" title="Auto-generate Room summary (L1 blocks every 300 lines, L2 rollups every 20 L1s) — replayed in Briefing for new agents">
+    <span class="rp-toggle-track"><span class="rp-toggle-thumb"></span></span>
+    <span class="rp-toggle-label">Auto-summarise this room</span>
+  </button>
+  <div class="rp-summary-meta" id="rp-summary-meta" style="display:none;"></div>
+</div>
+
+<div class="nutshell-editor" id="nutshell-editor">
+  <div class="box">
+    <h2>Propose nutshell edit</h2>
+    <p>
+      Edits are proposed as a handoff to the human. On accept, the nutshell is
+      atomically updated and all participants see the new text.
+    </p>
+    <textarea id="nutshell-editor-textarea" spellcheck="false"></textarea>
+    <div class="actions">
+      <button type="button" id="nutshell-editor-cancel">Cancel</button>
+      <button type="button" id="nutshell-editor-submit">Send proposal</button>
+    </div>
+  </div>
+</div>
+
+<div class="app-body" id="app-body">
+
+  <div class="chat-col" id="chat-col">
+    <div id="messages"></div>
+
+    <footer>
+      <div class="attachment-row" id="attachment-row"></div>
+      <div class="input-row">
+        <div class="target-wrap">
+          <select id="target" class="visually-hidden" tabindex="-1" aria-hidden="true"></select>
+          <button type="button" class="target-display" id="target-display" aria-haspopup="listbox" aria-expanded="false">
+            <span class="target-display-text">@ mentions</span>
+            <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="target-menu" id="target-menu" role="listbox"></div>
+        </div>
+        <button type="button" class="icon-btn" id="emoji-btn" title="Emoji" aria-label="Emoji"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg></button>
+        <button type="button" class="icon-btn" id="attach-btn" title="Attach file" aria-label="Attach file"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+        <input type="file" id="file-input" accept="*/*" class="visually-hidden" tabindex="-1" aria-hidden="true" />
+        <textarea id="msg-input" rows="1" placeholder="" autocomplete="off"></textarea>
+        <button id="send-btn" type="button">Send</button>
+        <div class="emoji-popover" id="emoji-popover"></div>
+        <div class="mention-popover" id="mention-popover"></div>
+        <div class="slash-popover" id="slash-popover"></div>
+      </div>
+      <div class="hint">
+        <span><kbd>Enter</kbd> send</span>
+        <span><kbd>Shift</kbd>+<kbd>Enter</kbd> newline</span>
+        <span><kbd>@</kbd>name target</span>
+        <span><kbd>/</kbd>command @target</span>
+        <span><kbd>Shift</kbd>+<kbd>Tab</kbd> cycle modes</span>
+      </div>
+      <div class="slash-error" id="slash-error" hidden></div>
+    </footer>
+  </div>
+
+  <div class="splitter" id="splitter" aria-hidden="true"></div>
+
+  <div class="terminal-col" id="terminal-col">
+    <div class="terminal-tabs" id="terminal-tabs"></div>
+    <div class="terminal-body" id="terminal-body"></div>
+  </div>
+
+  <div class="board-col" id="board-col">
+    <div class="ticket-filters" id="ticket-filters">
+      <button type="button" class="ticket-filters-btn" id="ticket-filters-btn" aria-haspopup="true" aria-expanded="false" aria-controls="ticket-filter-panel">Filters</button>
+      <span class="ticket-filter-summary" id="ticket-filter-summary" aria-live="polite"></span>
+      <div class="ticket-filter-panel" id="ticket-filter-panel" role="group" aria-label="Board filters" hidden>
+        <div class="ff-section">
+          <div class="ff-label" id="ff-radius-label">Blast radius</div>
+          <div class="ff-seg" role="radiogroup" aria-labelledby="ff-radius-label">
+            <label><input type="radio" name="ticket-filter-radius" id="ticket-filter-radius-all" value="all" checked /><span>All</span></label>
+            <label><input type="radio" name="ticket-filter-radius" id="ticket-filter-radius-high" value="high" /><span>High</span></label>
+            <label><input type="radio" name="ticket-filter-radius" id="ticket-filter-radius-low" value="low" /><span>Low</span></label>
+          </div>
+        </div>
+        <div class="ff-section">
+          <div class="ff-label">Priority</div>
+          <label class="ff-check"><input type="checkbox" id="ticket-filter-p-highest" checked /> Highest</label>
+          <label class="ff-check"><input type="checkbox" id="ticket-filter-p-high" checked /> High</label>
+          <label class="ff-check"><input type="checkbox" id="ticket-filter-p-medium" checked /> Medium</label>
+          <label class="ff-check"><input type="checkbox" id="ticket-filter-p-low" checked /> Low</label>
+          <label class="ff-check"><input type="checkbox" id="ticket-filter-p-lowest" checked /> Lowest</label>
+        </div>
+        <div class="ff-section">
+          <div class="ff-label">Also show</div>
+          <label class="ff-check"><input type="checkbox" id="ticket-show-archived" /> Archived</label>
+          <label class="ff-check"><input type="checkbox" id="ticket-show-cancelled" /> Cancelled</label>
+        </div>
+        <div class="ff-footer">
+          <button type="button" class="ff-reset" id="ticket-filter-reset">Reset</button>
+          <button type="button" class="ff-done" id="ticket-filter-done">Done</button>
+        </div>
+      </div>
+    </div>
+    <div class="ticket-board-columns" id="ticket-board-columns"></div>
+  </div>
+
+</div><!-- /app-body -->
+
+<footer class="app-footer">
+  <div class="status-pill" id="status-pill">
+    <div class="dot" id="dot"></div>
+    <span id="status-text">connecting…</span>
+  </div>
+  <div class="usage-pill" id="usage-pill" title="Token counts across all claudes on this machine. Session = current 5-hour block. Weekly = rolling 7 days. Click any chip to copy.">
+    <span class="usage-chip" id="usage-session" data-empty="1">
+      <span class="usage-label">Session</span>
+      <span class="usage-pct">—</span>
+      <span class="usage-sep">·</span>
+      <span class="usage-reset">no data</span>
+    </span>
+    <span class="usage-divider">|</span>
+    <span class="usage-chip" id="usage-weekly" data-empty="1">
+      <span class="usage-label">Weekly</span>
+      <span class="usage-pct">—</span>
+      <span class="usage-sep">·</span>
+      <span class="usage-reset">no data</span>
+    </span>
+  </div>
+</footer>
+
+<div class="modal-backdrop" id="spawn-modal">
+  <div class="modal">
+    <h2>Launch terminal for agent</h2>
+    <p>
+      Creates a tmux session on <code>~/Library/Application Support/A2AChannel/tmux.sock</code>
+      running the chosen harness in the chosen directory.
+    </p>
+    <label>Agent name</label>
+    <input id="spawn-agent-input" spellcheck="false" autocomplete="off" placeholder="alice" style="width:100%;" />
+    <div id="spawn-harness-row" style="margin-top:6px;">
+      <label style="text-transform:uppercase; letter-spacing:0.1em; font-family:var(--mono); font-size:10px; color:var(--text-dim);">Harness</label>
+      <div style="display:flex; flex-direction:column; gap:6px; margin-top:4px; font-family:var(--sans); font-size:12px; color:var(--text-muted);">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; text-transform:none; letter-spacing:0;">
+          <input type="radio" name="spawn-harness" value="claude" id="spawn-harness-claude" checked />
+          <span><code style="font-family:var(--mono); font-size:11px; color:var(--text);">claude</code> Claude Code</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; text-transform:none; letter-spacing:0;">
+          <input type="radio" name="spawn-harness" value="pi" id="spawn-harness-pi" />
+          <span><code style="font-family:var(--mono); font-size:11px; color:var(--text);">pi</code> pi.dev</span>
+        </label>
+      </div>
+    </div>
+    <label>Working directory</label>
+    <div style="display:flex; gap:6px; align-items:center;">
+      <input id="spawn-cwd-input" spellcheck="false" autocomplete="off" placeholder="/Users/you/project" style="flex:1;" readonly />
+      <button type="button" id="spawn-cwd-pick">Pick…</button>
+    </div>
+    <label>Room</label>
+    <div class="spawn-room-combo">
+      <input id="spawn-room-input" spellcheck="false" autocomplete="off" placeholder="defaults to git-root basename" />
+      <button type="button" class="spawn-room-picker-btn" id="spawn-room-picker-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Pick from existing rooms">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="spawn-room-menu" id="spawn-room-menu" role="listbox"></div>
+    </div>
+    <div id="spawn-session-row" style="margin-top:6px;">
+      <label style="text-transform:uppercase; letter-spacing:0.1em; font-family:var(--mono); font-size:10px; color:var(--text-dim);">Session</label>
+      <div style="display:flex; flex-direction:column; gap:6px; margin-top:4px; font-family:var(--sans); font-size:12px; color:var(--text-muted);">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; text-transform:none; letter-spacing:0;">
+          <input type="radio" name="spawn-session-mode" value="continue" id="spawn-session-continue" />
+          <span><code style="font-family:var(--mono); font-size:11px; color:var(--text);">--continue</code> most recent session in this directory</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; text-transform:none; letter-spacing:0;">
+          <input type="radio" name="spawn-session-mode" value="resume" id="spawn-session-resume" />
+          <span><code style="font-family:var(--mono); font-size:11px; color:var(--text);">--resume</code> pick from an interactive list (claude's picker)</span>
+        </label>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button type="button" id="spawn-cancel">Cancel</button>
+      <button type="button" id="spawn-submit">Launch</button>
+    </div>
+  </div>
+</div>
+
+<dialog class="ticket-dialog" id="ticket-modal" aria-labelledby="ticket-modal-title">
+  <form class="modal" id="ticket-new-form">
+    <h2 id="ticket-modal-title">New ticket</h2>
+    <label for="ticket-f-title">Title</label>
+    <input id="ticket-f-title" name="title" required autocomplete="off" />
+    <label for="ticket-f-criteria">Acceptance criteria</label>
+    <div class="md-toolbar" role="toolbar" aria-label="Format the acceptance criteria" aria-controls="ticket-f-criteria">
+      <button type="button" data-md="bold" aria-label="Bold" aria-keyshortcuts="Meta+B Control+B" title="Bold (Cmd+B)"><b>B</b></button>
+      <button type="button" data-md="bullet" aria-label="Bulleted list" aria-keyshortcuts="Meta+Shift+8 Control+Shift+8" title="Bulleted list (Cmd+Shift+8)">&#8226;</button>
+      <button type="button" data-md="checklist" aria-label="Checklist item" aria-keyshortcuts="Meta+Shift+9 Control+Shift+9" title="Checklist item (Cmd+Shift+9)">&#9744;</button>
+      <button type="button" data-md="code" aria-label="Inline code" aria-keyshortcuts="Meta+E Control+E" title="Inline code (Cmd+E)"><code>&lt;/&gt;</code></button>
+    </div>
+    <textarea id="ticket-f-criteria" name="criteria" required spellcheck="false"></textarea>
+    <div class="ticket-form-row">
+      <div><label for="ticket-f-radius">Blast radius</label>
+        <select id="ticket-f-radius" name="radius"><option value="low">low</option><option value="high">high</option></select></div>
+      <div><label for="ticket-f-priority">Priority</label>
+        <select id="ticket-f-priority" name="priority"><option value="highest">Highest</option><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option><option value="lowest">Lowest</option></select></div>
+    </div>
+    <div id="ticket-f-assignee-row" class="ticket-assignee-row">
+      <label for="ticket-f-assignee">Assignee</label>
+      <select id="ticket-f-assignee" name="assignee"><option value="">Unassigned</option></select>
+    </div>
+    <label for="ticket-f-ref">External ref (optional)</label>
+    <input id="ticket-f-ref" name="external_ref" autocomplete="off" />
+    <div class="ticket-f-attach">
+      <label for="ticket-f-attach-btn">Attachments (optional)</label>
+      <div class="ticket-f-attach-row">
+        <button type="button" id="ticket-f-attach-btn">Attach files</button>
+        <input type="file" id="ticket-f-files" accept=".pdf,.md,.txt,.png,.jpg,.jpeg" multiple hidden />
+        <span class="ticket-f-attach-hint">pdf, md, txt, png, jpg, jpeg</span>
+      </div>
+      <ul class="ticket-f-file-list" id="ticket-f-file-list"></ul>
+    </div>
+    <div class="modal-actions">
+      <button type="button" id="ticket-modal-cancel">Cancel</button>
+      <button type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="ticket-dialog" id="ticket-view" aria-labelledby="ticket-view-title">
+  <div class="modal ticket-view">
+    <h2 id="ticket-view-title"></h2>
+    <div id="ticket-view-content"></div>
+    <div id="ticket-view-actions"></div>
+    <div class="ticket-view-attach">
+      <button type="button" id="ticket-view-attach-btn">Attach file</button>
+      <input type="file" id="ticket-view-file" accept=".pdf,.md,.txt,.png,.jpg,.jpeg" multiple hidden />
+      <span id="ticket-view-attach-status" aria-live="polite"></span>
+    </div>
+    <div class="modal-actions">
+      <button type="button" id="ticket-view-close">Close</button>
+    </div>
+  </div>
+</dialog>
+
+<div class="modal-backdrop" id="confirm-modal">
+  <div class="modal">
+    <h2 id="confirm-title">Confirm</h2>
+    <p id="confirm-prompt"></p>
+    <div class="modal-actions">
+      <button type="button" id="confirm-cancel">Cancel</button>
+      <button type="button" id="confirm-ok">OK</button>
+    </div>
+  </div>
+</div>
+
+<div id="drop-overlay">Drop file to attach</div>
+
+<div id="copy-toast" role="status" aria-live="polite">Link copied</div>
+
+<div class="modal-backdrop" id="reason-modal">
+  <div class="modal">
+    <h2 id="reason-modal-title">Reason</h2>
+    <p id="reason-modal-prompt"></p>
+    <textarea id="reason-modal-input" spellcheck="false" style="min-height:80px;"></textarea>
+    <div class="modal-actions">
+      <button type="button" id="reason-modal-cancel">Cancel</button>
+      <button type="button" id="reason-modal-ok">OK</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="mcp-modal">
+  <div class="modal">
+    <h2>Claude launch command</h2>
+    <p>
+      Replace <code>agent</code> with the name this session should have in the hub roster and
+      <code>default</code> with its room, then run the line in your project folder.
+    </p>
+    <textarea id="mcp-textarea" spellcheck="false"></textarea>
+    <div class="modal-actions">
+      <span class="status" id="mcp-copied-status">copied</span>
+      <button type="button" id="mcp-copy-btn">Copy</button>
+      <button type="button" id="mcp-close-btn">Close</button>
+    </div>
+  </div>
+</div>
+
+<script src="vendor/xterm/xterm.js"></script>
+<script src="vendor/xterm/addon-fit.js"></script>
+
+<!-- v0.9.10 module layout — ui/ folder structure:
+       core/      — foundations (zero deps): pure utilities + globals + HTTP.
+       features/  — feature modules (depend on core): renderers, room/roster,
+                     composer family, nutshell strip, MCP modal, usage pill.
+       kinds/     — per-kind card renderers (handoff, interrupt, permission).
+       terminal/  — terminal-pane sub-modules (currently pty.js).
+       styles/    — CSS modules (loaded as <link> in <head>).
+       index.html, main.js, terminal.js — at root: entry + two orchestrators.
+     Each module's header comment declares its declared-earlier dependencies. -->
+
+<!-- Tier 1: foundations -->
+<script src="core/text.js"></script>
+<script src="core/state.js"></script>
+<script src="core/http.js"></script>
+
+<!-- Tier 2: feature modules -->
+<script src="features/messages.js"></script>
+<script src="features/rooms.js"></script>
+<script src="features/roster.js"></script>
+<script src="features/nutshell.js"></script>
+<script src="features/room-persistence.js"></script>
+<script src="features/mentions.js"></script>
+<script src="features/emoji.js"></script>
+<script src="features/attachments.js"></script>
+<script src="features/slash-command.js"></script>
+<script src="features/composer.js"></script>
+<script src="features/mcp-modal.js"></script>
+<script src="features/theme.js"></script>
+
+<!-- Tier 3: orchestrator + kinds + pill + terminal -->
+<script src="main.js"></script>
+<script src="features/usage.js"></script>
+<!-- kind-renderer.js MUST load before per-Kind files (they self-register on load) -->
+<script src="kinds/kind-renderer.js"></script>
+<script src="kinds/handoff.js"></script>
+<script src="kinds/interrupt.js"></script>
+<script src="kinds/permission.js"></script>
+<script src="kinds/ticket.js"></script>
+<script src="terminal/pty.js"></script>
+<script src="terminal/xterm-themes.js"></script>
+<script src="terminal.js"></script>
+</body>
+</html>

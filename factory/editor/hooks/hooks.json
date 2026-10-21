@@ -1,0 +1,17 @@
+{
+  "description": "Factory Editor gate: block a handoff to the reviewer while the doc has ASD-STE100 hard violations.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__chatbridge__send_handoff",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ste-gate.py\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

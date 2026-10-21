@@ -1,0 +1,28 @@
+{
+  "$schema": "./.github/schemas/markdown-config.schema.json",
+  "ignoredDirs": [
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    "codex-skills",
+    ".claude",
+    ".gemini",
+    "desktop-extension"
+  ],
+  "maxIssuesPerRule": 25,
+  "failOn": "error",
+  "rules": {
+    "md-img-alt": { "enabled": true, "severity": "error" },
+    "md-multi-h1": { "enabled": true, "severity": "error" },
+    "md-heading-skip": { "enabled": true, "severity": "error" },
+    "md-emoji-heading": { "enabled": true, "severity": "warning" },
+    "md-link-ambiguous": { "enabled": true, "severity": "warning" },
+    "md-bare-url": { "enabled": true, "severity": "warning" },
+    "md-table-desc": { "enabled": true, "severity": "warning" }
+  },
+  "output": {
+    "format": "both",
+    "sarifPath": "artifacts/markdown-a11y.sarif"
+  }
+}

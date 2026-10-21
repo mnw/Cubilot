@@ -1,0 +1,23 @@
+# SEO council seats. The app reads this file when it launches the seats of an [seo] ticket (factory/brief/10-seo-council.md).
+council:
+  members:
+    - seat: seo-claude
+      harness: claude
+      model: sonnet
+      disallowedTools: Edit, Write, NotebookEdit, Task, Agent
+    - seat: seo-openai
+      harness: pi
+      provider: openai
+      model: gpt-5.5
+      thinking: high
+      excludeTools: edit,write
+  chair:
+    seat: seo-chair
+    harness: claude
+    model: opus
+    disallowedTools: Edit, Write, NotebookEdit, Task, Agent
+  capture:
+    seat: seo-capture
+    harness: claude
+    model: sonnet
+    disallowedTools: Task, Agent

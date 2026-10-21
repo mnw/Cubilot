@@ -1,0 +1,260 @@
+/* ── Composer ──────────────────────────────────────────────── */
+footer {
+  border-top: var(--border-1) solid var(--line);
+  padding: var(--sp-12) var(--sp-20) var(--sp-14);
+  background: var(--bg);
+  flex-shrink: 0;
+}
+.input-row {
+  display: flex;
+  gap: var(--sp-8);
+  align-items: center;
+  position: relative;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: var(--size-1) !important;
+  height: var(--size-1) !important;
+  padding: 0 !important;
+  margin: -var(--sp-1) !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+
+/* Composer icon buttons share .icon-btn already. Send button is orange. */
+#send-btn {
+  background: var(--orange);
+  color: var(--bg-inset);
+  border: none;
+  padding: 0 var(--sp-16);
+  height: var(--size-36);
+  border-radius: var(--radius-lg);
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+  font-weight: 600;
+  cursor: pointer;
+}
+#send-btn:hover { background: var(--orange-hover); color: var(--bg-inset); }
+#send-btn:active { background: var(--orange-soft); }
+
+/* Emoji / attach buttons are square icon buttons */
+#emoji-btn, #attach-btn {
+  width: var(--size-36); height: var(--size-36);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-4xl);
+  background: var(--bg-elev);
+  color: var(--text-muted);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-lg);
+}
+#emoji-btn:hover, #attach-btn:hover { color: var(--text); background: var(--bg-hover); }
+
+/* Composer hints — reveal on focus only. Default-visible they're permanent
+   noise (4 cues most users learn once); focus-within keeps them discoverable
+   without paying the layout cost when you're not typing. */
+.hint {
+  margin-top: 0;
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-dim);
+  display: flex;
+  gap: var(--sp-14);
+  flex-wrap: wrap;
+  transition: max-height var(--motion-base) ease, margin-top var(--motion-base) ease, opacity var(--motion-base) ease;
+}
+.chat-col footer:focus-within .hint {
+  max-height: var(--size-64);
+  margin-top: var(--sp-8);
+  opacity: 1;
+}
+.hint kbd {
+  background: var(--bg-elev);
+  padding: var(--sp-1) var(--sp-5);
+  border-radius: var(--radius-sm);
+  border: var(--border-1) solid var(--line);
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+}
+
+/* Emoji / mention popovers */
+.emoji-popover {
+  position: absolute;
+  bottom: var(--size-44);
+  left: 0;
+  display: none;
+  grid-template-columns: repeat(10, 1fr);
+  gap: var(--sp-2);
+  background: var(--bg-elev);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-6);
+  max-width: var(--size-320);
+  z-index: var(--z-sticky);
+  box-shadow: var(--shadow-popover);
+}
+.emoji-popover.open { display: grid; }
+.emoji-popover button {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: var(--fs-6xl);
+  padding: var(--sp-4);
+  cursor: pointer;
+  border-radius: var(--radius-md);
+}
+.emoji-popover button:hover { background: var(--hover-overlay); }
+
+.mention-popover {
+  position: absolute;
+  bottom: var(--size-44);
+  left: 0;
+  display: none;
+  flex-direction: column;
+  background: var(--bg-elev);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-4);
+  min-width: var(--size-160);
+  max-width: var(--size-240);
+  z-index: var(--z-sticky);
+  box-shadow: var(--shadow-popover);
+}
+.mention-popover.open { display: flex; }
+.mention-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-6) var(--sp-10);
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+  color: var(--text);
+}
+.mention-item:hover, .mention-item.active { background: color-mix(in oklab, var(--orange) 12%, transparent); }
+.mention-item .dot { width: var(--size-8); height: var(--size-8); border-radius: var(--radius-circle); }
+.mention-item .meta { font-size: var(--fs-2xs); color: var(--text-dim); margin-left: auto; }
+.mention-item.offline { opacity: 0.6; }
+
+/* Slash-command picker popover — anchored above the composer textarea.
+   Spans the full input-row width (minus a touch of side padding) so command
+   descriptions have room to breathe, mirroring claude's TUI picker. The
+   composer toggles between this and mention-popover on first character:
+   `/` opens slash-popover, `@` opens mention-popover. */
+.slash-popover {
+  position: absolute;
+  bottom: var(--size-44);
+  left: var(--sp-8);
+  right: var(--sp-8);
+  display: none;
+  flex-direction: column;
+  background: var(--bg-elev);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-4);
+  max-height: 320px;
+  overflow-y: auto;
+  z-index: var(--z-sticky);
+  box-shadow: var(--shadow-popover);
+}
+.slash-popover.open { display: flex; }
+.slash-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-10);
+  padding: var(--sp-6) var(--sp-10);
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+  color: var(--text);
+}
+/* Hover = faint preview; active = strong keyboard cursor. Same orange hue, two
+   intensities so the user can always tell which row Enter will select even
+   when the mouse and keyboard cursor land on different rows. */
+.slash-item:hover { background: color-mix(in oklab, var(--orange) 6%, transparent); }
+.slash-item.active { background: color-mix(in oklab, var(--orange) 20%, transparent); }
+.slash-item .slash-cmd { color: var(--text); flex: 0 0 auto; min-width: 11ch; font-weight: 500; }
+.slash-item .slash-desc {
+  flex: 1 1 auto;
+  font-family: var(--sans);
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.slash-item .slash-badge { font-size: var(--fs-2xs); color: var(--text-dim); margin-left: auto; flex: 0 0 auto; }
+.slash-item.unavailable { opacity: 0.5; cursor: not-allowed; }
+.slash-item.unavailable .slash-badge { color: var(--text-dim); }
+.slash-empty, .slash-loading {
+  padding: var(--sp-6) var(--sp-10);
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.slash-error {
+  margin: var(--sp-4) 0 0;
+  padding: var(--sp-4) var(--sp-8);
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  color: var(--red);
+  background: color-mix(in oklab, var(--red) 8%, transparent);
+  border-radius: var(--radius-md);
+}
+
+/* Attachment row (chips) */
+.attachment-row {
+  display: flex;
+  gap: var(--sp-6);
+  align-items: center;
+  margin-bottom: var(--sp-6);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+.attachment-row:empty { display: none; }
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  background: var(--bg-elev);
+  border: var(--border-1) solid var(--line);
+  padding: var(--sp-4) var(--sp-8);
+  border-radius: var(--radius-md);
+}
+.attachment-chip img {
+  width: var(--size-24); height: var(--size-24);
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+}
+.attachment-chip .x {
+  color: var(--red);
+  cursor: pointer;
+  font-weight: bold;
+  padding: 0 var(--sp-2);
+}
+
+
+textarea#msg-input {
+  resize: none;
+  line-height: var(--lh-relaxed);
+  min-height: var(--size-36);
+  max-height: var(--size-180);
+  overflow-y: auto;
+}

@@ -1,0 +1,65 @@
+{
+  "name": "@a11y-agent-team/mcp-server",
+  "version": "7.0.3",
+  "description": "Server-based MCP server for the A11y Agent Team. Provides accessibility scanning tools over HTTP (Streamable HTTP transport with SSE fallback). Works with Claude Desktop, VS Code Copilot, and any MCP-compatible client.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Community-Access/accessibility-agents.git",
+    "directory": "mcp-server"
+  },
+  "homepage": "https://github.com/Community-Access/accessibility-agents/tree/main/mcp-server#readme",
+  "bugs": {
+    "url": "https://github.com/Community-Access/accessibility-agents/issues"
+  },
+  "keywords": [
+    "mcp",
+    "accessibility",
+    "a11y",
+    "wcag",
+    "axe-core",
+    "model-context-protocol",
+    "claude",
+    "copilot"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "bin": {
+    "a11y-mcp-server": "./server.js",
+    "a11y-mcp-stdio": "./stdio.js"
+  },
+  "files": [
+    "server.js",
+    "server-core.js",
+    "stdio.js",
+    "tools/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "start:stdio": "node stdio.js",
+    "test": "node --test server-core.test.js mcp-conformance.test.js",
+    "prepublishOnly": "npm test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "express": "^5.1.0",
+    "playwright-core": "^1.58.2",
+    "zod": "^3.25.0"
+  },
+  "optionalDependencies": {
+    "@axe-core/playwright": "^4.11.1",
+    "pdf-lib": "^1.17.1",
+    "playwright": "^1.58.2"
+  },
+  "//overrides": "Transitive dependencies pinned to their first patched release. Each is within the range its parent asks for, so this raises a floor rather than forcing an incompatible version. Remove an entry once the parent ships a range that cannot resolve below it.",
+  "overrides": {
+    "fast-uri": "^3.1.6",
+    "hono": "^4.12.25",
+    "ip-address": "^10.3.1"
+  }
+}

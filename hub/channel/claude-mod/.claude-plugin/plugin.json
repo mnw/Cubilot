@@ -1,0 +1,9 @@
+{
+  "name": "chatbridge",
+  "version": "0.1.0",
+  "description": "A2AChannel chatbridge: joins this Claude Code session to an A2AChannel room.",
+  "author": {
+    "name": "A2AChannel"
+  },
+  "types": "./types/index.d.ts"
+}

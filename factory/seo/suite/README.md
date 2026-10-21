@@ -1,0 +1,288 @@
+<table>
+  <tr>
+    <td width="136" valign="middle">
+      <img src="assets/seo-aeo-geo-ultimate-mark.svg" width="112" alt="SEO-AEO-GEO Ultimate mark" />
+    </td>
+    <td valign="middle">
+      <h1>SEO-AEO-GEO Ultimate</h1>
+      <p><strong>A complete, evidence-first SEO, AEO, GEO, and AI-search skill suite for Codex and Claude Code.</strong></p>
+      <p>Start with one router. Move from a real question to evidence, an owned decision, an accepted candidate, verified delivery, and separately observed search outcomes.</p>
+    </td>
+  </tr>
+</table>
+
+[![Validate suite](https://github.com/oegeyilmaz9/seo-aeo-geo-ultimate/actions/workflows/validate.yml/badge.svg)](https://github.com/oegeyilmaz9/seo-aeo-geo-ultimate/actions/workflows/validate.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-0f766e?style=flat-square)](LICENSE)
+[![Agent skills](https://img.shields.io/badge/agent_skills-27-2563eb?style=flat-square)](#what-is-inside)
+[![Codex](https://img.shields.io/badge/runtime-Codex-10a37f?style=flat-square)](#install-on-codex)
+[![Claude Code](https://img.shields.io/badge/runtime-Claude_Code-d97757?style=flat-square)](#install-on-claude-code)
+
+## Markdown discovery and keyword ownership
+
+The suite's default publisher profile delivers `llms.txt -> sitemap.md -> topic maps -> substantive page.md` across the entire verified eligible inventory. Every material work step also has a private Markdown document linked from `index.md`. robots.txt, XML sitemaps, schema, feeds and validated immutable artifacts retain their native formats.
+
+Read [the Markdown delivery contract](docs/MARKDOWN-DISCOVERY.md) and [keyword research protocol](skills/seo-research/references/keyword-research-protocol.md). The export helper uses already reviewed source Markdown, checks complete scoped mappings and source hashes, and verifies every generated live resource after authorized release. It does not promise external engine adoption. Version 3.3.0 also ships a complete repository content map and enforced source-to-navigation coverage.
+
+## Find the exact document
+
+[Complete content map](sitemap.md) · [Turkish guide](docs/REHBER-TR.md) · [Runnable Markdown quickstart](docs/MARKDOWN-QUICKSTART.md) · [Work-note template](docs/WORK-NOTE-TEMPLATE.md) · [Keyword decision template](docs/KEYWORD-DECISION-TEMPLATE.md)
+
+The repository applies its own discovery pattern: `llms.txt → sitemap.md → topic maps → exact existing Markdown documents/native resources`. All 27 skill trees, workflow contracts, tools, examples, schemas, tests and public project files are enumerated. `python scripts/manage_repository_map.py --write` refreshes them; `--check` and CI reject missing, stale or orphan navigation files. Site-owned robots/XML hint placement remains part of actual site implementation; publishing this repository does not change GitHub's crawler policy.
+
+## One request. The right workflow.
+
+SEO work rarely arrives neatly labelled. “Why are we absent from AI answers?” may need source research, a prompt corpus, or repeated surface observations. “Improve this site” may need content, architecture, technical, commerce, local, video, or authority work. SEO-AEO-GEO Ultimate starts from one autonomous router, screens all 27 skills, runs every applicable specialist workflow, and keeps evidence, ownership, approval, and follow-up connected without making the user coordinate the system.
+
+| Instead of | You get |
+| --- | --- |
+| Choosing specialists or learning SEO/AEO/GEO terminology before you can ask for help | One router that translates a plain-language goal into a complete 27-skill coverage screen and executes the applicable workflow |
+| Treating technical SEO, answer readiness, entity evidence, commerce, local, and measurement as one vague task | A clear scope, evidence standard, owner, and next handoff for each lane |
+| Shipping a tactic because it sounds current | A product-owned decision trail with independent implementation, release, provider-operation, verification, and rollback boundaries |
+| Calling a later mention, citation, or traffic shift proof | A comparable observation with its limits stated clearly |
+
+The result is a practical operating system for search and AI visibility: broad enough for a serious site, structured enough for a team to review, and modular enough to use one skill at a time.
+
+[Install on Codex](#install-on-codex) · [Install on Claude Code](#install-on-claude-code) · [Start with the router](#start-with-the-router) · [Submit to the Claude directory](docs/CLAUDE-PLUGIN-SUBMISSION.md)
+
+## Start with the router
+
+You do not need to memorize the internal map, know whether the problem is SEO/AEO/GEO, invoke another skill, or move artifacts between agents. Start with the `seo` router and name the outcome you want. The router owns specialist selection, sequencing, evidence handoffs, reconciliation, and the final consolidated answer.
+
+| Runtime | Router invocation |
+| --- | --- |
+| Codex | `$seo` |
+| Claude Code plugin | `/seo-aeo-geo-ultimate:seo` |
+
+```text
+Audit our Turkish pricing page and tell us what to fix first.
+Find the strongest evidence-backed keyword opportunities, map each to one page, and complete title, meta description, and favicon delivery.
+Build a two-track organic-growth plan: capture near-term wins and pursue leading positions for our highest-relevant-volume category terms without quietly deferring the hard targets.
+Make our documentation ready for AI search.
+Create and validate a maintained llms.txt from our public documentation.
+Find out why our brand is absent from a specific AI-search surface.
+Turn these validated findings into an approval-ready implementation plan.
+Deploy this accepted candidate, verify the full affected route class, and keep provider submission separate from indexing outcome.
+```
+
+The router is not a menu and does not stop after naming the next specialist. It screens all 27 suite skills, loads and executes every applicable specialist workflow, continues through safe and authorized phases, and returns one result. Direct specialist calls remain available for expert users who deliberately want one exact lane.
+
+| You ask for | The router starts with |
+| --- | --- |
+| Search intent, competitors, or audience questions | `seo-research` |
+| The best query opportunities, high-volume category leadership, near wins, CTR/snippet gaps, or query-to-page ownership | `seo-research`, then the required page/content/authority/architecture owners |
+| Engine or surface-specific AI-search evidence | `ai-search-research` |
+| Direct-answer clarity and extractability | `seo-aeo` |
+| Entity, source, citation, or documented engine controls | `seo-geo` |
+| Search Console clicks, impressions, CTR, or query/page change | `seo-performance` |
+| Repeated AI answers, mentions, sources, citations, referrals, or drift | `ai-visibility-monitor` |
+| Site hierarchy, crawl paths, internal links, depth, or orphan pages | `seo-architecture` |
+| Products, merchants, local presence, video, news, or Discover | The matching vertical specialist |
+| Agent-readable journeys, delegated actions, or commerce protocols | `seo-agentic` |
+| Crawlability, rendering, schema, sitemaps, images, hreflang, or a maintained `llms.txt` | The matching technical specialist |
+| Missing/wrong search-result favicon or incomplete hostname identity | `seo-technical` with live `site_identity` verification |
+| A multi-owner plan or scoped authorized change | `seo-action-plan`, then the exact implementation owner |
+| An authorized release and scope-matched live closeout | `optimise-seo` with `seo-technical` verification |
+| An authorized Search Console, Bing, or IndexNow mutation | `seo-performance` provider-operations mode with a separate receipt |
+
+## Install on Codex
+
+Requires Python 3.11 or later.
+
+```powershell
+git clone https://github.com/oegeyilmaz9/seo-aeo-geo-ultimate.git
+Set-Location seo-aeo-geo-ultimate
+
+# Check the suite before installing it.
+python scripts/sync_contracts.py --check
+python scripts/validate_suite.py
+python scripts/validate_claude_plugin.py
+python scripts/run_tests.py
+```
+
+Install the shared skills into Codex after the checks pass:
+
+```powershell
+# Preview the runtime changes first.
+python scripts/install_runtime.py --dry-run
+
+# Install all 27 skills. Existing target folders are backed up.
+python scripts/install_runtime.py
+
+# Confirm the support package, runtime locators, and installed skill hashes.
+python scripts/install_runtime.py --verify
+```
+
+The installer copies the skill trees and an immutable support package containing validators, schemas, manifests, and required documentation. By default skills go to `~/.codex/skills`; versioned support packages, backups, and install state go to `~/.codex/seo-skill-suite-state`. A `.seo-suite-runtime.json` locator beside each installed `SKILL.md` resolves the active package through `current.json`, so the repository clone does not need to be retained after installation.
+
+Start a new Codex task after installation so skill discovery and the runtime locator refresh, then invoke `$seo Audit ...` or any named specialist.
+
+## Install on Claude Code
+
+This repository is both a Claude Code plugin and a small developer marketplace. The plugin contains the same 27 skill trees used by Codex; there is no forked or reduced Claude edition.
+
+### Install from this repository
+
+Run these commands inside Claude Code:
+
+```text
+/plugin marketplace add oegeyilmaz9/seo-aeo-geo-ultimate
+/plugin install seo-aeo-geo-ultimate@oegeyilmaz9-skills
+/reload-plugins
+```
+
+Then use the router:
+
+```text
+/seo-aeo-geo-ultimate:seo Audit our Turkish pricing page and tell us what to fix first.
+```
+
+Plugin skills are namespaced by Claude Code, so `/seo-aeo-geo-ultimate:seo` is the stable Claude entry point. You can use any specialist in the same namespace, such as `/seo-aeo-geo-ultimate:seo-technical`.
+
+Formal validators ship inside the plugin. Claude Code substitutes `${CLAUDE_PLUGIN_ROOT}` in skill content with the installed plugin path, so users do not need a separate repository clone just to run those checks.
+
+The Markdown skills can still guide an audit without Python. Formal schema, hash, and bundle validation requires Python 3.11 or later; when Python is unavailable, treat the artifact handoff as provisional until the validator runs successfully.
+
+### Install from the official Claude plugin directory
+
+After Anthropic approves this repository's directory submission, the plugin becomes available through Claude Code's automatically configured `claude-plugins-official` marketplace:
+
+```text
+/plugin install seo-aeo-geo-ultimate@claude-plugins-official
+```
+
+If an existing Claude Code installation cannot find the listing, refresh it with `/plugin marketplace update claude-plugins-official`. Only installations missing the official marketplace need `/plugin marketplace add anthropics/claude-plugins-official` first. The direct repository marketplace flow above remains available independently of directory approval.
+
+For a local development session, Claude Code can load the clone directly with `claude --plugin-dir .`.
+
+## One source, two runtimes
+
+The package deliberately shares one `skills/` tree across both runtimes.
+
+| Shared | Platform-specific |
+| --- | --- |
+| 27 `SKILL.md` workflows, contracts, references, safeguards, names, and routing rules | Codex uses `agents/openai.yaml` metadata and `$seo` entry syntax |
+| Evidence and artifact validation | Claude Code uses `.claude-plugin/plugin.json`, marketplace metadata, and `/seo-aeo-geo-ultimate:seo` |
+| Every update published from this repository | Runtime installation commands and UI presentation |
+
+Claude Code auto-discovers the skill folders at the plugin root. The package declares no MCP servers, hooks, background monitors, credentials, telemetry, or automatic network actions.
+
+## From question to approved change
+
+```mermaid
+flowchart LR
+  Q["SEO or AI-search question"] --> R["seo routes the work"]
+  R --> RS["Research or focused audit"]
+  RS --> M["Optional baseline measurement"]
+  RS --> D["Product-owner decision"]
+  M --> P
+  D --> P["Owned action plan"]
+  P --> A["Explicit approval"]
+  A --> I["Scoped implementation"]
+  I --> L["Local acceptance"]
+  L --> RLS["Separately authorized release"]
+  RLS --> V["Scope-matched live verification"]
+  V --> OP["Separately authorized provider operation"]
+  OP --> C["Delayed outcome follow-up"]
+```
+
+Not every request needs every phase. The suite prevents a research task from silently becoming a production change, a deployment from silently becoming a provider mutation, and an accepted submission from being reported as an indexing result.
+
+## What is inside
+
+SEO-AEO-GEO Ultimate contains 27 focused agent skills. They share contracts where a handoff benefits from structure and stay separate where the work is meaningfully different.
+
+| Area | Skills | What they help you do |
+| --- | --- | --- |
+| Route and coordinate | `seo` (the autonomous core), `seo-audit`, `seo-page`, `seo-plan`, `seo-action-plan`, `optimise-seo` | Start with one plain-language outcome; screen all 27 skills, execute applicable lanes, create an owned plan, and continue to the authorized boundary. |
+| Research and measurement | `seo-research`, `ai-search-research`, `seo-performance`, `ai-visibility-monitor` | Build a formal query corpus and measure conventional search and AI surfaces with distinct, comparable runs. |
+| Answer and entity readiness | `seo-aeo`, `seo-geo`, `seo-authority` | Improve answer clarity, entity evidence, claim support, source quality, and authority signals. |
+| Technical and architecture | `seo-technical`, `seo-architecture`, `seo-schema`, `seo-hreflang`, `seo-sitemap`, `seo-images` | Review crawl, rendering, site graph, structured data, international, sitemap, image systems, and optional `llms.txt` publisher guides. |
+| Content and vertical search | `seo-content`, `seo-commerce`, `seo-local`, `seo-video`, `seo-news-discover`, `seo-agentic` | Work on editorial quality, product discovery, local presence, media discovery, timely publishing, and agent-readable journeys. |
+| Scaled and comparison work | `seo-programmatic`, `seo-competitor-pages` | Plan scaled page systems and fair comparison pages with evidence in view. |
+
+### Handoffs that keep work moving
+
+| Artifact | Created by | What it gives the next owner |
+| --- | --- | --- |
+| `research-pack.json` | `ai-search-research` | Dated, locale-aware evidence and ground truth for AI-search work. |
+| `query-corpus.json` | `seo-research` or `ai-search-research` | A versioned distinction between user needs, observed queries, AI prompts, and executed subqueries. |
+| `optimization-brief.json` | `seo-aeo` or `seo-geo` | Evidence-linked AEO/GEO findings, recommendations, and experiments. |
+| `seo-findings.json` | Conventional specialist skills | Raw-evidence-backed SEO findings ready for a cross-team handoff. |
+| `seo-performance-run.json` | `seo-performance` | A hash-pinned conventional search baseline or comparison with query and privacy limitations. |
+| `visibility-run.json` | `ai-visibility-monitor` | A repeat-aware AI-surface observation run with access state, consulted sources, visible citations, and confidence. |
+| `site-graph.json` | `seo-architecture` | A bounded map of pages and links with capture evidence and completeness limits. |
+| `platform-controls.json` | `seo-technical` | Dated feature lifecycle, crawler-purpose, notification, and protocol decisions. |
+| `llms.txt` | `seo-technical` | A validated public-resource guide, required in the owner-defined Markdown profile and independently optional as a standalone publisher guide. |
+| `action-plan.json` | `seo-action-plan` | Approval-ready scope, ownership, verification, and rollback for a proposed change; formal status starts as pending. |
+| `provider-operation-receipt.json` | `seo-performance` provider-operations mode | Hash-bound authorization, exact property/targets, provider response, pre/post state, and delayed outcome states. |
+| `live-release-report.json` | `seo-technical` live verifier | Sitemap equality plus distinct document, redirect, surface, retry, and failure counts for the exact candidate. |
+
+Read the [SEO Findings](docs/SEO-FINDINGS-PROTOCOL.md), [Query Corpus](docs/QUERY-CORPUS-PROTOCOL.md), [SEO Performance](docs/SEO-PERFORMANCE-PROTOCOL.md), [Provider Operations](docs/PROVIDER-OPERATIONS.md), [Live Release Verification](docs/LIVE-RELEASE-VERIFICATION.md), [Site Graph](docs/SITE-GRAPH-PROTOCOL.md), [Platform Controls](docs/PLATFORM-CONTROLS.md), and [`llms.txt` publisher-guide](skills/seo-technical/references/llms-txt-protocol.md) protocols. AEO and GEO retain their own audit contract because answer readiness and entity/citation readiness are different jobs.
+
+The router's complete-screen behavior is documented in [Autonomous Orchestration](docs/AUTONOMOUS-ORCHESTRATION.md). Broad work can produce a manifest-derived coverage ledger, so the 27-skill screen is a testable closeout invariant rather than a checklist claim.
+
+## Practical artifact and data tools
+
+The skills can work in Markdown alone, while the repository tools make formal handoffs easier to start, validate, migrate, and review. They use Python 3.11+, require no paid API, and keep draft or imported data clearly separate from validated artifacts.
+
+```powershell
+# See every artifact contract, then create an explicitly unvalidated draft bundle.
+python scripts/init_artifact.py list
+python scripts/init_artifact.py bundle conventional --out work/example --seed example-project --created-at 2026-08-10T00:00:00Z
+
+# Review supported safe migrations. The source artifact is never modified.
+python scripts/migrate_artifact.py paths
+
+# Render a readable report only after the artifact's semantic validator passes.
+python scripts/render_artifact_report.py examples/conventional-seo-handoff/seo-findings.json --bundle examples/conventional-seo-handoff --out work/seo-findings-report.md
+
+# Normalize an authorized Search Console export without inventing metrics.
+python scripts/import_seo_exports.py gsc-csv exports/gsc.csv --output work/gsc-source.json --property sc-domain:example.com --window-start 2026-07-01T00:00:00Z --window-end 2026-08-01T00:00:00Z
+
+# Verify an exact released candidate against its expected live URL contract.
+python scripts/verify_live_release.py verify --plan work/release/plan.json --output work/release/live-release-report.json
+
+# Validate a separately authorized provider-operation receipt.
+python scripts/validate_provider_operation.py validate-receipt work/provider-operation/provider-operation-receipt.json --bundle work/provider-operation
+
+# Prove that a broad router run assessed every current suite skill.
+python scripts/manage_orchestration_ledger.py init --output work/seo/orchestration-ledger.json --request "Improve organic and AI-search visibility" --mode broad --authorized-boundary "Research, audit, plan, and local implementation"
+python scripts/manage_orchestration_ledger.py validate work/seo/orchestration-ledger.json
+```
+
+Import adapters also cover Bing Webmaster Tools CSV, organic GA4 CSV, crawler CSV, and Apache/Nginx access logs. Read [Data Import Adapters](docs/DATA-IMPORT-ADAPTERS.md) for accepted fields, provenance, privacy boundaries, and exact commands. The [validated example bundles](examples/README.md) show conventional SEO and AI-search handoffs end to end.
+
+## Built for useful, defensible work
+
+The suite helps teams make stronger decisions and learn from what happens after a change. Broad organic-growth work now has a baseline completeness gate: query-to-page ownership, useful title and meta copy, canonical/indexability, and hostname favicon identity cannot disappear behind more advanced recommendations. Approved per-page title, description, and H1 copy can be bound into live verification, so presence-only checks do not bless stale or truncated output. Broad growth also carries two required tracks: nearer-term gains and high-volume head-term/category leadership. Difficult terms stay visible with a canonical owner, leading-result gap, supporting content/authority/architecture work, staged top-20/top-10/top-3 measurement goals, and position 1 as an explicit stretch objective; difficulty changes the investment path rather than silently converting ambition into `Defer`. Query decisions still preserve authorized first-party performance, dated locale/device result-set evidence, business and intent fit, coverage, authority, effort, and risk without pretending that one keyword score predicts rank. Recommendations carry an evidence class. Important changes can include product-owner intent, independent implementation/release/provider authorization, candidate identity, scope-matched verification, monitoring, and rollback. Search performance and AI visibility are measured separately, so each result keeps the context needed for a meaningful comparison.
+
+The workflows support ambitious search and AI-discovery programs while keeping claims grounded in observable evidence. The suite can create `/llms.txt` as a low-cost future-readiness layer when canonical public sources and a maintenance owner exist; it validates the file without presenting it as a ranking requirement. Primary-source discipline and safety checks are built in; see the [active source registry](docs/research/2026-10-03-source-registry.json), [dated source review](docs/research/2026-10-03-source-review.md), and [release checklist](docs/RELEASE-CHECKLIST.md). The [original market review](docs/research/2026-08-06-platform-and-market-review.md) remains historical evidence. As with any search program, platforms decide ranking, indexing, retrieval, and presentation outcomes.
+
+## Claude directory submission
+
+The public repository includes the Claude plugin manifest, a developer marketplace catalog, an offline compatibility validator, and ready-to-paste listing/security copy. The maintainer can submit the repository URL through the Claude.ai or Claude Console form.
+
+Read [Claude Plugin Submission](docs/CLAUDE-PLUGIN-SUBMISSION.md) for the exact account path and copy. Anthropic’s review is independent; listing is not guaranteed.
+
+## Community
+
+Use [GitHub Discussions](https://github.com/oegeyilmaz9/seo-aeo-geo-ultimate/discussions) for setup questions, workflow ideas, and routing feedback. Use issue forms for reproducible bugs or scoped improvements. Read [SUPPORT.md](SUPPORT.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [SECURITY.md](SECURITY.md) before contributing or reporting a vulnerability.
+
+## Verify a checkout
+
+Every push and pull request runs the checks below. A weekly scheduled run repeats the full suite so dated source and platform-control freshness failures surface even when the repository receives no commits. A failed scheduled run opens or updates one deduplicated review issue; the next passing scheduled run closes it.
+
+```text
+1. Generated-contract byte and hash check
+2. Suite structure and source-freshness validation
+3. Claude plugin and marketplace structural validation
+4. Isolated regression tests on Python 3.11
+```
+
+The evaluation suite covers contracts, source validation, query provenance and opportunity discipline, snippet/page completeness, favicon/site-identity delivery, measurement arithmetic, repeat-aware AI observations, site graphs, platform-control freshness, operational recovery and experiment recipes, provider receipts, live sitemap/document/redirect verification, dirty-candidate and authorization boundaries, specialist behavior, artifact boundaries, action-plan evidence disconnection, installer safety, and Claude package metadata. Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing the suite.
+
+## License
+
+Released under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for attribution and repository identity.
+
+If you reference this project in a report, article, or implementation, GitHub can generate a citation from [CITATION.cff](CITATION.cff).

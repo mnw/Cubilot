@@ -1,0 +1,5 @@
+# Bun's test discovery stays under tests/. The Claude mod's tests
+# (hub/channel/claude-mod/tests) import `claude-code/testing`, which only exists
+# under `claude plugin test`; scripts/check-mod.sh runs them.
+[test]
+root = "./tests"

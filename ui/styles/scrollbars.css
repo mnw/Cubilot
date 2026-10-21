@@ -1,0 +1,17 @@
+/* ── Scrollbars ────────────────────────────────────────────── */
+::-webkit-scrollbar { width: var(--size-10); height: var(--size-10); }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: var(--radius-md);
+  border: var(--border-2) solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--line-hover); }
+
+/* xterm.js terminal panes — hide the scrollbar entirely. Mouse wheel still
+   scrolls through scrollback (xterm handles that internally regardless of
+   the visible scrollbar). The viewport gets `display: none` on its
+   scrollbar pseudo-element; Firefox uses `scrollbar-width: none`. */
+.xterm-viewport::-webkit-scrollbar { display: none; }
+.xterm-viewport { scrollbar-width: none; }
+

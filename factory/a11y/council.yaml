@@ -1,0 +1,26 @@
+# Accessibility and usability council seats. The app reads this file when it launches the seats of an [a11y] ticket (factory/brief/09-a11y-council.md).
+council:
+  capture:
+    seat: a11y-capture
+    harness: claude
+    model: sonnet
+    disallowedTools: Task, Agent
+    mcp: [playwright, accessibility-agents, figma]
+  members:
+    - seat: a11y-claude
+      harness: claude
+      model: sonnet
+      disallowedTools: Edit, Write, NotebookEdit, Task, Agent
+      mcp: [accessibility-agents]
+    - seat: a11y-openai
+      harness: pi
+      provider: openai
+      model: gpt-5.5
+      thinking: high
+      excludeTools: edit,write
+      mcp: [accessibility-agents]
+  chair:
+    seat: a11y-chair
+    harness: claude
+    model: opus
+    disallowedTools: Edit, Write, NotebookEdit, Task, Agent

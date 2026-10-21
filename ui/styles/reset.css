@@ -1,0 +1,53 @@
+/* ── Base / reset ──────────────────────────────────────────── */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: var(--bg-inset); }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: var(--fs-xl);
+  line-height: var(--lh-loose);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+button, input, select, textarea {
+  font-family: inherit;
+  color: inherit;
+}
+
+
+input[type=text], textarea {
+  flex: 1;
+  background: var(--bg-elev);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-9) var(--sp-12);
+  font-size: var(--fs-xl);
+  color: var(--text);
+  font-family: var(--sans);
+  outline: none;
+  transition: border-color var(--motion-fast);
+}
+input[type=text]:focus, textarea:focus { border-color: var(--line-hover); }
+input[type=text]::placeholder, textarea::placeholder { color: var(--text-dim); }
+
+button {
+  background: var(--bg-elev);
+  border: var(--border-1) solid var(--line);
+  color: var(--text-muted);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-7) var(--sp-14);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--motion-fast);
+  outline: none;
+}
+button:hover { background: var(--bg-hover); color: var(--text); border-color: var(--line-hover); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button:active { background: var(--bg-elev); }

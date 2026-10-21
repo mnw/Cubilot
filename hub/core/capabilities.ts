@@ -1,0 +1,66 @@
+// Factory for the HubCapabilities object — sole access path for Kind/Feature route handlers.
+
+import type { Database } from "bun:sqlite";
+import type { AgentCtx, Entry, HubCapabilities, Scope } from "./types";
+import type { AgentRegistry } from "./agents";
+import type { AuthHelpers } from "./auth";
+import { insertEvent } from "./events";
+
+export type CapabilityDeps = {
+  db: Database | null;
+  agents: AgentRegistry;
+  ensureAgent: AgentRegistry["ensure"];
+  fanoutSend: (entry: Entry, scope: Scope) => void;
+  briefingRefresh: () => void;
+  auth: AuthHelpers;
+  config: {
+    humanName: string;
+    attachmentsDir: string;
+    defaultRoom: string;
+    allowedExtensions: ReadonlySet<string>;
+  };
+};
+
+export function createCapBuilder(deps: CapabilityDeps): () => HubCapabilities {
+  const { agents, ensureAgent, fanoutSend, auth, config } = deps;
+
+  return function buildCap(): HubCapabilities {
+    return {
+      db: deps.db!,
+      agents: {
+        get(name): AgentCtx | null {
+          const a = agents.get(name);
+          if (!a) return null;
+          return { name: a.name, room: a.room, permanent: agents.isPermanent(name) };
+        },
+        isPaused(name) {
+          return agents.isPaused(name);
+        },
+        isPermanent(name) {
+          return agents.isPermanent(name);
+        },
+        all(): AgentCtx[] {
+          return [...agents.values()].map((a) => ({
+            name: a.name,
+            room: a.room,
+            permanent: agents.isPermanent(a.name),
+          }));
+        },
+        ensure(name, room = config.defaultRoom): AgentCtx | null {
+          const a = ensureAgent(name, room);
+          if (!a) return null;
+          return { name: a.name, room: a.room, permanent: agents.isPermanent(a.name) };
+        },
+      },
+      sse: {
+        emit: fanoutSend,
+      },
+      auth,
+      events: {
+        insert: insertEvent,
+      },
+      config,
+      briefing: { refresh: deps.briefingRefresh },
+    };
+  };
+}
