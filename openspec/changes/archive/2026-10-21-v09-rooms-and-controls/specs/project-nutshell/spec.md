@@ -1,3 +1,14 @@
+## RENAMED Requirements
+
+- FROM: `### Requirement: A single project nutshell is persisted in the SQLite ledger`
+- TO: `### Requirement: A per-room project nutshell is persisted in the SQLite ledger`
+- FROM: `### Requirement: Nutshell edits are proposed via the existing handoff primitive`
+- TO: `### Requirement: Nutshell edits are proposed via the handoff primitive, scoped to the sender's room`
+- FROM: `### Requirement: The current nutshell is exposed via `GET /nutshell` and in briefings`
+- TO: `### Requirement: Nutshell is exposed per-room via `GET /nutshell?room=<label>``
+- FROM: `### Requirement: UI surfaces the nutshell and a propose-edit flow`
+- TO: `### Requirement: UI renders nutshells per room and scopes edits to the current selection`
+
 ## MODIFIED Requirements
 
 ### Requirement: A per-room project nutshell is persisted in the SQLite ledger
@@ -51,6 +62,12 @@ Cross-room nutshell edits are disallowed: a handoff whose `context.room` does no
 - **THEN** the accept returns 403 with `{"error": "cross-room nutshell edit not permitted"}`
 - **AND** neither `nutshell('neb-2026')` nor `nutshell('brand')` is modified
 
+#### Scenario: Declined edit leaves nutshell unchanged
+
+- **GIVEN** `nutshell.text = "X"` and `version = 3`
+- **WHEN** an agent's nutshell-edit handoff is declined by the human
+- **THEN** `nutshell.text` and `version` are unchanged
+
 ### Requirement: Nutshell is exposed per-room via `GET /nutshell?room=<label>`
 
 `GET /nutshell` SHALL require a `room` query parameter. Omitting it SHALL return HTTP 400 `{"error": "room parameter required"}`. Passing a `room` that has no row SHALL return `{ room: "<label>", text: "", version: 0, updated_at_ms: null, updated_by: null }` (empty sentinel), NOT 404.
@@ -95,3 +112,11 @@ The UI SHALL listen for `nutshell.updated` SSE events and update only the affect
 - **WHEN** the human selects "All"
 - **THEN** the nutshell strip lists each room with its text stacked vertically
 - **AND** the Edit button is disabled
+
+#### Scenario: UI renders and refreshes
+
+- **GIVEN** the webview is connected and the nutshell has text
+- **WHEN** a `nutshell.updated` SSE event arrives
+- **THEN** the pinned area updates to the new text
+- **AND** `updated_by` and `version` refresh to the new values
+

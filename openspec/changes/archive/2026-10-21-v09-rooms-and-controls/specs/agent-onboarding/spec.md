@@ -1,3 +1,8 @@
+## RENAMED Requirements
+
+- FROM: `### Requirement: Hub pushes a briefing notification on first agent connect`
+- TO: `### Requirement: Hub pushes a briefing notification on first agent connect, scoped to the agent's room`
+
 ## MODIFIED Requirements
 
 ### Requirement: Hub pushes a briefing notification on first agent connect, scoped to the agent's room
@@ -9,7 +14,7 @@ The briefing shape:
 {
   "type": "briefing",
   "room": "neb-2026",
-  "tools": ["post", "post_file", "send_handoff", "accept_handoff", "decline_handoff", "cancel_handoff", "send_interrupt", "ack_interrupt"],
+  "tools": ["post", "post_file", "<the tool names of each registered kind>"],
   "peers": [{ "name": "qa", "online": true, "room": "neb-2026" }, { "name": "<human_name>", "online": true, "room": null }],
   "attachments_dir": "/Users/<user>/cubilot-attachments",
   "human_name": "human",
@@ -42,6 +47,33 @@ Fields specific to rooms:
 - **GIVEN** no row exists in `nutshell` for room `brand`
 - **WHEN** a first agent in room `brand` connects
 - **THEN** the briefing's `nutshell` field is `null`
+
+#### Scenario: Briefing is delivered before any chat message
+
+- **GIVEN** the hub has been running since its last start
+- **AND** agent `alice` has not yet connected during this hub lifetime
+- **WHEN** `alice`'s channel sidecar connects to `/agent-stream?agent=alice`
+- **THEN** the very first event on the SSE stream (after the standard `: connected` preamble) is the `briefing` event
+- **AND** any queued chat messages are delivered AFTER the briefing
+
+#### Scenario: Reconnect within same hub process does not re-send briefing
+
+- **GIVEN** `alice` already received a briefing during this hub process
+- **WHEN** `alice` disconnects and reconnects
+- **THEN** no new briefing is sent
+- **AND** the usual replay (pending handoffs, etc.) proceeds as today
+
+#### Scenario: Hub restart triggers a fresh briefing
+
+- **GIVEN** `alice` received a briefing, then the hub restarted
+- **WHEN** `alice` connects to the new hub
+- **THEN** a fresh briefing is pushed
+
+#### Scenario: Briefing lists the tools of every registered kind
+
+- **WHEN** an agent receives its briefing
+- **THEN** `tools` contains `post`, `post_file` and the tool names of each registered kind
+- **AND** this includes `ack_permission` from the permission kind
 
 ## ADDED Requirements
 

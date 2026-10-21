@@ -1,3 +1,8 @@
+## RENAMED Requirements
+
+- FROM: `### Requirement: HTTP routes for interrupts mirror handoff conventions`
+- TO: `### Requirement: HTTP routes for interrupts mirror handoff conventions and enforce room scope`
+
 ## MODIFIED Requirements
 
 ### Requirement: HTTP routes for interrupts mirror handoff conventions and enforce room scope
@@ -36,6 +41,28 @@ The terminal-state policy is unchanged: same-status retry → 200 idempotent, di
 - **WHEN** the human POSTs `/interrupts` with `{from: "<human_name>", rooms: ["neb-2026"], text: "Pause..."}`
 - **THEN** two interrupts are created, one addressed to `backend`, one to `qa`
 - **AND** each has its own ID, ledger row, and `interrupt.new` event
+
+#### Scenario: Recipient acks a pending interrupt
+
+- **GIVEN** interrupt `i_abc…` has `status="pending"` and `to_agent="bob"`
+- **WHEN** `POST /interrupts/i_abc.../ack` arrives with `{by: "bob"}`
+- **THEN** the response is 200 with `{snapshot: {..., status: "acknowledged", ...}}`
+- **AND** a `events.kind="interrupt.ack"` row is written
+- **AND** an SSE event `interrupt.ack` is broadcast to the UI
+
+#### Scenario: Non-recipient cannot ack
+
+- **GIVEN** interrupt `i_abc…` has `to_agent="bob"`
+- **WHEN** `POST /interrupts/i_abc.../ack` arrives with `{by: "alice"}`
+- **THEN** the response is 403 with `{error: "not the recipient"}`
+- **AND** no events or status changes occur
+
+#### Scenario: Ack of already-acknowledged interrupt is idempotent
+
+- **GIVEN** interrupt `i_abc…` has `status="acknowledged"` and `acknowledged_by="bob"`
+- **WHEN** `POST /interrupts/i_abc.../ack` arrives with `{by: "bob"}`
+- **THEN** the response is 200 with `{snapshot: ..., idempotent: true}`
+- **AND** no new events are written
 
 ## ADDED Requirements
 
