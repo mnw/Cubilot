@@ -4,6 +4,7 @@ Each folder here is one OpenSpec change, drafted from one part of the brief (`..
 
 | Brief part | Change | Status |
 |---|---|---|
+| Part 1, `01-rebrand.md` | `rebrand/AGENT-BRIEF.md` (agent brief, not an OpenSpec change) | ready |
 | Part 2, `02-factory-roles.md` | `factory-roles/` | draft |
 
 Rules:
