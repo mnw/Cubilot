@@ -33,6 +33,11 @@
   const spawnCwdPick  = document.getElementById('spawn-cwd-pick');
   const spawnHarnessPi = document.getElementById('spawn-harness-pi');
   const spawnRoleEl    = document.getElementById('spawn-role-select');
+  const spawnRoleBtn   = document.getElementById('spawn-role-btn');
+  const spawnRoleMenu  = document.getElementById('spawn-role-menu');
+  const roleList = spawnRoleEl && spawnRoleBtn && spawnRoleMenu
+    ? window.__CUBILOT_TERM__.roleList.attach({ select: spawnRoleEl, button: spawnRoleBtn, menu: spawnRoleMenu, doc: document })
+    : null;
   const spawnGridEl    = document.getElementById('spawn-grid');
   const spawnGridFilterEl = document.getElementById('spawn-grid-filter');
   const spawnGridCountEl  = document.getElementById('spawn-grid-count');
@@ -812,10 +817,10 @@
     spawnRoleEl.innerHTML = '';
     spawnRoleEl.add(new Option('None', ''));
     for (const r of roles) {
-      const via = r.harness === 'pi' ? ` · pi${r.provider ? ' ' + r.provider : ''}` : '';
-      spawnRoleEl.add(new Option(`${r.name}${r.model ? ' (' + r.model + via + ')' : via}`, r.name));
+      spawnRoleEl.add(new Option(r.name, r.name));
     }
     spawnRoleEl.value = '';
+    roleList?.sync();
     await onSpawnRoleChange();
     await recallSpawnRole();
   }
@@ -827,6 +832,7 @@
     const m = roleMemory.recall(localStorage, spawnAgentEl.value.trim());
     if (!m || !spawnRoles.has(m.role)) return;
     spawnRoleEl.value = m.role;
+    roleList?.sync();
     await onSpawnRoleChange();
     const sel = modelGrid.selectionFromChoice(buildSpawnGrid(), m);
     if (sel) { gridSelected = sel; renderSpawnGrid(); }

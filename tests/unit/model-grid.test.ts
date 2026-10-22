@@ -106,7 +106,7 @@ describe("spawn modal grid glue", () => {
     const Option = function (label: string, value: string) { const o = new El("option"); o._text = label; o.value = value; return o; };
     const ctx = vm.createContext({
       document: { createElement: (t: string) => new El(t) }, Option, console, Map, Promise, localStorage: {},
-      ...els, modelGrid: g, roleMemory: { recall: () => null },
+      ...els, roleList: null, modelGrid: g, roleMemory: { recall: () => null },
       listRoles: async () => roles, listModels: async (h: string) => { calls.push(h); return lists[h]; },
     });
     vm.runInContext("let spawnRoles = new Map();" + block + ";this.api={refreshSpawnRoles,onSpawnRoleChange,spawnGridChoice,get sel(){return gridSelected;}};", ctx);

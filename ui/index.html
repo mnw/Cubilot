@@ -231,9 +231,16 @@
     <label>Agent name</label>
     <input id="spawn-agent-input" spellcheck="false" autocomplete="off" placeholder="alice" style="width:100%;" />
     <label>Role/Skill</label>
-    <select id="spawn-role-select" style="width:100%;">
-      <option value="">None</option>
-    </select>
+    <div class="spawn-role-combo">
+      <select id="spawn-role-select" hidden>
+        <option value="">None</option>
+      </select>
+      <button type="button" class="spawn-role-btn" id="spawn-role-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Role">
+        <span class="role-label">None</span>
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="spawn-role-menu" id="spawn-role-menu" role="listbox"></div>
+    </div>
     <div id="spawn-harness-row" style="margin-top:6px;">
       <label style="text-transform:uppercase; letter-spacing:0.1em; font-family:var(--mono); font-size:10px; color:var(--text-dim);">Harness</label>
       <div style="display:flex; flex-direction:column; gap:6px; margin-top:4px; font-family:var(--sans); font-size:12px; color:var(--text-muted);">
@@ -453,6 +460,7 @@
 <script src="terminal/pty.js"></script>
 <script src="terminal/role-memory.js"></script>
 <script src="terminal/model-grid.js"></script>
+<script src="terminal/role-list.js"></script>
 <script src="terminal/factory-room.js"></script>
 <script src="terminal/xterm-themes.js"></script>
 <script src="terminal.js"></script>

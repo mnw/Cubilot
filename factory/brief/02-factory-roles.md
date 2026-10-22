@@ -219,7 +219,7 @@ Follow the existing launch-command tests in `src-tauri/src/pty.rs`:
 3. Role `editor`: the command contains `--model sonnet` and `--disallowed-tools` with `Task` and `Agent`.
 4. The builder escapes a quote in a role name, like it does for agent and room names.
 5. An unknown role returns an error and launches nothing.
-6. Role `validator`: the app uses the Pi harness even when the modal says Claude. The Pi command contains `--provider 'openai'`, `--model`, `--thinking`, `--append-system-prompt`, `--no-skills`, exactly two `--skill` folders (the staged role and `shared` skills), `--exclude-tools 'edit,write'`, no `--skill` or `--prompt-template` folder from `claude_resource_flags`, and does not contain `--tools`.
+6. Role `validator`: the app uses the Pi harness even when the modal says Claude. The Pi command contains `--provider 'openai-codex'`, `--model`, `--thinking`, `--append-system-prompt`, `--no-skills`, exactly two `--skill` folders (the staged role and `shared` skills), `--exclude-tools 'edit,write,ack_permission'`, no `--skill` or `--prompt-template` folder from `claude_resource_flags`, and does not contain `--tools`.
 7. Staging a role writes no `agents/` folder.
 8. Staging a Claude role copies `hooks/hooks.json` when the role has one.
 8a. The `settings.json` of a role sets `skillOverrides` to `"off"` for a user skill that is not in the role plugin, and `enabledPlugins` to `false` for an installed plugin that is not the role plugin or the shared plugin. In the launched agent, the skill list shows only the skills of the role, the shared plugin and account-synced plugins. The settings do not turn off `chatbridge@inline`, and the agent has the chatbridge tools and sends a handoff.
