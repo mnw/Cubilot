@@ -333,6 +333,46 @@ const assignTicketVerb: VerbDecl<TicketSnapshot, AssignInput> = {
   scope: (post) => ({ kind: "room", room: post.room }),
 };
 
+type EditInput = { title?: string; acceptance_criteria?: string; blast_radius?: BlastRadius };
+
+// An open ticket's title and acceptance criteria: the human, the creator and the assignee. The blast radius is the
+// human's alone, because it gates the done approval. New criteria or a lower radius void the approval that was asked.
+const editTicketVerb: VerbDecl<TicketSnapshot, EditInput> = {
+  decide(prior, payload, actor, cap): Decision<TicketSnapshot> {
+    if (!prior) return { kind: "conflict", httpStatus: 404, message: "not found" };
+    if (!inRoom(actor, prior.room, cap)) return forbidden("ticket is in another room");
+    const human = isHuman(actor, cap);
+    if (payload.blast_radius !== undefined && !human) return forbidden("only the human may change blast_radius");
+    if (!human && actor !== prior.creator && actor !== prior.assignee) {
+      return forbidden("only the human, the creator or the assignee may edit a ticket");
+    }
+    if (TICKET_TERMINAL.has(prior.status)) return conflict(`ticket already ${prior.status}`);
+    const changes: Partial<TicketSnapshot> = {};
+    if (payload.title !== undefined && payload.title !== prior.title) changes.title = payload.title;
+    if (payload.acceptance_criteria !== undefined && payload.acceptance_criteria !== prior.acceptance_criteria) {
+      changes.acceptance_criteria = payload.acceptance_criteria;
+    }
+    if (payload.blast_radius !== undefined && payload.blast_radius !== prior.blast_radius) changes.blast_radius = payload.blast_radius;
+    if (Object.keys(changes).length === 0) return { kind: "idempotent" };
+    const next: Partial<TicketSnapshot> = { ...changes, updated_at_ms: Date.now() };
+    // The human allowed the work as it was written: new criteria, or a lower radius, void that approval.
+    if ((changes.acceptance_criteria !== undefined || changes.blast_radius === "low") && prior.approval_request_id) {
+      next.approval_request_id = null;
+    }
+    return {
+      kind: "transition",
+      next,
+      eventKind: "ticket.edited",
+      payload: () => ({
+        fields: Object.keys(changes),
+        ...(changes.blast_radius ? { blast_radius: { from: prior.blast_radius, to: changes.blast_radius } } : {}),
+      }),
+      entry: (post) => ticketEntry(post, "ticket.update", actor),
+    };
+  },
+  scope: (post) => ({ kind: "room", room: post.room }),
+};
+
 type ArchiveInput = { archived: boolean };
 
 // Archiving hides a finished ticket from the board's default view and from agents. It is a flag on the
@@ -812,6 +852,53 @@ export function createTicketKind(db: Database): KindModule {
 
     {
       method: "POST",
+      path: /^\/tickets\/([^/]+)\/edit$/,
+      auth: "mutating",
+      bodyMax: TICKET_BODY_MAX,
+      handler: async (req, cap, params) => {
+        if (!TICKET_ID_RE.test(params.id)) return Response.json({ error: "invalid ticket id" }, { status: 400 });
+        const body = await readBody(req);
+        const a = actorOr400(body.by, cap);
+        if (a instanceof Response) return a;
+        const input: EditInput = {};
+        if (body.title !== undefined) {
+          const title = typeof body.title === "string" ? body.title.trim() : "";
+          if (!title || title.length > TICKET_TITLE_MAX_CHARS) return Response.json({ error: "invalid title" }, { status: 400 });
+          input.title = title;
+        }
+        if (body.acceptance_criteria !== undefined) {
+          const criteria = typeof body.acceptance_criteria === "string" ? body.acceptance_criteria.trim() : "";
+          if (!criteria || criteria.length > TICKET_CRITERIA_MAX_CHARS) {
+            return Response.json({ error: "invalid acceptance_criteria" }, { status: 400 });
+          }
+          input.acceptance_criteria = criteria;
+        }
+        if (body.blast_radius !== undefined) {
+          if (body.blast_radius !== "low" && body.blast_radius !== "high") {
+            return Response.json({ error: "invalid blast_radius" }, { status: 400 });
+          }
+          input.blast_radius = body.blast_radius;
+        }
+        if (Object.keys(input).length === 0) {
+          return Response.json({ error: "nothing to edit (title, acceptance_criteria or blast_radius)" }, { status: 400 });
+        }
+        try {
+          const before = entity.load(params.id);
+          const r = entity.apply(params.id, editTicketVerb, input, a.name, cap);
+          if (r.emitted) {
+            cap.briefing.refresh();
+            retireStaleApproval(before, r.snapshot, a.name, cap);
+          }
+          return Response.json({ snapshot: r.snapshot, ...(r.emitted ? {} : { idempotent: true }) });
+        } catch (e) {
+          if (e instanceof LedgerConflict) return conflictResponse(e);
+          throw e;
+        }
+      },
+    },
+
+    {
+      method: "POST",
       path: /^\/tickets\/([^/]+)\/transition$/,
       auth: "mutating",
       bodyMax: TICKET_NOTE_BODY_MAX,
@@ -1013,7 +1100,7 @@ export function createTicketKind(db: Database): KindModule {
     },
     routes: withLedgerRequired(routes),
     pendingFor: () => [],
-    toolNames: ["create_ticket", "claim_ticket", "transition_ticket", "list_tickets", "assign_ticket", "attach_ticket_file"],
+    toolNames: ["create_ticket", "claim_ticket", "transition_ticket", "list_tickets", "assign_ticket", "edit_ticket", "attach_ticket_file"],
     briefingLines,
   };
 }

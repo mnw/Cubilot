@@ -20,7 +20,7 @@ describe("transition_ticket with the Allow landing mid-call", () => {
   // A host for the real tool: the real fetch, the token from the test hub, and a hook that runs
   // after the first blocked `done` answer and before the tool's next call.
   function hostWith(afterBlockedDone: () => Promise<void>): Host {
-    const real = nodeHost(async () => {});
+    const real = nodeHost(async () => {}, async () => {});
     let fired = false;
     return {
       ...real,

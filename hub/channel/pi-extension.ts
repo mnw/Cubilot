@@ -14,8 +14,9 @@
 import { CHATBRIDGE_TOOLS } from "./tools";
 import { buildInstructions } from "./instructions";
 import { nodeHost, nodeSleep } from "./node-host";
-import { startBridge, type Bridge } from "./core";
+import { startBridge, REPLY_POLICY, ReloadTimeout, RELOAD_MS, type Bridge } from "./core";
 import type { Host } from "./host";
+import { authedPost } from "./hub-client";
 
 const AGENT = (process.env.CHATBRIDGE_AGENT ?? "").trim();
 const ROOM = (process.env.CHATBRIDGE_ROOM ?? "default").trim() || "default";
@@ -69,7 +70,7 @@ function firstSentence(text: string): string {
 const POST_GUIDELINES = [
   "Your terminal output is visible to NOBODY. Writing a reply as ordinary prose does not communicate it — the room never sees it.",
   "To say anything to the human or another agent you MUST call the `post` tool. Narrating that you have posted is not posting.",
-  "Reply via `post` whenever a message is addressed to you, even to acknowledge or decline.",
+  REPLY_POLICY,
 ];
 
 export default function (pi: any): void {
@@ -102,9 +103,54 @@ export default function (pi: any): void {
       console.error(`[channel] sendUserMessage failed: ${e?.message ?? e}`);
       d.onFail?.();
     });
+  }, (version: string) => {
+    // Spike 7.1: a followUp command with expandPromptTemplates runs after the run and calls ctx.reload().
+    // sendUserMessage returns no completion, so the command handler settles this promise. It resolves only after
+    // ctx.reload() resolves and rejects when it throws, also after session_shutdown (a reload fires that first).
+    // Bound: RELOAD_MS for the whole reload. After the bound the reload is not stopped: a late success still
+    // records applied (the handler), and the hub's pending window blocks a second reload meanwhile.
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new ReloadTimeout()), RELOAD_MS);
+      reloadDone = { version, started: () => {}, resolve: () => { clearTimeout(timer); resolve(); }, reject: (e) => { clearTimeout(timer); reject(e); } };
+      Promise.resolve(pi.sendUserMessage("/cubilot-reload", { deliverAs: "followUp", expandPromptTemplates: true }))
+        .catch((e: Error) => { clearTimeout(timer); reloadDone = null; reject(e); });
+    });
   });
 
   let bridge: Bridge | null = null;
+
+  // The pending reload() of the core. Never settled by session_shutdown.
+  let reloadDone: { version: string; started(): void; resolve(): void; reject(e: Error): void } | null = null;
+  pi.registerCommand("cubilot-reload", {
+    description: "Reload skills and prompt files (sent by the chatbridge when the factory files change)",
+    handler: async (_args: string, ctx: { reload(): Promise<void> }) => {
+      const done = reloadDone;
+      reloadDone = null;
+      done?.started();
+      try {
+        try {
+          await ctx.reload();
+        } catch (e) {
+          // ctx.reload() stopped the bridge (session_shutdown) and invalidated this runtime's API before it failed, and
+          // a failed reload starts no new session. This agent cannot recover itself: tell the hub, tell the human
+          // through the hub (pi.sendMessage is invalid now), and log. The agent needs a restart.
+          const msg = (e as Error)?.message ?? String(e);
+          host.log(`[channel] hot reload failed: ${msg}`);
+          await authedPost(host, HUB_ENV, "/factory/applied", { agent: AGENT, failed: true }).catch(() => {});
+          await authedPost(host, HUB_ENV, "/post", { from: AGENT, to: "you", text: `${AGENT}: hot reload failed, restart this agent` }).catch(() => {});
+          throw e;
+        }
+        // Success is recorded here, after ctx.reload() resolved. session_shutdown is not success.
+        if (done) {
+          const r = await authedPost(host, HUB_ENV, "/factory/applied", { agent: AGENT, version: done.version });
+          if (r.status < 200 || r.status >= 300) throw new Error(`factory applied not recorded: HTTP ${r.status}`);
+        }
+        done?.resolve();
+      } catch (e) {
+        done?.reject(e as Error);
+      }
+    },
+  });
 
   for (const t of CHATBRIDGE_TOOLS) {
     pi.registerTool({
@@ -159,6 +205,7 @@ export default function (pi: any): void {
     reads.read(messageText(m));
   });
 
+  pi.on("agent_start", () => bridge?.onRunStart());
   // agent_end fires once per run; turn_end fires per model/tool iteration.
   pi.on("agent_end", (event: { messages?: unknown }) => bridge?.onRunEnd(runAnswered(event?.messages)));
 }

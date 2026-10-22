@@ -32,8 +32,21 @@ bun build "./$MOD/register.ts" --format=esm --target=browser --outfile "$TMP/hoo
 echo "== claude plugin validate"
 OUT=$("$CLAUDE" plugin validate "$TMP" 2>&1) && RC=0 || RC=$?
 echo "$OUT"
-if [ "$RC" -ne 0 ] || grep -q '✘' <<<"$OUT"; then
+if [ "$RC" -ne 0 ]; then
   echo "FAIL: plugin validate (exit $RC)"
+  exit 1
+fi
+# Claude Code 2.1.308 adds plugin-directory checks (catalog submission) that need a README and a LICENSE.
+# The mod is staged, never submitted: those two problems are known and allowed. Any other ✘ line, or any
+# other problem listed under the directory header, fails.
+if grep '✘' <<<"$OUT" | grep -qv 'plugin directory refuses a submission'; then
+  echo "FAIL: plugin validate reported an error"
+  exit 1
+fi
+OTHER=$(awk '/✘ Found .* plugin directory refuses a submission/ {on=1; next} /^(⚠|About)/ {on=0} on && /^  ❯ / && !/\((README_MISSING|LICENSE_MISSING)\)/' <<<"$OUT")
+if [ -n "$OTHER" ]; then
+  echo "FAIL: plugin directory check reported a problem other than README_MISSING / LICENSE_MISSING:"
+  echo "$OTHER"
   exit 1
 fi
 

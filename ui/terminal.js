@@ -38,12 +38,30 @@
   const roleList = spawnRoleEl && spawnRoleBtn && spawnRoleMenu
     ? window.__CUBILOT_TERM__.roleList.attach({ select: spawnRoleEl, button: spawnRoleBtn, menu: spawnRoleMenu, doc: document })
     : null;
+  const spawnRoleErrEl = document.getElementById('spawn-role-error');
   const spawnGridEl    = document.getElementById('spawn-grid');
   const spawnGridFilterEl = document.getElementById('spawn-grid-filter');
   const spawnGridCountEl  = document.getElementById('spawn-grid-count');
   const spawnGridNoteEl   = document.getElementById('spawn-grid-note');
   const spawnHarnessClaude = document.getElementById('spawn-harness-claude');
   let spawnRoles = new Map();
+  // Ticket t_41e14dde706805e3 trace: every write to the role select's value is logged with the caller, so a launch that
+  // lost its role shows which path cleared it. Remove it when the cause is fixed.
+  if (spawnRoleEl) {
+    const desc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+    if (desc?.set && desc?.get) {
+      Object.defineProperty(spawnRoleEl, 'value', {
+        configurable: true,
+        get() { return desc.get.call(this); },
+        set(v) {
+          const before = desc.get.call(this);
+          desc.set.call(this, v);
+          const after = desc.get.call(this);
+          if (before !== after) console.info('[terminal] role value', { before, after, stack: String(new Error().stack).split('\n').slice(2, 5).map((l) => l.trim()) });
+        },
+      });
+    }
+  }
   const spawnRoomEl     = document.getElementById('spawn-room-input');
   const spawnRoomBtn    = document.getElementById('spawn-room-picker-btn');
   const spawnRoomMenu   = document.getElementById('spawn-room-menu');
@@ -157,10 +175,10 @@
     localStorage.setItem('cubilot_agent_cwds', JSON.stringify(cwdCache));
   }
 
-  const { roleMemory, factoryRoom, modelGrid } = window.__CUBILOT_TERM__;
+  const { roleMemory, factoryRoom, modelGrid, gridView } = window.__CUBILOT_TERM__;
 
   const {
-    ptySpawn, listRoles, listModels, ptyWrite, ptyResize, ptyKill, ptyList,
+    ptySpawn, listRoles, listModels, ptyWrite, ptyResize, ptyKill, ptyList, ptyEventName,
     strToB64, b64ToBytes,
   } = window.__CUBILOT_TERM__.pty;
 
@@ -628,7 +646,7 @@
     if (!t) return;
     try { t.outputUnlisten?.(); } catch {}
     try { t.exitUnlisten?.(); } catch {}
-    t.outputUnlisten = await listen(`pty://output/${agent}`, async (e) => {
+    t.outputUnlisten = await listen(ptyEventName('output', agent), async (e) => {
       const bytes = b64ToBytes(e.payload.b64);
       if (!t._firstByteLogged && t._launchStage) {
         t._firstByteLogged = true;
@@ -649,7 +667,7 @@
       maybeFlagAttention(t, agent, bytes);
       window.CUBILOT_USAGE?.captureBanner(t, agent, bytes);
     });
-    t.exitUnlisten = await listen(`pty://exit/${agent}`, () => {
+    t.exitUnlisten = await listen(ptyEventName('exit', agent), () => {
       removeTab(agent);
       reconcile();
     });
@@ -734,10 +752,11 @@
     t._launchStage = stage;
     try {
       stage('invoke pty_spawn');
+      console.info('[terminal] pty_spawn', { agent, role, harness, model, effort, provider, sessionMode, room });
       await ptySpawn(agent, cwd, sessionMode, room, harness, role, model, effort, provider);
       stage('pty_spawn returned');
       rememberCwd(agent, cwd);
-      roleMemory.remember(localStorage, agent, role, { model, provider, effort });
+      roleMemory.remember(localStorage, agent, role, { model, provider, effort, harness });
       t.cwd = cwd;
       t.external = false;
       await _connectLiveTab(agent);
@@ -804,25 +823,49 @@
     gridModels = {};   // the model lists (and Pi sign-in marks) are read again each time the modal opens
     gridSelected = null;
     if (spawnGridFilterEl) spawnGridFilterEl.value = '';
+    if (spawnRoleErrEl) { spawnRoleErrEl.textContent = ''; spawnRoleErrEl.hidden = true; }
+    if (spawnRoleEl) spawnRoleEl.value = '';   // every opening starts at None; refreshSpawnRoles keeps only a pick made during its wait
+    roleList?.sync();
     refreshSpawnRoles();
     spawnModal.classList.add('open');
     setTimeout(() => spawnAgentEl.focus(), 0);
   }
 
   // Roles come from the staged version; "None" stays first and is the default, so a launch without a role is unchanged.
+  let spawnOpening = 0;   // counts openings of the modal: a list_roles answer of an earlier opening is dropped
   async function refreshSpawnRoles() {
     if (!spawnRoleEl) return;
-    const roles = await listRoles();
+    const opening = ++spawnOpening;
+    let roles;
+    try {
+      roles = await listRoles();
+    } catch (e) {
+      if (opening !== spawnOpening) return;
+      // An error is not "no roles": keep the options and the role the human picked, and say so in the window.
+      console.warn('[terminal] list_roles failed:', e);
+      if (spawnRoleErrEl) { spawnRoleErrEl.textContent = `Could not read the roles: ${e?.message ?? e}. The role list is not refreshed.`; spawnRoleErrEl.hidden = false; }
+      return;
+    }
+    if (opening !== spawnOpening) return;
+    if (spawnRoleErrEl) { spawnRoleErrEl.textContent = ''; spawnRoleErrEl.hidden = true; }
+    const keep = spawnRoleEl.value;   // a role picked while list_roles ran (the options of the last opening are still there)
+    console.info('[terminal] refreshSpawnRoles', { opening, keep, roles: roles.length });   // t_41e14dde706805e3 trace
     spawnRoles = new Map(roles.map((r) => [r.name, r]));
     spawnRoleEl.innerHTML = '';
     spawnRoleEl.add(new Option('None', ''));
     for (const r of roles) {
       spawnRoleEl.add(new Option(r.name, r.name));
     }
-    spawnRoleEl.value = '';
+    if (keep && !spawnRoles.has(keep)) {
+      // The pick is not in the answer (a list read while the version was being staged). Never turn a pick into None
+      // in silence: keep it, say so, and let the launch guard refuse it ("not in the role list").
+      spawnRoleEl.add(new Option(keep, keep));
+      if (spawnRoleErrEl) { spawnRoleErrEl.textContent = `The role "${keep}" is not in the staged role list. Pick a role again or reopen this window.`; spawnRoleErrEl.hidden = false; }
+    }
+    spawnRoleEl.value = keep;
     roleList?.sync();
     await onSpawnRoleChange();
-    await recallSpawnRole();
+    if (!spawnRoleEl.value) await recallSpawnRole();   // a role the human picked is not overridden by the memory
   }
 
   // The last role and grid choice used for this agent name, if the role is still staged and its model is still
@@ -833,18 +876,34 @@
     if (!m || !spawnRoles.has(m.role)) return;
     spawnRoleEl.value = m.role;
     roleList?.sync();
-    await onSpawnRoleChange();
+    if (m.harness && spawnHarnessClaude && spawnHarnessPi) {
+      spawnHarnessClaude.checked = m.harness !== 'pi';
+      spawnHarnessPi.checked = m.harness === 'pi';
+    }
+    await onSpawnRoleChange(!!m.harness);
     const sel = modelGrid.selectionFromChoice(buildSpawnGrid(), m);
     if (sel) { gridSelected = sel; renderSpawnGrid(); }
   }
-  spawnAgentEl?.addEventListener('change', recallSpawnRole);
+  // A remembered role fills an empty choice only; a role the human picked is never replaced by the name's memory.
+  function onSpawnNameCommit() { if (!spawnRoleEl?.value) return recallSpawnRole(); }
+  spawnAgentEl?.addEventListener('change', onSpawnNameCommit);
+
+  // The role the window shows (button label) and the role the launch sends (select value) must be the same, and a
+  // sent role must be a staged one. Else the launch is refused: a launch must never differ from what the human sees.
+  function spawnRoleMismatch() {
+    const value = spawnRoleEl?.value || '';
+    const shown = roleList ? roleList.shown() : (value || 'None');
+    if (shown !== (value || 'None')) return `the window shows "${shown}" but the role is "${value || 'None'}"`;
+    if (value && !spawnRoles.has(value)) return `role "${value}" is not in the role list`;
+    return '';
+  }
 
   // ---- The model x effort grid (task 5.5): it replaces the model field of 5.2. ----
   let gridModels = {};      // harness -> rows from list_models, for this opening of the modal
   let gridSelected = null;  // { rowKey, effort }
   const spawnRole = () => spawnRoles.get(spawnRoleEl?.value || '') || null;
-  // The role's harness wins over the radios (the app launches the role's harness).
-  const spawnGridHarness = () => spawnRole()?.harness || (spawnHarnessPi?.checked ? 'pi' : 'claude');
+  // The radios decide the launch harness; a role only preselects it (task 9.5).
+  const spawnGridHarness = () => (spawnHarnessPi?.checked ? 'pi' : 'claude');
 
   function buildSpawnGrid() {
     const harness = spawnGridHarness();
@@ -868,6 +927,7 @@
   function renderSpawnGrid() {
     if (!spawnGridEl) return;
     const grid = buildSpawnGrid();
+    if (spawnSubmit) spawnSubmit.disabled = !modelGrid.launchReady(grid, gridSelected, spawnRole());
     const isPi = grid.harness === 'pi';
     if (spawnGridFilterEl) spawnGridFilterEl.hidden = !isPi;
     if (spawnGridCountEl) spawnGridCountEl.textContent = isPi ? `${grid.count.shown}/${grid.count.total}` : '';
@@ -934,18 +994,18 @@
     renderSpawnGrid();
   }
 
-  // With a role the radios show its harness and are locked; with "None" they are free, as before.
-  async function onSpawnRoleChange() {
+  // A role preselects its harness in the radios (unless keepHarness: a recalled choice already set them). The radios
+  // stay free: the other harness runs the role with no default model, so the grid asks for a cell.
+  async function onSpawnRoleChange(keepHarness = false) {
     const r = spawnRole();
-    for (const el of [spawnHarnessClaude, spawnHarnessPi]) if (el) el.disabled = !!r;
-    if (r) {
+    if (r && !keepHarness) {
       if (spawnHarnessClaude) spawnHarnessClaude.checked = r.harness !== 'pi';
       if (spawnHarnessPi) spawnHarnessPi.checked = r.harness === 'pi';
     }
     gridSelected = null;
     await refreshSpawnGrid();
   }
-  spawnRoleEl?.addEventListener('change', onSpawnRoleChange);
+  spawnRoleEl?.addEventListener('change', () => onSpawnRoleChange());
   spawnHarnessClaude?.addEventListener('change', () => { gridSelected = null; refreshSpawnGrid(); });
   spawnHarnessPi?.addEventListener('change', () => { gridSelected = null; refreshSpawnGrid(); });
 
@@ -1062,6 +1122,7 @@
       alert('Invalid agent name (letters, digits, _.-, spaces in the middle).');
       return;
     }
+    if (factoryRoom.terminalNameError(agent)) { alert(`Agent name: ${factoryRoom.terminalNameError(agent)}.`); return; }
     if (!cwd) { alert('Pick a working directory.'); return; }
     if (room && !NAME_RE.test(room)) {
       alert('Invalid room label (same charset as agent names). Leave blank to auto-detect from cwd.');
@@ -1071,6 +1132,9 @@
     if (spawnSessionContinue?.checked) sessionMode = 'continue';
     else if (spawnSessionResume?.checked) sessionMode = 'resume';
     const harness = spawnHarnessPi?.checked ? 'pi' : 'claude';
+    console.info('[terminal] launch click', { agent, value: spawnRoleEl?.value || '', shown: roleList?.shown?.() });
+    const mismatch = spawnRoleMismatch();
+    if (mismatch) { alert(`Launch refused: ${mismatch}. Pick the role again.`); return; }
     closeSpawnModal();
     const choice = spawnGridChoice();
     await handleLaunch(agent, cwd, sessionMode, room || null, harness, spawnRoleEl?.value || null, choice?.model || null, choice?.effort || null, choice?.provider || null);
@@ -1086,6 +1150,61 @@
   const frWorkers = document.getElementById('factory-room-workers');
   const frTesters = document.getElementById('factory-room-testers');
   const closeFactoryRoom = () => frModal?.classList.remove('open');
+
+  // The harness radios and the model x effort grid (task 9.6): the same rules as the spawn modal, for the one role
+  // this window launches. The default is the orchestrator role's own harness and model.
+  const frHarnessClaude = document.getElementById('factory-room-harness-claude');
+  const frHarnessPi     = document.getElementById('factory-room-harness-pi');
+  const frGridEl        = document.getElementById('factory-room-grid');
+  const frFilterEl      = document.getElementById('factory-room-grid-filter');
+  const frCountEl       = document.getElementById('factory-room-grid-count');
+  const frNoteEl        = document.getElementById('factory-room-grid-note');
+  const frSubmit        = document.getElementById('factory-room-submit');
+  let frRole = null;       // the orchestrator role from list_roles, or null when none is staged
+  let frModels = {};       // harness -> rows from list_models, for this opening of the window
+  let frSelected = null;   // { rowKey, effort }
+  const frHarness = () => (frHarnessPi?.checked ? 'pi' : 'claude');
+  const frBuildGrid = () => modelGrid.gridModel({
+    harness: frHarness(), models: frModels[frHarness()] || [], filter: frFilterEl?.value || '', role: frRole,
+  });
+  function frRender() {
+    if (!frGridEl) return;
+    const grid = frBuildGrid();
+    gridView.renderGrid({ doc: document, gridEl: frGridEl, filterEl: frFilterEl, countEl: frCountEl, grid, selected: frSelected });
+    if (frSubmit) frSubmit.disabled = !modelGrid.launchReady(grid, frSelected, frRole);
+    const sel = frSelected && grid.all.find((r) => r.key === frSelected.rowKey);
+    if (frNoteEl && frModels[grid.harness] && sel && !sel.ready) {
+      frNoteEl.textContent = `${sel.provider} is not signed in: this launch will stop with a sign-in message.`;
+    } else if (frNoteEl && frModels[grid.harness]) {
+      frNoteEl.textContent = '';
+    }
+  }
+  async function frRefresh() {
+    const harness = frHarness();
+    frRender();
+    if (!frModels[harness]) {
+      if (frNoteEl) frNoteEl.textContent = harness === 'pi' ? 'Loading Pi models and sign-in state…' : '';
+      try {
+        frModels[harness] = await listModels(harness);
+      } catch (e) {
+        console.warn('[terminal] list_models failed:', e);
+        frModels[harness] = [];
+        if (frNoteEl) frNoteEl.textContent = `Could not list ${harness} models: ${e?.message ?? e}`;
+      }
+    }
+    if (frHarness() !== harness) return;   // changed again while loading
+    frSelected = modelGrid.initialSelection(frBuildGrid());
+    frRender();
+  }
+  frGridEl?.addEventListener('click', (e) => {
+    const b = e.target.closest?.('.cell');
+    if (!b) return;
+    const same = frSelected && frSelected.rowKey === b.dataset.row && frSelected.effort === b.dataset.effort;
+    frSelected = same ? null : { rowKey: b.dataset.row, effort: b.dataset.effort };   // a second click clears it
+    frRender();
+  });
+  frFilterEl?.addEventListener('input', frRender);
+  for (const el of [frHarnessClaude, frHarnessPi]) el?.addEventListener('change', () => { frSelected = null; frRefresh(); });
   // Task 6.3: seed the room's Nutshell BEFORE the orchestrator starts, so its first briefing has it. Only when the
   // room has none. A failure is shown and does not stop the launch (the Nutshell can be written later).
   async function seedFactoryNutshell(room, cwd) {
@@ -1113,6 +1232,15 @@
     if (frCwd) frCwd.value = '';
     frModal?.classList.add('open');
     setTimeout(() => frName?.focus(), 0);
+    frModels = {};   // the model lists (and Pi sign-in marks) are read again each time the window opens
+    frSelected = null;
+    if (frFilterEl) frFilterEl.value = '';
+    listRoles().then((roles) => {
+      frRole = roles.find((r) => r.name === 'orchestrator') || null;
+      if (frHarnessClaude) frHarnessClaude.checked = frRole?.harness !== 'pi';
+      if (frHarnessPi) frHarnessPi.checked = frRole?.harness === 'pi';
+      return frRefresh();
+    }).catch((e) => console.warn('[terminal] list_roles failed:', e));
   });
   document.getElementById('factory-room-cancel')?.addEventListener('click', closeFactoryRoom);
   frModal?.addEventListener('click', (e) => { if (e.target === frModal) closeFactoryRoom(); });
@@ -1123,7 +1251,10 @@
   document.getElementById('factory-room-submit')?.addEventListener('click', async () => {
     const names = (typeof ROSTER !== 'undefined' && Array.isArray(ROSTER)) ? ROSTER.map(a => a.name) : [];
     const r = factoryRoom.buildFactoryRoom(
-      { room: frName?.value, cwd: frCwd?.value, workers: frWorkers?.value, testers: frTesters?.value },
+      {
+        room: frName?.value, cwd: frCwd?.value, workers: frWorkers?.value, testers: frTesters?.value,
+        harness: frHarness(), choice: modelGrid.choiceFromSelection(frBuildGrid(), frSelected), roleHarness: frRole?.harness,
+      },
       names,
     );
     if (r.error) { alert(r.error); return; }
@@ -1141,8 +1272,8 @@
     }
     closeFactoryRoom();
     await seedFactoryNutshell(l.room, l.cwd);
-    // Same call as the spawn modal makes, with the orchestrator role and no model override.
-    await handleLaunch(l.agent, l.cwd, null, l.room, null, l.role, null);
+    // Same call as the spawn modal makes: the chosen harness, and only the parts of the grid cell that differ from the role.
+    await handleLaunch(l.agent, l.cwd, null, l.room, l.harness, l.role, l.model, l.effort, l.provider);
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && frModal?.classList.contains('open')) closeFactoryRoom();
@@ -1206,15 +1337,21 @@
     const t = tabs.get(agent);
     if (!t) return;
     if (t.state === 'live' || t.state === 'launching') return;
+    // pty_spawn creates a missing session, and without a role. List right before it and re-attach only a session
+    // that exists now. The state stays as it is until then, so a launch that starts during the listing is not touched.
+    if (!(await ptyList()).includes(agent)) return;
+    if (tabs.get(agent) !== t || t.state === 'live' || t.state === 'launching') return;
     setTabState(agent, 'launching');
     try {
       const effectiveCwd = cwd || '/tmp';
-      await ptySpawn(agent, effectiveCwd);
+      await ptySpawn(agent, effectiveCwd, null, null, null, null, null, null, null, true);
       await _connectLiveTab(agent);
     } catch (e) {
       const msg = String(e?.message ?? e);
       if (msg.includes('already attached')) {
         setTabState(agent, 'live');
+      } else if (msg.includes('session not found')) {
+        setTabState(agent, 'external');   // the session ended while we attached: nothing was created
       } else {
         console.warn('[terminal] autoAttach', agent, e);
         setTabState(agent, 'external');

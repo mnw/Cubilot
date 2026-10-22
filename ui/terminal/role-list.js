@@ -77,7 +77,9 @@
     select.addEventListener('change', sync);
 
     sync();
-    return { sync, open, close };
+    // The role name the button shows, so a launch can check that the window and the select agree.
+    const shown = () => (label ? label.textContent : '');
+    return { sync, open, close, shown };
   }
 
   window.__CUBILOT_TERM__ = window.__CUBILOT_TERM__ || {};

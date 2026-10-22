@@ -19,6 +19,7 @@ function addMessage(data) {
   div.className = `msg ${cls}`;
   // Untagged rows stay visible everywhere; CSS only hides tagged non-matches.
   if (typeof data.room === 'string' && data.room) div.dataset.room = data.room;
+  if (typeof data.id === 'number') div.dataset.msgId = data.id;
 
   const displayName = NAMES[from] || from;
   const avatar = document.createElement('div');
@@ -89,6 +90,7 @@ function addMessage(data) {
 
   div.appendChild(content);
   messagesEl.appendChild(div);
+  window.notePin?.(data);
   trimMessages();
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }

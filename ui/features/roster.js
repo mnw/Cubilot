@@ -48,6 +48,7 @@ legendEl.addEventListener('click', async (e) => {
 });
 
 function renderLegend() {
+  hidePillCard();   // every pill is replaced: a card for a removed pill must not stay
   legendEl.innerHTML = '';
 
   for (const a of ROSTER) {
@@ -55,6 +56,7 @@ function renderLegend() {
     const legItem = document.createElement('div');
     legItem.className = 'legend-item offline';
     legItem.dataset.agent = a.name;
+    legItem.tabIndex = 0;   // keyboard focus opens the details card, like hover
     // Human visible in every room (no data-room attr).
     if (!isHuman && typeof a.room === 'string' && a.room) legItem.dataset.room = a.room;
     const removeBtn = isHuman
@@ -78,11 +80,53 @@ function renderLegend() {
   }
 }
 
-// Role pill text: "worker · opus", and for a Pi role "validator · gpt-5.5 · openai". Agents without a role keep
-// the plain pill. The data comes from the tmux session (pty_roles); outside the desktop app there is none.
-function rolePillText(info) {
-  return [info.role, info.model, info.provider].filter(Boolean).join(' · ');
+// The pill shows only the dot, the name and the presence. Role, harness, model, provider and effort are in a card
+// on hover or keyboard focus (pillCardFields, pill-card.js), the same five fields for every agent. The data comes
+// from the tmux session (pty_roles); outside the desktop app there is none.
+let pillRoles = {};
+let pillCardEl = null;
+let pillCardFor = null;
+
+function hidePillCard() {
+  pillCardFor = null;
+  if (pillCardEl) pillCardEl.hidden = true;
 }
+
+function showPillCard(item) {
+  const name = item.dataset.agent;
+  if (!name || pillCardFor === name) return;
+  pillCardFor = name;
+  if (!pillCardEl) {
+    pillCardEl = document.createElement('div');
+    pillCardEl.className = 'pill-card';
+    pillCardEl.setAttribute('role', 'tooltip');
+    document.body.appendChild(pillCardEl);
+  }
+  const info = pillRoles[name];
+  pillCardEl.innerHTML = pillCardFields(info).map(([k, v]) =>
+    `<div class="pill-card-row"><span class="pill-card-k">${escAttr(k)}</span><span class="pill-card-v">${escAttr(v)}</span></div>`).join('');
+  // Fixed position under the pill: the card floats, so the pills do not move or wrap.
+  const r = item.getBoundingClientRect();
+  pillCardEl.hidden = false;   // shown first: a hidden card has no width to measure
+  const vw = document.documentElement.clientWidth || window.innerWidth;
+  const left = Math.max(8, Math.min(r.left, vw - pillCardEl.getBoundingClientRect().width - 8));
+  Object.assign(pillCardEl.style, { top: `${r.bottom + 6}px`, left: `${left}px` });
+}
+
+legendEl.addEventListener('mouseover', (e) => {
+  const item = e.target.closest?.('.legend-item[data-agent]');
+  if (item) showPillCard(item);
+});
+legendEl.addEventListener('mouseout', (e) => {
+  const item = e.target.closest?.('.legend-item[data-agent]');
+  if (item && !item.contains(e.relatedTarget)) hidePillCard();
+});
+legendEl.addEventListener('focusin', (e) => {
+  const item = e.target.closest?.('.legend-item[data-agent]');
+  if (item) showPillCard(item);
+});
+legendEl.addEventListener('focusout', hidePillCard);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hidePillCard(); });
 
 // Task 6.2: an online agent with role `orchestrator` becomes the lead of its room, once, and only when the room has
 // no lead yet (the human's choice is never overridden). The hub route is human-only, so the call is made as the human.
@@ -114,19 +158,9 @@ function refreshRolePills() {
   rolePillTimer = setTimeout(async () => {
     let roles = {};
     try { roles = (await tauriInvoke('pty_roles')) || {}; } catch { return; }
+    pillRoles = roles;
     ensureOrchestratorLead(roles);
-    for (const item of legendEl.querySelectorAll('.legend-item[data-agent]')) {
-      const info = roles[item.dataset.agent];
-      let el = item.querySelector('.legend-role');
-      if (!info) { el?.remove(); continue; }
-      if (!el) {
-        el = document.createElement('span');
-        el.className = 'legend-role';
-        item.querySelector('.legend-label')?.after(el);
-      }
-      el.textContent = rolePillText(info);
-      el.title = `role ${info.role}${info.model ? ', model ' + info.model : ''}${info.provider ? ', provider ' + info.provider : ''}`;
-    }
+    for (const el of legendEl.querySelectorAll('.legend-role')) el.remove();   // old inline text, if any
   }, 300);
 }
 

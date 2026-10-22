@@ -40,6 +40,7 @@
   color: var(--text-dim);
 }
 .modal input[type=text],
+.modal input[type=number],
 .modal input:not([type]),
 .modal textarea {
   width: 100%;
@@ -170,20 +171,33 @@
 .model-grid .grid-empty { color: var(--text-dim); font-size: 11px; padding: 6px 2px; }
 .grid-note { color: var(--text-dim); font-size: 10px; min-height: 12px; margin-top: 2px; }
 
+/* number fields: dark spin buttons (WebKit draws them light without it) */
+.modal input[type=number] { color-scheme: dark; }
+
 /* Spawn modal layout (mockup: factory-roles 5.6) */
 #spawn-modal .spawn-head { display: flex; align-items: center; gap: var(--sp-12); }
 #spawn-modal .spawn-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: var(--border-1) solid var(--line); border-radius: var(--radius-md); background: var(--bg-inset); font-family: var(--mono); font-size: var(--fs-sm); color: var(--text); }
-#spawn-modal label .sub, #spawn-modal .sub { font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
-#spawn-modal .model-grid { border-radius: var(--radius-md); padding: 0; }
-#spawn-modal .model-grid .grid-head { text-transform: capitalize; letter-spacing: 0.02em; font-size: 11px; padding: 6px 8px; border-bottom: var(--border-1) solid var(--line); }
-#spawn-modal .model-grid .grid-row { padding: 2px 8px; }
-#spawn-modal .model-grid .row-label { font-size: 12px; color: var(--text); }
-#spawn-modal .model-grid .cell { height: 24px; }
-#spawn-modal .model-grid .cell::before { box-sizing: border-box; width: 14px; height: 14px; background: transparent; border: 1.5px solid var(--text-dim); opacity: 1; }
-#spawn-modal .model-grid .cell:hover::before { transform: none; border-color: var(--text-muted); }
-#spawn-modal .model-grid .cell.default::before { border-color: #a78bfa; }
-#spawn-modal .model-grid .cell.selected { background: transparent; }
-#spawn-modal .model-grid .cell.selected::before { width: 14px; height: 14px; background: var(--orange); border-color: var(--orange); }
+#spawn-modal label .sub, #spawn-modal .sub, #factory-room-modal .sub { font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
+#spawn-modal .model-grid,
+#factory-room-modal .model-grid { border-radius: var(--radius-md); padding: 0; }
+#spawn-modal .model-grid .grid-head,
+#factory-room-modal .model-grid .grid-head { text-transform: capitalize; letter-spacing: 0.02em; font-size: 11px; padding: 6px 8px; border-bottom: var(--border-1) solid var(--line); }
+#spawn-modal .model-grid .grid-row,
+#factory-room-modal .model-grid .grid-row { padding: 2px 8px; }
+#spawn-modal .model-grid .row-label,
+#factory-room-modal .model-grid .row-label { font-size: 12px; color: var(--text); }
+#spawn-modal .model-grid .cell,
+#factory-room-modal .model-grid .cell { height: 24px; }
+#spawn-modal .model-grid .cell::before,
+#factory-room-modal .model-grid .cell::before { box-sizing: border-box; width: 14px; height: 14px; background: transparent; border: 1.5px solid var(--text-dim); opacity: 1; }
+#spawn-modal .model-grid .cell:hover::before,
+#factory-room-modal .model-grid .cell:hover::before { transform: none; border-color: var(--text-muted); }
+#spawn-modal .model-grid .cell.default::before,
+#factory-room-modal .model-grid .cell.default::before { border-color: #a78bfa; }
+#spawn-modal .model-grid .cell.selected,
+#factory-room-modal .model-grid .cell.selected { background: transparent; }
+#spawn-modal .model-grid .cell.selected::before,
+#factory-room-modal .model-grid .cell.selected::before { width: 14px; height: 14px; background: var(--orange); border-color: var(--orange); }
 #spawn-cancel { background: var(--bg-inset); border: var(--border-1) solid var(--line); color: var(--text-muted); }
 #spawn-modal select { background: var(--bg-inset); border: var(--border-1) solid var(--line); color: var(--text); font-family: var(--mono); font-size: var(--fs-base); padding: var(--sp-8) var(--sp-12); border-radius: var(--radius-md); outline: none; }
 

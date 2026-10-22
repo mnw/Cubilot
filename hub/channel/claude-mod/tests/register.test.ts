@@ -14,6 +14,8 @@ function curlOk(status: number, body: string) {
 }
 
 // What hub.url says, and whether CHATBRIDGE_HUB pins it (tests clear the pin to move the hub).
+// Extra launch env for the next world() (reset by it).
+let extraEnv: Record<string, string> = {};
 let urlNow = HUB;
 let hubPinned = true;
 
@@ -23,20 +25,27 @@ let tokenNow = TOKEN;
 // Every curl child the mod started in the last world(): its argv and the config on stdin.
 let curlCalls: Array<{ argv: string[]; stdin: string }> = [];
 
+// Ordered stream: a string is yielded as a chunk, a function is awaited (a step the test controls).
+// Overrides world()'s `chunk` for one test; world() clears it.
+let streamSteps: Array<string | (() => Promise<void>)> | null = null;
+
 // The exit code the mocked hub-stream curl ends with.
 let spawnCode = 0;
 let clock: { advance(ms: number): Promise<void> };
 
 // Every host-state write the mod made since the last world(), as [key, value].
 let stateSets: Array<[string, unknown]> = [];
+// The host-held state of the last world(), so a test can play a second module writing to it.
+let stateNow: Record<string, unknown> = {};
 
 // Wires the world beneath the mod: identity env, the token file, a silent clock,
 // an idle hub stream, and debug logs. `run` answers each curl request.
 function world(on: any, run: (url: string, stdin: string) => unknown, chunk?: string, check: object = { decision: "allow" }, ownLog = false, stateSeed: Record<string, unknown> = {}) {
   urlNow = HUB;
-  mock.env(on, { CHATBRIDGE_AGENT: "bob", CHATBRIDGE_ROOM: "r1", CHATBRIDGE_HUB: hubPinned ? HUB : "", HOME: "/Users/t" });
+  mock.env(on, { CHATBRIDGE_AGENT: "bob", CHATBRIDGE_ROOM: "r1", CHATBRIDGE_HUB: hubPinned ? HUB : "", HOME: "/Users/t", ...extraEnv });
   clock = mock.clock(on);
   spawnCode = 0;
+  streamSteps = null;
   curlCalls = [];
   on("session.start", ($: any, e: any) => ({ cwd: e.cwd }));
   tokenNow = TOKEN;
@@ -45,13 +54,19 @@ function world(on: any, run: (url: string, stdin: string) => unknown, chunk?: st
   on("tool.check", () => check);
   // Host-held $.state, answered from memory.
   const state: Record<string, unknown> = { ...stateSeed };
+  stateNow = state;
   stateSets = [];
   on("state.get", ($: any, e: any) => ({ value: { value: state[e.key], version: 1 } }));
   on("state.set", ($: any, e: any) => { stateSets.push([e.key, e.value]); state[e.key] = e.value; return { value: { version: 2 } }; });
   on("tool.register", ($: any, e: any) => ({ value: { tool: `mcp__chatbridge__${e.name}` } }));
   on("process.spawn", async function* ($: any, e: any) {
     curlCalls.push({ argv: [...(e.argv ?? [])], stdin: String(e.input ?? "") });
-    if (chunk) yield { stream: "stdout", text: chunk };
+    if (streamSteps) {
+      for (const step of streamSteps) {
+        if (typeof step === "string") yield { stream: "stdout", text: step };
+        else await step();
+      }
+    } else if (chunk) yield { stream: "stdout", text: chunk };
     return { value: { code: spawnCode } };
   });
   // Beneath the mod, an unanswered permission request is Claude Code's own dialog: no decision.
@@ -65,6 +80,9 @@ function world(on: any, run: (url: string, stdin: string) => unknown, chunk?: st
 async function start($: any) {
   await $.session.start({ surface: "terminal", isInteractive: true, cwd: "/work" });
 }
+
+// The hub answers a relink with a move; anything else is a plain 200.
+const relinked = (url: string) => (url.endsWith("/factory/applied") ? curlOk(200, "{}") : url.endsWith("/factory/relink") ? curlOk(200, JSON.stringify({ ok: true, reload: true, version: "v-2" })) : curlOk(200, "{}"));
 
 describe("register", () => {
   test("tool call: post goes to the hub and returns its text", async ($, on) => {
@@ -545,6 +563,7 @@ describe("delivery", () => {
     world(on, () => curlOk(200, "{}"));
     on("turn.start", (_$: any, e: any) => ({ turnId: e.turnId }));
     await start($);
+    stateSets.length = 0;
     await $.turn.start({ text: "", turnId: "t-sub", agentId: "sub1" } as any);
     expect(stateSets).toEqual([]);
     await $.turn.start({ text: "", turnId: "t-main" } as any);
@@ -585,6 +604,69 @@ describe("delivery", () => {
     expect(texts.some((t) => t.includes("got no reply in the room"))).toBe(false);
   });
 
+  // The agent posts to alice, then alice's message arrives and the main loop's turn ends without a post.
+  async function replyThenEndTurn($: any, on: any, text: string): Promise<string[]> {
+    world(on, () => curlOk(200, "{}"));
+    let posted!: () => void;
+    const postDone = new Promise<void>((resolve) => (posted = resolve));
+    streamSteps = [() => postDone, `data: ${JSON.stringify({ id: 9, from: "alice", to: "bob", room: "r1", text })}\n\n`];
+    const texts: string[] = [];
+    const first = new Promise<void>((resolve) => on("prompt.submit", ($: any, e: any) => { texts.push(e.text); resolve(); return { text: e.text }; }));
+    on("turn.complete", () => ({ text: "" }));
+    await start($);
+    await $.tool.call({ tool: "mcp__chatbridge__post", to: "alice", text: "status" } as any);
+    posted();
+    await first;
+    await new Promise((r) => setTimeout(r, 30));
+    await $.turn.complete({ text: "", turnId: "t1", reason: "answer" } as any);
+    await new Promise((r) => setTimeout(r, 100));
+    return texts;
+  }
+
+  test("a question after my own status post still gets one nudge", async ($, on) => {
+    const texts = await replyThenEndTurn($, on, "Can you review ticket X now?");
+    expect(texts.filter((t) => t.includes("got no reply in the room")).length).toBe(1);
+  });
+
+  test("an instruction without a question mark after my own status post gets one nudge", async ($, on) => {
+    const texts = await replyThenEndTurn($, on, "Review ticket X now.");
+    expect(texts.filter((t) => t.includes("got no reply in the room")).length).toBe(1);
+  });
+
+  // The nudge window reads Date.now in the mod bundle (no fake clock reaches it: mock.clock answers $.clock only).
+  // First message: nudge, which stamps the peer. Second message from the same peer: Date.now is read again
+  // in the bridge and, inside the window, no second nudge comes.
+  test("the nudge window runs on the real Date.now: one nudge for two messages from one peer", async ($, on) => {
+    world(on, () => curlOk(200, "{}"));
+    let secondGo!: () => void;
+    const gate = new Promise<void>((resolve) => (secondGo = resolve));
+    const frame = (id: number) => `data: ${JSON.stringify({ id, from: "alice", to: "bob", room: "r1", text: "Review ticket X now." })}\n\n`;
+    streamSteps = [frame(1), () => gate, frame(2)];
+    const texts: string[] = [];
+    let seen = 0;
+    let got!: () => void;
+    let next = new Promise<void>((resolve) => (got = resolve));
+    on("prompt.submit", ($: any, e: any) => {
+      texts.push(e.text);
+      if (!e.text.includes("got no reply in the room")) { seen++; got(); next = new Promise<void>((resolve) => (got = resolve)); }
+      return { text: e.text };
+    });
+    on("turn.complete", () => ({ text: "" }));
+    expect(typeof Date.now()).toBe("number");
+    await start($);
+    await next;
+    await new Promise((r) => setTimeout(r, 30));
+    await $.turn.complete({ text: "", turnId: "t1", reason: "answer" } as any);
+    await new Promise((r) => setTimeout(r, 100));
+    secondGo();
+    await next;
+    await new Promise((r) => setTimeout(r, 30));
+    await $.turn.complete({ text: "", turnId: "t2", reason: "answer" } as any);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(seen).toBe(2);
+    expect(texts.filter((t) => t.includes("got no reply in the room")).length).toBe(1);
+  });
+
   test("when idle, an interrupt is submitted as a prompt", async ($, on) => {
     world(on, () => curlOk(200, "{}"), frames(
       { id: 7, from: "you", to: "bob", room: "r1", kind: "interrupt.new", interrupt_id: "i_9", text: "stop" },
@@ -611,5 +693,180 @@ describe("delivery", () => {
     await interrupted;
     expect(texts).toHaveLength(2);
     expect(texts[1]).toContain('kind="interrupt.new"');
+  });
+  test("a new factory_version in the briefing runs reload-plugins through $.command.run", async ($, on) => {
+    const brief = (v: string) => `data: ${JSON.stringify({ type: "briefing", room: "r1", factory_version: v })}\n\n`;
+    world(on, relinked, brief("v-2"));
+    on("prompt.submit", ($: any, e: any) => ({ text: e.text }));
+    const ran = new Promise<string>((resolve) => on("command.run", (_$: any, e: any) => { resolve(e.command); return { value: undefined }; }));
+    await start($);
+    expect(await ran).toBe("reload-plugins");
+  });
+  // Unchanged module (a skill-only reload): reload-plugins runs, the same bridge stays connected, no second one starts.
+  test("a reload that leaves the module loaded keeps one bridge connected", async ($, on) => {
+    const brief = (v: string) => `data: ${JSON.stringify({ type: "briefing", room: "r1", factory_version: v })}\n\n`;
+    const after = `data: ${JSON.stringify({ id: 5, from: "alice", to: "bob", room: "r1", text: "after reload" })}\n\n`;
+    let go!: () => void;
+    const gate = new Promise<void>((resolve) => (go = resolve));
+    world(on, relinked);
+    streamSteps = [brief("v-2"), () => gate, after];
+    const texts: string[] = [];
+    on("prompt.submit", ($: any, e: any) => { texts.push(e.text); return { text: e.text }; });
+    let ran = 0;
+    on("command.run", () => { ran++; return { value: undefined }; });
+    await start($);
+    for (let i = 0; i < 100 && ran < 1; i++) await new Promise((r) => setTimeout(r, 5));
+    expect(ran).toBe(1);
+    const streams = () => curlCalls.filter((c) => c.argv.includes("-N")).length;
+    expect(streams()).toBe(1);
+    go();
+    for (let i = 0; i < 100 && !texts.some((t) => t.includes("after reload")); i++) await new Promise((r) => setTimeout(r, 5));
+    expect(texts.some((t) => t.includes("after reload"))).toBe(true);
+    expect(streams()).toBe(1);
+    expect(stateSets.filter(([k]) => k === "generation")).toEqual([["generation", 1]]);
+    // Module stayed loaded: it recorded the version itself, after the reload resolved, and cleared the marker.
+    const applied = curlCalls.filter((c) => urlOf(c.stdin).endsWith("/factory/applied"));
+    expect(applied).toHaveLength(1);
+    expect(applied[0].stdin).toContain("v-2");
+    expect(stateSets.filter(([k]) => k === "applying")).toEqual([["applying", "v-2"], ["applying", ""]]);
+  });
+
+  // Replaced module: the old module left its version in $.state; the new module records it at its start and clears it.
+  test("a new module records the version the old module left, once, and clears it", async ($, on) => {
+    world(on, relinked, undefined, { decision: "allow" }, false, { applying: "v-2" });
+    await start($);
+    for (let i = 0; i < 100 && !curlCalls.some((c) => urlOf(c.stdin).endsWith("/factory/applied")); i++) await new Promise((r) => setTimeout(r, 5));
+    const applied = curlCalls.filter((c) => urlOf(c.stdin).endsWith("/factory/applied"));
+    expect(applied).toHaveLength(1);
+    expect(applied[0].stdin).toContain("v-2");
+    expect(stateSets.filter(([k]) => k === "applying")).toEqual([["applying", ""]]);
+  });
+
+  test("a reload that fails records no version and tells the hub it failed", async ($, on) => {
+    const brief = `data: ${JSON.stringify({ type: "briefing", room: "r1", factory_version: "v-2" })}\n\n`;
+    world(on, relinked, brief);
+    on("prompt.submit", ($: any, e: any) => ({ text: e.text }));
+    let ran = 0;
+    on("command.run", () => { ran++; throw new Error("reload failed"); });
+    await start($);
+    for (let i = 0; i < 100 && ran < 1; i++) await new Promise((r) => setTimeout(r, 5));
+    await new Promise((r) => setTimeout(r, 50));
+// A failed reload tells the hub so ({failed:true}, no version) and records no version.
+    const posts = curlCalls.filter((c) => urlOf(c.stdin).endsWith("/factory/applied"));
+    expect(posts.length).toBeGreaterThan(0);
+    expect(posts.every((c) => c.stdin.includes("failed") && !c.stdin.includes("v-2"))).toBe(true);
+  });
+
+  // Replaced module: a newer generation appears in $.state; the old bridge ends at its next frame and delivers nothing.
+  test("when a newer generation exists, the old bridge ends and delivers nothing", async ($, on) => {
+    const frame = (id: number, text: string) => `data: ${JSON.stringify({ id, from: "alice", to: "bob", room: "r1", text })}\n\n`;
+    let go!: () => void;
+    const gate = new Promise<void>((resolve) => (go = resolve));
+    world(on, () => curlOk(200, "{}"));
+    streamSteps = [frame(1, "before"), () => gate, frame(2, "after")];
+    const texts: string[] = [];
+    on("prompt.submit", ($: any, e: any) => { texts.push(e.text); return { text: e.text }; });
+    await start($);
+    for (let i = 0; i < 100 && !texts.some((t) => t.includes("before")); i++) await new Promise((r) => setTimeout(r, 5));
+    expect(texts.some((t) => t.includes("before"))).toBe(true);
+    // A replaced module takes the next generation.
+    stateNow.generation = 2;
+    go();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(texts.some((t) => t.includes("after"))).toBe(false);
+  });
+  // The gate runs through $.process.run (a shell, the hook-shaped event on stdin). Exit 2 blocks and the hub is never asked.
+  test("CHATBRIDGE_HANDOFF_GATE: exit 2 blocks send_handoff with the gate's stderr; exit 0 lets it through", async ($, on) => {
+    extraEnv = { CHATBRIDGE_HANDOFF_GATE: "/g/ste-gate.py" };
+    let gateExit = 2;
+    const gateRuns: string[] = [];
+    world(on, (url, stdin) => {
+      if (url) return url.endsWith("/handoffs") ? curlOk(201, '{"id":"h_0123456789abcdef"}') : curlOk(200, "{}");
+      gateRuns.push(stdin);
+      return { value: { exitCode: gateExit, stdout: "", stderr: "[ste-gate] blocked" } };
+    });
+    extraEnv = {};
+    await start($);
+    const call = { tool: "mcp__chatbridge__send_handoff", to: "reviewer", task: "t", context: { path: "/x.md" } } as any;
+    const blocked = await $.tool.call(call);
+    expect(JSON.stringify(blocked)).toContain("[ste-gate] blocked");
+    expect(curlCalls.some((c) => urlOf(c.stdin).endsWith("/handoffs"))).toBe(false);
+    expect(JSON.parse(gateRuns[0]).tool_input.to).toBe("reviewer");
+    gateExit = 0;
+    const passed = await $.tool.call(call);
+    expect(JSON.stringify(passed)).toContain("handoff_id=h_0123456789abcdef");
+  });
+  // The reload is bounded to 30 s, but success and failure stay attached to the real command promise.
+  test("a reload that does not end in 30 s times out: nothing recorded yet, the version stays in $.state", async ($, on) => {
+    const brief = `data: ${JSON.stringify({ type: "briefing", room: "r1", factory_version: "v-2" })}\n\n`;
+    world(on, relinked, brief);
+    on("prompt.submit", ($: any, e: any) => ({ text: e.text }));
+    let ran = 0;
+    on("command.run", () => new Promise(() => { ran++; })); // never ends
+    await start($);
+    for (let i = 0; i < 100 && ran < 1; i++) await new Promise((r) => setTimeout(r, 5));
+    await clock.advance(30_001);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(curlCalls.some((c) => urlOf(c.stdin).endsWith("/factory/applied"))).toBe(false);
+    const marks = stateSets.filter(([k]) => k === "applying").map(([, v]) => v);
+    expect(marks.length).toBeGreaterThan(0);
+    expect(marks.every((v) => v === "v-2")).toBe(true);
+  });
+
+  // Validator: the command ends AFTER the 30 s bound, successfully: applied is still recorded (once).
+  test("Validator: a late successful unchanged-module reload still records its applied version", async ($, on) => {
+    const brief = `data: ${JSON.stringify({ type: "briefing", room: "r1", factory_version: "v-2" })}\n\n`;
+    let ordered = false;
+    world(on, (url) => {
+      if (url.endsWith("/factory/relink")) {
+        const reload = !ordered;
+        ordered = true;
+        return curlOk(200, JSON.stringify({ reload, pending: !reload, version: "v-2" }));
+      }
+      return curlOk(200, "{}");
+    }, brief);
+    on("prompt.submit", (_$: any, e: any) => ({ text: e.text }));
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => (finish = resolve));
+    let ran = 0;
+    on("command.run", async () => { ran++; await gate; return { text: "Reloaded plugins" }; });
+    await start($);
+    for (let i = 0; i < 100 && ran < 1; i++) await new Promise((r) => setTimeout(r, 5));
+    expect(ran).toBe(1);
+    await clock.advance(30_001);
+    await new Promise((r) => setTimeout(r, 40));
+    finish();
+    await new Promise((r) => setTimeout(r, 70));
+    const applied = curlCalls.filter((c) => urlOf(c.stdin).endsWith("/factory/applied") && c.stdin.includes("v-2"));
+    expect(applied).toHaveLength(1);
+    expect(stateSets.filter(([k]) => k === "applying").map(([, v]) => v).at(-1)).toBe("");
+  });
+
+  test("a command that fails AFTER the 30 s bound reports failed to the hub and clears the marker", async ($, on) => {
+    const brief = `data: ${JSON.stringify({ type: "briefing", room: "r1", factory_version: "v-2" })}\n\n`;
+    let ordered = false;
+    world(on, (url) => {
+      if (url.endsWith("/factory/relink")) {
+        const reload = !ordered;
+        ordered = true;
+        return curlOk(200, JSON.stringify({ reload, pending: !reload, version: "v-2" }));
+      }
+      return curlOk(200, "{}");
+    }, brief);
+    on("prompt.submit", (_$: any, e: any) => ({ text: e.text }));
+    let fail!: () => void;
+    const gate = new Promise<void>((_r, reject) => (fail = () => reject(new Error("reload broke"))));
+    let ran = 0;
+    on("command.run", async () => { ran++; await gate; });
+    await start($);
+    for (let i = 0; i < 100 && ran < 1; i++) await new Promise((r) => setTimeout(r, 5));
+    await clock.advance(30_001);
+    await new Promise((r) => setTimeout(r, 40));
+    fail();
+    await new Promise((r) => setTimeout(r, 70));
+    const posts = curlCalls.filter((c) => urlOf(c.stdin).endsWith("/factory/applied"));
+    expect(posts.some((c) => c.stdin.includes("failed"))).toBe(true);
+    expect(posts.some((c) => c.stdin.includes("v-2"))).toBe(false);
+    expect(stateSets.filter(([k]) => k === "applying").map(([, v]) => v).at(-1)).toBe("");
   });
 });

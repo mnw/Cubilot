@@ -15,8 +15,17 @@
     return { n };
   }
 
-  // form: { room, cwd, workers, testers }; existingAgents: names already in the roster.
-  // → { error } or { launch: { agent, cwd, room, role }, limits: { workers, testers } }
+  // form: { room, cwd, workers, testers, harness, choice, roleHarness }; existingAgents: names already in the roster.
+  // `harness` is the launch harness ('claude' default). `choice` is the grid choice {model, provider, effort} (each null
+  // when it equals the role default). `roleHarness` is the orchestrator role's own harness: on any other harness the
+  // role has no default model, so a model must be chosen (task 9.6, same rule as the spawn modal).
+  // → { error } or { launch: { agent, cwd, room, role, harness, model, provider, effort }, limits: { workers, testers } }
+  // tmux changes a '.' in a session name, so a terminal agent cannot have one (same text as pty.rs). The hub still
+  // accepts dots for external agents. null when the name is fine.
+  function terminalNameError(name) {
+    return String(name ?? '').includes('.') ? 'a dot is not allowed in a terminal agent name: tmux changes it' : null;
+  }
+
   function buildFactoryRoom(form, existingAgents) {
     const room = String(form?.room ?? '').trim();
     const cwd = String(form?.cwd ?? '').trim();
@@ -27,14 +36,25 @@
     if (w.error) return { error: w.error };
     const t = parseLimit(form?.testers, 'Tester');
     if (t.error) return { error: t.error };
+    const harness = form?.harness ?? 'claude';
+    if (harness !== 'claude' && harness !== 'pi') return { error: `Unknown harness '${harness}'.` };
+    const c = form?.choice || {};
+    if (form?.roleHarness && form.roleHarness !== harness && !c.model) {
+      return { error: `Pick a model for ${harness}: the orchestrator role has no default there.` };
+    }
     // One agent, the orchestrator. Its name is also the tmux session name, so it must be free.
     const taken = new Set(existingAgents || []);
     let agent = 'orchestrator';
     if (taken.has(agent)) agent = `orchestrator-${room}`;
+    // The generated name is what tmux sees: `orchestrator` has no dot; `orchestrator-<room>` has one when the room does.
+    if (terminalNameError(agent)) return { error: `Agent '${agent}': ${terminalNameError(agent)}. Use a room name without a dot, or free the name 'orchestrator'.` };
     if (!NAME_RE.test(agent) || taken.has(agent)) {
       return { error: `An agent called '${agent}' already exists. Remove it first.` };
     }
-    return { launch: { agent, cwd, room, role: 'orchestrator' }, limits: { workers: w.n, testers: t.n } };
+    return {
+      launch: { agent, cwd, room, role: 'orchestrator', harness, model: c.model || null, provider: c.provider || null, effort: c.effort || null },
+      limits: { workers: w.n, testers: t.n },
+    };
   }
 
 
@@ -65,5 +85,5 @@
   }
 
   window.__CUBILOT_TERM__ = window.__CUBILOT_TERM__ || {};
-  window.__CUBILOT_TERM__.factoryRoom = { buildFactoryRoom, nutshellTemplate, nutshellSeedRequests };
+  window.__CUBILOT_TERM__.factoryRoom = { buildFactoryRoom, nutshellTemplate, nutshellSeedRequests, terminalNameError };
 })();

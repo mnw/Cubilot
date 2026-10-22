@@ -16,6 +16,7 @@ const base = (): BriefingPayload => ({
   attachments_dir: "/a",
   human_name: "human",
   nutshell: "goal",
+  factory_version: "v-1",
   kind_lines: ["Your open tickets:", "- t_1 [claimed] x"],
   room_summary: null,
 });
@@ -44,6 +45,12 @@ describe("briefing signature agrees with renderBriefing", () => {
       expect(render(v), what).not.toBe(render(a));
       expect(briefingSignature(v), what).not.toBe(briefingSignature(a));
     }
+  });
+
+  test("a new factory version changes the signature but not the text: it re-briefs so the bridge can reload", () => {
+    const v2 = { ...base(), factory_version: "v-2" };
+    expect(render(v2)).toBe(render(base()));
+    expect(briefingSignature(v2)).not.toBe(briefingSignature(base()));
   });
 
   test("the dispatcher does not re-send when only a summary layer is added", async () => {

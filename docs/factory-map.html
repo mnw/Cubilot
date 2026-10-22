@@ -289,7 +289,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
       <span class="track">Writing track</span>
       <p class="job">Edits in place: structure, ASD-STE100, terminology, accessible markup. Only role that runs the language skills.</p>
       <dl><dt>skills</dt><dd>humanizer → asd-ste100 → clean-user-facing-text</dd>
-      <dt>gate</dt><dd>ste-lint hook, exit 0 to hand in</dd>
+      <dt>gate</dt><dd>ste-lint before each handoff; the Reviewer runs it again</dd>
       <dt>never</dt><dd>changes technical meaning</dd></dl>
     </article>
 
@@ -342,6 +342,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
     <div class="panel">
       <h3>Technical track</h3>
       <div class="flow">
+        <div class="n defined"><span class="t">Orchestrator</span><span class="d">lead: assigns, unblocks, decides</span></div><span class="arrow">→</span>
         <div class="n defined"><span class="t">Worker</span><span class="d">tests + code, in_review</span></div><span class="arrow">→</span>
         <div class="n defined"><span class="t">Testers</span><span class="d">suite, e2e, mutation</span></div><span class="arrow">→</span>
         <div class="n defined"><span class="t">Validator</span><span class="d">criteria, mutants, diff</span></div><span class="arrow">→</span>
@@ -352,9 +353,10 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
     <div class="panel">
       <h3>Writing track</h3>
       <div class="flow">
+        <div class="n defined"><span class="t">Orchestrator</span><span class="d">lead: assigns, unblocks, decides</span></div><span class="arrow">→</span>
         <div class="n defined"><span class="t">Writer</span><span class="d">draft, samples, links</span></div><span class="arrow">→</span>
-        <div class="n defined"><span class="t">Editor</span><span class="d">language pass</span><span class="gate">hook: ste-lint must pass</span></div><span class="arrow">→</span>
-        <div class="n defined"><span class="t">Reviewer</span><span class="d">accuracy, completeness</span></div><span class="arrow">→</span>
+        <div class="n defined"><span class="t">Editor</span><span class="d">language pass</span><span class="gate">runs ste-lint before hand-in</span></div><span class="arrow">→</span>
+        <div class="n defined"><span class="t">Reviewer</span><span class="d">ste-lint, accuracy, completeness</span></div><span class="arrow">→</span>
         <div class="n built"><span class="t">Done</span></div>
       </div>
       <p class="loop"><b>CHANGES</b> returns to the Writer, who sends large rewrites back through the Editor.</p>

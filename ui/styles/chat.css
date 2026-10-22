@@ -7,6 +7,21 @@
   min-height: 0;
   overflow: hidden;
 }
+/* Pinned messages addressed to the human (features/pins.js) */
+.pin-strip { flex: none; display: flex; flex-direction: column; gap: var(--sp-4); padding: var(--sp-8) var(--sp-20); border-bottom: var(--border-1) solid var(--line); background: var(--bg-raised); max-height: 40%; overflow-y: auto; }
+.pin-strip[hidden] { display: none; }
+.pin { display: flex; align-items: center; gap: var(--sp-8); border: var(--border-1) solid var(--line); border-left: 2px solid var(--orange); border-radius: var(--radius-md); background: var(--bg-inset); }
+.pin-main { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--sp-8); padding: var(--sp-4) var(--sp-8); background: transparent; border: none; color: var(--text); font-size: var(--fs-base); text-align: left; cursor: pointer; }
+.pin-main:hover { background: var(--bg-hover); }
+.pin-from { font-weight: 600; flex: none; }
+.pin-room, .pin-ts { font-family: var(--mono); font-size: var(--fs-2xs); color: var(--text-dim); flex: none; }
+.pin-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+.pin-x { flex: none; padding: 0 var(--sp-8); background: transparent; border: none; color: var(--text-dim); font-size: var(--fs-lg, 16px); cursor: pointer; }
+.pin-x:hover { color: var(--text); }
+.pin-more { align-self: flex-start; background: transparent; border: none; color: var(--text-dim); font-family: var(--mono); font-size: var(--fs-2xs); cursor: pointer; padding: 0; }
+.pin-more:hover { color: var(--text); }
+.msg.pin-flash { animation: none; background: var(--bg-hover); outline: var(--border-1) solid var(--orange); border-radius: var(--radius-md); }
+
 #messages {
   flex: 1;
   overflow-y: auto;

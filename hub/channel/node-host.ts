@@ -1,6 +1,7 @@
 // Host pieces for runtimes that have Node/Bun globals (pi).
 // The caller supplies `deliver`; everything else is the same for both.
 
+import { spawn } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename } from "node:path";
@@ -13,9 +14,34 @@ const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 
 export const nodeSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-export function nodeHost(deliver: Host["deliver"]): Host {
+export function nodeHost(deliver: Host["deliver"], reload: Host["reload"]): Host {
   let streamFailing = false; // a failure was logged and no data has arrived since
   return {
+    reload,
+    handoffGate: async () => process.env.CHATBRIDGE_HANDOFF_GATE?.trim() || null,
+    exec: (command, stdin, timeoutMs) =>
+      new Promise((resolve, reject) => {
+        // detached: the gate leads its own process group, so a timeout can kill its children too. A child that keeps
+        // stderr open would otherwise hold the "close" event back long after the bound.
+        const child = spawn("/bin/sh", ["-c", command], { stdio: ["pipe", "ignore", "pipe"], detached: true });
+        let stderr = "";
+        let done = false;
+        const settle = (r: { code: number | null; timedOut: boolean }) => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          resolve({ ...r, stderr });
+        };
+        const timer = setTimeout(() => {
+          try { process.kill(-child.pid!, "SIGKILL"); } catch { child.kill("SIGKILL"); }
+          settle({ code: null, timedOut: true }); // do not wait for "close"
+        }, timeoutMs);
+        child.stderr.on("data", (d) => { if (stderr.length < 16_384) stderr += d; });
+        child.on("error", (e) => { if (done) return; done = true; clearTimeout(timer); reject(e); });
+        child.on("close", (code) => settle({ code, timedOut: false }));
+        child.stdin.on("error", () => {}); // the gate may exit without reading stdin
+        child.stdin.end(stdin);
+      }),
     async readText(path) {
       try {
         return readFileSync(expandPath(path, homedir(), process.env.CUBILOT_DATA_DIR), "utf8");

@@ -10,6 +10,7 @@ function fake(replies: Record<string, Script>) {
   const calls: Array<{ key: string; body: any }> = [];
   const host = {
     readText: async (p: string) => (p.endsWith("hub.url") ? "http://hub.test" : "tok"),
+    handoffGate: async () => null,
     request: async (url: string, init: { method: string; body?: string }) => {
       const key = `${init.method} ${url.replace("http://hub.test", "")}`;
       calls.push({ key, body: init.body ? JSON.parse(init.body) : null });
@@ -411,6 +412,7 @@ describe("a paused agent (hub answers 423)", () => {
     ["claim_ticket", `POST /tickets/${TID}/claim`, { ticket_id: TID }, "claim_ticket"],
     ["transition_ticket", `POST /tickets/${TID}/transition`, { ticket_id: TID, to: "in_progress" }, "transition_ticket"],
     ["assign_ticket", `POST /tickets/${TID}/assign`, { ticket_id: TID, assignee: "bob" }, "assign_ticket"],
+    ["edit_ticket", `POST /tickets/${TID}/edit`, { ticket_id: TID, title: "t" }, "edit_ticket"],
   ];
   for (const [name, key, args, action] of cases) {
     test(`${name}: one clear line, one request, no retry`, async () => {
@@ -426,5 +428,26 @@ describe("a paused agent (hub answers 423)", () => {
   test("accept_handoff names the paused state when the claim is refused", async () => {
     const f = accept({ [`POST /tickets/${TID}/claim`]: paused });
     expect(await run("accept_handoff", f.host, { handoff_id: "h_0123456789abcdef" })).toContain(LINE);
+  });
+});
+
+describe("edit_ticket", () => {
+  test("posts only the given fields as the agent", async () => {
+    const f = fake({ [`POST /tickets/${TID}/edit`]: { status: 200, body: { snapshot: {} } } });
+    expect(await run("edit_ticket", f.host, { ticket_id: TID, title: "New", acceptance_criteria: "C" })).toBe(`ticket ${TID} is edited`);
+    expect(f.calls[0].body).toEqual({ by: "alice", title: "New", acceptance_criteria: "C" });
+  });
+  test("an unchanged edit says so", async () => {
+    const f = fake({ [`POST /tickets/${TID}/edit`]: { status: 200, body: { idempotent: true } } });
+    expect(await run("edit_ticket", f.host, { ticket_id: TID, title: "Same" })).toBe(`ticket ${TID} is unchanged`);
+  });
+  test("a 403 for blast_radius is a tool error", async () => {
+    const f = fake({ [`POST /tickets/${TID}/edit`]: { status: 403, body: { error: "only the human may change blast_radius" } } });
+    await expect(run("edit_ticket", f.host, { ticket_id: TID, blast_radius: "low" })).rejects.toThrow("403 only the human may change blast_radius");
+  });
+  test("the schema requires only ticket_id and limits blast_radius to low or high", () => {
+    const s = findTool("edit_ticket")!.inputSchema as { properties: { blast_radius: { enum: string[] } }; required: string[] };
+    expect(s.required).toEqual(["ticket_id"]);
+    expect(s.properties.blast_radius.enum).toEqual(["low", "high"]);
   });
 });

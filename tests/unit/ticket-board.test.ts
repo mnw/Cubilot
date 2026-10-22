@@ -1059,6 +1059,35 @@ describe("ticket view dialog", () => {
   const click = (card: any, inside = false) => card.handlers.click({ target: { closest: () => (inside ? {} : null) } });
 
   // (The harness escHtml/escAttr are String, so these checks read the raw text; the real helpers escape it.)
+  // Status light (the human's rules): red = cannot advance without the human (pending approval or human assignee),
+  // orange = claimed / in_progress, green = queued and in_review, none when finished.
+  test("lightOf: every status, a pending approval or a human assignee wins", () => {
+    const light = (status: string, extra: any = {}) => ctx.TicketBoard.lightOf({ status, assignee: "alice", ...extra })?.[0] ?? null;
+    for (const s of ["queued", "in_review"]) expect(light(s)).toBe("green");
+    for (const s of ["claimed", "in_progress"]) expect(light(s)).toBe("orange");
+    for (const s of ["done", "cancelled"]) expect(light(s)).toBeNull();
+    for (const s of ["queued", "claimed", "in_progress", "in_review"]) {
+      expect(light(s, { approval: { status: "pending" } })).toBe("red");
+      expect(light(s, { assignee: "human" })).toBe("red");
+    }
+    expect(light("in_progress", { approval: { status: "allowed" } })).toBe("orange");
+    expect(light("queued", { assignee: null })).toBe("green");
+    expect(light("done", { approval: { status: "pending" }, assignee: "human" })).toBeNull();   // finished: no light
+  });
+
+  test("the light is on the card (actions row) and at the top of the full view, with a title and an aria-label", async () => {
+    const lit = (html: string) => [...html.matchAll(/<i class="on light-(\w+)">/g)].map((m) => m[1]);
+    const cards = await board(T({ status: "in_progress", blast_radius: "low", approval_request_id: null }));
+    expect(lit(cols.innerHTML)).toEqual(["orange"]);
+    expect(cols.innerHTML).toMatch(/<div class="ticket-actions">.*<span class="ticket-light" role="img" aria-label="Status: [^"]+" title="[^"]+">/s);
+    click(cards.t_9);
+    expect(content()).toMatch(/^<div class="ticket-view-light"><span class="ticket-light"/);
+    expect(lit(content())).toEqual(["orange"]);
+    els["ticket-view-close"].handlers.click();
+    await board(T({ status: "done", blast_radius: "low", approval_request_id: null }));
+    expect(cols.innerHTML).not.toContain("ticket-light");
+  });
+
   test("a card is focusable, has a role and an accessible name", async () => {
     await board(T());
     expect(cols.innerHTML).toContain('role="button" tabindex="0" draggable="true" data-ticket="t_9" aria-label="Open ticket: Fix <it>"');

@@ -2,7 +2,7 @@
 
 ### Requirement: An agent can be launched with a factory role
 
-The app SHALL accept an optional role when it launches an agent. With a role, the launch command SHALL use the role's harness, model, instructions, skills and tool limits from the role file. Without a role, the launch command SHALL be the same as before this change. An unknown role SHALL be an error, and the app SHALL launch nothing.
+The app SHALL accept an optional role when it launches an agent. With a role, the launch command SHALL use the harness chosen at launch, and the role's instructions, skills and the tool limits for that harness from the role file. The role's harness SHALL be the default choice only. The role's model SHALL apply only on the role's harness; on the other harness the launch SHALL need a chosen model. Without a role, the launch command SHALL be the same as before this change. An unknown role SHALL be an error, and the app SHALL launch nothing.
 
 #### Scenario: Launch without a role is unchanged
 
@@ -15,12 +15,21 @@ The app SHALL accept an optional role when it launches an agent. With a role, th
 - **THEN** the command contains the role plugin directory, the role prompt file, the role settings file and `--model sonnet`
 - **AND** the command blocks the `Task` and `Agent` tools
 
-#### Scenario: Pi role overrides the harness choice
+#### Scenario: Pi role on its own harness
 
-- **GIVEN** the spawn modal is set to Claude Code
-- **WHEN** the human launches `validator` with the role `validator`
-- **THEN** the app launches Pi with `--provider openai`, the role model, `--thinking`, the role prompt, the role skills and `--exclude-tools edit,write`
+- **WHEN** the human launches `validator` with the role `validator` and the harness Pi
+- **THEN** the app launches Pi with `--provider openai-codex`, the role model, `--thinking`, the role prompt, the role skills and `--exclude-tools` containing `edit,write`
 - **AND** the command does not contain `--tools`
+
+#### Scenario: Role on the other harness
+
+- **WHEN** the human launches `validator` with the role `validator`, the harness Claude Code and the cell opus × high
+- **THEN** the app launches Claude Code with the role plugin, `--model opus --effort high`, and `--disallowed-tools` containing `Edit`, `Write`, `NotebookEdit`, `Task` and `Agent`
+
+#### Scenario: Other harness with no chosen model
+
+- **WHEN** the human launches `worker` with the harness Pi and no chosen cell
+- **THEN** the app shows an error and launches no agent
 
 #### Scenario: Unknown role
 
@@ -106,13 +115,25 @@ The app SHALL stage `factory/shared` as the plugin `factory-shared` and SHALL lo
 
 ### Requirement: The user can add or replace a role skill
 
-The app SHALL stage the skills in `<app data>/factory-user/<role>/skills/` on top of the bundled skills of that role. A user skill folder SHALL replace the bundled skill folder with the same folder name as a whole. The app SHALL NOT change the files in `factory-user/`, except to create the empty folders. The title bar SHALL have a button that opens `factory-user/` in Finder. The app SHALL stage each change into a new version folder. It SHALL NOT change the staged inputs of a published version, and it SHALL NOT delete a version in this change.
+The app SHALL stage the skills in `<app data>/factory-user/<role>/skills/` on top of the bundled skills of that role. A user skill folder SHALL replace the bundled skill folder with the same folder name as a whole. The app SHALL copy each bundled skill into `factory-user/<role>/skills/<name>/` when that folder does not exist, with a `.cubilot-seed` file that holds the hash of the copied content. The copy SHALL appear whole or not at all (temp folder, then rename). The app SHALL NOT change or delete an existing skill folder in `factory-user/`. The app SHALL NOT stage a `.cubilot-seed` file. The title bar SHALL have a button that opens `factory-user/` in Finder. The app SHALL stage each change into a new version folder and SHALL point the link `factory/active` at it. It SHALL NOT change the staged inputs of a published version, and it SHALL NOT delete a version in this change. After a new version, each running role agent SHALL reload its skills once: at once when idle, and at the end of its run when busy. A run that starts while the reload request is pending MAY see changed files. An agent with no role, or launched before this change, SHALL NOT reload.
 
 #### Scenario: A user skill replaces a bundled skill
 
 - **GIVEN** `factory-user/tester/skills/<name>/SKILL.md` exists and the bundled `tester` role has a skill with the same name
 - **WHEN** the app stages the roles
 - **THEN** the staged `tester` plugin contains the user's skill
+
+#### Scenario: The provided skills are in the user folder
+
+- **WHEN** the app starts for the first time
+- **THEN** `factory-user/tester/skills/` contains each bundled `tester` skill and its `.cubilot-seed` file
+
+#### Scenario: An app update never changes a copy
+
+- **GIVEN** the user changed one seeded copy and did not change another
+- **WHEN** a new app version has changed bundled copies of both skills
+- **THEN** both copies stay the same
+- **AND** the app logs one line for the unchanged copy that tells the user to delete the folder to get the new version
 
 #### Scenario: Removing the user skill restores the bundled one
 
@@ -128,8 +149,32 @@ The app SHALL stage the skills in `<app data>/factory-user/<role>/skills/` on to
 
 - **GIVEN** an agent with a role runs
 - **WHEN** the app stages the roles again, after a reload or an app restart
-- **THEN** the files that the running agent uses do not change
+- **THEN** the old version folder does not change
+- **AND** the link `factory/active` names the new version
 - **AND** the next agent of that role uses the new version
+
+#### Scenario: An idle running agent gets a changed skill at once
+
+- **GIVEN** an idle agent with a role runs, on Claude Code or on Pi
+- **AND** the user changed a skill of that role
+- **WHEN** the human uses Reload settings
+- **THEN** the agent reloads its skills once, with no model turn
+- **AND** its next use of the skill reads the changed text
+
+#### Scenario: A busy running agent is not interrupted
+
+- **GIVEN** an agent with a role is in a run
+- **WHEN** the human uses Reload settings after a skill change
+- **THEN** the run continues with the old skills
+- **AND** the agent reloads once, after the run ends
+- **AND** only a new run that starts while the reload request is pending can see changed files (accepted limit)
+
+#### Scenario: A Claude agent keeps its role text
+
+- **GIVEN** a Claude Code agent with a role runs
+- **WHEN** the role text changes and the agent reloads
+- **THEN** the agent gets the changed skills
+- **AND** it keeps the role text from its launch until it is started again
 
 #### Scenario: A listed deliberate break is accepted
 
@@ -163,3 +208,22 @@ The spawn modal SHALL show a model × effort grid. The rows SHALL be the models 
 
 - **WHEN** the human keeps the role's default cell
 - **THEN** the command is the same as a launch without a choice
+
+#### Scenario: Other harness has no default cell
+
+- **WHEN** the human selects the role `worker` and then the harness Pi
+- **THEN** the grid marks no default cell and Launch stays off until the human picks a cell
+
+### Requirement: The human picks the orchestrator's harness and model for a new factory room
+
+The New factory room window SHALL show the harness choice and the model × effort grid of the spawn modal, with the same rules. The default SHALL be the `orchestrator` role default.
+
+#### Scenario: Factory room on Pi
+
+- **WHEN** the human creates a factory room with the harness Pi and the cell gpt-5.6-sol [openai-codex] × high
+- **THEN** the orchestrator launches on Pi with `--provider openai-codex --model gpt-5.6-sol --thinking high`
+
+#### Scenario: Factory room with the defaults
+
+- **WHEN** the human creates a factory room with no change to the harness or the grid
+- **THEN** the orchestrator launches on Claude Code with `--model opus`

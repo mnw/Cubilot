@@ -1124,6 +1124,9 @@ fn reload_settings(
     let ledger_path = ledger_file();
     let chat_history_limit = resolve_chat_history_limit();
 
+    // Stage first so the new hub reports the version agents reload to; a staging error does not stop the restart.
+    let factory_version = factory::staged_version_or_log(factory::materialize_factory(), "reload");
+
     let port = pick_free_port()?;
     let url = format!("http://127.0.0.1:{port}");
     let token = mint_token()?;
@@ -1156,6 +1159,9 @@ fn reload_settings(
         .env("CUBILOT_HUMAN_NAME", &human_name)
         .env("CUBILOT_ALLOWED_EXTENSIONS", extensions.join(","))
         .env("CUBILOT_CHAT_HISTORY_LIMIT", chat_history_limit.to_string());
+    for (k, v) in factory::hub_factory_env(&factory::factory_dir(), &factory_version) {
+        cmd = cmd.env(k, v);
+    }
     cmd = apply_summariser_env(cmd);
     let (rx, child) = cmd.spawn().map_err(|e| format!("spawn cubilot-bin: {e}"))?;
 
@@ -1430,10 +1436,8 @@ pub fn run() {
                 Err(e) => eprintln!("[setup] chatbridge mod staging failed: {e}"),
             }
 
-            match factory::materialize_factory() {
-                Ok(v) => println!("[setup] factory roles staged: {v}"),
-                Err(e) => eprintln!("[setup] factory staging failed: {e}"),
-            }
+            let factory_version = factory::staged_version_or_log(factory::materialize_factory(), "setup");
+            println!("[setup] factory roles staged: {factory_version}");
 
             let port = pick_free_port()?;
             let url = format!("http://127.0.0.1:{port}");
@@ -1481,6 +1485,9 @@ pub fn run() {
                 .env("CUBILOT_HUMAN_NAME", &human_name)
                 .env("CUBILOT_ALLOWED_EXTENSIONS", extensions.join(","))
                 .env("CUBILOT_CHAT_HISTORY_LIMIT", chat_history_limit.to_string());
+            for (k, v) in factory::hub_factory_env(&factory::factory_dir(), &factory_version) {
+                cmd = cmd.env(k, v);
+            }
             cmd = apply_summariser_env(cmd);
 
             let (rx, child) = cmd.spawn().map_err(|e| format!("spawn cubilot-bin: {e}"))?;

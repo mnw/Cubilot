@@ -33,5 +33,15 @@ export type Host = {
     onRead: () => void;
     onFail?: () => void;
   }): Promise<void>;
+  // Reloads this runtime so it re-reads the staged factory files, then records `version` as applied
+  // (POST /factory/applied). Resolves only when the reload succeeded; rejects when it failed. The core calls it
+  // at the agent's idle point only. The adapter owns the record, because a replaced module cannot write it.
+  reload(version: string): Promise<void>;
+  // Runs `command` through /bin/sh -c with `stdin`. After timeoutMs it is killed: timedOut true, code null.
+  // Rejects when it cannot be started.
+  exec(command: string, stdin: string, timeoutMs: number): Promise<{ code: number | null; stderr: string; timedOut: boolean }>;
+  // CHATBRIDGE_HANDOFF_GATE of the agent's launch environment; null when unset or empty. Named, not generic:
+  // the Claude mod's $.env.get takes a literal variable name.
+  handoffGate(): Promise<string | null>;
   log(msg: string): void;
 };

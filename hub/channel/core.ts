@@ -3,7 +3,17 @@
 // Runtime adapters implement `Host` and forward turn/tool events; they decide nothing.
 
 import type { DeliveryMode, Host } from "./host";
-import { resolveHub, URL_PATH, TOKEN_PATH } from "./hub-client";
+import { authedPost, resolveHub, URL_PATH, TOKEN_PATH } from "./hub-client";
+
+// Every adapter bounds host.reload() to RELOAD_MS and rejects with a ReloadTimeout. That is not a failure: the
+// runtime reload may still be running, so the core does not forget the hub's order for it.
+export const RELOAD_MS = 30_000;
+export class ReloadTimeout extends Error {
+  constructor() {
+    super(`reload did not end within ${RELOAD_MS / 1000} s`);
+    this.name = "ReloadTimeout";
+  }
+}
 
 const BUF_MAX = 1 << 20;
 const RETRY_MS = 2000;
@@ -30,6 +40,7 @@ export type BridgeEvent = {
   human_name?: string;
   nutshell?: string | null;
   kind_lines?: string[];
+  factory_version?: string | null;
   // ticket.new or ticket.assigned for an unassigned ticket: the room lead, who triages it (null/absent: no lead).
   lead?: string | null;
   paused?: boolean;
@@ -43,7 +54,40 @@ export type BridgeOpts = {
   hubEnv: string;
   // Backoff timer, supplied by the adapter: the core names no runtime timer (the mod has no setTimeout).
   sleep: (ms: number) => Promise<void>;
+  // Wall clock in ms; the default is Date.now. Tests pass a fake.
+  now?: () => number;
+  // False once a newer module of the same agent runs (a reloaded Claude mod). The bridge then ends by itself.
+  // A rejection counts as false: the engine unloaded the module this bridge runs in.
+  alive?: () => Promise<boolean>;
 };
+
+// A peer that got a nudge opens no new check for this long, so two agents cannot nudge each other forever.
+export const NUDGE_WINDOW_MS = 5 * 60 * 1000;
+
+// Handoff gate. CHATBRIDGE_HANDOFF_GATE (host.handoffGate) in the launch environment names a command that runs before send_handoff.
+// It gets the Claude hook shape on stdin: {tool_name, tool_input}. Exit 2 blocks the handoff and its stderr goes
+// to the agent. Exit 0 lets it through. Any other result (another exit code, a timeout, a start failure) is a fault
+// of the gate, not a verdict: it is logged and the handoff goes on, as a Claude hook does. No gate set: nothing runs.
+export const HANDOFF_GATE_MS = 60_000;
+
+export async function runHandoffGate(host: Host, toolInput: Record<string, unknown>): Promise<void> {
+  const gate = await host.handoffGate();
+  if (!gate) return;
+  const stdin = JSON.stringify({ tool_name: "mcp__chatbridge__send_handoff", tool_input: toolInput });
+  let r;
+  try {
+    r = await host.exec(gate, stdin, HANDOFF_GATE_MS);
+  } catch (e) {
+    host.log(`[channel] handoff gate not run: ${(e as Error).message ?? e}`);
+    return;
+  }
+  if (r.timedOut) {
+    host.log(`[channel] handoff gate timed out after ${HANDOFF_GATE_MS} ms; the handoff goes on`);
+    return;
+  }
+  if (r.code === 2) throw new Error(r.stderr.trim() || "the handoff gate blocked this handoff");
+  if (r.code !== 0) host.log(`[channel] handoff gate failed (exit ${r.code}); the handoff goes on`);
+}
 
 export type Bridge = {
   stop(): void;
@@ -51,12 +95,18 @@ export type Bridge = {
   // answered=false (aborted, refused, failed): the agent had no chance to reply, so armed
   // checks are dropped and no nudge is sent.
   onRunEnd(answered?: boolean): void;
+  // The main agent starts a run (not a subagent's). Until onRunEnd the agent counts as busy.
+  onRunStart(): void;
   // A chatbridge tool finished; ok = the hub answered 2xx.
   onToolResult(tool: string, ok: boolean): void;
 };
 
 export const NUDGE_TEXT =
-  "A message addressed to you got no reply in the room. Your terminal output is visible to nobody — call post.";
+  "A message addressed to you got no reply in the room. Your terminal output is visible to nobody. Call post if a reply is needed. An acknowledgement needs no reply.";
+
+// Reply policy for the `post` tool, shared by the adapters that show it to the model (pi system prompt).
+export const REPLY_POLICY =
+  "Call `post` when a message addressed to you needs a reply. A message that only acknowledges needs no reply.";
 
 // Traffic the agent itself caused (its own permission request and the resulting
 // verdict/ack events) is context, not a reason to start another turn. No general
@@ -153,7 +203,102 @@ export function startBridge(host: Host, opts: BridgeOpts): Bridge {
 
   // Post check (D7). One object per delivery (hub ids restart with the hub, so they are display-only).
   // Pending entries are untouched by posts: only an armed entry can be disarmed.
-  const checks = new Set<{ armed: boolean }>();
+  const checks = new Set<{ armed: boolean; from: string | undefined }>();
+  // When each peer last earned a nudge. A peer nudged within NUDGE_WINDOW_MS earns no second one.
+  const nudgedAt = new Map<string, number>();
+  const now = opts.now ?? Date.now;
+
+  // Hot reload. The hub keeps two records per agent (the link and the .applied file) and compares them with the
+  // desired version (POST /factory/relink), so the bridge keeps no version state: it survives a module replacement
+  // and a hub restart. host.reload records the version (POST /factory/applied) only after the reload succeeds. A briefing with a factory_version, and every run end, mark "check needed". At the idle point
+  // (at once when idle, at run end when busy) one reload at a time asks the hub to move the link.
+  let sawVersion: string | null = null;
+  let checkNeeded = false;
+  let reloading = false;
+  let retryWait = false;
+  let stuckLogged = false;
+  let noLink = false; // 404: no role, or a legacy launch. Never reloads.
+  let busy = false;
+  const failures = new Map<string, number>();
+
+  const post = (path: string, body: Record<string, unknown>) => authedPost(host, hubEnv, path, { agent, ...body });
+
+  // The hub answered "pending": a reload (maybe this agent's earlier module) is still running. The check must not
+  // be lost, because nothing tells this bridge when that reload ends. Ask again after 5 s, 10, 20, ... up to 60 s.
+  // It stops when relink answers anything but pending. No model turn: it uses the injected sleep.
+  const POLL_MIN_MS = 5_000;
+  const POLL_MAX_MS = 60_000;
+  let polling = false;
+  async function pollWhilePending(): Promise<void> {
+    if (polling) return;
+    polling = true;
+    try {
+      let delay = POLL_MIN_MS;
+      while (!ac.signal.aborted) {
+        await sleep(delay);
+        delay = Math.min(delay * 2, POLL_MAX_MS);
+        if (ac.signal.aborted) return;
+        checkNeeded = true;
+        if ((await maybeReload()) !== "pending") return;
+      }
+    } finally {
+      polling = false;
+    }
+  }
+
+  async function maybeReload(): Promise<"pending" | "other"> {
+    if (reloading || !checkNeeded || busy || noLink || sawVersion === null) return "other";
+    if ((failures.get(sawVersion) ?? 0) >= 2) return "other";
+    checkNeeded = false;
+    reloading = true;
+    try {
+      const r = await post("/factory/relink", {});
+      if (r.status === 404) { noLink = true; return "other"; }
+      const j = (r.json ?? {}) as { reload?: boolean; pending?: boolean; version?: string };
+      if (r.status < 200 || r.status >= 300) {
+        host.log(`[channel] factory relink refused: HTTP ${r.status}`);
+        return "other";
+      }
+      if (!j.reload) {
+        // The hub holds a reload with no completion: it never clears by time. Say so once per process.
+        if (j.pending && !stuckLogged) {
+          stuckLogged = true;
+          host.log("[channel] hot reload still pending: restart the agent");
+        }
+        if (j.pending) { void pollWhilePending(); return "pending"; }
+        return "other";
+      }
+      const version = j.version ?? sawVersion;
+      try {
+        await host.reload(version);
+      } catch (e) {
+        // No rollback and no applied record. A real failure tells the hub, which forgets the order, so the next
+        // relink asks for the reload again. A timeout does not: the reload may still run, the window blocks a second.
+        if (!(e instanceof ReloadTimeout)) {
+          await post("/factory/applied", { failed: true }).catch((err) => host.log(`[channel] failure not reported: ${(err as Error).message ?? err}`));
+        }
+        const n = (failures.get(version) ?? 0) + 1;
+        failures.set(version, n);
+        if (n >= 2) host.log(`[channel] hot reload failed for ${version}: ${(e as Error).message ?? e}`);
+        else { retryWait = true; checkNeeded = true; }
+        return "other";
+      }
+    } catch (e) {
+      host.log(`[channel] reload check failed: ${(e as Error).message ?? e}`);
+      return "other";
+    } finally {
+      reloading = false;
+      // A change that arrived during the reload gets one more check after it (not a retry after a failure).
+      if (checkNeeded && !retryWait) void maybeReload();
+    }
+    return "other";
+  }
+
+  function trigger(): void {
+    retryWait = false;
+    checkNeeded = true;
+    void maybeReload();
+  }
 
   async function deliver(evt: BridgeEvent): Promise<void> {
     const id = typeof evt.id === "number" ? evt.id : null;
@@ -163,7 +308,7 @@ export function startBridge(host: Host, opts: BridgeOpts): Bridge {
       !evt.type &&
       !evt.kind &&
       (evt.to ?? "").split(",").some((n) => n.trim() === agent);
-    const check = qualifies ? { armed: false } : null;
+    const check = qualifies ? { armed: false, from: evt.from } : null;
     if (check) checks.add(check);
     try {
       await host.deliver({
@@ -193,12 +338,20 @@ export function startBridge(host: Host, opts: BridgeOpts): Bridge {
       return;
     }
     await deliver(evt);
+    if (evt.type === "briefing" && evt.factory_version) {
+      sawVersion = evt.factory_version;
+      trigger();
+    }
   }
 
   async function processBuffer(buf: string): Promise<string> {
     let idx: number;
     // Stopped bridges must not leak already-buffered frames into a replacement session.
     while (!ac.signal.aborted && (idx = buf.indexOf("\n\n")) >= 0) {
+      if (opts.alive && !(await opts.alive().catch(() => false))) {
+        ac.abort();
+        break;
+      }
       const frame = buf.slice(0, idx);
       buf = buf.slice(idx + 2);
       const dataLine = frame.split("\n").find((l) => l.startsWith("data: "));
@@ -223,6 +376,7 @@ export function startBridge(host: Host, opts: BridgeOpts): Bridge {
   async function tail(): Promise<void> {
     let loggedMissingOnce = false;
     while (!ac.signal.aborted) {
+      if (opts.alive && !(await opts.alive().catch(() => false))) return;
       const hub = await resolveHub(host, hubEnv);
       if (!hub) {
         if (!loggedMissingOnce) {
@@ -263,14 +417,27 @@ export function startBridge(host: Host, opts: BridgeOpts): Bridge {
       if (!ok || (tool !== "post" && tool !== "post_file")) return;
       for (const c of checks) if (c.armed) checks.delete(c);
     },
+    onRunStart() {
+      busy = true;
+    },
     onRunEnd(answered = true) {
+      busy = false;
+      if (sawVersion !== null) trigger();
+      // The limit is checked here, when the nudge would go out, so messages queued before the first nudge
+      // share one nudge per peer.
+      const t = now();
+      const peers: string[] = [];
       let unanswered = false;
       for (const c of checks) {
         if (!c.armed) continue;
         checks.delete(c);
+        const last = c.from === undefined ? undefined : nudgedAt.get(c.from);
+        if (last !== undefined && t - last < NUDGE_WINDOW_MS) continue;
         unanswered = true;
+        if (c.from !== undefined) peers.push(c.from);
       }
       if (!unanswered || !answered) return;
+      for (const p of peers) nudgedAt.set(p, t);
       // id null: the nudge never qualifies for a check, so it cannot re-arm.
       host
         .deliver({ id: null, text: NUDGE_TEXT, mode: "wake", onRead: () => {} })

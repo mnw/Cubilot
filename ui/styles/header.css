@@ -120,11 +120,17 @@ header {
 
 .presence-dot { display: none; }  /* subsumed into .legend-dot visual */
 .legend-label { font-weight: 500; letter-spacing: 0; }
-.legend-role {
-  font-size: var(--fs-2xs);
-  color: var(--text-dim);
-  letter-spacing: 0.02em;
+/* Hover/focus card of a roster pill: floats (fixed), so the pills never move or wrap when it opens. */
+.pill-card {
+  position: fixed; z-index: 1000; min-width: 180px; max-width: min(360px, calc(100vw - 16px)); overflow-wrap: anywhere; padding: var(--sp-8) var(--sp-10);
+  background: var(--bg-elev); border: var(--border-1) solid var(--line); border-radius: var(--radius-sm);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); font-family: var(--mono); font-size: var(--fs-sm); color: var(--text);
+  pointer-events: none;
 }
+.pill-card[hidden] { display: none; }
+.pill-card-row { display: flex; justify-content: space-between; gap: var(--sp-12); }
+.pill-card-k { color: var(--text-dim); }
+.legend-item:focus-visible { outline: var(--border-1) solid var(--line-hover); outline-offset: 1px; }
 .legend-state {
   font-size: var(--fs-2xs);
   color: var(--text-dim);

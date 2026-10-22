@@ -4,6 +4,7 @@
 // runtime adapters (pi extension, Claude Code mod) stay kind-agnostic.
 
 import type { Host } from "./host";
+import { runHandoffGate } from "./core";
 import { authedGet, authedPost, authedUpload, PAUSED_LINE, toolError, type HubResponse } from "./hub-client";
 
 export type ToolContext = {
@@ -173,6 +174,7 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
       required: ["to", "task"],
     },
     handler: async (ctx, args) => {
+      await runHandoffGate(ctx.host, args);
       const body: Record<string, unknown> = {
         from: ctx.agent,
         to: args.to,
@@ -475,6 +477,30 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
       const resp = await authedPost(ctx.host, ctx.hubEnv, `/tickets/${encodeURIComponent(id)}/assign`, { by: ctx.agent, assignee });
       if (resp.status !== 200) toolError(resp, "assign_ticket");
       return { content: [{ type: "text", text: assignee ? `ticket ${id} is assigned to ${assignee}` : `ticket ${id} is unassigned` }] };
+    },
+  },
+  {
+    name: "edit_ticket",
+    description:
+      "Edit an open ticket's title or acceptance criteria. Only the human, the ticket's creator and its assignee may edit. Only the human may change blast_radius: an agent that sends it is refused. A done or cancelled ticket cannot be edited. Pass only the fields you change.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ticket_id: TICKET_ID_SCHEMA,
+        title: { type: "string", maxLength: 200, description: "The new title." },
+        acceptance_criteria: { type: "string", maxLength: 4000, description: "The new acceptance criteria." },
+        blast_radius: { type: "string", enum: ["low", "high"], description: "The human only." },
+      },
+      required: ["ticket_id"],
+    },
+    handler: async (ctx, args) => {
+      const id = String(args.ticket_id ?? "");
+      const body: Record<string, unknown> = { by: ctx.agent };
+      for (const k of ["title", "acceptance_criteria", "blast_radius"]) if (args[k] !== undefined) body[k] = args[k];
+      const resp = await authedPost(ctx.host, ctx.hubEnv, `/tickets/${encodeURIComponent(id)}/edit`, body);
+      if (resp.status !== 200) toolError(resp, "edit_ticket");
+      const unchanged = (resp.json as { idempotent?: boolean } | undefined)?.idempotent;
+      return { content: [{ type: "text", text: unchanged ? `ticket ${id} is unchanged` : `ticket ${id} is edited` }] };
     },
   },
   {

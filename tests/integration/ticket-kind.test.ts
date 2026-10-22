@@ -1408,12 +1408,138 @@ describe("list", () => {
   });
 });
 
+describe("edit", () => {
+  const edit = (id: string, by: string, over: Record<string, unknown>) => t.call("POST", `/tickets/${id}/edit`, { by, ...over });
+
+  test("the creator, the assignee and the human edit title and criteria: one ticket.edited event, room scope, refresh", async () => {
+    const id = await create({ assignee: "bob" });            // creator alice, assignee bob
+    for (const [by, title] of [["alice", "T-creator"], ["bob", "T-assignee"], [HUMAN, "T-human"]] as const) {
+      const events = t.events(id).length;
+      const refreshed = t.refreshes();
+      const r = await edit(id, by, { title, acceptance_criteria: `criteria by ${by}` });
+      expect(r.status).toBe(200);
+      expect(r.json.snapshot).toMatchObject({ title, acceptance_criteria: `criteria by ${by}`, status: "queued", blast_radius: "low" });
+      expect(t.events(id).length).toBe(events + 1);
+      expect(t.events(id).at(-1)).toEqual({ kind: "ticket.edited", actor: by });
+      expect(t.emitted.at(-1)!.entry).toMatchObject({ kind: "ticket.update", ticket_id: id, snapshot: { title } });
+      expect(t.emitted.at(-1)!.scope).toEqual({ kind: "room", room: "r1" });
+      expect(t.refreshes()).toBe(refreshed + 1);
+    }
+  });
+
+  test("another agent is refused 403, an unknown ticket 404, other room 403; nothing changes", async () => {
+    const id = await create({ assignee: "bob" });
+    const events = t.events(id).length;
+    expect((await edit(id, "carol", { title: "x" })).status).toBe(403);
+    expect((await edit(id, "dave", { title: "x" })).status).toBe(403);
+    expect((await edit("t_0000000000000000", HUMAN, { title: "x" })).status).toBe(404);
+    expect(t.row(id).title).toBe("Fix login");
+    expect(t.events(id).length).toBe(events);
+  });
+
+  test("an agent that sends blast_radius gets 403, even the creator and with the same value; nothing changes", async () => {
+    const id = await create({ assignee: "bob" });
+    const events = t.events(id).length;
+    for (const by of ["alice", "bob"]) {
+      expect((await edit(id, by, { blast_radius: "high" })).status).toBe(403);
+      expect((await edit(id, by, { title: "new", blast_radius: "low" })).status).toBe(403);
+    }
+    expect(t.row(id)).toMatchObject({ blast_radius: "low", title: "Fix login" });
+    expect(t.events(id).length).toBe(events);
+  });
+
+  test("the human changes blast_radius", async () => {
+    const id = await create();
+    const r = await edit(id, HUMAN, { blast_radius: "high" });
+    expect(r.status).toBe(200);
+    expect(r.json.snapshot.blast_radius).toBe("high");
+    expect(t.events(id).at(-1)).toEqual({ kind: "ticket.edited", actor: HUMAN });
+  });
+
+  test("a done or cancelled ticket gets 409", async () => {
+    const a = await create();
+    await as(a, HUMAN, "cancelled");
+    expect((await edit(a, "alice", { title: "x" })).status).toBe(409);
+    const b = await create();
+    await as(b, HUMAN, "done");
+    expect((await edit(b, HUMAN, { title: "x" })).status).toBe(409);
+    expect(t.row(a).title).toBe("Fix login");
+  });
+
+  test("lowering blast_radius voids the pending approval request and dismisses it", async () => {
+    const id = await toReview({ blast_radius: "high" });
+    const rid = (await t.call("POST", `/tickets/${id}/approval`, { by: "bob" })).json.request_id as string;
+    expect(t.row(id).approval_request_id).toBe(rid);
+    expect((await edit(id, HUMAN, { blast_radius: "low" })).status).toBe(200);
+    expect(t.row(id)).toMatchObject({ blast_radius: "low", approval_request_id: null });
+    expect(t.db.query<any, [string]>("SELECT status FROM permissions WHERE id = ?").get(rid)!.status).not.toBe("pending");
+    // an edit that keeps the radius leaves the pointer alone
+    const id2 = await toReview({ blast_radius: "high" });
+    const rid2 = (await t.call("POST", `/tickets/${id2}/approval`, { by: "bob" })).json.request_id as string;
+    expect((await edit(id2, "alice", { title: "renamed" })).status).toBe(200);
+    expect(t.row(id2).approval_request_id).toBe(rid2);
+  });
+
+  test("new criteria void a pending approval: the pointer is cleared and the request is dismissed", async () => {
+    const id = await toReview({ blast_radius: "high" });
+    const rid = (await t.call("POST", `/tickets/${id}/approval`, { by: "bob" })).json.request_id as string;
+    const r = await edit(id, "alice", { acceptance_criteria: "Other criteria." });
+    expect(r.status).toBe(200);
+    expect(t.row(id)).toMatchObject({ acceptance_criteria: "Other criteria.", approval_request_id: null, status: "in_review" });
+    expect(t.db.query<any, [string]>("SELECT status FROM permissions WHERE id = ?").get(rid)!.status).toBe("dismissed");
+  });
+
+  test("new criteria void an allowed approval: the assignee's done move needs a new Allow", async () => {
+    const id = await toReview({ blast_radius: "high" });
+    const rid = (await t.call("POST", `/tickets/${id}/approval`, { by: "bob" })).json.request_id as string;
+    expect((await t.call("POST", `/permissions/${rid}/verdict`, { by: HUMAN, behavior: "allow" })).status).toBe(200);
+    expect((await edit(id, HUMAN, { acceptance_criteria: "Other criteria." })).status).toBe(200);
+    expect(t.row(id).approval_request_id).toBeNull();
+    const done = await as(id, "bob", "done");
+    expect(done.status).toBe(409);
+    expect(t.row(id).status).toBe("in_review");
+    // a new request, a new Allow: now the move works
+    const rid2 = (await t.call("POST", `/tickets/${id}/approval`, { by: "bob" })).json.request_id as string;
+    expect(rid2).not.toBe(rid);
+    await t.call("POST", `/permissions/${rid2}/verdict`, { by: HUMAN, behavior: "allow" });
+    expect((await as(id, "bob", "done")).status).toBe(200);
+  });
+
+  test("a title edit keeps the approval", async () => {
+    const id = await toReview({ blast_radius: "high" });
+    const rid = (await t.call("POST", `/tickets/${id}/approval`, { by: "bob" })).json.request_id as string;
+    expect((await edit(id, "alice", { title: "renamed" })).status).toBe(200);
+    expect(t.row(id).approval_request_id).toBe(rid);
+  });
+
+  test("bad input: 400 and nothing written; the same values are idempotent", async () => {
+    const id = await create();
+    const events = t.events(id).length;
+    for (const over of [{}, { title: "" }, { title: 5 }, { title: "x".repeat(201) }, { acceptance_criteria: "  " }, { acceptance_criteria: "y".repeat(4001) }, { blast_radius: "medium" }]) {
+      expect((await edit(id, "alice", over)).status).toBe(400);
+    }
+    expect(t.events(id).length).toBe(events);
+    const refreshed = t.refreshes();
+    const same = await edit(id, "alice", { title: "Fix login", acceptance_criteria: "Login works with a valid token." });
+    expect(same.status).toBe(200);
+    expect(same.json.idempotent).toBe(true);
+    expect(t.events(id).length).toBe(events);
+    expect(t.refreshes()).toBe(refreshed);
+  });
+
+  test("a paused agent is refused", async () => {
+    const id = await create();
+    t.paused.add("alice");
+    expect((await edit(id, "alice", { title: "x" })).status).toBe(423);
+  });
+});
+
 describe("kind contract", () => {
-  test("pendingFor is empty and toolNames list the six tools", async () => {
+  test("pendingFor is empty and toolNames list the seven tools", async () => {
     const k = t.kinds.find((x) => x.kind === "ticket")!;
     await create();
     expect(k.pendingFor({ name: "alice", room: "r1", permanent: false }, t.cap)).toEqual([]);
-    expect(k.toolNames).toEqual(["create_ticket", "claim_ticket", "transition_ticket", "list_tickets", "assign_ticket", "attach_ticket_file"]);
+    expect(k.toolNames).toEqual(["create_ticket", "claim_ticket", "transition_ticket", "list_tickets", "assign_ticket", "edit_ticket", "attach_ticket_file"]);
   });
 
   test("hub.ts names no ticket kind", () => {

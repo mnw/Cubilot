@@ -115,6 +115,38 @@ describe("pty plumbing — tmux session contract", () => {
     },
   );
 
+  // An agent name may hold spaces (and dots). The pane streams the attach client's output and ends with the
+  // session; pty.rs emits the output and exit events from that stream under a hex-encoded event name
+  // (pty_event / ptyEventName), so the name never reaches Tauri's event-name rules. Here: the tmux side of it,
+  // with a spaced name and the exact target forms pty.rs uses (`=name`).
+  test(
+    "an agent name with a space streams output through the attach client and the stream ends with the session",
+    async () => {
+      const name = "orchestrator-Test room";
+      await h.spawnSession(name, ["-c", "/tmp", "echo STREAM-MARK-1; sleep 2"]);
+      expect((await h.run(["has-session", "-t", `=${name}`])).exitCode).toBe(0);
+      // `script` gives the attach client the terminal it needs (pty.rs uses a real PTY pair).
+      const proc = Bun.spawn(["script", "-q", "/dev/null", h.tmux, "-S", h.sock, "attach-session", "-t", `=${name}`], {
+        stdout: "pipe", stderr: "pipe", stdin: Bun.file("/dev/null"),
+      });
+      const out = await new Response(proc.stdout).text(); // the exit event: the stream ends when the session ends
+      await proc.exited;
+      expect(out).toContain("STREAM-MARK-1");
+      expect((await h.run(["has-session", "-t", `=${name}`])).exitCode).not.toBe(0);
+    },
+    15000,
+  );
+
+  // Known limit, found with the event-name fix: tmux itself rewrites a '.' in a session NAME to '_', and a target
+  // `=a.b` then parses `.b` as a pane. A dotted agent name therefore does not round-trip through tmux.
+  test("tmux rewrites a dot in a session name (a dotted agent name does not round-trip)", async () => {
+    await h.run(["new-session", "-d", "-s", "t a.b", "-x", "80", "-y", "24"]);
+    const names = (await h.run(["list-sessions", "-F", "#{session_name}"])).stdout.trim().split("\n");
+    expect(names).toEqual(["t a_b"]);
+    expect((await h.run(["has-session", "-t", "=t a.b"])).exitCode).not.toBe(0);
+    expect((await h.run(["has-session", "-t", "=t a_b"])).exitCode).toBe(0);
+  });
+
   test("list-sessions reports names created on the hermetic socket", async () => {
     await h.spawnSession("probe-7a", ["-c", "/tmp"]);
     await h.spawnSession("probe-7b", ["-c", "/tmp"]);

@@ -6,6 +6,7 @@ provider: openai-codex
 model: gpt-5.6-sol
 thinking: high
 excludeTools: edit,write
+disallowedTools: Edit, Write, NotebookEdit, Task, Agent
 ---
 You are the Reviewer in a software factory in an Cubilot Room. You give the final verdict on `[doc]` tickets.
 

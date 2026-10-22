@@ -14,7 +14,7 @@ use tauri::{AppHandle, Emitter, State};
 use crate::{
     app_data_dir, resolve_anthropic_api_key, resolve_claude_path,
     resolve_pi_extension, resolve_pi_path,
-    resolve_tmux_bin,
+    resolve_tmux_bin as real_tmux_bin,
 };
 
 // Reserved name for the human's pinned shell — kept separate so it survives room filters.
@@ -36,6 +36,15 @@ pub fn valid_agent_name(name: &str) -> bool {
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-' || c == ' ')
 }
 
+// tmux rewrites a '.' in a session name to '_' and then cannot find the session by the agent's name (found with the
+// event-name fix), so a terminal agent cannot have a dot. Hub names are unchanged: external agents may use dots.
+// The same text is in ui/terminal/factory-room.js (terminalNameError).
+const DOT_IN_TERMINAL_NAME: &str = "a dot is not allowed in a terminal agent name: tmux changes it";
+
+fn terminal_name_error(name: &str) -> Option<&'static str> {
+    name.contains('.').then_some(DOT_IN_TERMINAL_NAME)
+}
+
 pub struct PtyHandle {
     master: Box<dyn portable_pty::MasterPty + Send>,
     writer: Box<dyn Write + Send>,
@@ -52,7 +61,25 @@ struct OutputPayload {
     b64: String,
 }
 
+#[cfg(test)]
+thread_local! {
+    // (tmux binary, socket) of an isolated test server; unset: the real ones.
+    static TEST_TMUX: std::cell::RefCell<Option<(PathBuf, PathBuf)>> = const { std::cell::RefCell::new(None) };
+}
+
+fn resolve_tmux_bin() -> Result<PathBuf, String> {
+    #[cfg(test)]
+    if let Some((bin, _)) = TEST_TMUX.with(|t| t.borrow().clone()) {
+        return Ok(bin);
+    }
+    real_tmux_bin()
+}
+
 fn tmux_socket_path() -> PathBuf {
+    #[cfg(test)]
+    if let Some((_, sock)) = TEST_TMUX.with(|t| t.borrow().clone()) {
+        return sock;
+    }
     app_data_dir().join("tmux.sock")
 }
 
@@ -61,6 +88,13 @@ fn tmux_socket_path() -> PathBuf {
 // `=name`; one for a pane, window or option (set-option, list-panes, resize-window, capture-pane,
 // display-message, pipe-pane) needs the colon, `=name:` (`=name` alone is rejected there).
 // Not for `refresh-client -t`, which takes a client, not a session.
+// Tauri event names allow only alphanumerics, `-`, `/`, `:` and `_`, but an agent name may hold spaces and dots.
+// The name part of an event is the lowercase hex of the agent name's UTF-8 bytes: injective, and in the allowed
+// set. The JS side builds the same string (ptyEventName in ui/terminal/pty.js); both sides use ONE helper.
+fn pty_event(kind: &str, agent: &str) -> String {
+    format!("pty://{kind}/{}", crate::factory::agent_key(agent))
+}
+
 fn tmux_session(name: &str) -> String {
     format!("={name}")
 }
@@ -225,6 +259,8 @@ fn agent_command(
     role: Option<&str>,
     choice: &crate::factory::LaunchChoice,
 ) -> Result<String, String> {
+    // A new session: drop any link and .applied of an earlier agent of this name. Re-attach never gets here.
+    crate::factory::clear_agent_records(&crate::factory::factory_dir(), agent)?;
     match harness {
         Harness::Claude => claude_command(
             agent,
@@ -237,10 +273,7 @@ fn agent_command(
         ),
         Harness::Pi => {
             let launch = match role {
-                Some(r) => Some(crate::factory::with_choice(
-                    crate::factory::resolve_role_launch(agent, r, std::path::Path::new(cwd))?,
-                    choice,
-                )),
+                Some(r) => Some(crate::factory::resolve_role_launch(agent, r, std::path::Path::new(cwd), "pi", choice)?),
                 None => None,
             };
             let cmd = pi_command(agent, room, cwd, session_mode, launch.as_ref())?;
@@ -409,29 +442,56 @@ pub fn pane_harness(agent: &str) -> Harness {
 // does not know the role. Read back with one list-sessions call.
 #[derive(Debug, PartialEq, Clone, serde::Serialize)]
 pub struct PillInfo {
-    pub role: String,
+    pub role: String,     // empty: a launch without a role
     pub model: String,
-    pub provider: String, // Pi roles only, else empty
+    pub provider: String, // Pi only, else empty
+    pub effort: String,   // Claude effort or Pi thinking level; empty when none was set
+    pub harness: String,  // "claude" or "pi"; empty for a session this app did not launch
 }
 
-fn role_options(spec: &crate::factory::RoleSpec, choice: &crate::factory::LaunchChoice) -> Vec<(&'static str, String)> {
-    let model = choice.model.clone().or_else(|| spec.model.clone()).unwrap_or_default();
-    let provider = if spec.harness == "pi" { choice.provider.clone().or_else(|| spec.provider.clone()).unwrap_or_default() } else { String::new() };
-    vec![("@cubilot_role", spec.name.clone()), ("@cubilot_model", model), ("@cubilot_provider", provider)]
+// The pill shows what the launch runs, so it follows the LAUNCH harness (task 9.4): on the role's own harness the
+// role default applies unless the choice changes it; on the other harness only the choice counts (the role's model
+// and provider are not used there). A Claude launch has no provider.
+fn role_options(spec: &crate::factory::RoleSpec, harness: Harness, choice: &crate::factory::LaunchChoice) -> Vec<(&'static str, String)> {
+    let is_pi = harness == Harness::Pi;
+    let own = (spec.harness == "pi") == is_pi;
+    // "default" is written only here, when the launch carries no model or effort flag: the pill card shows what was recorded.
+    let model = choice.model.clone().or_else(|| spec.model.clone().filter(|_| own)).unwrap_or_else(|| DEFAULT_RECORD.to_string());
+    let provider = if is_pi { choice.provider.clone().or_else(|| spec.provider.clone().filter(|_| own)).unwrap_or_default() } else { String::new() };
+    // Claude roles have no default effort; a Pi role's thinking level is its effort on its own harness.
+    let effort = choice.effort.clone().or_else(|| spec.thinking.clone().filter(|_| own && is_pi)).unwrap_or_else(|| DEFAULT_RECORD.to_string());
+    vec![("@cubilot_role", spec.name.clone()), ("@cubilot_model", model), ("@cubilot_provider", provider), ("@cubilot_effort", effort)]
 }
 
-const PILL_FORMAT: &str = "#{session_name}\t#{@cubilot_role}\t#{@cubilot_model}\t#{@cubilot_provider}";
+const DEFAULT_RECORD: &str = "default";
 
-// Sessions without a role (no option set) are left out: their pill stays as it is.
+// A launch without a role records what its flags carry: the chosen model, provider (Pi) and effort.
+fn plain_options(harness: Harness, choice: &crate::factory::LaunchChoice) -> Vec<(&'static str, String)> {
+    let provider = if harness == Harness::Pi { choice.provider.clone().unwrap_or_default() } else { String::new() };
+    vec![
+        ("@cubilot_model", choice.model.clone().unwrap_or_else(|| DEFAULT_RECORD.to_string())),
+        ("@cubilot_provider", provider),
+        ("@cubilot_effort", choice.effort.clone().unwrap_or_else(|| DEFAULT_RECORD.to_string())),
+    ]
+}
+
+const PILL_FORMAT: &str = "#{session_name}\t#{@cubilot_role}\t#{@cubilot_model}\t#{@cubilot_provider}\t#{@cubilot_effort}\t#{@cubilot_harness}";
+
+// A session is listed when it has a role or a harness record, so a launch without a role has its details too.
+// Sessions with neither (not launched by this app) are left out: the card shows "-" for them.
 fn parse_role_pills(out: &str) -> std::collections::HashMap<String, PillInfo> {
     let mut map = std::collections::HashMap::new();
     for line in out.lines() {
         let mut f = line.split('\t');
         let (Some(name), Some(role), Some(model), Some(provider)) = (f.next(), f.next(), f.next(), f.next()) else { continue };
-        if role.is_empty() || !valid_agent_name(name) {
+        let (effort, harness) = (f.next().unwrap_or(""), f.next().unwrap_or(""));
+        if (role.is_empty() && harness.is_empty()) || !valid_agent_name(name) {
             continue;
         }
-        map.insert(name.to_string(), PillInfo { role: role.to_string(), model: model.to_string(), provider: provider.to_string() });
+        map.insert(
+            name.to_string(),
+            PillInfo { role: role.to_string(), model: model.to_string(), provider: provider.to_string(), effort: effort.to_string(), harness: harness.to_string() },
+        );
     }
     map
 }
@@ -598,7 +658,16 @@ fn pi_role_flags(r: &crate::factory::RoleLaunch) -> Result<(String, String), Str
     }
     let sq = |s: &str| s.replace('\'', r"'\''");
     let psq = |p: &std::path::Path| sq(&p.to_string_lossy());
-    let mut f = format!("--no-skills --append-system-prompt '{}' ", psq(&r.prompt_file));
+    // `--no-extensions` (task: Pi role isolation): without it Pi also loads the user's pi packages (their skills and
+    // extension tools such as filler). It also drops Pi's built-in MCP, so the two builtins are loaded again by name,
+    // for parity with Claude roles (user MCP servers through --mcp-config). Probe 2 (Pi 1.3.0, live): with both
+    // builtins `/mcp` shows serena connected and a tool_search + mcp__serena__ call reaches the server; with
+    // builtin:mcp alone the tools are connected but not callable. Skills stay the role's own plus asd-ste100, and no
+    // filler tool. Explicit `-e` paths still load, so pi_command's chatbridge extension follows these flags.
+    let mut f = format!(
+        "--no-skills --no-extensions -e builtin:mcp -e builtin:tool-search --append-system-prompt '{}' ",
+        psq(&r.prompt_file)
+    );
     let role_skills = r.plugin_dir.join("skills");
     if role_skills.is_dir() {
         f.push_str(&format!("--skill '{}' ", psq(&role_skills)));
@@ -631,10 +700,7 @@ fn claude_command(
 ) -> Result<String, String> {
     // Resolved before the mod is staged or anything is written for a role-less spawn: no role, no change.
     let launch = match role {
-        Some(r) => Some(crate::factory::with_choice(
-            crate::factory::resolve_role_launch(agent, r, std::path::Path::new(cwd))?,
-            choice,
-        )),
+        Some(r) => Some(crate::factory::resolve_role_launch(agent, r, std::path::Path::new(cwd), "claude", choice)?),
         None => None,
     };
     let cmd = claude_command_using(
@@ -828,7 +894,7 @@ fn format_claude_command(
     // Role identity travels as env like agent and room; the flags load the staged role plugin and shared plugin.
     // Nothing is added when there is no role.
     let (role_part, role_flags) = match role {
-        // pty_spawn picks the harness from the role (harness_for_role), so this only guards a wrong call.
+        // The launch harness comes from the modal and resolve_role_launch builds the role for it, so this only guards a wrong call.
         Some(r) if r.harness != "claude" => return Err(format!("role '{}' runs on {}, not claude", r.name, r.harness)),
         Some(r) if crate::factory::valid_role_name(&r.name) => {
             let settings = r.settings.as_ref().ok_or_else(|| format!("role '{}': no settings file", r.name))?;
@@ -945,7 +1011,7 @@ fn attach_and_stream(
                 Ok(n) => {
                     let b64 = B64.encode(&buf[..n]);
                     let _ = app_clone.emit(
-                        &format!("pty://output/{}", name_clone),
+                        &pty_event("output", &name_clone),
                         OutputPayload {
                             agent: name_clone.clone(),
                             b64,
@@ -955,7 +1021,7 @@ fn attach_and_stream(
                 Err(_) => break,
             }
         }
-        let _ = app_clone.emit(&format!("pty://exit/{}", name_clone), &name_clone);
+        let _ = app_clone.emit(&pty_event("exit", &name_clone), &name_clone);
         let mut map = registry_clone.lock().unwrap();
         map.remove(&name_clone);
     });
@@ -1098,22 +1164,6 @@ fn spawn_role_with(role: Option<String>, check: &dyn Fn(&str) -> Result<(), Stri
     Ok(Some(r))
 }
 
-/// The harness a spawn runs on: the role's frontmatter `harness` when a role is set, else the requested one.
-fn harness_for_role(requested: Harness, role: Option<&str>) -> Result<Harness, String> {
-    harness_for_role_with(requested, role, &|r| crate::factory::resolve_role_spec(r).map(|s| s.harness))
-}
-
-fn harness_for_role_with(
-    requested: Harness,
-    role: Option<&str>,
-    role_harness: &dyn Fn(&str) -> Result<String, String>,
-) -> Result<Harness, String> {
-    match role {
-        None => Ok(requested),
-        Some(r) => Harness::parse(Some(&role_harness(r)?)),
-    }
-}
-
 // ---- Pi sign-in check (task 3.5) ----
 // A Pi role launch names a provider (openai-codex for the validator and the reviewer). Without a sign-in Pi starts
 // and then fails inside the pane, where the human sees a blank agent. So the check runs BEFORE the tmux session is
@@ -1194,9 +1244,58 @@ fn pi_provider_to_check(
         return Ok(Some(p.clone()));
     }
     match role {
-        Some(r) => Ok(crate::factory::resolve_role_spec(r)?.provider),
+        Some(r) => Ok(role_default_pi_provider(&crate::factory::resolve_role_spec(r)?)),
         None => Ok(None),
     }
+}
+
+// The role's provider counts only when the role runs on Pi by default; a Claude role launched on Pi has none.
+fn role_default_pi_provider(spec: &crate::factory::RoleSpec) -> Option<String> {
+    spec.provider.clone().filter(|_| spec.harness == "pi")
+}
+
+const SESSION_NOT_FOUND: &str = "session not found";
+
+// attach_only with no tmux session of that name: refuse, create nothing.
+fn attach_only_error(attach_only: bool, session_exists: bool) -> Option<&'static str> {
+    (attach_only && !session_exists).then_some(SESSION_NOT_FOUND)
+}
+
+// A role was requested and the session already exists: it must run that role. A session with no role does not.
+fn role_mismatch_error(agent: &str, requested: Option<&str>, session_role: Option<&str>) -> Option<String> {
+    let want = requested?;
+    let have = session_role.map(str::trim).filter(|r| !r.is_empty());
+    if have == Some(want) {
+        return None;
+    }
+    let running = have.map_or_else(|| "no role".to_string(), |h| format!("role {h}"));
+    Some(format!("session {agent} already runs with {running}: close it first"))
+}
+
+// Everything pty_spawn decides about a session that may already exist, before anything is created:
+// - attach_only and no session: refused;
+// - a role was requested and the session runs another one (or none): refused;
+// - attach_only and the session is gone by the time it is configured (it can exit after the first checks):
+//   refused too, so the caller's "create" branch is never reached.
+// Ok(true): the session exists and is configured. Ok(false): none exists and the caller may create it.
+// `between` runs after the role check and before the configuration (the test kills the session there).
+fn existing_session_state(agent: &str, role: Option<&str>, attach_only: bool, lang: &str, between: impl FnOnce()) -> Result<bool, String> {
+    if let Some(e) = attach_only_error(attach_only, session_exists(agent)) {
+        return Err(e.to_string());
+    }
+    // An existing session keeps the role it was launched with: a launch that asks for another one is refused.
+    if role.is_some() && session_exists(agent) {
+        let have = tmux_run(&["show-options", "-v", "-t", &tmux_pane(agent), "@cubilot_role"]).ok();
+        if let Some(e) = role_mismatch_error(agent, role, have.as_deref()) {
+            return Err(e);
+        }
+    }
+    between();
+    let existed = ensure_session_configured(agent, lang)?;
+    if !existed && attach_only {
+        return Err(SESSION_NOT_FOUND.to_string());
+    }
+    Ok(existed)
 }
 
 #[tauri::command]
@@ -1212,19 +1311,25 @@ pub async fn pty_spawn(
     model: Option<String>,
     effort: Option<String>,
     provider: Option<String>,
+    attach_only: Option<bool>,
 ) -> Result<(), String> {
     // An unknown or council role fails here, before any tmux session exists. No role: nothing changes.
     let role = spawn_role(role)?;
     if !valid_agent_name(&agent) {
         return Err(format!("invalid agent name: {agent}"));
     }
+    if let Some(e) = terminal_name_error(&agent) {
+        return Err(e.to_string());
+    }
     let harness = Harness::parse(harness.as_deref())?;
-    // A role's own harness replaces the one the modal asked for (a Pi role builds the Pi command even when the
-    // modal says Claude). No role: the requested harness, as before.
-    let harness = harness_for_role(harness, role.as_deref())?;
-    // The model x effort grid (task 5.5): only what the human changed arrives here. Checked against the EFFECTIVE
-    // harness, so a Claude effort level on a Pi role (or the reverse) is refused, not guessed.
+    // The harness from the modal decides the launch (task 9.4); a role's own harness is only its default. The
+    // model x effort grid (task 5.5): only what the human changed arrives here. Checked against the launch harness,
+    // so a Claude effort level on a Pi launch (or the reverse) is refused, not guessed.
     let choice = crate::factory::launch_choice(harness == Harness::Pi, model.as_deref(), provider.as_deref(), effort.as_deref())?;
+    // A role on the other harness than its own needs a chosen model: refused here, before any tmux session exists.
+    if let Some(r) = role.as_deref() {
+        crate::factory::check_role_harness(&crate::factory::resolve_role_spec(r)?, if harness == Harness::Pi { "pi" } else { "claude" }, &choice)?;
+    }
 
     let resolved_room = match room.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(r) if valid_room_label(r) => r.to_string(),
@@ -1239,10 +1344,9 @@ pub async fn pty_spawn(
         }
     }
 
-    let api_key = resolve_anthropic_api_key();
     let lang = resolve_utf8_locale();
-
-    let existed = ensure_session_configured(&agent, &lang)?;
+    let api_key = resolve_anthropic_api_key();
+    let existed = existing_session_state(&agent, role.as_deref(), attach_only.unwrap_or(false), &lang, || {})?;
     if !existed {
         // Built only for a new session: re-attaching to a live one must not depend on the
         // Claude version check or mod staging.
@@ -1281,14 +1385,15 @@ pub async fn pty_spawn(
         if let Err(e) = tmux_run(&["set-option", "-t", &tmux_pane(&agent), "@cubilot_harness", harness.as_str()]) {
             eprintln!("[pty] pty_spawn/@cubilot_harness (falls back to command inspection): {e}");
         }
-        if let Some(r) = &role {
-            // Best effort, like the harness record: a missing pill must not fail a launch that already runs.
-            if let Ok(spec) = crate::factory::resolve_role_spec(r) {
-                for (k, v) in role_options(&spec, &choice) {
-                    if let Err(e) = tmux_run(&["set-option", "-t", &tmux_pane(&agent), k, &v]) {
-                        eprintln!("[pty] pty_spawn/{k} (pill only): {e}");
-                    }
-                }
+        // Best effort, like the harness record: a missing pill must not fail a launch that already runs.
+        // A role launch records the role's details, a launch without a role records its chosen ones.
+        let options = match &role {
+            Some(r) => crate::factory::resolve_role_spec(r).ok().map(|spec| role_options(&spec, harness, &choice)),
+            None => Some(plain_options(harness, &choice)),
+        };
+        for (k, v) in options.into_iter().flatten() {
+            if let Err(e) = tmux_run(&["set-option", "-t", &tmux_pane(&agent), k, &v]) {
+                eprintln!("[pty] pty_spawn/{k} (pill only): {e}");
             }
         }
         if let Err(e) = tmux_run(&["set-option", "-t", &tmux_pane(&agent), "status", "off"]) {
@@ -1411,6 +1516,18 @@ pub fn pty_spawn_shell(
 #[tauri::command]
 pub fn pty_shell_exists() -> Result<bool, String> {
     Ok(session_exists(SHELL_SESSION_NAME))
+}
+
+// Live sessions and the start command of every live pane, for the factory cleanup. No tmux server means nothing is
+// live, and that is known only when the socket file does not exist. Any other failure (a stale or non-socket file,
+// a refused connection) is an error, so the cleanup deletes nothing.
+pub(crate) fn live_tmux_state() -> Result<(Vec<String>, String), String> {
+    let ask = |args: &[&str]| match tmux_run(args) {
+        Err(_) if !tmux_socket_path().exists() => Ok(String::new()),
+        other => other,
+    };
+    let sessions = ask(&["list-sessions", "-F", "#S"])?.lines().map(|l| l.trim().to_string()).collect();
+    Ok((sessions, ask(&["list-panes", "-a", "-F", "#{pane_start_command}"])?))
 }
 
 #[tauri::command]
@@ -2225,6 +2342,11 @@ mod spawn_argv_tests {
     }
 
     // A real staged tree: the repo's factory/ staged into a temp app-data dir, plus a settings file for the agent.
+    // The role on its own harness (what the role file says).
+    fn role_launch(spec: &crate::factory::RoleSpec, version_dir: &std::path::Path, settings: Option<std::path::PathBuf>) -> crate::factory::RoleLaunch {
+        crate::factory::role_launch_on(spec, &spec.harness, version_dir, settings)
+    }
+
     fn staged_role(role: &str, agent: &str) -> (std::path::PathBuf, crate::factory::RoleLaunch) {
         use crate::factory::*;
         static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -2339,7 +2461,10 @@ mod spawn_argv_tests {
         let (root, launch) = staged_role("validator", "v");
         let f = pi_role_flags_for_test(&launch).unwrap();
         let v = launch.plugin_dir.parent().unwrap().display().to_string();
-        assert!(f.starts_with("CHATBRIDGE_ROLE='validator' --no-skills "), "{f}");
+        assert!(
+            f.starts_with("CHATBRIDGE_ROLE='validator' --no-skills --no-extensions -e builtin:mcp -e builtin:tool-search --append-system-prompt "),
+            "{f}"
+        );
         assert!(f.contains("--provider 'openai-codex'"), "test 6: {f}");
         assert!(f.contains("--model 'gpt-5.6-sol'"), "test 6: {f}");
         assert!(f.contains("--thinking 'high'"), "test 6: {f}");
@@ -2373,13 +2498,17 @@ mod spawn_argv_tests {
         assert_eq!(cmd.matches("--skill '").count(), 2, "test 6: {cmd}");
         assert!(!cmd.contains("--prompt-template"), "test 6: {cmd}");
         assert!(!cmd.contains(&proj.to_string_lossy().to_string()), "test 6: no inherited project folder: {cmd}");
-        assert!(cmd.contains("--no-approve --no-skills "), "test 11: {cmd}");
+        assert!(cmd.contains("--no-approve --no-skills --no-extensions -e builtin:mcp -e builtin:tool-search --append-system-prompt "), "test 11: {cmd}");
+        // the chatbridge extension is the LAST -e, after the two builtins
+        assert!(cmd.find("-e builtin:tool-search").unwrap() < cmd.find(" -e '").unwrap(), "{cmd}");
+        assert_eq!(cmd.matches(" -e ").count(), 3, "two builtins + the chatbridge extension: {cmd}");
         assert!(cmd.find("/validator/skills'").unwrap() < cmd.find("/shared/skills'").unwrap(), "{cmd}");
         assert!(cmd.contains(" -e '"), "extension kept: {cmd}");
         assert!(!cmd.contains("--tools"), "{cmd}");
         let none = super::pi_command("v", "r", &cwd, None, None).unwrap();
         assert_eq!(none, plain);
-        assert!(!none.contains("CHATBRIDGE_ROLE") && !none.contains("--no-skills"), "{none}");
+        assert!(!none.contains("CHATBRIDGE_ROLE") && !none.contains("--no-skills") && !none.contains("--no-extensions") && !none.contains("builtin:"), "{none}");
+        assert_eq!(none.matches(" -e ").count(), 1, "a no-role Pi command only has the chatbridge extension: {none}");
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&proj);
     }
@@ -2403,33 +2532,107 @@ mod spawn_argv_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    // Hot reload (8.3a): a launch built on the agent link names it, never a v-<hash> folder, on both harnesses.
     #[test]
-    fn a_role_harness_replaces_the_requested_harness() {
+    fn role_commands_name_the_agent_link_not_a_version_folder() {
         use crate::factory::*;
-        let root = std::env::temp_dir().join(format!("cubilot-harness-role-{}", std::process::id()));
+        use std::path::Path;
+        let root = std::env::temp_dir().join(format!("cubilot-active-cmd-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
         let dest = root.join("factory");
         let version = dest.join(stage_factory(&src, &dest, &root.join("user")).unwrap());
-        let of = |r: &str| load_role_spec(r, &src, &version).map(|s| s.harness);
-        // test 6: validator with the modal on Claude builds the Pi command
-        assert_eq!(super::harness_for_role_with(Harness::Claude, Some("validator"), &of), Ok(Harness::Pi));
-        // a Claude role with the modal on Pi builds the Claude command
-        assert_eq!(super::harness_for_role_with(Harness::Pi, Some("worker"), &of), Ok(Harness::Claude));
-        // no role: the argument is used as before
-        assert_eq!(super::harness_for_role_with(Harness::Pi, None, &of), Ok(Harness::Pi));
-        assert_eq!(super::harness_for_role_with(Harness::Claude, None, &of), Ok(Harness::Claude));
-        // an unknown role is still an error
-        assert!(super::harness_for_role_with(Harness::Claude, Some("nope"), &of).is_err());
-        // and the command builders follow: the validator launch builds with pi, not claude
-        let launch = {
-            let spec = load_role_spec("validator", &src, &version).unwrap();
-            role_launch(&spec, &version, None)
-        };
-        assert!(super::format_claude_command("a", "r", None, std::path::Path::new("/c"), std::path::Path::new("/m"), None, Some(&launch)).is_err());
-        let (env, flags) = super::pi_role_flags(&launch).unwrap();
-        assert!(env.contains("validator") && flags.contains("--provider 'openai-codex'"));
+        let v = version.file_name().unwrap().to_string_lossy().into_owned();
+        let active = link_agent(&dest, "my agent", &v).unwrap();
+        assert!(active.ends_with("agents/6d79206167656e74"));
+        let spec = load_role_spec("worker", &src, &version).unwrap();
+        let claude = role_launch_on(&spec, "claude", &active, Some(root.join("s.json")));
+        let cmd = super::format_claude_command("a", "r", None, Path::new("/c"), Path::new("/m"), None, Some(&claude)).unwrap();
+        let pi = role_launch_on(&spec, "pi", &active, None);
+        let (e, f) = super::pi_role_flags(&pi).unwrap();
+        let a = active.display().to_string();
+        for (name, text) in [("claude", cmd), ("pi", format!("{e}{f}"))] {
+            assert!(text.contains(&format!("{a}/worker")) && text.contains(&format!("{a}/shared")), "{name}: {text}");
+            assert!(!text.contains("/v-"), "{name} names a version folder: {text}");
+        }
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // Brief test 15 (task 9.4): the modal's harness decides; the role's model, provider and thinking apply only on
+    // the role's own harness; the tool limits for the launch harness come from the role file; ack_permission is
+    // blocked on both; a launch on the other harness without a chosen model is refused.
+    #[test]
+    fn launch_choice_the_modal_harness_decides_and_the_role_defaults_apply_only_on_its_own() {
+        use crate::factory::*;
+        use std::path::Path;
+        let root = std::env::temp_dir().join(format!("cubilot-launch-choice-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
+        let dest = root.join("factory");
+        let version = dest.join(stage_factory(&src, &dest, &root.join("user")).unwrap());
+        let settings = Some(root.join("s.json"));
+        let on = |role: &str, harness: &str, ch: &LaunchChoice| -> Result<RoleLaunch, String> {
+            let spec = load_role_spec(role, &src, &version)?;
+            check_role_harness(&spec, harness, ch)?;
+            Ok(with_choice(role_launch_on(&spec, harness, &version, settings.clone()), ch))
+        };
+        let claude_cmd = |l: &RoleLaunch| super::format_claude_command("a", "r", None, Path::new("/c"), Path::new("/m"), None, Some(l)).unwrap();
+        let pi_flags = |l: &RoleLaunch| { let (e, f) = super::pi_role_flags(l).unwrap(); format!("{e}{f}") };
+        let none = LaunchChoice::default();
+
+        // each role on its own harness with no choice: the role file's defaults
+        let w = claude_cmd(&on("worker", "claude", &none).unwrap());
+        assert!(w.contains("--model 'sonnet'") && w.contains("--disallowed-tools 'Task,Agent,mcp__chatbridge__ack_permission'"), "{w}");
+        let o = claude_cmd(&on("orchestrator", "claude", &none).unwrap());
+        assert!(o.contains("--model 'opus'") && o.contains("--disallowed-tools 'Edit,Write,NotebookEdit,Task,Agent,mcp__chatbridge__ack_permission'"), "{o}");
+        for r in ["validator", "reviewer"] {
+            let f = pi_flags(&on(r, "pi", &none).unwrap());
+            assert!(f.contains("--provider 'openai-codex'") && f.contains("--model 'gpt-5.6-sol'") && f.contains("--thinking 'high'"), "{r}: {f}");
+            assert!(f.contains("--exclude-tools 'edit,write,ack_permission'"), "{r}: {f}");
+        }
+
+        // the other harness without a chosen model: an error, nothing is built
+        for (r, h) in [("worker", "pi"), ("orchestrator", "pi"), ("validator", "claude"), ("reviewer", "claude")] {
+            let e = on(r, h, &none).unwrap_err();
+            assert!(e.contains("choose a model") && e.contains("Nothing was started"), "{r} on {h}: {e}");
+            assert!(on(r, h, &choice(None, None, Some("high"))).is_err(), "an effort alone is not a model: {r} on {h}");
+        }
+
+        // a Claude role on Pi: the human's model and provider, no role default, the role file's Pi limits
+        let f = pi_flags(&on("worker", "pi", &choice(Some("gpt-5.6-sol"), Some("openai-codex"), Some("high"))).unwrap());
+        assert!(f.contains("--provider 'openai-codex' --model 'gpt-5.6-sol' --thinking 'high'"), "{f}");
+        assert!(!f.contains("sonnet"), "{f}");
+        assert!(f.contains("--exclude-tools 'ack_permission'"), "worker has no Pi file limits: {f}");
+        let f = pi_flags(&on("orchestrator", "pi", &choice(Some("gpt-5.6-terra"), Some("openai-codex"), None)).unwrap());
+        assert!(f.contains("--exclude-tools 'edit,write,ack_permission'") && !f.contains("--thinking"), "{f}");
+
+        // a Pi role on Claude: the human's model, no provider or thinking, the role file's Claude limits
+        for r in ["validator", "reviewer"] {
+            let c = claude_cmd(&on(r, "claude", &choice(Some("opus"), None, Some("max"))).unwrap());
+            assert!(c.contains("--model 'opus'") && c.contains("--effort 'max'"), "{r}: {c}");
+            assert!(c.contains("--disallowed-tools 'Edit,Write,NotebookEdit,Task,Agent,mcp__chatbridge__ack_permission'"), "{r}: {c}");
+            assert!(!c.contains("openai-codex") && !c.contains("--thinking") && !c.contains("gpt-5"), "{r}: {c}");
+        }
+
+        // the same role file is read again for the next launch; an unknown role is still an error
+        assert_eq!(on("validator", "pi", &none).unwrap().model.as_deref(), Some("gpt-5.6-sol"));
+        assert!(on("nope", "claude", &none).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_pi_sign_in_check_ignores_the_provider_of_a_claude_role_and_uses_the_chosen_one() {
+        use crate::factory::*;
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
+        let spec = |r: &str| parse_role_spec(r, &std::fs::read_to_string(src.join(r).join(format!("{r}.md"))).unwrap()).unwrap();
+        // a Claude role on Pi has no default provider; a Pi role keeps its own
+        assert_eq!(super::role_default_pi_provider(&spec("worker")), None);
+        assert_eq!(super::role_default_pi_provider(&spec("orchestrator")), None);
+        assert_eq!(super::role_default_pi_provider(&spec("validator")).as_deref(), Some("openai-codex"));
+        // the chosen provider wins and needs no role lookup; a Claude launch checks nothing
+        let c = choice(Some("m"), Some("openai-codex"), None);
+        assert_eq!(super::pi_provider_to_check(super::Harness::Pi, Some("worker"), &c), Ok(Some("openai-codex".to_string())));
+        assert_eq!(super::pi_provider_to_check(super::Harness::Claude, Some("validator"), &LaunchChoice::default()), Ok(None));
     }
 
     fn choice(model: Option<&str>, provider: Option<&str>, effort: Option<&str>) -> crate::factory::LaunchChoice {
@@ -2567,25 +2770,107 @@ mod spawn_argv_tests {
     }
 
     #[test]
+    fn an_existing_session_attaches_only_for_the_role_it_runs() {
+        use crate::pty::role_mismatch_error as e;
+        assert_eq!(e("t", Some("worker"), Some("worker\n")), None);
+        assert_eq!(e("t", Some("worker"), Some("tester")), Some("session t already runs with role tester: close it first".into()));
+        assert_eq!(e("t", Some("worker"), Some("")), Some("session t already runs with no role: close it first".into()));
+        assert_eq!(e("t", Some("worker"), None), Some("session t already runs with no role: close it first".into()));
+        assert_eq!(e("t", None, Some("tester")), None);
+    }
+
+    #[test]
+    fn attach_only_refuses_a_missing_session_and_nothing_else() {
+        assert_eq!(crate::pty::attach_only_error(true, false), Some("session not found"));
+        assert_eq!(crate::pty::attach_only_error(true, true), None);
+        assert_eq!(crate::pty::attach_only_error(false, false), None);
+        assert_eq!(crate::pty::attach_only_error(false, true), None);
+    }
+
+    // The event name an agent's pane listens on (task: names with a space or a dot). The same vectors are asserted
+    // against the JS helper in tests/unit/pty-event-name.test.ts: both sides must give the same string.
+    #[test]
+    fn a_terminal_agent_name_with_a_dot_is_refused_and_a_space_or_dash_is_not() {
+        assert_eq!(
+            super::terminal_name_error("t a.b"),
+            Some("a dot is not allowed in a terminal agent name: tmux changes it")
+        );
+        assert!(super::terminal_name_error(".x").is_some() && super::terminal_name_error("x.").is_some());
+        for ok in ["t a-b", "orchestrator-Test room", "alice", "a_b", "A 1"] {
+            assert_eq!(super::terminal_name_error(ok), None, "{ok}");
+        }
+        // the name stays valid for the hub rules (valid_agent_name still allows dots): only the terminal refuses it
+        assert!(super::valid_agent_name("t a.b"));
+    }
+
+    #[test]
+    fn pty_event_names_are_hex_of_the_agent_name_and_only_use_allowed_characters() {
+        assert_eq!(super::pty_event("output", "alice"), "pty://output/616c696365");
+        assert_eq!(super::pty_event("exit", "orchestrator-Test room"), "pty://exit/6f7263686573747261746f722d5465737420726f6f6d");
+        assert_eq!(super::pty_event("output", "t a.b"), "pty://output/7420612e62");
+        assert_eq!(super::pty_event("output", "é"), "pty://output/c3a9");
+        let allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '/' | ':' | '_');
+        for n in ["a b", "a.b", "a  b", "a-b_c", "orchestrator-Test room", "Z.z 9"] {
+            let e = super::pty_event("output", n);
+            assert!(e.chars().all(allowed), "{n}: {e}");
+        }
+        // injective: names that differ only by a space, a dot or a case never collide
+        let names = ["a b", "a.b", "a_b", "a-b", "A b", "a  b"];
+        let set: std::collections::HashSet<_> = names.iter().map(|n| super::pty_event("output", n)).collect();
+        assert_eq!(set.len(), names.len());
+        assert_ne!(super::pty_event("output", "a"), super::pty_event("exit", "a"));
+    }
+
+    #[test]
+    fn every_launch_records_model_provider_and_effort() {
+        let (cl, pi) = (super::Harness::Claude, super::Harness::Pi);
+        let rec = |h, c: &crate::factory::LaunchChoice| super::plain_options(h, c).into_iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>();
+        assert_eq!(rec(cl, &choice(Some("opus"), Some("ignored"), Some("max"))), ["@cubilot_model=opus", "@cubilot_provider=", "@cubilot_effort=max"], "Claude has no provider");
+        assert_eq!(rec(pi, &choice(Some("gpt-5.6-sol"), Some("openai-codex"), Some("high"))), ["@cubilot_model=gpt-5.6-sol", "@cubilot_provider=openai-codex", "@cubilot_effort=high"]);
+        assert_eq!(rec(cl, &Default::default()), ["@cubilot_model=default", "@cubilot_provider=", "@cubilot_effort=default"], "no flag: the launch records \"default\"");
+        // a role: effort is the choice, or on its own Pi harness the role's thinking level
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
+        let spec = crate::factory::parse_role_spec("validator", &std::fs::read_to_string(src.join("validator/validator.md")).unwrap()).unwrap();
+        let o = super::role_options(&spec, pi, &Default::default());
+        assert_eq!(o[3].1, spec.thinking.clone().unwrap_or_else(|| "default".into()));
+        assert_eq!(super::role_options(&spec, pi, &choice(None, None, Some("low")))[3].1, "low", "the choice wins");
+        assert_eq!(super::role_options(&spec, cl, &Default::default())[3].1, "default", "a Claude role without an effort flag records \"default\"");
+    }
+
+    #[test]
     fn pill_options_and_parser_show_role_model_and_pi_provider() {
         use crate::factory::*;
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
         let spec = |r: &str| {
             parse_role_spec(r, &std::fs::read_to_string(src.join(r).join(format!("{r}.md"))).unwrap()).unwrap()
         };
-        let w = super::role_options(&spec("worker"), &Default::default());
-        assert_eq!(w, vec![("@cubilot_role", "worker".into()), ("@cubilot_model", "sonnet".into()), ("@cubilot_provider", "".into())]);
-        let w2 = super::role_options(&spec("worker"), &choice(Some("opus"), None, None));
+        let (cl, pi) = (super::Harness::Claude, super::Harness::Pi);
+        let w = super::role_options(&spec("worker"), cl, &Default::default());
+        assert_eq!(w, vec![("@cubilot_role", "worker".into()), ("@cubilot_model", "sonnet".into()), ("@cubilot_provider", "".into()), ("@cubilot_effort", "default".into())]);
+        let w2 = super::role_options(&spec("worker"), cl, &choice(Some("opus"), None, None));
         assert_eq!(w2[1], ("@cubilot_model", "opus".to_string()), "the override is what runs");
-        let v = super::role_options(&spec("validator"), &Default::default());
+        let v = super::role_options(&spec("validator"), pi, &Default::default());
         assert_eq!((v[1].1.as_str(), v[2].1.as_str()), ("gpt-5.6-sol", "openai-codex"), "a Pi role shows its provider");
+        // the other harness (task 9.4): only the choice counts, never the role's default model or provider
+        let v_cl = super::role_options(&spec("validator"), cl, &choice(Some("opus"), None, Some("max")));
+        assert_eq!((v_cl[1].1.as_str(), v_cl[2].1.as_str()), ("opus", ""), "a Pi role on Claude: chosen model, no provider");
+        let o_pi = super::role_options(&spec("orchestrator"), pi, &choice(Some("gpt-5.6-terra"), Some("openai-codex"), None));
+        assert_eq!((o_pi[1].1.as_str(), o_pi[2].1.as_str()), ("gpt-5.6-terra", "openai-codex"), "a Claude role on Pi: chosen model and provider");
+        let o_pi_m = super::role_options(&spec("orchestrator"), pi, &choice(Some("gpt-5.6-terra"), None, None));
+        assert_eq!((o_pi_m[1].1.as_str(), o_pi_m[2].1.as_str()), ("gpt-5.6-terra", ""), "no chosen provider: empty, not the role's");
+        // a launch on the other harness always has a chosen model (9.4), so the role default is never shown there
+        let o = super::role_options(&spec("orchestrator"), cl, &Default::default());
+        assert_eq!(o[1].1, "opus");
         // what tmux prints for three sessions: a Claude role, a Pi role, a plain agent
-        let out = "worker-1\tworker\topus\t\nvalidator\tvalidator\tgpt-5.6-sol\topenai-codex\nplain\t\t\t\nbad name!\tworker\tx\t\n";
+        let out = "worker-1\tworker\topus\t\thigh\tclaude\nvalidator\tvalidator\tgpt-5.6-sol\topenai-codex\t\tpi\nplain\t\t\t\t\t\nnorole\t\tgpt-5.6-sol\topenai-codex\txhigh\tpi\nbad name!\tworker\tx\t\t\t\n";
         let m = super::parse_role_pills(out);
-        assert_eq!(m.len(), 2, "{m:?}");
-        assert_eq!(m["worker-1"], super::PillInfo { role: "worker".into(), model: "opus".into(), provider: "".into() });
+        assert_eq!(m.len(), 3, "{m:?}");
+        assert_eq!(m["worker-1"], super::PillInfo { role: "worker".into(), model: "opus".into(), provider: "".into(), effort: "high".into(), harness: "claude".into() });
         assert_eq!(m["validator"].provider, "openai-codex");
-        assert!(!m.contains_key("plain"));
+        assert_eq!((m["norole"].role.as_str(), m["norole"].harness.as_str(), m["norole"].effort.as_str()), ("", "pi", "xhigh"), "a launch without a role is listed");
+        assert!(!m.contains_key("plain"), "not launched by this app: no record, no details");
+        // old sessions (4 columns, no harness record) still parse
+        assert_eq!(super::parse_role_pills("old\tworker\topus\t")["old"].harness, "");
         assert!(super::parse_role_pills("").is_empty() && super::parse_role_pills("garbage").is_empty());
     }
 
@@ -2903,5 +3188,129 @@ mod tmux_target_tests {
             .map(|(_, l)| *l)
             .collect();
         assert!(bad.is_empty(), "bare tmux -t target(s): {bad:#?}");
+    }
+}
+
+// The decisions pty_spawn makes about an existing session, run against a real tmux on an isolated socket (never
+// the Cubilot one): TEST_TMUX points tmux_run / session_exists at it for the current test thread.
+#[cfg(test)]
+mod existing_session_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static N: AtomicUsize = AtomicUsize::new(0);
+
+    struct Isolated {
+        bin: PathBuf,
+        sock: PathBuf,
+    }
+
+    impl Isolated {
+        fn new() -> Self {
+            let bundled = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/tmux");
+            let bin = if bundled.exists() { bundled } else { PathBuf::from("tmux") };
+            let sock = PathBuf::from(format!("/tmp/cubilot-rs-{}-{}.sock", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+            let t = Isolated { bin: bin.clone(), sock: sock.clone() };
+            TEST_TMUX.with(|c| *c.borrow_mut() = Some((bin, sock)));
+            t
+        }
+        fn raw(&self, args: &[&str]) -> bool {
+            Command::new(&self.bin).arg("-S").arg(&self.sock).args(args).status().map(|s| s.success()).unwrap_or(false)
+        }
+        // A detached session that stays alive, with the role option a role launch sets.
+        fn session(&self, name: &str, role: Option<&str>) {
+            assert!(self.raw(&["new-session", "-d", "-s", name, "-x", "80", "-y", "24", "sleep 300"]), "new-session");
+            if let Some(r) = role {
+                assert!(self.raw(&["set-option", "-t", &tmux_pane(name), "@cubilot_role", r]), "set @cubilot_role");
+            }
+        }
+    }
+
+    impl Drop for Isolated {
+        fn drop(&mut self) {
+            self.raw(&["kill-server"]);
+            TEST_TMUX.with(|c| *c.borrow_mut() = None);
+            let _ = std::fs::remove_file(&self.sock);
+        }
+    }
+
+    const LANG: &str = "en_US.UTF-8";
+
+    #[test]
+    fn live_tmux_state_reads_sessions_and_fails_unless_there_is_no_socket() {
+        let t = Isolated::new();
+        // No socket file: no server, nothing live.
+        assert_eq!(live_tmux_state(), Ok((vec![], String::new())));
+        // A live session and its start command.
+        t.session("test agent", None);
+        let (sessions, panes) = live_tmux_state().unwrap();
+        assert_eq!(sessions, vec!["test agent".to_string()]);
+        assert!(panes.contains("sleep 300"), "{panes}");
+        // A socket path that is a regular file is a failure, not "no sessions".
+        t.raw(&["kill-server"]);
+        let _ = std::fs::remove_file(&t.sock);
+        std::fs::write(&t.sock, "regular file").unwrap();
+        assert!(live_tmux_state().is_err());
+    }
+
+    #[test]
+    fn the_same_role_attaches() {
+        let t = Isolated::new();
+        t.session("a", Some("worker"));
+        assert_eq!(existing_session_state("a", Some("worker"), false, LANG, || {}), Ok(true));
+        assert_eq!(existing_session_state("a", Some("worker"), true, LANG, || {}), Ok(true));
+        assert_eq!(existing_session_state("a", None, true, LANG, || {}), Ok(true));
+    }
+
+    #[test]
+    fn a_different_role_is_refused_and_the_session_is_left_alone() {
+        let t = Isolated::new();
+        t.session("a", Some("tester"));
+        assert_eq!(
+            existing_session_state("a", Some("worker"), false, LANG, || {}),
+            Err("session a already runs with role tester: close it first".to_string())
+        );
+        assert!(session_exists("a"));
+    }
+
+    #[test]
+    fn a_session_without_a_role_is_refused_for_a_role_launch() {
+        let t = Isolated::new();
+        t.session("a", None);
+        assert_eq!(
+            existing_session_state("a", Some("worker"), false, LANG, || {}),
+            Err("session a already runs with no role: close it first".to_string())
+        );
+        assert!(session_exists("a"));
+    }
+
+    #[test]
+    fn attach_only_without_a_session_creates_nothing() {
+        let t = Isolated::new();
+        t.session("other", None); // a live server, but no session "a"
+        assert_eq!(existing_session_state("a", Some("worker"), true, LANG, || {}), Err("session not found".to_string()));
+        assert!(!session_exists("a"));
+        assert!(!t.raw(&["has-session", "-t", "=a"]));
+    }
+
+    // The session passes the first checks and exits before it is configured: attach_only must not fall into the
+    // create branch (existed == false there); a normal launch still may.
+    #[test]
+    fn a_session_that_exits_between_the_checks_is_not_recreated_under_attach_only() {
+        let t = Isolated::new();
+        t.session("keep", None);
+        t.session("a", Some("worker"));
+        let killer = || assert!(Isolated::raw_kill("a"));
+        assert_eq!(existing_session_state("a", Some("worker"), true, LANG, killer), Err("session not found".to_string()));
+        assert!(!session_exists("a"));
+
+        t.session("b", Some("worker"));
+        assert_eq!(existing_session_state("b", Some("worker"), false, LANG, || assert!(Isolated::raw_kill("b"))), Ok(false));
+    }
+
+    impl Isolated {
+        fn raw_kill(name: &str) -> bool {
+            tmux_run(&["kill-session", "-t", &tmux_session(name)]).is_ok()
+        }
     }
 }

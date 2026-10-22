@@ -437,6 +437,16 @@ body.board-open .board-col {
 .ticket-move-label, .ticket-assign-label { display: flex; flex-direction: column; align-items: stretch; gap: 2px; color: var(--text-muted); font-size: 0.9em; min-width: 0; }
 #ticket-view .ticket-move-label, #ticket-view .ticket-assign-label { color: var(--text); font-size: var(--fs-base); gap: var(--sp-4); }
 .ticket-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+/* Status light: three macOS window-button dots, the active one lit, the others dim grey. Card: bottom right of the
+   actions row. Full view: top right of the dialog. */
+.ticket-light { display: inline-flex; gap: 4px; margin-left: auto; align-self: center; }
+.ticket-light i { width: 8px; height: 8px; border-radius: 50%; background: #8a8a8e; opacity: 0.35; }
+.ticket-light i.on { opacity: 1; }
+.ticket-light i.light-red { background: #ff5f57; }
+.ticket-light i.light-orange { background: #febc2e; }
+.ticket-light i.light-green { background: #28c840; }
+#ticket-view .modal { position: relative; }
+.ticket-view-light { position: absolute; top: 14px; right: 16px; }
 .ticket-board-empty { color: var(--text-muted); }
 .ticket-add {
   width: 100%; background: none; border: 1px dashed var(--border, #444); border-radius: 6px;

@@ -616,6 +616,23 @@ const TicketBoard = (() => {
     return `<button type="button" class="ticket-archive" data-ticket="${escAttr(t.id)}" data-archive="${archived ? 'false' : 'true'}">${archived ? 'Unarchive' : 'Archive'}</button>`;
   }
 
+  // Status light, macOS window-button style (the human's rules, id=233). Red: the ticket cannot advance without the
+  // human: a pending approval, or the human is the assignee. Orange: an agent works on it now (claimed, in_progress).
+  // Green: nobody works on it now: queued, and in_review, which waits for a check; it is green because no "check
+  // started" state exists on the hub. Done and cancelled: no light. Only the active dot is lit.
+  function lightOf(t) {
+    if (t.status === 'done' || t.status === 'cancelled') return null;
+    if (t.approval?.status === 'pending' || t.assignee === HUMAN_NAME) return ['red', 'waiting for the human'];
+    if (t.status === 'claimed' || t.status === 'in_progress') return ['orange', 'an agent is busy with it'];
+    return ['green', 'no one is working on it'];
+  }
+  function lightHtml(t) {
+    const l = lightOf(t);
+    if (!l) return '';
+    return `<span class="ticket-light" role="img" aria-label="Status: ${escAttr(l[1])}" title="${escAttr(l[1])}">`
+      + ['red', 'orange', 'green'].map((c) => `<i${c === l[0] ? ` class="on light-${c}"` : ''}></i>`).join('') + '</span>';
+  }
+
   const buttonsHtml = (t) =>
     actionsFor(t).map(([to, label]) =>
       `<button type="button" data-ticket="${escAttr(t.id)}" data-to="${escAttr(to)}">${escHtml(label)}</button>`).join('')
@@ -637,7 +654,7 @@ const TicketBoard = (() => {
         ${approvalHtml(t)}
         ${notesHtml(t, false)}
         ${fieldsHtml(t)}
-        <div class="ticket-actions">${buttons}</div>
+        <div class="ticket-actions">${buttons}${lightHtml(t)}</div>
       </div>`;
   }
 
@@ -933,7 +950,7 @@ const TicketBoard = (() => {
       ['Assignee', t.assignee || 'unassigned'], ['Created', when(t.created_at_ms)], ['Updated', when(t.updated_at_ms)],
       ...(t.archived_at_ms ? [['Archived', when(t.archived_at_ms)]] : []),
     ];
-    return `<dl class="ticket-view-fields">${rows.map(([k, v]) => `<dt>${escHtml(k)}</dt><dd>${escHtml(String(v ?? '—'))}</dd>`).join('')}</dl>`
+    return `<div class="ticket-view-light">${lightHtml(t)}</div><dl class="ticket-view-fields">${rows.map(([k, v]) => `<dt>${escHtml(k)}</dt><dd>${escHtml(String(v ?? '—'))}</dd>`).join('')}</dl>`
       + `<h3 class="ticket-view-h">Acceptance criteria</h3><div class="ticket-view-criteria md">${mdHtml(t.acceptance_criteria)}</div>`
       + approvalHtml(t)
       + notesHtml(t, true)
@@ -1181,5 +1198,5 @@ const TicketBoard = (() => {
   KindCardRenderer.observe('room', onRoomLead);
   if (typeof document !== 'undefined' && document.getElementById) wire();
 
-  return { load, onTicket, onPermission, openNew, setFilter, matchesFilter, sanitizeFilter, readFilter, setLead, onRoomLead, archiveAllDone, setFilterPanel, attachFiles, addPendingFiles, applyMarkdownAction, mdHtml, applyToCriteria, onCriteriaKeydown, openView, closeView, onNoted, _tickets: tickets, _filter: () => filter, _lead: () => lead };
+  return { load, onTicket, onPermission, openNew, setFilter, matchesFilter, sanitizeFilter, readFilter, setLead, onRoomLead, archiveAllDone, setFilterPanel, attachFiles, addPendingFiles, applyMarkdownAction, mdHtml, applyToCriteria, onCriteriaKeydown, openView, closeView, onNoted, lightOf, _tickets: tickets, _filter: () => filter, _lead: () => lead };
 })();

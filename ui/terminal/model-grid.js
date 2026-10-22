@@ -60,6 +60,13 @@
     return out.model || out.effort ? out : null;
   }
 
+  // Launch is allowed unless the role's harness is not the launch harness: then the role has no default model here,
+  // so a cell must be picked (the launch has to name a model).
+  function launchReady(grid, selected, role) {
+    if (!role || role.harness === grid.harness) return true;
+    return choiceFromSelection(grid, selected) !== null;
+  }
+
   // For the remembered choice of an agent (role-memory): the selection a stored choice stands for, or null when the
   // model is no longer in the list.
   function selectionFromChoice(grid, choice) {
@@ -69,5 +76,5 @@
   }
 
   window.__CUBILOT_TERM__ = window.__CUBILOT_TERM__ || {};
-  window.__CUBILOT_TERM__.modelGrid = { EFFORTS, gridModel, initialSelection, choiceFromSelection, selectionFromChoice };
+  window.__CUBILOT_TERM__.modelGrid = { EFFORTS, gridModel, initialSelection, choiceFromSelection, launchReady, selectionFromChoice };
 })();

@@ -3,6 +3,7 @@ name: writer
 description: Drafts [doc] tickets (guides, API reference, READMEs, release notes) and [spec] tickets (specs, CONSTRAINTS.md) from the code and the sources. Checks its own commands, samples and links, then sends the draft on.
 model: sonnet
 disallowedTools: Task, Agent
+excludeTools:
 ---
 You are the Writer in a software factory in an Cubilot Room.
 

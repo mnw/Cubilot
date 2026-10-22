@@ -12,7 +12,7 @@
 
 import type { On } from "claude-code";
 import type { DeliveryMode, Host, HttpResult } from "../host";
-import { startBridge, type Bridge } from "../core";
+import { startBridge, ReloadTimeout, RELOAD_MS, type Bridge } from "../core";
 import { CHATBRIDGE_TOOLS, findTool } from "../tools";
 import { buildInstructions } from "../instructions";
 import { authedGet, authedPost, expandPath, resolveHub } from "../hub-client";
@@ -30,6 +30,11 @@ let bridge: Bridge | null = null;
 
 // Host-held, so it survives a mod reload mid-turn (types/index.d.ts is its contract).
 const BUSY = { plugin: "chatbridge", key: "busy" } as const;
+// Counts module generations. A replaced module takes the next number; the older bridge sees it is old and ends.
+const GEN = { plugin: "chatbridge", key: "generation" } as const;
+// The version a reload is loading, set before the reload runs. If the reload replaces this module, the new module
+// records it as applied at its start; if not, this module records it when the reload resolves. "" = none.
+const APPLYING = { plugin: "chatbridge", key: "applying" } as const;
 
 // Every hub request is a curl child with its options on stdin. `-q` must be the FIRST argument: it
 // stops curl reading the user's ~/.curlrc (a `proxy`, `output` or `fail` there would change or leak
@@ -128,6 +133,20 @@ export function fitPreview(
   }
 }
 
+// Records a good reload for this agent. Throws when the hub refuses.
+async function recordApplied(version: string): Promise<void> {
+  if (!identity || !host) throw new Error("chatbridge not started");
+  const r = await authedPost(host, identity.hubEnv, "/factory/applied", { agent: identity.agent, version });
+  if (r.status < 200 || r.status >= 300) throw new Error(`factory applied not recorded: HTTP ${r.status}`);
+}
+
+// Tells the hub a reload failed, so it forgets the order and the next relink asks again.
+async function reportFailed(): Promise<void> {
+  if (!identity || !host) throw new Error("chatbridge not started");
+  const r = await authedPost(host, identity.hubEnv, "/factory/applied", { agent: identity.agent, failed: true });
+  if (r.status < 200 || r.status >= 300) throw new Error(`factory failure not reported: HTTP ${r.status}`);
+}
+
 // The one place `$` becomes a Host. Everything else sees only `host`.
 function makeHost($: any, home: string, dataDir: string): Host {
   let streamFailing = false; // a failure was logged and no data has arrived since
@@ -221,6 +240,39 @@ function makeHost($: any, home: string, dataDir: string): Host {
       void landText(text, mode === "context" || busy, onRead).then((why) => {
         if (why !== null) onFail?.();
       });
+    },
+    async handoffGate() {
+      return ((await $.env.get("CHATBRIDGE_HANDOFF_GATE")) ?? "").trim() || null;
+    },
+    // $.process.run rejects when the command cannot start or still runs at the timeout: the core logs it and goes on.
+    async exec(command, stdin, timeoutMs) {
+      const r = await $.process.run(["/bin/sh", "-c", command], { stdin, timeoutMs });
+      return { code: r.exitCode, stderr: r.stderr ?? "", timedOut: false };
+    },
+    // The bridge keeps running: the engine reloads only changed modules, so a skill-only change leaves this
+    // module loaded. If the module is replaced, the new one takes the next generation and this bridge ends.
+    // Bounded to RELOAD_MS, but success and failure stay attached to the REAL command promise: a command that
+    // ends after the bound still records applied (or reports failed). APPLYING stays set until then, so a replaced
+    // module also records the version. The hub's pending window blocks a second reload meanwhile.
+    async reload(version) {
+      await $.state.set(APPLYING, version);
+      let timedOut = false;
+      const finished: Promise<void> = Promise.resolve($.command.run({ command: "reload-plugins" })).then(
+        async () => {
+          await recordApplied(version);
+          await $.state.set(APPLYING, "");
+        },
+        async (e) => {
+          await $.state.set(APPLYING, "");
+          // Before the bound the core sees the rejection and reports failed; after it, nobody else would.
+          if (timedOut) await reportFailed().catch(() => {});
+          throw e;
+        },
+      );
+      finished.catch(() => {}); // a late failure is reported above, not unhandled
+      const timeout = new Promise<never>((_, reject) => { $.clock.after(RELOAD_MS, () => { timedOut = true; reject(new ReloadTimeout()); }); });
+      timeout.catch(() => {}); // the timer outlives a reload that ended in time
+      await Promise.race([finished, timeout]);
     },
     log(msg) {
       $.ui.log(msg, { to: "debug" });
@@ -326,7 +378,16 @@ export function register(on: On): void {
       await $.tool.register({ name: t.name, description: t.description, inputSchema: t.inputSchema as Record<string, unknown> });
     }
     bridge?.stop();
-    bridge = startBridge(host, { agent, room, hubEnv, sleep: makeSleep($) });
+    const gen = (((await $.state.get(GEN)).value as number | undefined) ?? 0) + 1;
+    await $.state.set(GEN, gen);
+    const alive = async () => ((await $.state.get(GEN)).value ?? gen) === gen;
+    bridge = startBridge(host, { agent, room, hubEnv, sleep: makeSleep($), alive });
+    // A reload that replaced the old module: its version was stored before the reload, and this module records it.
+    const applying = (((await $.state.get(APPLYING)).value as string | undefined) ?? "");
+    if (applying) {
+      await $.state.set(APPLYING, "");
+      await recordApplied(applying).catch((e) => host?.log(`[chatbridge] ${(e as Error).message ?? e}`));
+    }
     return started;
   });
 
@@ -339,7 +400,10 @@ export function register(on: On): void {
 
   // turn.start also fires for a subagent's or teammate's run (`agentId` set): only the main loop is busy.
   on("turn.start", async ($, e, next) => {
-    if (e.agentId === undefined) await $.state.set(BUSY, true);
+    if (e.agentId === undefined) {
+      await $.state.set(BUSY, true);
+      bridge?.onRunStart();
+    }
     return next(e);
   });
 

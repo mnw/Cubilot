@@ -21,7 +21,7 @@ describe("nodeHost.stream failure logging", () => {
     console.error = (m: unknown) => logs.push(String(m));
     try {
       // One host instance carries the streak across reconnects, like the real bridge.
-      const host = nodeHost(async () => {});
+      const host = nodeHost(async () => {}, async () => {});
       const run = async () => { for await (const _ of host.stream(url, "tok", new AbortController().signal)) { /* drain */ } };
       mode = "401";
       await run(); await run(); await run();
@@ -44,7 +44,7 @@ describe("nodeHost.stream failure logging", () => {
     const orig = console.error;
     console.error = (m: unknown) => logs.push(String(m));
     try {
-      const host = nodeHost(async () => {});
+      const host = nodeHost(async () => {}, async () => {});
       const run = async () => { for await (const _ of host.stream(url, "tok", new AbortController().signal)) { /* drain */ } };
       await run(); await run(); await run();
     } finally {
@@ -61,7 +61,7 @@ describe("nodeHost.stream failure logging", () => {
     try {
       const ac = new AbortController();
       ac.abort();
-      for await (const _ of nodeHost(async () => {}).stream(url, "tok", ac.signal)) { /* none */ }
+      for await (const _ of nodeHost(async () => {}, async () => {}).stream(url, "tok", ac.signal)) { /* none */ }
     } finally {
       console.error = orig;
     }

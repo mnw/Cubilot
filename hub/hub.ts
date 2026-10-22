@@ -26,6 +26,7 @@ import { createDispatcher } from "./core/dispatcher";
 import { createFanout } from "./core/fanout";
 import { createBriefingDispatcher } from "./core/briefing-dispatcher";
 import { createCapBuilder } from "./core/capabilities";
+import { createFactoryFeature } from "./features/factory";
 import { createUsageFeature } from "./features/usage";
 import { createSessionsFeature } from "./features/sessions";
 import { createAttachmentsFeature } from "./features/attachments";
@@ -213,6 +214,7 @@ function buildBriefing(agent: string): BriefingPayload {
     _briefingBuilder = createBriefingBuilder({
       agents, kinds: KINDS, ledgerDb, ledgerEnabled, roomSummariser,
       defaultRoom: DEFAULT_ROOM, attachmentsDir: ATTACHMENTS_DIR, humanName: HUMAN_NAME,
+      factoryVersion: (process.env.CUBILOT_FACTORY_VERSION ?? "").trim() || null,
       buildCap: () => buildCap(),
     });
   }
@@ -249,6 +251,10 @@ if (ledgerDb) {
 const FEATURES: readonly HubFeature[] = [
   ...KINDS,
   createUsageFeature(),
+  createFactoryFeature({
+    dir: (process.env.CUBILOT_FACTORY_DIR ?? "").trim(),
+    version: (process.env.CUBILOT_FACTORY_VERSION ?? "").trim(),
+  }),
   ...(ledgerDb ? [createSessionsFeature(ledgerDb)] : []),
   createAttachmentsFeature({
     attachmentsDir: ATTACHMENTS_DIR,

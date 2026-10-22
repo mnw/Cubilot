@@ -41,13 +41,7 @@
   <div class="header-row">
     <div class="brand">
       <div class="brand-mark" aria-hidden="true">
-        <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-          <rect x="2" y="4" width="28" height="20" rx="5" fill="none" stroke="#d97757" stroke-width="2"/>
-          <path d="M 10 24 L 8 29 L 14 24" fill="none" stroke="#d97757" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-          <circle cx="11" cy="14" r="1.6" fill="#d97757"/>
-          <circle cx="16" cy="14" r="1.6" fill="#e8a857"/>
-          <circle cx="21" cy="14" r="1.6" fill="#7fb069"/>
-        </svg>
+        <img src="brand-mark.png" alt="">
       </div>
     </div>
 
@@ -241,6 +235,7 @@
       </button>
       <div class="spawn-role-menu" id="spawn-role-menu" role="listbox"></div>
     </div>
+    <div id="spawn-role-error" role="alert" hidden style="margin-top:4px; font-family:var(--sans); font-size:11px; color:#ff6b6b;"></div>
     <div id="spawn-harness-row" style="margin-top:6px;">
       <label style="text-transform:uppercase; letter-spacing:0.1em; font-family:var(--mono); font-size:10px; color:var(--text-dim);">Harness</label>
       <div style="display:flex; flex-direction:column; gap:6px; margin-top:4px; font-family:var(--sans); font-size:12px; color:var(--text-muted);">
@@ -437,6 +432,7 @@
 <script src="features/messages.js"></script>
 <script src="features/rooms.js"></script>
 <script src="features/orchestrator-lead.js"></script>
+<script src="features/pill-card.js"></script>
 <script src="features/roster.js"></script>
 <script src="features/nutshell.js"></script>
 <script src="features/room-persistence.js"></script>

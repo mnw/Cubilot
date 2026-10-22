@@ -27,6 +27,8 @@ export type BriefingPayload = {
   attachments_dir: string;
   human_name: string;
   nutshell: string | null;
+  // Version folder of the staged factory files (null when the hub got none): a change makes bridges reload.
+  factory_version: string | null;
   // Lines contributed by kinds' optional briefingLines hook, in KINDS order.
   kind_lines: string[];
   // Phase 3 layers — null when summariser is disabled.
@@ -45,6 +47,7 @@ export type BriefingBuilderOptions = {
   defaultRoom: string;
   attachmentsDir: string;
   humanName: string;
+  factoryVersion?: string | null;
   // Needed only for kinds' briefingLines; omitted → no kind lines.
   buildCap?: () => HubCapabilities;
 };
@@ -104,6 +107,7 @@ export function createBriefingBuilder(opts: BriefingBuilderOptions): BriefingBui
       attachments_dir: opts.attachmentsDir,
       human_name: opts.humanName,
       nutshell: nutshell || null,
+      factory_version: opts.factoryVersion || null,
       kind_lines,
       room_summary,
     };
@@ -135,5 +139,5 @@ export function briefingSignature(b: BriefingPayload): string {
     .map((p) => `${p.name}:${p.online ? 1 : 0}:${p.room ?? ""}`)
     .sort()
     .join(",");
-  return `${b.room ?? ""}|${peers}|${b.nutshell ?? ""}|${(b.kind_lines ?? []).join("\n")}`;
+  return `${b.room ?? ""}|${peers}|${b.nutshell ?? ""}|${b.factory_version ?? ""}|${(b.kind_lines ?? []).join("\n")}`;
 }

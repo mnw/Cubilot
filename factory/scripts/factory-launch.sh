@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# factory-launch.sh <role> <agent-name> [--model <m>] [--provider <p>] [--room <label>] [--dry-run] [-- <extra args>]
+# factory-launch.sh <role> <agent-name> [--harness <claude|pi>] [--model <m>] [--provider <p>] [--room <label>] [--dry-run] [-- <extra args>]
 # Tasks 1.1 and 1.2: read the role frontmatter and launch the role.
 # Claude roles: stage a temp copy of the role plugin (the source has no manifest, and Claude Code writes files into a
 # loaded plugin dir, so the repo must not be loaded directly), load it and factory/shared with --plugin-dir, and pass
@@ -20,12 +20,13 @@ if [ -z "$PI_EXT" ]; then
   done
 fi
 
-usage() { echo "usage: $0 <role> <agent-name> [--model <m>] [--provider <p>] [--room <label>] [--dry-run] [-- <extra args>]" >&2; exit 2; }
+usage() { echo "usage: $0 <role> <agent-name> [--harness <claude|pi>] [--model <m>] [--provider <p>] [--room <label>] [--dry-run] [-- <extra args>]" >&2; exit 2; }
 
-role="" agent="" model_override="" provider_override="" room="${CHATBRIDGE_ROOM:-}" dry_run=0 extra=()
+role="" agent="" harness_override="" model_override="" provider_override="" room="${CHATBRIDGE_ROOM:-}" dry_run=0 extra=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --) shift; extra=("$@"); break ;;
+    --harness) [ $# -ge 2 ] || usage; harness_override="$2"; shift 2 ;;
     --model) [ $# -ge 2 ] || usage; model_override="$2"; shift 2 ;;
     --provider) [ $# -ge 2 ] || usage; provider_override="$2"; shift 2 ;;
     --room) [ $# -ge 2 ] || usage; room="$2"; shift 2 ;;
@@ -61,10 +62,18 @@ if [ -n "$(fm council)" ]; then
   exit 1
 fi
 
-harness="$(fm harness)"; harness="${harness:-claude}"
-model="${model_override:-$(fm model)}"
-provider="${provider_override:-$(fm provider)}"
-thinking="$(fm thinking)"
+role_harness="$(fm harness)"; role_harness="${role_harness:-claude}"
+harness="${harness_override:-$role_harness}"
+case "$harness" in claude|pi) ;; *) echo "role '$role': unknown harness '$harness'" >&2; exit 1 ;; esac
+if [ "$harness" = "$role_harness" ]; then
+  model="${model_override:-$(fm model)}"
+  provider="${provider_override:-$(fm provider)}"
+  thinking="$(fm thinking)"
+else
+  # Another harness than the role's: the role's model, provider and thinking do not apply. A model must be chosen.
+  [ -n "$model_override" ] || { echo "role '$role': harness '$harness' differs from the role harness '$role_harness'; --model is required" >&2; exit 1; }
+  model="$model_override"; provider="$provider_override"; thinking=""
+fi
 disallowed="$(csv "$(fm disallowedTools)")"
 excluded="$(csv "$(fm excludeTools)")"
 
@@ -88,7 +97,10 @@ case "$harness" in
     stage="${STAGE_DIR:-<stage>}"
     # --no-skills: without it Pi also finds ~/.claude/skills and that copy of a skill wins (seen live for asd-ste100);
     # explicit --skill paths still load.
-    cmd=(pi --no-skills --append-system-prompt "$stage/role.md")
+    # --no-extensions: without it Pi also loads the user's pi packages (skills and tools such as filler). It also drops
+    # Pi's built-in MCP, so the two builtins are loaded again by name (parity with Claude roles: user MCP servers).
+    # The chatbridge -e below still loads, after them. Same flags as src-tauri/src/pty.rs (pi_role_flags).
+    cmd=(pi --no-skills --no-extensions -e builtin:mcp -e builtin:tool-search --append-system-prompt "$stage/role.md")
     [ -d "$FACTORY_DIR/$role/skills" ] && cmd+=(--skill "$FACTORY_DIR/$role/skills")
     cmd+=(--skill "$FACTORY_DIR/shared/skills")
     [ -n "$provider" ] && cmd+=(--provider "$provider")
