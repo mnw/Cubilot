@@ -12,6 +12,7 @@ import type {
   KindModule,
   RouteDef,
   StateMachineDecl,
+  TxHandle,
   VerbDecl,
 } from "../core/types";
 import { pausedRefusal } from "../core/auth";
@@ -20,11 +21,12 @@ import { createLedgerEntity, ledgerConflictResponse, withLedgerRequired } from "
 import { IMAGE_URL_RE, imageUrlToPath } from "../core/attachments";
 import { insertEvent } from "../core/events";
 import { ts, validName, validRoomLabel } from "../core/ids";
+import { validateBlockedBy } from "./ticket-blockers";
 import { createPermissionWithSideEffect, dismissPendingPermission } from "./permission";
 
 // ---------- Types ----------
 
-export type TicketStatus = "queued" | "claimed" | "in_progress" | "in_review" | "done" | "cancelled";
+export type TicketStatus = "draft" | "queued" | "claimed" | "in_progress" | "in_review" | "done" | "cancelled";
 export type BlastRadius = "low" | "high";
 export type TicketPriority = "highest" | "high" | "medium" | "low" | "lowest";
 
@@ -39,9 +41,9 @@ const isPriority = (v: unknown): v is TicketPriority =>
   typeof v === "string" && Object.prototype.hasOwnProperty.call(PRIORITY_RANK, v);
 
 const TICKET_TERMINAL: ReadonlySet<TicketStatus> = new Set(["done", "cancelled"]);
-const TARGET_STATUSES = new Set<string>(["queued", "in_progress", "in_review", "done", "cancelled"]);
+const TARGET_STATUSES = new Set<string>(["draft", "queued", "in_progress", "in_review", "done", "cancelled"]);
 /** The columns a ticket may be created in. */
-const CREATE_STATUSES = new Set<string>(["queued", "in_progress", "in_review", "done"]);
+const CREATE_STATUSES = new Set<string>(["draft", "queued", "in_progress", "in_review", "done"]);
 
 export type TicketSnapshot = {
   id: string;
@@ -54,6 +56,8 @@ export type TicketSnapshot = {
   assignee: string | null;
   approval_request_id: string | null;
   external_ref: string | null;
+  /** Groups the tickets of one request; null when ungrouped. */
+  request_id: string | null;
   status: TicketStatus;
   created_at_ms: number;
   updated_at_ms: number;
@@ -66,6 +70,7 @@ const TICKET_ID_RE = /^t_[0-9a-f]{16}$/;
 const TICKET_TITLE_MAX_CHARS = 200;
 const TICKET_CRITERIA_MAX_CHARS = 4_000;
 const TICKET_REF_MAX_CHARS = 200;
+const REQUEST_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
 const TICKET_BODY_MAX = 16_384;
 const TICKET_NOTE_MAX_BYTES = 4_096;
 // A 4 KiB note whose every byte is JSON-escaped (control characters) is 24 KiB: leave room.
@@ -111,6 +116,7 @@ const ticketDecl: StateMachineDecl<TicketSnapshot> = {
     assignee: "TEXT_NULL",
     approval_request_id: "TEXT_NULL",
     external_ref: "TEXT_NULL",
+    request_id: "TEXT_NULL",
     status: "TEXT",
     created_at_ms: "INTEGER",
     updated_at_ms: "INTEGER",
@@ -129,6 +135,7 @@ const ticketDecl: StateMachineDecl<TicketSnapshot> = {
     assignee: row.assignee == null ? null : (row.assignee as string),
     approval_request_id: row.approval_request_id == null ? null : (row.approval_request_id as string),
     external_ref: row.external_ref == null ? null : (row.external_ref as string),
+    request_id: row.request_id == null ? null : (row.request_id as string),
     status: row.status as TicketStatus,
     created_at_ms: Number(row.created_at_ms),
     updated_at_ms: Number(row.updated_at_ms),
@@ -148,14 +155,27 @@ const ticketDecl: StateMachineDecl<TicketSnapshot> = {
 
 // ---------- Entry projection ----------
 
+/** A ticket's blocker ids and the ones still open (status other than done: the claim gate's rule). */
+export function blockerFields(db: Database, ticketId: string): { blocked_by: string[]; open_blockers: string[] } {
+  const rows = db
+    .query<{ blocker_id: string; status: string | null }, [string]>(
+      "SELECT b.blocker_id, t.status FROM ticket_blockers b LEFT JOIN tickets t ON t.id = b.blocker_id WHERE b.ticket_id = ? ORDER BY b.rowid",
+    )
+    .all(ticketId);
+  return { blocked_by: rows.map((r) => r.blocker_id), open_blockers: rows.filter((r) => r.status !== "done").map((r) => r.blocker_id) };
+}
+
 export function ticketEntry(
-  snapshot: TicketSnapshot,
-  eventKind: "ticket.new" | "ticket.update" | "ticket.assigned" | "ticket.archived",
+  db: Database,
+  rawSnapshot: TicketSnapshot,
+  eventKind: "ticket.new" | "ticket.update" | "ticket.assigned" | "ticket.archived" | "ticket.promoted",
   actor: string,
   replay = false,
   lead?: string | null,
   extra?: Record<string, unknown>,
 ): Entry {
+  // The blocker arrays are derived (ticket_blockers), not stored on the ticket: read them for every broadcast.
+  const snapshot = { ...rawSnapshot, ...blockerFields(db, rawSnapshot.id) };
   return {
     from: actor,   // who did it; the assignee is in the snapshot
     to: "all",
@@ -169,7 +189,8 @@ export function ticketEntry(
     replay,
     snapshot,
     // A new ticket nobody owns goes to the room lead for triage; the bridge wakes that agent.
-    ...(lead !== undefined && snapshot.assignee === null ? { lead } : {}),
+    // A draft wakes no one, the lead included.
+    ...(lead !== undefined && snapshot.assignee === null && snapshot.status !== "draft" ? { lead } : {}),
     ...(extra ?? {}),
   };
 }
@@ -225,6 +246,13 @@ const conflict = (message: string): Decision<TicketSnapshot> => ({ kind: "confli
 
 // ---------- Verbs ----------
 
+/** Replaces a ticket's blocker rows with the list decide() validated (null, undefined or [] clear them). */
+function writeBlockers(tx: TxHandle, ticketId: string, value: unknown): void {
+  tx.run("DELETE FROM ticket_blockers WHERE ticket_id = ?", [ticketId]);
+  if (!Array.isArray(value)) return;
+  for (const blocker of value) tx.run("INSERT INTO ticket_blockers (ticket_id, blocker_id) VALUES (?, ?)", [ticketId, blocker]);
+}
+
 type CreateInput = {
   id: string;
   room: string;
@@ -233,8 +261,11 @@ type CreateInput = {
   blast_radius: BlastRadius;
   priority: TicketPriority;
   external_ref: string | null;
+  request_id: string | null;
+  /** Raw `blocked_by` from the body: undefined = none, null or [] = none, validated in decide(). */
+  blocked_by?: unknown;
   assignee: string | null;
-  status: "queued" | "in_progress" | "in_review" | "done";
+  status: "draft" | "queued" | "in_progress" | "in_review" | "done";
 };
 
 const createTicketVerb: VerbDecl<TicketSnapshot, CreateInput> = {
@@ -242,6 +273,8 @@ const createTicketVerb: VerbDecl<TicketSnapshot, CreateInput> = {
     if (prior) return conflict("ticket id collision");
     // A ticket created as done skips the whole workflow, so only the human may do it.
     if (payload.status === "done" && !isHuman(actor, cap)) return forbidden("only the human may create a done ticket");
+    const blockers = validateBlockedBy(cap.db, payload.room, null, payload.blocked_by);
+    if (blockers.error !== undefined) return { kind: "conflict", httpStatus: 400, message: blockers.error };
     const now = Date.now();
     const initial: TicketSnapshot = {
       id: payload.id,
@@ -254,6 +287,7 @@ const createTicketVerb: VerbDecl<TicketSnapshot, CreateInput> = {
       assignee: payload.assignee,
       approval_request_id: null,
       external_ref: payload.external_ref,
+      request_id: payload.request_id,
       status: payload.status,
       created_at_ms: now,
       updated_at_ms: now,
@@ -270,10 +304,11 @@ const createTicketVerb: VerbDecl<TicketSnapshot, CreateInput> = {
         blast_radius: post.blast_radius,
         priority: post.priority,
         external_ref: post.external_ref,
+        request_id: post.request_id,
         assignee: post.assignee,
         status: post.status,
       }),
-      entry: (post) => ticketEntry(post, "ticket.new", actor, false, roomLead(cap, post.room)),
+      entry: (post) => ticketEntry(cap.db, post, "ticket.new", actor, false, roomLead(cap, post.room)),
     };
   },
   scope: (post) => ({ kind: "room", room: post.room }),
@@ -284,24 +319,36 @@ const claimTicketVerb: VerbDecl<TicketSnapshot, Record<string, never>> = {
     if (!prior) return { kind: "conflict", httpStatus: 404, message: "not found" };
     if (!inRoom(actor, prior.room, cap)) return forbidden("claim outside the ticket's room");
     if (prior.status === "claimed" && prior.assignee === actor) return { kind: "idempotent" };
+    if (prior.status === "draft") return conflict("ticket is draft: it cannot be claimed");
     if (prior.status !== "queued") {
       const who = prior.assignee ? ` by ${prior.assignee}` : "";
       return conflict(`ticket already ${prior.status}${who}`);
     }
     // Assigned while queued: only the assignee claims it (the human reassigns with the assign verb).
     if (prior.assignee !== null && prior.assignee !== actor) return conflict(`assigned to ${prior.assignee}`);
+    // A blocker that is not done keeps the ticket unclaimable. A cancelled blocker still blocks (the human or the
+    // lead removes it from the list). The human is not gated. Read here, outside the write transaction: the hub is
+    // the single writer (design decision 3).
+    if (!isHuman(actor, cap)) {
+      const open = cap.db
+        .query<{ id: string; status: string }, [string]>(
+          "SELECT t.id, t.status FROM ticket_blockers b JOIN tickets t ON t.id = b.blocker_id WHERE b.ticket_id = ? AND t.status != 'done' ORDER BY b.rowid LIMIT 1",
+        )
+        .get(prior.id);
+      if (open) return conflict(`blocked by ${open.id} (${open.status})`);
+    }
     return {
       kind: "transition",
       next: { status: "claimed", assignee: actor, updated_at_ms: Date.now() } as Partial<TicketSnapshot>,
       eventKind: "ticket.claimed",
       payload: () => ({ assignee: actor }),
-      entry: (post) => ticketEntry(post, "ticket.update", actor),
+      entry: (post) => ticketEntry(cap.db, post, "ticket.update", actor),
     };
   },
   scope: (post) => ({ kind: "room", room: post.room }),
 };
 
-type AssignInput = { assignee: string | null }; // null unassigns, and only while the ticket is queued
+type AssignInput = { assignee: string | null }; // null unassigns, and only while the ticket is draft or queued
 
 const assignTicketVerb: VerbDecl<TicketSnapshot, AssignInput> = {
   decide(prior, payload, actor, cap): Decision<TicketSnapshot> {
@@ -312,7 +359,7 @@ const assignTicketVerb: VerbDecl<TicketSnapshot, AssignInput> = {
     }
     if (TICKET_TERMINAL.has(prior.status)) return conflict(`ticket already ${prior.status}`);
     if (payload.assignee === null) {
-      if (prior.status !== "queued") return conflict(`cannot unassign a ${prior.status} ticket`);
+      if (prior.status !== "queued" && prior.status !== "draft") return conflict(`cannot unassign a ${prior.status} ticket`);
     } else {
       const problem = assigneeProblem(payload.assignee, prior.room, cap);
       if (problem) return { kind: "conflict", httpStatus: problem.httpStatus, message: problem.message };
@@ -327,13 +374,13 @@ const assignTicketVerb: VerbDecl<TicketSnapshot, AssignInput> = {
       eventKind: "ticket.assigned",
       payload: () => ({ from: prior.assignee, to: payload.assignee }),
       // An unassigned ticket is back in triage, like a new one: the entry names the lead (the bridge wakes it).
-      entry: (post) => ticketEntry(post, "ticket.assigned", actor, false, roomLead(cap, post.room)),
+      entry: (post) => ticketEntry(cap.db, post, "ticket.assigned", actor, false, roomLead(cap, post.room)),
     };
   },
   scope: (post) => ({ kind: "room", room: post.room }),
 };
 
-type EditInput = { title?: string; acceptance_criteria?: string; blast_radius?: BlastRadius };
+type EditInput = { title?: string; acceptance_criteria?: string; blast_radius?: BlastRadius; blocked_by?: unknown; request_id?: string | null; priority?: TicketPriority; external_ref?: string | null };
 
 // An open ticket's title and acceptance criteria: the human, the creator and the assignee. The blast radius is the
 // human's alone, because it gates the done approval. New criteria or a lower radius void the approval that was asked.
@@ -343,17 +390,40 @@ const editTicketVerb: VerbDecl<TicketSnapshot, EditInput> = {
     if (!inRoom(actor, prior.room, cap)) return forbidden("ticket is in another room");
     const human = isHuman(actor, cap);
     if (payload.blast_radius !== undefined && !human) return forbidden("only the human may change blast_radius");
-    if (!human && actor !== prior.creator && actor !== prior.assignee) {
+    // The grouping fields (request_id, blocked_by) are edited by the human, the creator or the room lead, not the assignee.
+    // The other fields keep their rule: the human, the creator or the assignee.
+    const grouping = payload.request_id !== undefined || payload.blocked_by !== undefined;
+    const other = payload.title !== undefined || payload.acceptance_criteria !== undefined || payload.blast_radius !== undefined
+      || payload.priority !== undefined || payload.external_ref !== undefined;
+    if (other && !human && actor !== prior.creator && actor !== prior.assignee) {
       return forbidden("only the human, the creator or the assignee may edit a ticket");
     }
+    if (grouping && !human && actor !== prior.creator && actor !== roomLead(cap, prior.room)) {
+      return forbidden("only the human, the creator or the room lead may edit request_id or blocked_by");
+    }
     if (TICKET_TERMINAL.has(prior.status)) return conflict(`ticket already ${prior.status}`);
+    // After the claim the grouping is frozen for agents: the human alone changes it.
+    if (grouping && !human && prior.status !== "draft" && prior.status !== "queued") {
+      return conflict(`request_id and blocked_by are frozen once a ticket is ${prior.status}`);
+    }
     const changes: Partial<TicketSnapshot> = {};
     if (payload.title !== undefined && payload.title !== prior.title) changes.title = payload.title;
     if (payload.acceptance_criteria !== undefined && payload.acceptance_criteria !== prior.acceptance_criteria) {
       changes.acceptance_criteria = payload.acceptance_criteria;
     }
     if (payload.blast_radius !== undefined && payload.blast_radius !== prior.blast_radius) changes.blast_radius = payload.blast_radius;
-    if (Object.keys(changes).length === 0) return { kind: "idempotent" };
+    if (payload.priority !== undefined && payload.priority !== prior.priority) changes.priority = payload.priority;
+    if (payload.external_ref !== undefined && payload.external_ref !== prior.external_ref) changes.external_ref = payload.external_ref;
+    if (payload.request_id !== undefined && payload.request_id !== prior.request_id) changes.request_id = payload.request_id;
+    // The blocker list is replaced whole. It is not a snapshot field: it changes only when the set differs.
+    let blockersChanged = false;
+    if (payload.blocked_by !== undefined) {
+      const v = validateBlockedBy(cap.db, prior.room, prior.id, payload.blocked_by);
+      if (v.error !== undefined) return { kind: "conflict", httpStatus: 400, message: v.error };
+      const stored = cap.db.query<{ blocker_id: string }, [string]>("SELECT blocker_id FROM ticket_blockers WHERE ticket_id = ?").all(prior.id).map((r) => r.blocker_id);
+      blockersChanged = stored.length !== v.ids!.length || v.ids!.some((id) => !stored.includes(id));
+    }
+    if (Object.keys(changes).length === 0 && !blockersChanged) return { kind: "idempotent" };
     const next: Partial<TicketSnapshot> = { ...changes, updated_at_ms: Date.now() };
     // The human allowed the work as it was written: new criteria, or a lower radius, void that approval.
     if ((changes.acceptance_criteria !== undefined || changes.blast_radius === "low") && prior.approval_request_id) {
@@ -364,10 +434,10 @@ const editTicketVerb: VerbDecl<TicketSnapshot, EditInput> = {
       next,
       eventKind: "ticket.edited",
       payload: () => ({
-        fields: Object.keys(changes),
+        fields: [...Object.keys(changes), ...(blockersChanged ? ["blocked_by"] : [])],
         ...(changes.blast_radius ? { blast_radius: { from: prior.blast_radius, to: changes.blast_radius } } : {}),
       }),
-      entry: (post) => ticketEntry(post, "ticket.update", actor),
+      entry: (post) => ticketEntry(cap.db, post, "ticket.update", actor),
     };
   },
   scope: (post) => ({ kind: "room", room: post.room }),
@@ -392,7 +462,7 @@ const archiveTicketVerb: VerbDecl<TicketSnapshot, ArchiveInput> = {
       next: { archived_at_ms: payload.archived ? now : null, updated_at_ms: now } as Partial<TicketSnapshot>,
       eventKind: "ticket.archived",
       payload: () => ({ archived: payload.archived }),
-      entry: (post) => ticketEntry(post, "ticket.archived", actor),
+      entry: (post) => ticketEntry(cap.db, post, "ticket.archived", actor),
     };
   },
   // The board hears of it; agents never do (they do not see archived tickets, and this is no chat).
@@ -415,14 +485,32 @@ const transitionTicketVerb: VerbDecl<TicketSnapshot, TransitionInput> = {
     if (!inRoom(actor, prior.room, cap)) return forbidden("ticket is in another room");
     const to = payload.to;
     const owns = prior.assignee !== null && actor === prior.assignee;
-    const allowed = to === "cancelled" ? human || owns || actor === prior.creator : human || owns;
-    if (!allowed) return forbidden(to === "cancelled" ? "only the assignee, creator or human may cancel" : "only the assignee or human may move this ticket");
+    // Intake moves (draft <-> queued) belong to the human and the room lead. Every other move into draft or queued is the human's.
+    const intake = (prior.status === "draft" && to === "queued") || (prior.status === "queued" && to === "draft");
+    const lead = actor === roomLead(cap, prior.room);
+    // A repeated draft/queued move by the lead is an idempotent retry, not a refusal.
+    const retry = lead && prior.status === to && (to === "queued" || to === "draft");
+    const allowed = intake || retry ? human || lead : to === "cancelled" ? human || owns || actor === prior.creator : human || owns;
+    if (!allowed) return forbidden(intake ? "only the human or the room lead may move a ticket between draft and queued" : to === "cancelled" ? "only the assignee, creator or human may cancel" : "only the assignee or human may move this ticket");
     if (prior.status === to) return { kind: "idempotent" };
     if (TICKET_TERMINAL.has(prior.status)) return conflict(`ticket already ${prior.status}`);
     // The human drags a ticket to any open column (the board's moves); an agent follows LEGAL_FROM.
-    // Back to queued is the human's alone.
-    if (to === "queued" && !human) return forbidden("only the human may move a ticket back to queued");
-    if (to !== "cancelled" && !human && !LEGAL_FROM[to]?.has(prior.status)) {
+    // Back to queued or to draft from a later status is the human's alone.
+    if ((to === "queued" || to === "draft") && !intake && !human) return forbidden(`only the human may move a ticket back to ${to}`);
+    // The lead may not queue a request that holds a high-blast-radius ticket: the human releases it. A ticket without
+    // a label is checked alone. The count includes this ticket.
+    if (intake && to === "queued" && !human) {
+      const high =
+        prior.request_id === null
+          ? prior.blast_radius === "high"
+          : cap.db
+              .query<{ n: number }, [string, string]>(
+                "SELECT COUNT(*) AS n FROM tickets WHERE room = ? AND request_id = ? AND blast_radius = 'high' AND status NOT IN ('done','cancelled')",
+              )
+              .get(prior.room, prior.request_id)!.n > 0;
+      if (high) return forbidden("the request holds a high blast_radius ticket: only the human may queue it");
+    }
+    if (to !== "cancelled" && !human && !intake && !LEGAL_FROM[to]?.has(prior.status)) {
       return conflict(`cannot move ${prior.status} → ${to}`);
     }
     if (to === "done" && prior.blast_radius === "high" && !human) {
@@ -453,7 +541,12 @@ const transitionTicketVerb: VerbDecl<TicketSnapshot, TransitionInput> = {
       eventKind: `ticket.${to}`,
       payload: () => ({ from: prior.status, to, ...(note ? { note } : {}) }),
       // The entry reaches the room's agents: it says THAT a note exists, not what it says.
-      entry: (post) => ticketEntry(post, "ticket.update", actor, false, undefined, note ? { notes_count: noteCount(cap, post.id) } : undefined),
+      // A draft queued is a promotion: its own entry kind, so the bridge wakes the assignee or the lead once. `by`
+      // lets the core skip the lead when the lead made the move.
+      entry: (post) =>
+        prior.status === "draft" && to === "queued"
+          ? ticketEntry(cap.db, post, "ticket.promoted", actor, false, roomLead(cap, post.room), { by: actor })
+          : ticketEntry(cap.db, post, "ticket.update", actor, false, undefined, note ? { notes_count: noteCount(cap, post.id) } : undefined),
     };
   },
   scope: (post) => ({ kind: "room", room: post.room }),
@@ -534,6 +627,13 @@ export function createTicketKind(db: Database): KindModule {
           }
           externalRef = body.external_ref;
         }
+        let requestId: string | null = null;
+        if (body.request_id !== undefined && body.request_id !== null) {
+          if (typeof body.request_id !== "string" || !REQUEST_ID_RE.test(body.request_id)) {
+            return Response.json({ error: "invalid request_id" }, { status: 400 });
+          }
+          requestId = body.request_id;
+        }
 
         let room: string;
         if (isHuman(by, cap)) {
@@ -566,7 +666,7 @@ export function createTicketKind(db: Database): KindModule {
 
         const id = mintTicketId();
         try {
-          const r = entity.apply(
+          const r = entity.applyWithSideEffect(
             id,
             createTicketVerb,
             {
@@ -577,11 +677,14 @@ export function createTicketKind(db: Database): KindModule {
               blast_radius: body.blast_radius,
               priority,
               external_ref: externalRef,
+              request_id: requestId,
+              blocked_by: body.blocked_by,
               assignee,
               status,
             },
             by,
             cap,
+            ({ tx }) => writeBlockers(tx, id, body.blocked_by),
           );
           // An assignee's lines change, and so does the lead's list of unassigned tickets.
           if (assignee || roomLead(cap, room)) cap.briefing.refresh();
@@ -724,6 +827,62 @@ export function createTicketKind(db: Database): KindModule {
           { kind: "ui-only-ambient" },
         );
         return Response.json({ attachment, attachments_count: total }, { status: 201 });
+      },
+    },
+
+    {
+      method: "POST",
+      path: /^\/tickets\/([^/]+)\/attachments\/(\d+)\/remove$/,
+      auth: "mutating",
+      bodyMax: TICKET_BODY_MAX,
+      handler: async (req, cap, params) => {
+        if (!TICKET_ID_RE.test(params.id)) return Response.json({ error: "invalid ticket id" }, { status: 400 });
+        const body = await readBody(req);
+        const a = actorOr400(body.by, cap);
+        if (a instanceof Response) return a;
+        const t = entity.load(params.id);
+        if (!t) return Response.json({ error: "not found" }, { status: 404 });
+        if (!inRoom(a.name, t.room, cap)) return Response.json({ error: "ticket is in another room" }, { status: 403 });
+        // The dispatcher passes only the first capture group (the ticket id), so the attachment id comes from the path.
+        const attId = Number(new URL(req.url).pathname.split("/")[4]);
+        const row = cap.db
+          .query<{ author: string }, [number, string]>("SELECT author FROM ticket_attachments WHERE id = ? AND ticket_id = ?")
+          .get(attId, t.id);
+        const count = () => cap.db.query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM ticket_attachments WHERE ticket_id = ?").get(t.id)!.n;
+        const human = isHuman(a.name, cap);
+        // The role check runs first, as in edit. An unknown id is 404 unless a ticket.detached event names it: that is a retry.
+        // A removed row is gone: its author is the actor of the ticket.attached event (the row id is that event's seq).
+        const author = row?.author ?? cap.db
+          .query<{ actor: string }, [number, string]>("SELECT actor FROM events WHERE seq = ? AND entity_id = ? AND kind = 'ticket.attached'")
+          .get(attId, t.id)?.actor ?? null;
+        if (!human && a.name !== t.creator && a.name !== author) {
+          return Response.json({ error: "only the human, the creator or the attachment's author may remove a file" }, { status: 403 });
+        }
+        if (!row) {
+          const gone = cap.db
+            .query<{ n: number }, [string, number]>(
+              "SELECT COUNT(*) AS n FROM events WHERE entity_id = ? AND kind = 'ticket.detached' AND json_extract(payload_json, '$.attachment_id') = ?",
+            )
+            .get(t.id, attId)!.n;
+          if (gone > 0) return Response.json({ attachments_count: count(), idempotent: true });
+          return Response.json({ error: "no such attachment" }, { status: 404 });
+        }
+        if (TICKET_TERMINAL.has(t.status)) return Response.json({ error: `ticket already ${t.status}` }, { status: 409 });
+        if (!human && t.status !== "draft" && t.status !== "queued") {
+          return Response.json({ error: `a file can be removed only while the ticket is draft or queued, this one is ${t.status}` }, { status: 409 });
+        }
+        const at = Date.now();
+        let seq = 0;
+        db.transaction(() => {
+          seq = insertEvent(db, t.id, "ticket.detached", a.name, { attachment_id: attId }, at);
+          db.run("DELETE FROM ticket_attachments WHERE id = ? AND ticket_id = ?", [attId, t.id]);
+        })();
+        const total = count();
+        cap.sse.emit(
+          { kind: "ticket.detached", ticket_id: t.id, room: t.room, version: seq, attachments_count: total, attachment_id: attId, from: a.name, to: "all", text: `[attachment removed from ${t.id}]`, ts: ts(), image: null },
+          { kind: "ui-only-ambient" },
+        );
+        return Response.json({ attachments_count: total });
       },
     },
 
@@ -879,12 +1038,31 @@ export function createTicketKind(db: Database): KindModule {
           }
           input.blast_radius = body.blast_radius;
         }
+        if (body.priority !== undefined) {
+          if (!isPriority(body.priority)) return Response.json({ error: "invalid priority" }, { status: 400 });
+          input.priority = body.priority;
+        }
+        if (body.external_ref !== undefined) {
+          if (body.external_ref !== null && (typeof body.external_ref !== "string" || body.external_ref.length > TICKET_REF_MAX_CHARS)) {
+            return Response.json({ error: "invalid external_ref" }, { status: 400 });
+          }
+          input.external_ref = body.external_ref;
+        }
+        if (body.request_id !== undefined) {
+          // A label sets it, an explicit null clears it.
+          if (body.request_id !== null && (typeof body.request_id !== "string" || !REQUEST_ID_RE.test(body.request_id))) {
+            return Response.json({ error: "invalid request_id" }, { status: 400 });
+          }
+          input.request_id = body.request_id;
+        }
+        if (body.blocked_by !== undefined) input.blocked_by = body.blocked_by;
         if (Object.keys(input).length === 0) {
-          return Response.json({ error: "nothing to edit (title, acceptance_criteria or blast_radius)" }, { status: 400 });
+          return Response.json({ error: "nothing to edit (title, acceptance_criteria, blast_radius, priority, external_ref, request_id or blocked_by)" }, { status: 400 });
         }
         try {
           const before = entity.load(params.id);
-          const r = entity.apply(params.id, editTicketVerb, input, a.name, cap);
+          const r = entity.applyWithSideEffect(params.id, editTicketVerb, input, a.name, cap, ({ tx }) =>
+            input.blocked_by === undefined ? undefined : writeBlockers(tx, params.id, input.blocked_by));
           if (r.emitted) {
             cap.briefing.refresh();
             retireStaleApproval(before, r.snapshot, a.name, cap);
@@ -1014,16 +1192,19 @@ export function createTicketKind(db: Database): KindModule {
         }
         // Archived tickets are hidden unless the caller asks (the board's "Show archived").
         const withArchived = url.searchParams.get("archived") === "1";
+        // Filtered in SQL, inside the room, before the limit.
+        const requestId = url.searchParams.get("request_id");
+        if (requestId !== null && !REQUEST_ID_RE.test(requestId)) return Response.json({ error: "invalid request_id" }, { status: 400 });
         const rows = db
-          .query<Record<string, unknown>, [string, number]>(
+          .query<Record<string, unknown>, (string | number)[]>(
             `SELECT t.*, p.status AS p_status, p.resolved_by AS p_resolved_by, p.version AS p_version,
                     (SELECT COUNT(*) FROM ticket_notes n WHERE n.ticket_id = t.id) AS notes_count,
                     (SELECT COUNT(*) FROM ticket_attachments x WHERE x.ticket_id = t.id) AS attachments_count
                FROM tickets t LEFT JOIN permissions p ON p.id = t.approval_request_id
-              WHERE t.room = ?${status === "open" ? " AND t.status NOT IN ('done','cancelled')" : ""}${withArchived ? "" : " AND t.archived_at_ms IS NULL"}
+              WHERE t.room = ?${status === "open" ? " AND t.status NOT IN ('done','cancelled')" : ""}${withArchived ? "" : " AND t.archived_at_ms IS NULL"}${requestId === null ? "" : " AND t.request_id = ?"}
               ORDER BY ${rankSql("t.priority")} DESC, t.created_at_ms ASC LIMIT ?`,
           )
-          .all(room, TICKET_LIST_LIMIT);
+          .all(...(requestId === null ? [room] : [room, requestId]), TICKET_LIST_LIMIT);
         return Response.json(
           rows.map((row) => {
             const snap = ticketDecl.rowToSnapshot(row);
@@ -1035,7 +1216,7 @@ export function createTicketKind(db: Database): KindModule {
                   version: (row.p_version as number | null) ?? null,
                 }
               : null;
-            return { ...snap, approval, notes_count: Number(row.notes_count ?? 0), attachments_count: Number(row.attachments_count ?? 0) };
+            return { ...snap, ...blockerFields(db, snap.id), approval, notes_count: Number(row.notes_count ?? 0), attachments_count: Number(row.attachments_count ?? 0) };
           }),
         );
       },
@@ -1055,8 +1236,15 @@ export function createTicketKind(db: Database): KindModule {
       for (const row of list) {
         const t = ticketDecl.rowToSnapshot(row);
         const criteria = oneLine(t.acceptance_criteria).slice(0, BRIEFING_CRITERIA_CHARS);
-        out.push(`- ${t.id} [${t.status}] (${t.blast_radius} radius, priority ${t.priority}) ${oneLine(t.title)}`);
+        const request = t.request_id ? ` request ${t.request_id}` : "";
+        out.push(`- ${t.id} [${t.status}] (${t.blast_radius} radius, priority ${t.priority}${request ? "," + request : ""}) ${oneLine(t.title)}`);
         out.push(`  Done when: ${criteria}`);
+        const open = cap.db
+          .query<{ id: string; status: string }, [string]>(
+            "SELECT b.blocker_id AS id, COALESCE(t.status, 'missing') AS status FROM ticket_blockers b LEFT JOIN tickets t ON t.id = b.blocker_id WHERE b.ticket_id = ? AND COALESCE(t.status, '') != 'done' ORDER BY b.rowid",
+          )
+          .all(t.id);
+        if (open.length) out.push(`  Blocked by: ${open.map((b) => `${b.id} (${b.status})`).join(", ")}`);
       }
       return out;
     };
@@ -1086,7 +1274,13 @@ export function createTicketKind(db: Database): KindModule {
       if (!d.query<{ name: string }, []>("PRAGMA table_info(tickets)").all().some((c) => c.name === "archived_at_ms")) {
         d.exec(`ALTER TABLE "tickets" ADD COLUMN "archived_at_ms" INTEGER`);
       }
+      if (!d.query<{ name: string }, []>("PRAGMA table_info(tickets)").all().some((c) => c.name === "request_id")) {
+        d.exec(`ALTER TABLE "tickets" ADD COLUMN "request_id" TEXT`);
+      }
       d.exec(`CREATE INDEX IF NOT EXISTS "idx_tickets_room_status" ON "tickets" ("room", "status")`);
+      // Blocker links: a ticket cannot be claimed while a blocker is not done.
+      d.exec(`CREATE TABLE IF NOT EXISTS "ticket_blockers" ("ticket_id" TEXT NOT NULL, "blocker_id" TEXT NOT NULL, PRIMARY KEY ("ticket_id", "blocker_id"))`);
+      d.exec(`CREATE INDEX IF NOT EXISTS "idx_ticket_blockers_blocker" ON "ticket_blockers" ("blocker_id")`);
       // The room lead (a room setting kept with the tickets): one agent per room, set by the human.
       // Append-only notes: the audit trail of how a ticket was built and tested. The id is the seq of the
       // note's event, so a note and its event always match.

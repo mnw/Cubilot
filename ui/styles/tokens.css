@@ -30,6 +30,7 @@
   --text:         #f5ede2;
   --text-muted:   #a69583;
   --text-dim:     #6b5d51;
+  --text-meta:    #978b78;  /* times, counts, section labels: 5:1 on --bg */
 
   /* Accents (semantic + reserved). */
   --orange:       #d97757;
@@ -268,6 +269,7 @@
   --text:         #575279;  /* text */
   --text-muted:   #797593;  /* subtle */
   --text-dim:     #9893a5;  /* muted */
+  --text-meta:    #6c6789;  /* 4.5:1+ on bg, raised and inset */
 
   --orange:       #d7827e;  /* rose */
   --orange-soft:  #b4637a;  /* love (darker) */
@@ -325,6 +327,7 @@
   --text:         #e0def4;
   --text-muted:   #908caa;
   --text-dim:     #6e6a86;
+  --text-meta:    #938fad;  /* 4.5:1+ on bg, raised and inset */
 
   --orange:       #ea9a97;  /* rose */
   --orange-soft:  #eb6f92;  /* love */

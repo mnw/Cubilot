@@ -361,7 +361,7 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
   {
     name: "create_ticket",
     description:
-      "Create a work ticket in your room. Acceptance criteria are required: state what done means. A high blast_radius ticket needs the human's approval to reach done. Returns ticket_id.",
+      "Create a work ticket in your room. Acceptance criteria are required: state what done means. A high blast_radius ticket needs the human's approval to reach done. Use status draft to hold a ticket back: a draft cannot be claimed and wakes no one until it moves to queued. Use request_id to group the tickets of one request, and blocked_by to list ticket ids that must be done before this ticket can be claimed. Returns ticket_id.",
     inputSchema: {
       type: "object",
       properties: {
@@ -375,6 +375,9 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
         },
         external_ref: { type: "string", description: "Optional opaque key from an outside tracker." },
         assignee: { type: "string", description: "Optional agent of your room that owns the ticket; it is woken once. Omit it to leave the ticket in the queue." },
+        status: { type: "string", enum: ["draft", "queued"], description: "Default queued. A draft cannot be claimed and wakes no one." },
+        request_id: { type: "string", pattern: "^[A-Za-z0-9._-]{1,64}$", description: "Optional label that groups the tickets of one request." },
+        blocked_by: { type: "array", items: TICKET_ID_SCHEMA, maxItems: 20, description: "Optional ids of tickets of your room that must be done before this ticket can be claimed." },
       },
       required: ["title", "acceptance_criteria", "blast_radius"],
     },
@@ -388,6 +391,7 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
       if (args.priority !== undefined) body.priority = args.priority;
       if (args.external_ref !== undefined) body.external_ref = args.external_ref;
       if (args.assignee !== undefined) body.assignee = args.assignee;
+      for (const k of ["status", "request_id", "blocked_by"]) if (args[k] !== undefined) body[k] = args[k];
       const resp = await authedPost(ctx.host, ctx.hubEnv, "/tickets", body);
       if (resp.status !== 201) toolError(resp, "create_ticket");
       const id = (resp.json as { snapshot?: { id?: string } } | null)?.snapshot?.id ?? "";
@@ -412,12 +416,12 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
   {
     name: "transition_ticket",
     description:
-      "Move your ticket to in_progress, in_review, done or cancelled. Only the assignee moves a claimed ticket. A done move on a high blast_radius ticket needs the human's Allow: the tool then requests approval and returns the request id. Moving to in_review REQUIRES `note`: say how you implemented it and how you tested it. The note goes into the ticket's audit trail; it does not replace your chatbridge messages, so still post what the room needs to know.",
+      "Move your ticket to in_progress, in_review, done or cancelled. Only the assignee moves a claimed ticket. Move a ticket to draft or queued only as the human or the room lead: queued promotes a draft, and the hub refuses any other actor. A done move on a high blast_radius ticket needs the human's Allow: the tool then requests approval and returns the request id. Moving to in_review REQUIRES `note`: say how you implemented it and how you tested it. The note goes into the ticket's audit trail; it does not replace your chatbridge messages, so still post what the room needs to know.",
     inputSchema: {
       type: "object",
       properties: {
         ticket_id: TICKET_ID_SCHEMA,
-        to: { type: "string", enum: ["in_progress", "in_review", "done", "cancelled"] },
+        to: { type: "string", enum: ["draft", "queued", "in_progress", "in_review", "done", "cancelled"] },
         note: {
           type: "string",
           maxLength: 4096,
@@ -482,7 +486,7 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
   {
     name: "edit_ticket",
     description:
-      "Edit an open ticket's title or acceptance criteria. Only the human, the ticket's creator and its assignee may edit. Only the human may change blast_radius: an agent that sends it is refused. A done or cancelled ticket cannot be edited. Pass only the fields you change.",
+      "Edit an open ticket's title or acceptance criteria. Only the human, the ticket's creator and its assignee may edit. Only the human may change blast_radius: an agent that sends it is refused. A done or cancelled ticket cannot be edited. Pass only the fields you change. The human, the ticket's creator and the room lead change request_id and blocked_by, not the assignee, and only while the ticket is draft or queued (the human may change them at any time). blocked_by replaces the whole list, and null or [] clears it.",
     inputSchema: {
       type: "object",
       properties: {
@@ -490,13 +494,15 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
         title: { type: "string", maxLength: 200, description: "The new title." },
         acceptance_criteria: { type: "string", maxLength: 4000, description: "The new acceptance criteria." },
         blast_radius: { type: "string", enum: ["low", "high"], description: "The human only." },
+        request_id: { type: ["string", "null"], pattern: "^[A-Za-z0-9._-]{1,64}$", description: "The label that groups the tickets of one request." },
+        blocked_by: { type: ["array", "null"], items: TICKET_ID_SCHEMA, maxItems: 20, description: "Replaces the whole blocker list. null or [] clears it." },
       },
       required: ["ticket_id"],
     },
     handler: async (ctx, args) => {
       const id = String(args.ticket_id ?? "");
       const body: Record<string, unknown> = { by: ctx.agent };
-      for (const k of ["title", "acceptance_criteria", "blast_radius"]) if (args[k] !== undefined) body[k] = args[k];
+      for (const k of ["title", "acceptance_criteria", "blast_radius", "request_id", "blocked_by"]) if (args[k] !== undefined) body[k] = args[k];
       const resp = await authedPost(ctx.host, ctx.hubEnv, `/tickets/${encodeURIComponent(id)}/edit`, body);
       if (resp.status !== 200) toolError(resp, "edit_ticket");
       const unchanged = (resp.json as { idempotent?: boolean } | undefined)?.idempotent;
@@ -544,11 +550,12 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
   },
   {
     name: "list_tickets",
-    description: "List the tickets of your own room, highest priority first. You cannot read another room's tickets. status open (default) hides done and cancelled; all shows every ticket.",
+    description: "List the tickets of your own room, highest priority first. You cannot read another room's tickets. status open (default) hides done and cancelled; all shows every ticket. request_id lists only the tickets of one request. Each line shows the request label and the ids of the open blockers (blockers not done).",
     inputSchema: {
       type: "object",
       properties: {
         status: { type: "string", enum: ["open", "all"] },
+        request_id: { type: "string", pattern: "^[A-Za-z0-9._-]{1,64}$", description: "Only the tickets with this request label." },
       },
     },
     handler: async (ctx, args) => {
@@ -556,21 +563,25 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
       const room = ctx.room ?? "";
       if (!room) throw new Error("list_tickets: room is required");
       const status = args.status === "all" ? "all" : "open";
+      const requestId = typeof args.request_id === "string" && args.request_id ? `&request_id=${encodeURIComponent(args.request_id)}` : "";
       const resp = await authedGet(
         ctx.host,
         ctx.hubEnv,
-        `/tickets?room=${encodeURIComponent(room)}&status=${status}`,
+        `/tickets?room=${encodeURIComponent(room)}&status=${status}${requestId}`,
       );
       if (resp.status !== 200) toolError(resp, "list_tickets");
       type T = {
         id: string; title: string; status: string; priority: string; blast_radius: string;
         assignee: string | null; acceptance_criteria: string; notes_count?: number; attachments_count?: number;
+        request_id?: string | null; open_blockers?: string[];
       };
       const items = Array.isArray(resp.json) ? (resp.json as T[]) : [];
       const text = items.length
         ? items
             .map((t) =>
               `${t.id} [${t.status}] priority ${t.priority}, ${t.blast_radius} radius, ${t.assignee ?? "unassigned"}: ${t.title}\n  done when: ${t.acceptance_criteria}`
+              + (t.request_id ? `\n  request ${t.request_id}` : "")
+              + (t.open_blockers?.length ? `\n  blocked by ${t.open_blockers.join(", ")}` : "")
               // Counts only when there is something: notes are in the audit trail, files are read at their stored path.
               + (t.notes_count || t.attachments_count ? `\n  ${t.notes_count ?? 0} notes, ${t.attachments_count ?? 0} files` : ""),
             )

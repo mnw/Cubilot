@@ -401,10 +401,22 @@ body.board-open .board-col {
 }
 /* Columns stretch to the tallest one, so every column header stays stuck while the cards scroll. */
 .ticket-board-columns {
-  /* One row, never wrapped: a wrapped row would scroll its sticky headers away. A narrow pane scrolls sideways. */
-  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(140px, 1fr); gap: var(--sp-4, 8px); align-items: stretch;
+  /* One row, never wrapped: a wrapped row would scroll its sticky headers away. A narrow pane scrolls sideways.
+     A column with tickets takes the free width; an empty one is a 40 px strip. */
+  display: flex; gap: var(--sp-4, 8px); align-items: stretch;
   flex: 1 1 auto; min-height: 0; overflow: auto; align-content: start;
 }
+.ticket-col { flex: 1 1 210px; min-width: 200px; }
+.ticket-col.collapsed {
+  flex: 0 0 40px; min-width: 40px; display: flex; flex-direction: column; align-items: center; gap: var(--sp-8);
+  border: 1px dashed var(--line); border-radius: var(--radius-md); padding: var(--sp-8) 0;
+}
+.ticket-col.collapsed h3 {
+  position: static; background: none; margin: 0; padding: 0; display: flex; flex-direction: row-reverse; gap: var(--sp-8);
+  writing-mode: vertical-rl; color: var(--text);
+}
+.ticket-col.collapsed .ticket-add { width: 26px; }
+.ticket-col h3 .ticket-add { width: 26px; margin-left: auto; padding: 0; line-height: 1.4; }
 .ticket-col h3 {
   font-size: 0.85em; margin: 0 0 4px; color: var(--text-muted);
   position: sticky; top: 0; z-index: 1; background: var(--bg); padding: 4px 0;
@@ -427,10 +439,8 @@ body.board-open .board-col {
 .ticket-note-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .ticket-notes-empty { color: var(--text-muted); font-size: 0.9em; }
 .ticket-card.archived { opacity: 0.6; border-style: dashed; }
-.ticket-card.radius-high { border-left: 3px solid #d9822b; }
 .ticket-title { font-weight: 600; }
 .ticket-meta, .ticket-approval { color: var(--text-muted); font-size: 0.9em; }
-.ticket-radius { color: #d9822b; }
 .ticket-assignee-row { display: flex; flex-direction: column; gap: 4px; }
 /* Move to and Assignee: two equal columns, label on top of its select; two rows only when the card is narrow. */
 .ticket-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 4px 8px; margin-top: 4px; }
@@ -470,6 +480,7 @@ body.board-open .board-col {
    native arrow is replaced by one drawn with the same tokens, so all selects match. */
 #ticket-modal select,
 #ticket-view select,
+#ticket-filter-request,
 .roster-lead select,
 .ticket-card .ticket-assign, .ticket-card .ticket-move {
   appearance: none; -webkit-appearance: none;
@@ -497,7 +508,7 @@ body.board-open .board-col {
 #ticket-modal select:disabled, #ticket-view select:disabled,
 .roster-lead select:disabled, .ticket-card .ticket-assign:disabled, .ticket-card .ticket-move:disabled { opacity: 0.45; cursor: not-allowed; }
 #ticket-modal select option, #ticket-view select option,
-.roster-lead select option, .ticket-card .ticket-assign option, .ticket-card .ticket-move option { background: var(--bg-inset); color: var(--text); }
+.roster-lead select option, #ticket-filter-request option, .ticket-card .ticket-assign option, .ticket-card .ticket-move option { background: var(--bg-inset); color: var(--text); }
 /* Compact variant for the dense places: a card's Assignee select and the top bar. */
 .roster-lead select,
 .ticket-card .ticket-assign, .ticket-card .ticket-move {
@@ -529,7 +540,11 @@ body.board-open .board-col {
 .ticket-filters-btn { font-family: var(--mono); font-size: var(--fs-sm); padding: var(--sp-4) var(--sp-10); border-radius: var(--radius-md); }
 .ticket-filters-btn[aria-expanded="true"] { border-color: var(--line-hover); }
 .ticket-filters-btn.active { border-color: var(--orange); color: var(--orange); }
-.ticket-filter-summary { font-size: var(--fs-sm); color: var(--text-muted); opacity: 0.85; }
+.ticket-filter-summary { font-size: var(--fs-sm); color: var(--text); }
+/* The primary button at the right of the toolbar. On dawn the orange fill is too light for any text (2.45:1): --text on --bg-inset there. */
+.ticket-new-btn { margin-left: auto; background: var(--orange); color: var(--bg-inset); border: none; font-weight: 600; padding: var(--sp-4) var(--sp-12); border-radius: var(--radius-md); }
+.ticket-new-btn:hover { background: var(--orange-hover); color: var(--bg-inset); }
+[data-theme="rose-pine-dawn"] .ticket-new-btn, [data-theme="rose-pine-dawn"] .ticket-new-btn:hover { background: var(--text); color: var(--bg-inset); }
 .ticket-filter-panel {
   position: absolute; top: calc(100% + var(--sp-4)); left: 0; z-index: 5;
   width: min(300px, 100%); max-height: min(70vh, 420px); overflow: auto;
@@ -605,6 +620,252 @@ body.board-open .board-col {
 .md p:last-child, .md ul:last-child { margin-bottom: 0; }
 .md ul { margin: 0 0 var(--sp-6); padding-left: var(--sp-16, 16px); }
 .md .md-checklist { list-style: none; padding-left: 0; }
-.md .md-checklist input { margin: 0 var(--sp-4) 0 0; accent-color: var(--orange); vertical-align: middle; }
+/* A checklist item: a 15 px box, filled --green with a check when done, an outline when not. */
+.md .md-checklist input {
+  appearance: none; -webkit-appearance: none; position: relative; box-sizing: border-box; width: 15px; height: 15px;
+  margin: 0 var(--sp-4) 0 0; vertical-align: middle; border: 1.5px solid var(--text-muted); border-radius: 3px; background: transparent;
+}
+.md .md-checklist input:checked { background: var(--green); border-color: var(--green); }
+.md .md-checklist input:checked::after {
+  content: ''; position: absolute; left: 4px; top: 1px; width: 3px; height: 7px;
+  border: solid var(--bg); border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+/* Write / Preview tabs above the criteria editor. */
+.ticket-tabs { display: flex; gap: var(--sp-4); border-bottom: var(--border-1) solid var(--line); }
+.ticket-tabs [role="tab"] {
+  padding: var(--sp-4) var(--sp-8); background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  color: var(--text-muted); font-size: var(--fs-sm); cursor: pointer;
+}
+.ticket-tabs [role="tab"][aria-selected="true"] { color: var(--text); border-bottom-color: var(--orange); }
+.ticket-tabs [role="tab"]:focus-visible { outline: 2px solid var(--orange); outline-offset: -2px; }
 .md code { font-family: var(--mono); font-size: 0.95em; padding: 0 var(--sp-4); background: var(--bg-inset); border-radius: var(--radius-md); }
 .ticket-view-criteria.md { white-space: normal; }
+
+/* Request label and blockers (ticket-grouping 6.2, 6.3, 6.5). Part 14 restyles these.
+   Text uses --text, not --text-muted: measured, --text-muted is below 4.5:1 on the dawn theme (4.0 on --bg)
+   and on the moon theme's raised and inset surfaces (4.4-4.5). --text is 6.3:1 or more in all three themes. */
+.ticket-lock { margin-left: var(--sp-6); color: var(--text); white-space: nowrap; }
+.ticket-view-blockers { margin: 0 0 8px; padding-left: 1.2em; font-size: 0.9em; color: var(--text); }
+.ticket-request-form { display: flex; flex-direction: column; gap: var(--sp-6); margin: 8px 0; }
+.ticket-request-form label { display: flex; flex-direction: column; gap: 2px; color: var(--text); font-size: 0.9em; }
+.ticket-request-form input, .ticket-request-form textarea, .ticket-request-form select { background: var(--bg-inset); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 4px 6px; }
+/* The dialog's bottom row: Cancel ticket / Archive, Attach file, Close, Save. Save is the primary button when the
+   ticket is editable; otherwise Close is (the look of .modal-actions in modals.css). */
+/* The error line and the action row stay at the bottom of the dialog while the content scrolls: Save never scrolls out of view. */
+.ticket-view-foot { position: sticky; bottom: 0; background: var(--bg-raised); padding-top: var(--sp-4); }
+.ticket-view-bottom { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--sp-8); margin-top: var(--sp-4); }
+#ticket-view-row-actions { display: contents; }
+/* Cancel ticket sits left, apart from the other buttons, with a danger outline. No red token reaches 4.5:1 as text on dawn (4.04),
+   so the label stays --text and the danger is the outline and the changed label ("Confirm cancel"), not colour alone. */
+.ticket-cancel-btn { margin-right: auto; border: 1px solid var(--red); color: var(--text); }
+.ticket-cancel-btn.armed { border-width: 2px; font-weight: 700; }
+#ticket-view-notice { margin-top: var(--sp-8); color: var(--text); font-size: 0.9em; }
+#ticket-view-notice:empty { display: none; }
+/* A refused Save. No red token reaches 4.5:1 as text on all three themes (dark 4.43 and dawn 4.04 on --bg-raised), so the text is --text
+   and the red is the border: the field's border, and the left bar of a message with no field. */
+.ticket-field-error, .ticket-view-notice-error { color: var(--text); font-size: 0.9em; }
+.ticket-field-error { margin-top: calc(var(--sp-6) * -0.5); border-left: 3px solid var(--red); padding-left: var(--sp-8); }   /* the red cue does not rest on the field border alone */
+.ticket-view-notice-error { display: inline-block; border-left: 3px solid var(--red); padding-left: var(--sp-8); }
+/* ".modal input:focus" and ":hover" (modals.css) outrank a plain attribute rule, and "#ticket-view select:focus" (kinds.css) too: the invalid border also wins on focus and hover. */
+#ticket-view .ticket-request-form [aria-invalid="true"], #ticket-view .ticket-request-form [aria-invalid="true"]:focus, #ticket-view .ticket-request-form [aria-invalid="true"]:hover { border-color: var(--red); border-width: 2px; }
+#ticket-view-notice button { color: var(--text); margin-left: var(--sp-6); }
+.ticket-attach-actions { margin-left: auto; display: flex; gap: var(--sp-6); }
+.ticket-attach-actions button { color: var(--text); }
+.ticket-file-remove.armed { border: 2px solid var(--red); font-weight: 700; }
+.ticket-view-bottom #ticket-view-save:not([hidden]), .ticket-view-bottom:has(#ticket-view-save[hidden]) #ticket-view-close {
+  background: var(--orange); color: var(--bg-inset); border: none; font-weight: 600;
+}
+.ticket-view-bottom #ticket-view-save:not([hidden]):hover, .ticket-view-bottom:has(#ticket-view-save[hidden]) #ticket-view-close:hover { background: var(--orange-hover); color: var(--bg-inset); }
+/* On dawn the orange fill is too light for any text colour (2.45:1 with --bg-inset): the primary button is --text on --bg-inset there (6.28:1). */
+[data-theme="rose-pine-dawn"] .ticket-view-bottom #ticket-view-save:not([hidden]), [data-theme="rose-pine-dawn"] .ticket-view-bottom #ticket-view-save:not([hidden]):hover,
+[data-theme="rose-pine-dawn"] .ticket-view-bottom:has(#ticket-view-save[hidden]) #ticket-view-close, [data-theme="rose-pine-dawn"] .ticket-view-bottom:has(#ticket-view-save[hidden]) #ticket-view-close:hover { background: var(--text); color: var(--bg-inset); }
+label[for="ticket-filter-request"] { color: var(--text); }
+.ticket-request-label, .ticket-view-fields dt.dt-strong, .ticket-view-h-strong { color: var(--text); }
+.ticket-add { color: var(--text); }   /* the Draft column's "+" is a new control; --text-muted is 4.0:1 on dawn */
+
+/* Visible keyboard focus in the ticket dialogs. HYPOTHESIS, not confirmed in the installed app: the human reported that
+   Tab never reaches Attach files, Cancel or Save. reset.css sets `button { outline: none }` and modals.css does the same
+   for the modal inputs, so if Tab does reach them, nothing showed it. The other candidate is the macOS "Keyboard
+   navigation" setting, which makes WebKit skip buttons. Until the installed-app check confirms which, this block only
+   guarantees a visible ring. --text, not --orange: --orange is 2.45-2.74:1 on dawn, below 3:1. */
+#ticket-modal button:focus-visible, #ticket-modal input:focus-visible, #ticket-modal textarea:focus-visible, #ticket-modal select:focus-visible,
+#ticket-view button:focus-visible, #ticket-view input:focus-visible, #ticket-view textarea:focus-visible, #ticket-view select:focus-visible,
+#ticket-view summary:focus-visible, #ticket-view a:focus-visible,
+#ticket-filters button:focus-visible, #ticket-filters input:focus-visible, #ticket-filters select:focus-visible,
+.ticket-add:focus-visible, .ticket-card button:focus-visible, .ticket-card select:focus-visible, .ticket-card summary:focus-visible {
+  outline: 2px solid var(--text); outline-offset: 2px;
+}
+
+/* Contrast: the default button colour (--text-muted) is 3.6:1 on dawn and moon and the modal label colour (--text-dim) is 2.6 to 2.9:1.
+   The new dialog controls use --text (6.3:1 or more in all three themes). */
+#ticket-view .ticket-view-attach button, #ticket-view .ticket-view-bottom button, #ticket-view #ticket-view-notice button { color: var(--text); }
+#ticket-new-form label[for="ticket-f-request"], #ticket-new-form label[for="ticket-f-blockers"] { color: var(--text); }
+
+/* ---- 15.3: the card ---- */
+.ticket-card { display: flex; flex-direction: column; gap: var(--sp-6); padding: var(--sp-10); background: var(--bg-raised); }
+.ticket-card-top { display: flex; align-items: center; gap: var(--sp-6); font-family: var(--mono); font-size: var(--fs-xs); min-width: 0; }
+.ticket-tag { text-transform: uppercase; letter-spacing: 0.04em; padding: 1px var(--sp-6); border-radius: var(--radius-sm, 4px); background: var(--bg-inset); color: var(--text); }
+.ticket-tag.tag-code { background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--text); }
+.ticket-code { color: var(--text-meta); }
+.ticket-prio { margin-left: auto; display: inline-flex; align-items: center; gap: var(--sp-4); color: var(--text); white-space: nowrap; }
+.ticket-bars { display: inline-flex; align-items: flex-end; gap: 1px; height: 10px; }
+.ticket-bars i { width: 2px; background: var(--text-meta); opacity: 0.45; }
+.ticket-bars i:nth-child(1) { height: 3px; } .ticket-bars i:nth-child(2) { height: 5px; } .ticket-bars i:nth-child(3) { height: 7px; } .ticket-bars i:nth-child(4) { height: 10px; }
+.ticket-bars i.on { background: var(--orange); opacity: 1; }
+.ticket-title { font-size: var(--fs-xl); font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.ticket-sub { color: var(--text-muted); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.ticket-chips { display: flex; flex-wrap: wrap; gap: var(--sp-4); }
+.ticket-chip { display: inline-flex; align-items: center; gap: var(--sp-4); max-width: 100%; min-width: 0; font-family: var(--mono); font-size: var(--fs-xs); padding: 1px var(--sp-6); border-radius: var(--radius-sm, 4px); background: var(--bg-inset); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ticket-chip.ticket-radius { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--text); }
+.ticket-status-line { display: flex; align-items: center; gap: var(--sp-4); font-size: var(--fs-sm); color: var(--text); }
+.ticket-status-line.is-blocked .ticket-icon { color: var(--amber); }
+.ticket-status-line.is-approval .ticket-icon, .ticket-status-line.is-human .ticket-icon { color: var(--red); }
+.ticket-card-foot { display: flex; align-items: center; gap: var(--sp-8); padding-top: var(--sp-6); border-top: 1px solid var(--line); min-width: 0; }
+.ticket-who { display: inline-flex; align-items: center; gap: var(--sp-6); font-family: var(--mono); font-size: var(--fs-sm); min-width: 0; color: var(--text); }
+.ticket-who-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ticket-unassigned { font-style: italic; color: var(--text-muted); }
+.ticket-avatar { width: 18px; height: 18px; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: color-mix(in srgb, var(--amber) 22%, transparent); color: var(--text); font-size: var(--fs-xs); font-weight: 600; }
+.ticket-counts { display: inline-flex; gap: var(--sp-6); margin-left: auto; font-family: var(--mono); font-size: var(--fs-xs); color: var(--text-meta); }
+.ticket-count { display: inline-flex; align-items: center; gap: 2px; }
+.ticket-card-foot .ticket-light { margin-left: 0; }
+/* The controls are hidden until the card has the pointer or focus (visibility, not display: they stay reachable by Tab once the card has focus). */
+.ticket-card-controls { visibility: hidden; height: 0; overflow: hidden; }
+.ticket-card:hover .ticket-card-controls, .ticket-card:focus-within .ticket-card-controls { visibility: visible; height: auto; overflow: visible; }
+
+/* ---- 15.4: card actions on hover and keyboard focus ---- */
+/* The name in the footer becomes the Assignee select; the hidden select is out of the tab order (visibility) until the card has the pointer or focus. */
+.ticket-who .ticket-assign-label { font-size: 0; position: absolute; width: 0; height: 0; overflow: hidden; visibility: hidden; }
+.ticket-card:hover .ticket-who:has(.ticket-assign-label) .ticket-who-name, .ticket-card:focus-within .ticket-who:has(.ticket-assign-label) .ticket-who-name { display: none; }
+.ticket-card:hover .ticket-who .ticket-assign-label, .ticket-card:focus-within .ticket-who .ticket-assign-label { position: static; width: auto; height: auto; overflow: visible; visibility: visible; }
+.ticket-who .ticket-assign { width: 104px; max-width: 104px; }
+.ticket-card-controls { margin-top: calc(var(--sp-6) * -1); }
+.ticket-card:hover .ticket-card-controls, .ticket-card:focus-within .ticket-card-controls { margin-top: 0; }
+.ticket-card-controls { display: flex; align-items: center; gap: var(--sp-6); }
+.ticket-card-controls .ticket-move-label { flex: 1 1 auto; min-width: 0; font-size: 0; }
+.ticket-card-controls .ticket-move { width: 100%; }
+.ticket-card-controls .ticket-actions { margin-top: 0; flex: none; flex-wrap: nowrap; align-items: center; }
+.ticket-cancel-icon { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-4); min-width: 26px; height: 26px; padding: 0 var(--sp-4); color: var(--text); border: 1px solid var(--red); border-radius: var(--radius-md); font-size: var(--fs-xs); }
+.ticket-cancel-icon.armed { border-width: 2px; font-weight: 700; }
+
+/* ---- 15.5: the dialog shell: header, a body that scrolls, a footer that stays ---- */
+#ticket-view .modal.ticket-view { padding: 0; overflow: hidden; display: flex; flex-direction: column; width: calc(100% - 32px); max-width: none; max-height: calc(100% - 32px); gap: 0; }
+.ticket-view-head { flex: none; padding: var(--sp-14, 14px) var(--sp-20) var(--sp-10, 10px); border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: var(--sp-6); }
+.ticket-view-head-row { display: flex; align-items: center; gap: var(--sp-8); }
+.ticket-view-head-meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-8); min-width: 0; font-family: var(--mono); font-size: var(--fs-xs); }
+.ticket-view-head-actions { margin-left: auto; display: flex; align-items: center; gap: var(--sp-6); }
+.ticket-view-x { width: 28px; height: 28px; padding: 0; color: var(--text); border-radius: var(--radius-md); }
+#ticket-view-title { margin: 0; font-size: var(--fs-6xl); font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; color: var(--text); }
+.ticket-title-input { width: 100%; font-size: var(--fs-6xl); font-weight: 600; font-family: var(--sans); }
+.ticket-view-sub { color: var(--text-muted); font-size: var(--fs-base); }
+.ticket-view-light { position: static; display: inline-flex; align-items: center; gap: var(--sp-6); color: var(--text); }
+.ticket-pill { padding: 1px var(--sp-8); border-radius: 999px; background: var(--bg-inset); color: var(--text); font-size: var(--fs-xs); white-space: nowrap; }
+.ticket-pill.pill-draft { border: 1px dashed var(--line-hover); }
+.ticket-pill.pill-queued { background: color-mix(in srgb, var(--blue) 20%, transparent); }
+.ticket-pill.pill-in_progress { background: color-mix(in srgb, var(--amber) 20%, transparent); }
+.ticket-pill.pill-in_review { background: color-mix(in srgb, var(--purple) 20%, transparent); }
+.ticket-pill.pill-done { background: color-mix(in srgb, var(--green) 20%, transparent); }
+.ticket-pill.pill-cancelled { background: color-mix(in srgb, var(--red) 20%, transparent); }
+/* The body is the one thing that scrolls. Wide: content left, properties right. Narrow (a container query on the body): the panel goes above. */
+.ticket-view-body { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-wrap: wrap; gap: var(--sp-20); padding: var(--sp-14, 14px) var(--sp-20); container-type: inline-size; align-content: flex-start; }
+.ticket-view-main { flex: 999 1 380px; min-width: 0; }
+.ticket-view-panel { flex: 1 1 264px; min-width: 264px; align-self: flex-start; padding: var(--sp-10, 10px); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-inset); }
+@container (max-width: 600px) { .ticket-view-panel { order: -1; flex-basis: 100%; } }
+.ticket-view-panel .ticket-view-fields { grid-template-columns: max-content minmax(0, 1fr); font-size: var(--fs-sm); }
+.ticket-view-panel .ticket-view-fields dt { color: var(--text-meta); }
+.ticket-view-rule { border: 0; border-top: 1px solid var(--line); margin: var(--sp-8) 0; }
+.ticket-view-status { margin-bottom: var(--sp-8); }
+.ticket-id { font-family: var(--mono); overflow-wrap: anywhere; }
+.ticket-copy-id { color: var(--text); font-size: var(--fs-xs); padding: 0 var(--sp-6); }
+/* Section headings: sentence case, with the count in --text-meta; no uppercase mono labels. */
+.ticket-view-h { font-size: var(--fs-xl); font-weight: 600; color: var(--text); text-transform: none; letter-spacing: normal; font-family: var(--sans); margin: var(--sp-10, 10px) 0 var(--sp-4); }
+/* The footer stays at the bottom: the body scrolls, not the footer. */
+#ticket-view .ticket-view-foot { position: static; flex: none; padding: var(--sp-10, 10px) var(--sp-20); border-top: 1px solid var(--line); background: var(--bg-raised); }
+/* The panel row already says "Assignee": the select's own label text is not repeated. */
+#ticket-view .ticket-view-panel dd .ticket-assign-label { font-size: 0; display: block; }
+#ticket-view .ticket-view-panel dd .ticket-assign { font-size: var(--fs-sm); }
+
+/* ---- 15.6: read mode and edit mode ---- */
+.ticket-edit-btn { color: var(--text); }
+.ticket-pill.pill-editing { background: color-mix(in srgb, var(--amber) 22%, transparent); }
+.ticket-view-hint { color: var(--text-meta); font-size: var(--fs-xs); margin-top: var(--sp-4); }
+.ticket-edit-warning { padding: var(--sp-8) var(--sp-10, 10px); margin-bottom: var(--sp-10, 10px); border: 1px solid color-mix(in srgb, var(--amber) 50%, transparent); border-radius: var(--radius-md); background: color-mix(in srgb, var(--amber) 12%, transparent); color: var(--text); font-size: var(--fs-sm); }
+.ticket-view-dirty { margin-right: var(--sp-6); align-self: center; color: var(--text); font-size: var(--fs-sm); }
+.ticket-view-dirty::before { content: "\25CF"; color: var(--amber); margin-right: var(--sp-4); }
+.ticket-discard-btn { margin-right: auto; color: var(--text); }
+.ticket-field-label { display: block; margin-bottom: var(--sp-4); color: var(--text); font-size: var(--fs-sm); }
+.ticket-radio-pair { display: inline-flex; border: var(--border-1) solid var(--line); border-radius: var(--radius-md); overflow: hidden; }
+.ticket-radio { position: relative; display: inline-flex; margin: 0; }
+.ticket-radio input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.ticket-radio span { padding: var(--sp-4) var(--sp-14, 14px); color: var(--text); font-size: var(--fs-sm); }
+.ticket-radio input:checked + span { background: var(--bg-inset); font-weight: 600; box-shadow: inset 0 0 0 2px var(--line-hover); }
+.ticket-radio.is-high input:checked + span { background: color-mix(in srgb, var(--red) 20%, transparent); }
+.ticket-radio input:focus-visible + span { outline: 2px solid var(--text); outline-offset: -2px; }
+#ticket-view .ticket-request-form [aria-invalid="true"].ticket-radio-pair { border-color: var(--red); border-width: 2px; }
+
+/* Labels and headings in the dialog: sentence case, sans, readable; the count in --text-meta. */
+#ticket-view label, #ticket-view .ticket-field-label, #ticket-view .ticket-view-panel dt { font-family: var(--sans); font-size: var(--fs-sm); letter-spacing: normal; text-transform: none; color: var(--text); }
+#ticket-view .ticket-view-panel dt { color: var(--text-meta); }
+.ticket-view-count { font-family: var(--sans); font-weight: 400; font-size: var(--fs-sm); color: var(--text-meta); }
+.ticket-view-panel dd { min-width: 0; }
+.ticket-view-panel dd select, .ticket-view-panel dd input[type=text], .ticket-view-panel dd input:not([type]) { width: 100%; }
+
+/* ---- 15.8: blocker rows and the picker ---- */
+.ticket-view-blockers { list-style: none; margin: 0 0 var(--sp-6); padding: 0; display: flex; flex-direction: column; gap: var(--sp-4); font-size: var(--fs-sm); color: var(--text); }
+.ticket-blocker-row { display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-6) var(--sp-8); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-inset); min-width: 0; }
+.ticket-blocker-icon { display: inline-flex; flex: none; }
+.ticket-blocker-row.blocker-open .ticket-blocker-icon { color: var(--amber); }
+.ticket-blocker-row.blocker-done .ticket-blocker-icon { color: var(--green); }
+.ticket-blocker-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ticket-blocker-state { flex: none; }
+.ticket-blocker-state.is-done { background: color-mix(in srgb, var(--green) 20%, transparent); }
+.ticket-blocker-state.is-open { background: color-mix(in srgb, var(--amber) 20%, transparent); }
+.ticket-blocker-remove { flex: none; width: 24px; height: 24px; padding: 0; color: var(--text); border-radius: var(--radius-md); }
+.ticket-blocker-edit { display: flex; flex-direction: column; gap: var(--sp-6); }
+.ticket-blocker-add { align-self: flex-start; color: var(--text); border: 1px dashed var(--line-hover); }
+.ticket-blocker-box { display: flex; flex-direction: column; gap: var(--sp-4); }
+.ticket-blocker-box input { width: 100%; }
+#ticket-blocker-listbox { list-style: none; margin: 0; padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-inset); max-height: 220px; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+.ticket-blocker-opt { display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-6) var(--sp-8); border-radius: var(--radius-md); cursor: pointer; font-size: var(--fs-sm); color: var(--text); min-width: 0; }
+.ticket-blocker-opt.active, .ticket-blocker-opt:hover { background: var(--bg-elev); }
+.ticket-blocker-none { padding: var(--sp-6) var(--sp-8); color: var(--text-meta); font-size: var(--fs-sm); }
+
+/* The approval banner at the top of the dialog body: a pending ticket:done request for the human. */
+.ticket-approval-banner {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-8);
+  padding: var(--sp-8) var(--sp-10, 10px); margin-bottom: var(--sp-10, 10px);
+  border: 1px solid color-mix(in srgb, var(--red) 50%, transparent); border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--red) 10%, transparent); color: var(--text); font-size: var(--fs-sm);
+}
+.ticket-approval-text { flex: 1 1 240px; }
+.ticket-approval-actions { display: flex; gap: var(--sp-6); }
+.ticket-approval-actions button:disabled { opacity: 0.6; cursor: default; }
+
+/* ---- 15.10: files and notes ---- */
+.ticket-attach-list li { padding: var(--sp-6) var(--sp-8); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-inset); }
+.ticket-attach-thumb { width: 44px; height: 44px; }
+.ticket-attach-ext { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; flex: none; border-radius: var(--radius-md); border: var(--border-1) solid var(--line); background: var(--bg-raised); color: var(--text); font-family: var(--mono); font-size: var(--fs-xs); }
+.ticket-attach-meta { color: var(--text-meta); }
+.ticket-attach-actions button { width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-md); }
+.ticket-attach-actions .ticket-file-remove.armed { width: auto; padding: 0 var(--sp-8); gap: var(--sp-4); border: 2px solid var(--red); font-weight: 700; font-size: var(--fs-xs); }
+/* The dashed drop area under the list; "browse" is the file picker button. */
+.ticket-view-attach { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--sp-8); margin-top: var(--sp-8); padding: var(--sp-14, 14px) var(--sp-10, 10px); border: 1px dashed var(--line-hover); border-radius: var(--radius-md); color: var(--text); font-size: var(--fs-sm); text-align: center; }
+.ticket-view-attach.over { border-style: solid; background: color-mix(in srgb, var(--orange) 10%, transparent); }
+.ticket-browse { color: var(--text); background: none; border: none; text-decoration: underline; padding: 0; font: inherit; cursor: pointer; }
+/* Notes: author in mono and role colour (a 30 % token tint mixed into --text: 4.5:1 or more in all three themes), then the time. */
+.ticket-note-author { font-family: var(--mono); font-weight: 600; color: var(--text); }
+.ticket-note-author.note-role-worker { color: color-mix(in srgb, var(--amber) 30%, var(--text)); }
+.ticket-note-author.note-role-tester { color: color-mix(in srgb, var(--green) 30%, var(--text)); }
+.ticket-note-author.note-role-validator { color: color-mix(in srgb, var(--purple) 30%, var(--text)); }
+.ticket-note-author.note-role-orchestrator { color: color-mix(in srgb, var(--blue) 30%, var(--text)); }
+.ticket-notes-list time { color: var(--text-meta); }
+.ticket-notes-all { color: var(--text); margin-top: var(--sp-6); }
+
+/* ---- 15.11: layout fixes ---- */
+/* The heading line: the title and its count on the left, the Write and Preview tabs at the right. */
+.ticket-crit-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-8); flex-wrap: wrap; border-bottom: var(--border-1) solid var(--line); }
+.ticket-request-form .ticket-crit-head label { display: inline; font-size: var(--fs-xl); font-weight: 600; color: var(--text); }
+.ticket-crit-head .ticket-tabs { border-bottom: 0; }
+/* The panel: labels above their fields (the dates keep label and value on one line); long values wrap and are not cut off. */
+.ticket-view-panel .ticket-view-fields:first-of-type { grid-template-columns: minmax(0, 1fr); gap: var(--sp-4) 0; }
+.ticket-view-panel .ticket-view-fields:first-of-type dd { margin-bottom: var(--sp-8); }
+.ticket-view-panel dd { overflow-wrap: anywhere; }

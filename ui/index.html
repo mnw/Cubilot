@@ -160,6 +160,7 @@
     <div class="ticket-filters" id="ticket-filters">
       <button type="button" class="ticket-filters-btn" id="ticket-filters-btn" aria-haspopup="true" aria-expanded="false" aria-controls="ticket-filter-panel">Filters</button>
       <span class="ticket-filter-summary" id="ticket-filter-summary" aria-live="polite"></span>
+      <button type="button" class="ticket-new-btn" id="ticket-new-btn">+ New ticket</button>
       <div class="ticket-filter-panel" id="ticket-filter-panel" role="group" aria-label="Board filters" hidden>
         <div class="ff-section">
           <div class="ff-label" id="ff-radius-label">Blast radius</div>
@@ -168,6 +169,10 @@
             <label><input type="radio" name="ticket-filter-radius" id="ticket-filter-radius-high" value="high" /><span>High</span></label>
             <label><input type="radio" name="ticket-filter-radius" id="ticket-filter-radius-low" value="low" /><span>Low</span></label>
           </div>
+        </div>
+        <div class="ff-section">
+          <label class="ff-label" for="ticket-filter-request">Request</label>
+          <select id="ticket-filter-request"><option value="">All requests</option></select>
         </div>
         <div class="ff-section">
           <div class="ff-label">Priority</div>
@@ -335,6 +340,10 @@
     </div>
     <label for="ticket-f-ref">External ref (optional)</label>
     <input id="ticket-f-ref" name="external_ref" autocomplete="off" />
+    <label for="ticket-f-request">Request (optional)</label>
+    <input id="ticket-f-request" name="request_id" autocomplete="off" maxlength="64" />
+    <label for="ticket-f-blockers">Blocked by (ticket ids, comma separated, optional)</label>
+    <input id="ticket-f-blockers" name="blocked_by" autocomplete="off" />
     <div class="ticket-f-attach">
       <label for="ticket-f-attach-btn">Attachments (optional)</label>
       <div class="ticket-f-attach-row">
@@ -353,16 +362,38 @@
 
 <dialog class="ticket-dialog" id="ticket-view" aria-labelledby="ticket-view-title">
   <div class="modal ticket-view">
-    <h2 id="ticket-view-title"></h2>
-    <div id="ticket-view-content"></div>
-    <div id="ticket-view-actions"></div>
-    <div class="ticket-view-attach">
-      <button type="button" id="ticket-view-attach-btn">Attach file</button>
-      <input type="file" id="ticket-view-file" accept=".pdf,.md,.txt,.png,.jpg,.jpeg" multiple hidden />
-      <span id="ticket-view-attach-status" aria-live="polite"></span>
+    <header class="ticket-view-head">
+      <div class="ticket-view-head-row">
+        <div class="ticket-view-head-meta" id="ticket-view-head-meta"></div>
+        <div class="ticket-view-head-actions">
+          <span id="ticket-view-edit-slot"><button type="button" class="ticket-edit-btn" id="ticket-view-edit" hidden>Edit</button></span>
+          <button type="button" class="ticket-view-x" id="ticket-view-x" aria-label="Close">&#10005;</button>
+        </div>
+      </div>
+      <h2 id="ticket-view-title"></h2>
+      <div class="ticket-view-sub" id="ticket-view-sub" hidden></div>
+    </header>
+    <div class="ticket-view-body" id="ticket-view-body">
+      <div class="ticket-view-main">
+        <div id="ticket-view-content"></div>
+        <div class="ticket-view-attach" id="ticket-view-drop">
+          <span class="ticket-view-drop-text">Drop files here or <button type="button" class="ticket-browse" id="ticket-view-attach-btn">browse</button> &middot; pdf, md, txt, png, jpg &middot; up to 8 MB</span>
+          <input type="file" id="ticket-view-file" accept=".pdf,.md,.txt,.png,.jpg,.jpeg" multiple hidden />
+          <input type="file" id="ticket-view-replace" accept=".pdf,.md,.txt,.png,.jpg,.jpeg" hidden />
+          <span id="ticket-view-attach-status" aria-live="polite"></span>
+        </div>
+        <div id="ticket-view-notes"></div>
+      </div>
+      <aside class="ticket-view-panel" id="ticket-view-actions" aria-label="Ticket properties"></aside>
     </div>
-    <div class="modal-actions">
-      <button type="button" id="ticket-view-close">Close</button>
+    <div class="ticket-view-foot" id="ticket-view-foot">
+      <div id="ticket-view-notice" role="alert"></div>
+      <div class="ticket-view-bottom" id="ticket-view-bottom">
+        <div id="ticket-view-row-actions"></div>
+        <span class="ticket-view-dirty" id="ticket-view-dirty" role="status" hidden></span>
+        <button type="button" id="ticket-view-close">Close</button>
+        <button type="submit" id="ticket-view-save" form="ticket-request-form" hidden disabled>Save changes</button>
+      </div>
     </div>
   </div>
 </dialog>

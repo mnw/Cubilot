@@ -17,6 +17,8 @@ let gate: Promise<void> | null;
 let posts: Array<{ path: string; body: any }>;
 let postGate: Promise<void> | null;
 let failPath: string | null;
+let attachReplyId: number | null;
+let refuseText = "upload refused";
 let cols: { innerHTML: string; querySelectorAll: (sel: string) => any[] };
 let observers: Record<string, (e: any) => void>;   // what the board registered with KindCardRenderer
 let bodyClasses: Set<string>;
@@ -59,6 +61,8 @@ beforeEach(async () => {
   posts = [];
   postGate = null;
   failPath = null;
+  attachReplyId = null;
+  refuseText = "upload refused";
   cols = { innerHTML: "", querySelectorAll: () => [] };
   store = new Map();
   messages = [];
@@ -95,11 +99,30 @@ beforeEach(async () => {
   els["ticket-show-cancelled"] = control({ checked: false });
   // The ticket view: a dialog, its title, content and action areas, and the Close button.
   els["ticket-view"] = control({ open: false, style: {}, showModal() { this.open = true; }, close() { if (this.open) { this.open = false; this.handlers.close?.(); } } });
-  els["ticket-view-title"] = control({ textContent: "" });
+  els["ticket-view-title"] = control({ textContent: "", innerHTML: "" });
+  els["ticket-view-head-meta"] = control({ innerHTML: "" });                  // 15.5: tag chip, code, status pill, light and its label
+  els["ticket-view-sub"] = control({ textContent: "", hidden: true });
+  els["ticket-view-notes"] = control({ innerHTML: "" });                         // 15.6: the notes sit below the Attach block
+  els["ticket-view-edit"] = control({ hidden: true });                            // 15.6: the Edit button
+  els["ticket-view-dirty"] = control({ textContent: "", hidden: true });          // 15.6: "N unsaved changes"
+  els["ticket-view-x"] = control({});                                        // the header's Close icon button
   els["ticket-view-content"] = control({ innerHTML: "" });
   els["ticket-view-actions"] = control({ innerHTML: "", queried: [] as string[], contains: () => false, querySelector: () => null,
     querySelectorAll(sel: string) { this.queried.push(sel); return []; } });
+  els["ticket-new-btn"] = control({});
+  els["ticket-view-drop"] = (() => { const cls = new Set<string>(); return control({ cls, classList: { add: (c: string) => cls.add(c), remove: (c: string) => cls.delete(c) } }); })();                                         // 15.10: the dashed drop area
   els["ticket-view-close"] = control({ focus() { active = this; } });
+  // The bottom row: a slot for Cancel ticket / Archive, and the Save button (hidden unless the ticket is editable).
+  els["ticket-view-row-actions"] = control({ innerHTML: "", queried: [] as string[], contains: () => false, querySelector: () => null,
+    querySelectorAll(sel: string) { this.queried.push(sel); return []; } });
+  els["ticket-view-save"] = control({ hidden: true, disabled: true });
+  // The line above the action row ("Unsaved changes" with Discard and Keep editing, or the hub's refusal) and the Replace picker.
+  const noticeButtons: Record<string, any> = {};
+  els["ticket-view-notice"] = control({ innerHTML: "", querySelector(sel: string) {
+    const id = sel.slice(1);
+    return (this.innerHTML as string).includes(`id="${id}"`) ? (noticeButtons[id] ??= control({ id })) : null;
+  } });
+  els["ticket-view-replace"] = control({ files: [] as any[], value: "x", clicks: 0, click() { this.clicks++; } });
   // The criteria toolbar: four buttons with data-md, and the field they edit.
   for (const a of ["bold", "bullet", "checklist", "code"]) mdButtons.push(control({ dataset: { md: a } }));
   els["ticket-f-criteria"] = control({ value: "", selectionStart: 0, selectionEnd: 0 });
@@ -116,11 +139,11 @@ beforeEach(async () => {
       { name: "alice", room: "r" }, { name: "bob", room: "r" },
       { name: "human", room: null }, { name: "carol", room: "other" },
     ],
-    escHtml: String, escAttr: String, addMessage: (m: any) => messages.push(m), parseErrorBody: async () => "upload refused",
+    escHtml: String, escAttr: String, addMessage: (m: any) => messages.push(m), parseErrorBody: async () => refuseText,
     IMAGE_EXT_RE: /\.(png|jpe?g|gif|webp)$/i,
     imgUrl: (u: string) => `http://hub${u}?token=T`,
     FormData: class { file: any; append(_k: string, v: any) { this.file = v; } },
-    console,
+    console, setTimeout, clearTimeout,
     localStorage: {
       getItem: (k: string) => store.get(k) ?? null,
       setItem: (k: string, v: string) => { store.set(k, v); },
@@ -147,12 +170,12 @@ beforeEach(async () => {
       if (init?.method === "POST") {
         posts.push({ path: _path, body: JSON.parse(init.body) });
         if (postGate && (_path === "/tickets" || _path.startsWith("/rooms/"))) await postGate;
-        return { ok: postOk && _path !== failPath, json: async () => (_path === "/tickets" ? { snapshot: { id: "t_new" } } : {}) };
+        return { ok: postOk && _path !== failPath, json: async () => (_path === "/tickets" ? { snapshot: { id: "t_new" } } : attachReplyId != null && _path.endsWith("/attachments") ? { attachment: { id: attachReplyId } } : {}) };
       }
       const attachRoute = /^\/tickets\/([^/]+)\/attachments$/.exec(_path);
       if (attachRoute) {
         attachFetches.push(decodeURIComponent(attachRoute[1]));
-        return { ok: true, json: async () => attachmentsOnHub[decodeURIComponent(attachRoute[1])] ?? [] };
+        return { ok: true, json: async () => [...(attachmentsOnHub[decodeURIComponent(attachRoute[1])] ?? [])] };
       }
       const noteRoute = /^\/tickets\/([^/]+)\/notes$/.exec(_path);
       if (noteRoute) {
@@ -246,7 +269,7 @@ describe("ticket board approval binding", () => {
       title: { value: "T" }, criteria: { value: "c" }, radius: { value: "high" }, priority: { value: "medium" },
       external_ref: { value: "" }, reset: () => {},
     };
-    for (const [col, status] of [["queued", "queued"], ["progress", "in_progress"], ["review", "in_review"], ["done", "done"]]) {
+    for (const [col, status] of [["draft", "draft"], ["queued", "queued"], ["progress", "in_progress"], ["review", "in_review"], ["done", "done"]]) {
       posts = [];
       ctx.TicketBoard.openNew(col);
       await formSubmit!({ preventDefault: () => {}, target: form });
@@ -448,7 +471,7 @@ describe("ticket assignee", () => {
   }
 
   test("the dialog lists the room's agents in every column", () => {
-    for (const col of ["queued", "progress", "review", "done"]) {
+    for (const col of ["draft", "queued", "progress", "review", "done"]) {
       const { pick } = dialogEls();
       ctx.TicketBoard.openNew(col);
       expect(pick.innerHTML).toContain('<option value="">Unassigned</option>');
@@ -460,7 +483,7 @@ describe("ticket assignee", () => {
   });
 
   test("a ticket saved with an assignee sends it with the column's status, in one call, from any column", async () => {
-    for (const [col, status] of [["queued", "queued"], ["progress", "in_progress"], ["review", "in_review"], ["done", "done"]]) {
+    for (const [col, status] of [["draft", "draft"], ["queued", "queued"], ["progress", "in_progress"], ["review", "in_review"], ["done", "done"]]) {
       posts = [];
       dialogEls();
       ctx.TicketBoard.openNew(col);
@@ -729,13 +752,13 @@ describe("board filters", () => {
 
   test("no filter shows every ticket and every count", async () => {
     await show(...board());
-    expect(counts()).toEqual([["Queued", 3], ["In progress", 1], ["In review", 1], ["Done", 1]]);
-    expect(els["ticket-filter-summary"].textContent).toBe("");
+    expect(counts()).toEqual([["Draft", 0], ["Queued", 3], ["In progress", 1], ["In review", 1], ["Done", 1]]);
+    expect(els["ticket-filter-summary"].textContent).toBe("All 6 tickets");   // the default filter: the count of tickets the board shows
   });
 
   test("matchesFilter: radius and priority combine; an unknown priority is medium", () => {
     const m = ctx.TicketBoard.matchesFilter;
-    const f = (radius: string, priorities: string[]) => ({ radius, priorities });
+    const f = (radius: string, priorities: string[], request = "") => ({ radius, request, priorities });
     expect(m(mk("x", "queued", "high", "high"), f("high", all5))).toBe(true);
     expect(m(mk("x", "queued", "low", "high"), f("high", all5))).toBe(false);
     expect(m(mk("x", "queued", "low", "high"), f("all", ["medium"]))).toBe(false);
@@ -745,20 +768,138 @@ describe("board filters", () => {
     expect(m(mk("x", "queued", "low", "high"), f("all", []))).toBe(false);
   });
 
+  test("the request filter shows one request, lists the labels on the board and counts as an active filter", async () => {
+    await show(...board().map((t, i) => ({ ...t, request_id: i < 3 ? "r-1" : "r-2" })));
+    expect(els["ticket-filter-summary"].textContent).toBe("All 6 tickets");   // the default filter: the count of tickets the board shows
+    ctx.TicketBoard.setFilter({ ...ctx.TicketBoard._filter(), request: "r-1" });
+    expect(titles().sort()).toEqual(["a", "b", "c"]);
+    expect(els["ticket-filters-btn"].textContent).toBe("Filters · 1");
+    ctx.TicketBoard.setFilter({ ...ctx.TicketBoard._filter(), request: "" });
+    expect(titles().length).toBe(6);
+  });
+
+  test("a request labelled \"all\" is a real label: the filter picks it, and \"\" (All requests) shows everything", async () => {
+    const t = board().map((x, i) => ({ ...x, request_id: i < 2 ? "all" : i < 4 ? "r-2" : null }));
+    await show(...t);
+    ctx.TicketBoard.setFilter({ ...ctx.TicketBoard._filter(), request: "all" });
+    expect(titles().sort()).toEqual(["a", "b"]);                      // only the tickets labelled "all"
+    expect(ctx.TicketBoard.matchesFilter(t[0], { radius: "all", request: "all", priorities: all5 })).toBe(true);
+    expect(ctx.TicketBoard.matchesFilter(t[2], { radius: "all", request: "all", priorities: all5 })).toBe(false);
+    expect(els["ticket-filters-btn"].textContent).toBe("Filters · 1");   // it counts as an active filter
+    ctx.TicketBoard.setFilter({ ...ctx.TicketBoard._filter(), request: "" });
+    expect(titles().length).toBe(6);
+    expect(els["ticket-filters-btn"].textContent).toBe("Filters");
+  });
+
+  test("the request select lists only labels of tickets the board can show; a filter on a gone label resets", async () => {
+    els["ticket-filter-request"] = { innerHTML: "", value: "" };
+    const t = (id: string, status: string, extra: object) => ({ ...mk(id, status, "low", "medium"), ...extra });
+    await show(t("a", "queued", { request_id: "r-live" }), t("b", "cancelled", { request_id: "r-gone" }), t("c", "done", { request_id: "r-old", archived_at_ms: 5 }));
+    const opts = () => ((els["ticket-filter-request"].innerHTML as string).match(/value="([^"]*)"/g) ?? []);
+    expect(opts()).toEqual(['value=""', 'value="r-live"']);
+    ctx.TicketBoard.setFilter({ ...ctx.TicketBoard._filter(), showCancelled: true });
+    expect(opts()).toEqual(['value=""', 'value="r-gone"', 'value="r-live"']);
+    ctx.TicketBoard.setFilter({ ...ctx.TicketBoard._filter(), request: "r-gone" });
+    expect(titles()).toEqual(["b"]);
+    ctx.TicketBoard.setFilter({ ...ctx.TicketBoard._filter(), showCancelled: false });   // the label's only ticket is hidden now
+    expect(ctx.TicketBoard._filter().request).toBe("");
+    expect(titles()).toEqual(["a"]);
+    delete els["ticket-filter-request"];
+  });
+
+  test("archived toggle: a filter on a label whose only ticket is archived resets when archived tickets hide", async () => {
+    els["ticket-filter-request"] = { innerHTML: "", value: "" };
+    const arch = { ...mk("z", "done", "low", "medium"), request_id: "r-arch", archived_at_ms: 5 };
+    await show(arch, { ...mk("a", "queued", "low", "medium"), request_id: "r-live" });
+    const opts = () => ((els["ticket-filter-request"].innerHTML as string).match(/value="([^"]*)"/g) ?? []);
+    expect(opts()).toEqual(['value=""', 'value="r-live"']);
+    ctx.TicketBoard.setFilter({ ...ctx.TicketBoard._filter(), showArchived: true });
+    list = [arch, { ...mk("a", "queued", "low", "medium"), request_id: "r-live" }];
+    await ctx.TicketBoard.load();
+    expect(opts()).toEqual(['value=""', 'value="r-arch"', 'value="r-live"']);
+    ctx.TicketBoard.setFilter({ ...ctx.TicketBoard._filter(), request: "r-arch" });
+    expect(titles()).toEqual(["z"]);
+    ctx.TicketBoard.setFilter({ ...ctx.TicketBoard._filter(), showArchived: false });
+    expect(ctx.TicketBoard._filter().request).toBe("");
+    delete els["ticket-filter-request"];
+  });
+
+  // A room change makes load() read the stored filter, which is the first load of a room.
+  test("6.6 first load: a stored filter on a label no ticket has resets before the first render", async () => {
+    store.set("cubilot_board_filter:r9", JSON.stringify({ radius: "all", request: "r-gone", priorities: all5, showArchived: false, showCancelled: false, v: 2 }));
+    ctx.SELECTED_ROOM = "r9";
+    list = [{ ...mk("a", "queued", "low", "medium"), request_id: "r-live" }];
+    await ctx.TicketBoard.load();
+    expect(ctx.TicketBoard._filter().request).toBe("");
+    expect(titles()).toEqual(["a"]);
+    expect(JSON.parse(store.get("cubilot_board_filter:r9")!).request).toBe("");
+    ctx.SELECTED_ROOM = "r";
+  });
+
+  test("6.6 first load: an empty list with a stored request filter resets it", async () => {
+    store.set("cubilot_board_filter:r9", JSON.stringify({ radius: "all", request: "r-gone", priorities: all5, showArchived: false, showCancelled: false, v: 2 }));
+    ctx.SELECTED_ROOM = "r9";
+    list = [];
+    await ctx.TicketBoard.load();
+    expect(ctx.TicketBoard._filter().request).toBe("");
+    ctx.SELECTED_ROOM = "r";
+  });
+
+  test("6.6 a live event that hides the only ticket of the selected label resets the filter", async () => {
+    els["ticket-filter-request"] = { innerHTML: "", value: "" };
+    await show({ ...mk("a", "queued", "low", "medium"), request_id: "r-1" }, { ...mk("b", "queued", "low", "medium"), request_id: "r-2" });
+    ctx.TicketBoard.setFilter({ ...ctx.TicketBoard._filter(), request: "r-1" });
+    expect(titles()).toEqual(["a"]);
+    ctx.TicketBoard.onTicket({ kind: "ticket.update", version: 99, snapshot: { ...mk("a", "cancelled", "low", "medium"), request_id: "r-1", room: "r", version: 99 } });
+    expect(ctx.TicketBoard._filter().request).toBe("");                 // not an empty board behind a select that no longer lists r-1
+    expect(titles()).toEqual(["b"]);
+    delete els["ticket-filter-request"];
+  });
+
+  test("6.7 the board card's Cancel ticket needs a second click (Confirm cancel, 5 s)", async () => {
+    await show(mk("a", "queued", "low", "medium"));
+    const btn: any = { dataset: { ticket: "a", to: "cancelled" }, handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { btn.handlers[t] = fn; } };
+    const orig = cols.querySelectorAll;
+    cols.querySelectorAll = (sel: string) => (sel.includes(".ticket-actions button[data-to]") ? [btn] : []);
+    let fire: any = null;
+    ctx.setTimeout = (fn: any, ms: number) => { expect(ms).toBe(5000); fire = fn; return 1; };
+    ctx.TicketBoard.setFilter(ctx.TicketBoard._filter());              // redraw so the card is wired to the stub
+    posts = [];
+    btn.handlers.click();
+    expect(cols.innerHTML).toContain("Confirm cancel");
+    expect(posts).toEqual([]);
+    fire();
+    expect(cols.innerHTML).not.toContain("Confirm cancel");
+    btn.handlers.click();
+    btn.handlers.click();
+    expect(posts).toEqual([{ path: "/tickets/a/transition", body: { by: "human", to: "cancelled" } }]);
+    ctx.setTimeout = setTimeout;
+    cols.querySelectorAll = orig;
+  });
+
+  test("a stored filter written before format 2 reads request \"all\" as no filter; a format 2 \"all\" stays a label", () => {
+    store.set("cubilot_board_filter:r", JSON.stringify({ radius: "all", request: "all", priorities: all5, showArchived: false, showCancelled: false }));
+    expect(ctx.TicketBoard.readFilter("r").request).toBe("");
+    store.set("cubilot_board_filter:r", JSON.stringify({ radius: "all", request: "all", priorities: all5, showArchived: false, showCancelled: false, v: 2 }));
+    expect(ctx.TicketBoard.readFilter("r").request).toBe("all");
+    store.set("cubilot_board_filter:r", JSON.stringify({ radius: "all", priorities: all5, showArchived: false, showCancelled: false }));
+    expect(ctx.TicketBoard.readFilter("r").request).toBe("");        // a filter saved before the request field existed
+  });
+
   test("the radius filter applies to every column and to the counts", async () => {
     await show(...board());
     ctx.TicketBoard.setFilter({ radius: "high", priorities: all5 });
-    expect(counts()).toEqual([["Queued", 1], ["In progress", 1], ["In review", 0], ["Done", 1]]);
+    expect(counts()).toEqual([["Draft", 0], ["Queued", 1], ["In progress", 1], ["In review", 0], ["Done", 1]]);
     expect(titles().sort()).toEqual(["b", "c", "e"]);
     ctx.TicketBoard.setFilter({ radius: "low", priorities: all5 });
-    expect(counts()).toEqual([["Queued", 2], ["In progress", 0], ["In review", 1], ["Done", 0]]);
+    expect(counts()).toEqual([["Draft", 0], ["Queued", 2], ["In progress", 0], ["In review", 1], ["Done", 0]]);
   });
 
   test("the priority filter takes any mix of levels and applies to the counts", async () => {
     await show(...board());
     ctx.TicketBoard.setFilter({ radius: "all", priorities: ["highest", "lowest"] });
     expect(titles().sort()).toEqual(["a", "d"]);
-    expect(counts()).toEqual([["Queued", 1], ["In progress", 0], ["In review", 1], ["Done", 0]]);
+    expect(counts()).toEqual([["Draft", 0], ["Queued", 1], ["In progress", 0], ["In review", 1], ["Done", 0]]);
     ctx.TicketBoard.setFilter({ radius: "all", priorities: ["medium"] });
     expect(titles().sort()).toEqual(["b", "f"]);                       // f: unknown priority is medium
   });
@@ -801,33 +942,33 @@ describe("board filters", () => {
     expect(ctx.TicketBoard._filter().priorities).toEqual(["high", "medium", "lowest"]);
     // Reset restores everything
     els["ticket-filter-reset"].handlers.click();
-    expect(ctx.TicketBoard._filter()).toEqual({ radius: "all", priorities: all5, showArchived: false, showCancelled: false });
+    expect(ctx.TicketBoard._filter()).toEqual({ radius: "all", request: "", priorities: all5, showArchived: false, showCancelled: false });
     expect(radio()).toBe("all");
   });
 
   test("the choice is saved per room and restored on the room's return", async () => {
     await show(...board());
     ctx.TicketBoard.setFilter({ radius: "high", priorities: ["low"] });
-    expect(JSON.parse(store.get("cubilot_board_filter:r")!)).toEqual({ radius: "high", priorities: ["low"], showArchived: false, showCancelled: false });
+    expect(JSON.parse(store.get("cubilot_board_filter:r")!)).toEqual({ radius: "high", request: "", priorities: ["low"], showArchived: false, showCancelled: false, v: 2 });
     ctx.SELECTED_ROOM = "r2";
     await ctx.TicketBoard.load();
-    expect(ctx.TicketBoard._filter()).toEqual({ radius: "all", priorities: all5, showArchived: false, showCancelled: false });   // another room starts clean
+    expect(ctx.TicketBoard._filter()).toEqual({ radius: "all", request: "", priorities: all5, showArchived: false, showCancelled: false });   // another room starts clean
     ctx.TicketBoard.setFilter({ radius: "low", priorities: all5 });
     ctx.SELECTED_ROOM = "r";
     await ctx.TicketBoard.load();
-    expect(ctx.TicketBoard._filter()).toEqual({ radius: "high", priorities: ["low"], showArchived: false, showCancelled: false });
+    expect(ctx.TicketBoard._filter()).toEqual({ radius: "high", request: "", priorities: ["low"], showArchived: false, showCancelled: false });
     expect(radio()).toBe("high");                                      // the controls follow the room
-    expect(JSON.parse(store.get("cubilot_board_filter:r2")!)).toEqual({ radius: "low", priorities: all5, showArchived: false, showCancelled: false });
+    expect(JSON.parse(store.get("cubilot_board_filter:r2")!)).toEqual({ radius: "low", request: "", priorities: all5, showArchived: false, showCancelled: false, v: 2 });
   });
 
   test("damaged storage falls back to no filter; unknown values are dropped", () => {
     store.set("cubilot_board_filter:r", "{not json");
-    expect(ctx.TicketBoard.readFilter("r")).toEqual({ radius: "all", priorities: all5, showArchived: false, showCancelled: false });
+    expect(ctx.TicketBoard.readFilter("r")).toEqual({ radius: "all", request: "", priorities: all5, showArchived: false, showCancelled: false });
     store.set("cubilot_board_filter:r", JSON.stringify({ radius: "extreme", priorities: ["high", "bogus", "constructor"] }));
-    expect(ctx.TicketBoard.readFilter("r")).toEqual({ radius: "all", priorities: ["high"], showArchived: false, showCancelled: false });
+    expect(ctx.TicketBoard.readFilter("r")).toEqual({ radius: "all", request: "", priorities: ["high"], showArchived: false, showCancelled: false });
     store.set("cubilot_board_filter:r", JSON.stringify({ radius: "low", priorities: "high" }));
-    expect(ctx.TicketBoard.readFilter("r")).toEqual({ radius: "low", priorities: all5, showArchived: false, showCancelled: false });
-    expect(ctx.TicketBoard.sanitizeFilter(null)).toEqual({ radius: "all", priorities: all5, showArchived: false, showCancelled: false });
+    expect(ctx.TicketBoard.readFilter("r")).toEqual({ radius: "low", request: "", priorities: all5, showArchived: false, showCancelled: false });
+    expect(ctx.TicketBoard.sanitizeFilter(null)).toEqual({ radius: "all", request: "", priorities: all5, showArchived: false, showCancelled: false });
   });
 });
 
@@ -864,7 +1005,7 @@ describe("archived tickets", () => {
     set({ showArchived: true });
     await settle();
     expect(titles()).toEqual(["live", "old", "q"]);
-    expect(cols.innerHTML).toContain("ticket-card radius-low status-done archived");
+    expect(cols.innerHTML).toContain("ticket-card status-done archived");
   });
 
   test("turning Show archived on reloads with archived=1; turning it off reloads without", async () => {
@@ -913,18 +1054,18 @@ describe("archived tickets", () => {
     expect(posts.at(-1)).toEqual({ path: "/tickets/d/archive", body: { by: "human", archived: false } });
   });
 
-  test("the board has four columns; Cancelled appears only with Show cancelled, and has no +", async () => {
+  test("the board has five columns; Cancelled appears only with Show cancelled, and has no +", async () => {
     await show(mk("q", "queued"), mk("c", "cancelled"));
-    expect(headers()).toEqual(["Queued", "In progress", "In review", "Done"]);
+    expect(headers()).toEqual(["Draft", "Queued", "In progress", "In review", "Done"]);
     expect(titles()).toEqual(["q"]);                                            // the cancelled ticket is hidden
     set({ showCancelled: true });
-    expect(headers()).toEqual(["Queued", "In progress", "In review", "Done", "Cancelled"]);
+    expect(headers()).toEqual(["Draft", "Queued", "In progress", "In review", "Done", "Cancelled"]);
     expect(titles()).toEqual(["c", "q"]);
-    expect((cols.innerHTML.match(/class="ticket-add"/g) ?? []).length).toBe(4);      // none on Cancelled
+    expect((cols.innerHTML.match(/class="ticket-add"/g) ?? []).length).toBe(5);      // none on Cancelled
     await show(mk("q", "queued"));                                              // shown even with no cancelled ticket
     expect(headers().at(-1)).toBe("Cancelled");
     set({ showCancelled: false });
-    expect(headers()).toEqual(["Queued", "In progress", "In review", "Done"]);
+    expect(headers()).toEqual(["Draft", "Queued", "In progress", "In review", "Done"]);
   });
 
   test("an archived cancelled ticket needs both Show cancelled and Show archived", async () => {
@@ -988,6 +1129,9 @@ describe("archived tickets", () => {
 
   test("with nothing to archive the button is disabled and a click posts nothing", async () => {
     await show(mk("q", "queued"), mk("old", "done", 5));
+    expect(archiveAllBtn()).toBeUndefined();                              // Done shows no ticket: it is a strip with no button
+    set({ showArchived: true });                                          // the archived ticket shows: Done has a ticket and nothing to archive
+    await settle();
     expect(archiveAllDisabled()).toBe(true);
     expect(archiveAllBtn()).toBe("Archive all done");
     posts = [];
@@ -1038,6 +1182,8 @@ describe("ticket view dialog", () => {
   });
   const view = () => els["ticket-view"];
   const content = () => els["ticket-view-content"].innerHTML as string;
+  const panel = () => els["ticket-view-actions"].innerHTML as string;          // 15.5: the properties panel
+  const head = () => els["ticket-view-head-meta"].innerHTML as string;         // 15.5: tag, code, status pill, light and its label
   const actions = () => els["ticket-view-actions"];
 
   function fakeCard(id: string) {
@@ -1075,14 +1221,62 @@ describe("ticket view dialog", () => {
     expect(light("done", { approval: { status: "pending" }, assignee: "human" })).toBeNull();   // finished: no light
   });
 
+  test("parseTitle: tag, code, main and sub", () => {
+    const p = (x: string) => ctx.TicketBoard.parseTitle(x);
+    expect(p("[code] 8.3a Card actions [backlog]")).toEqual({ tag: "code", code: "8.3a", main: "Card actions", sub: "backlog" });
+    expect(p("[Code] 15.1 Pure helpers: parseTitle, x")).toEqual({ tag: "code", code: "15.1", main: "Pure helpers: parseTitle, x", sub: null });
+    expect(p("Plain title")).toEqual({ tag: null, code: null, main: "Plain title", sub: null });          // no tag
+    expect(p("[code] Fix the bug")).toEqual({ tag: "code", code: null, main: "Fix the bug", sub: null });   // a tag with no code
+    expect(p("[code] 12 not a code")).toMatchObject({ code: "12", main: "not a code" });
+    expect(p("[code] version 2")).toMatchObject({ code: null, main: "version 2" });
+    expect(p("3.2 Numbered, no tag")).toEqual({ tag: null, code: "3.2", main: "Numbered, no tag", sub: null });
+    for (const only of ["[code]", "[code] 8.3a", "[code] [x]", "[code] 8.3a [x]"]) {        // nothing left for main
+      expect(p(only)).toEqual({ tag: null, code: null, main: only, sub: null });
+    }
+  });
+
+  test("criteriaProgress counts - [x], - [X] and - [ ] lines only", () => {
+    const c = (x: string) => ctx.TicketBoard.criteriaProgress(x);
+    expect(c("- [x] a\n- [X] b\n- [ ] c\ntext\n  - [x] nested\n* [x] star\n-[x] none")).toEqual({ done: 2, total: 3 });
+    expect(c("")).toEqual({ done: 0, total: 0 });
+    expect(c(null)).toEqual({ done: 0, total: 0 });
+  });
+
+  test("priorityBars: 4 for Highest down to 0 for Lowest; an unknown priority reads as Medium", () => {
+    const b = (priority: any) => ctx.TicketBoard.priorityBars({ priority });
+    expect(["highest", "high", "medium", "low", "lowest"].map(b)).toEqual([4, 3, 2, 1, 0]);
+    expect(b(undefined)).toBe(2);
+    expect(b("bogus")).toBe(2);
+  });
+
+  test("statusLine: approval, then the human, then blockers; null otherwise; never disagrees with lightOf", () => {
+    const sl = (t: any) => ctx.TicketBoard.statusLine({ status: "queued", assignee: "alice", ...t });
+    expect(sl({})).toBeNull();
+    expect(sl({ blocked_by: ["x"], open_blockers: ["x"] })).toBe("Blocked by 1 open ticket");
+    expect(sl({ blocked_by: ["x", "y"], open_blockers: ["x", "y"] })).toBe("Blocked by 2 open tickets");
+    expect(sl({ blocked_by: ["x"], open_blockers: [] })).toBeNull();                                  // blocker is done
+    expect(sl({ assignee: "human", blocked_by: ["x"], open_blockers: ["x"] })).toBe("Assigned to you");
+    expect(sl({ approval: { status: "pending" }, assignee: "human", open_blockers: ["x"], blocked_by: ["x"] })).toBe("Waiting for your approval");
+    for (const status of ["done", "cancelled"]) expect(sl({ status, approval: { status: "pending" }, assignee: "human" })).toBeNull();
+    // Whenever the line is the approval or the human line, the light is red.
+    for (const status of ["queued", "claimed", "in_progress", "in_review", "done", "cancelled"]) {
+      for (const extra of [{}, { assignee: "human" }, { approval: { status: "pending" } }, { blocked_by: ["x"], open_blockers: ["x"] }]) {
+        const t = { status, assignee: "alice", ...extra };
+        const line = ctx.TicketBoard.statusLine(t);
+        if (line === "Waiting for your approval" || line === "Assigned to you") expect(ctx.TicketBoard.lightOf(t)?.[0]).toBe("red");
+      }
+    }
+  });
+
   test("the light is on the card (actions row) and at the top of the full view, with a title and an aria-label", async () => {
     const lit = (html: string) => [...html.matchAll(/<i class="on light-(\w+)">/g)].map((m) => m[1]);
     const cards = await board(T({ status: "in_progress", blast_radius: "low", approval_request_id: null }));
     expect(lit(cols.innerHTML)).toEqual(["orange"]);
-    expect(cols.innerHTML).toMatch(/<div class="ticket-actions">.*<span class="ticket-light" role="img" aria-label="Status: [^"]+" title="[^"]+">/s);
+    expect(cols.innerHTML).toMatch(/<div class="ticket-card-foot">.*<span class="ticket-light" role="img" aria-label="Status: [^"]+" title="[^"]+">/s);   // the light ends the card footer
     click(cards.t_9);
-    expect(content()).toMatch(/^<div class="ticket-view-light"><span class="ticket-light"/);
-    expect(lit(content())).toEqual(["orange"]);
+    expect(head()).toMatch(/<span class="ticket-view-light"><span class="ticket-light"/);
+    expect(head()).toContain('<span class="ticket-view-light-label">an agent is busy with it</span>');
+    expect(lit(head())).toEqual(["orange"]);
     els["ticket-view-close"].handlers.click();
     await board(T({ status: "done", blast_radius: "low", approval_request_id: null }));
     expect(cols.innerHTML).not.toContain("ticket-light");
@@ -1098,11 +1292,12 @@ describe("ticket view dialog", () => {
     click(cards.t_9);
     expect(view().open).toBe(true);
     expect(els["ticket-view-title"].textContent).toBe("Fix <it>");
-    for (const text of ["t_9", "AUDIT-9", "in_progress", "High", "high", "human", "alice", "Created", "Updated", "line one<br>line two <b>"]) {
-      expect(content()).toContain(text);
-    }
+    expect(head()).toContain("In progress");                                  // the status pill
+    for (const text of ["t_9", "AUDIT-9", "High", "high", "human", "alice", "Created", "Updated"]) expect(panel()).toContain(text);
+    expect(content()).toContain("line one<br>line two <b>");
+    expect(panel()).toContain("Copy");                                        // the ID has a copy button
     expect(content()).toContain("Acceptance criteria");
-    expect(content()).toContain("waiting for your approval");              // the approval state
+    expect(content()).toContain("Waiting for your approval.");              // the approval banner
     expect(active).toBe(els["ticket-view-close"]);                         // focus moves into the dialog
   });
 
@@ -1111,9 +1306,9 @@ describe("ticket view dialog", () => {
     ctx.TicketBoard.setFilter({ ...ctx.TicketBoard._filter(), showArchived: true });
     await settle();
     click(cards.t_9);
-    expect(content()).toContain("unassigned");
-    expect(content()).toContain("—");
-    expect(content()).toContain("Archived");
+    expect(panel()).toContain("Unassigned");                                  // the Assignee select's first option
+    expect(panel()).toContain("—");
+    expect(panel()).toContain("Archived");
   });
 
   test("a click on a control inside the card (move, archive, reassign, criteria) does not open it", async () => {
@@ -1139,16 +1334,17 @@ describe("ticket view dialog", () => {
   test("the dialog offers the card's actions: moves, archive, reassign", async () => {
     const cards = await board(T({ status: "done" }), T({ id: "t_8", title: "other", status: "in_progress" }));
     click(cards.t_9);
-    const html = els["ticket-view-actions"].innerHTML as string;
+    const html = (els["ticket-view-actions"].innerHTML as string) + (els["ticket-view-row-actions"].innerHTML as string);
     expect(html).toContain('class="ticket-archive" data-ticket="t_9" data-archive="true">Archive</button>');
     expect(html).not.toContain('data-to=');                                // done: no moves
     expect(html).not.toContain("ticket-move");
     view().close();
     click(cards.t_8);
-    const html2 = els["ticket-view-actions"].innerHTML as string;
+    const html2 = (els["ticket-view-actions"].innerHTML as string) + (els["ticket-view-row-actions"].innerHTML as string);
+    expect(els["ticket-view-row-actions"].innerHTML).toContain('data-cancel="1">Cancel ticket</button>');   // in the bottom row, not the content
+    expect(els["ticket-view-actions"].innerHTML).not.toContain("Cancel ticket");
     expect(html2).toContain('class="ticket-move" data-ticket="t_8" data-current="in_progress"');
     expect(html2).not.toContain("To review");
-    expect(html2).toContain('data-to="cancelled">Cancel</button>');
     expect(html2).toContain('class="ticket-assign" data-ticket="t_8"');
   });
 
@@ -1156,9 +1352,11 @@ describe("ticket view dialog", () => {
     const cards = await board(T());
     const move: any = { dataset: { ticket: "t_9", to: "in_review" }, handlers: {} };
     move.addEventListener = (type: string, fn: () => unknown) => { move.handlers[type] = fn; };
-    actions().querySelectorAll = (sel: string) => { actions().queried.push(sel); return sel === ".ticket-actions button[data-to]" ? [move] : []; };
+    const sel = ".ticket-actions button[data-to], #ticket-view-row-actions button[data-to]";
+    els["ticket-view-row-actions"].querySelectorAll = (q: string) => { els["ticket-view-row-actions"].queried.push(q); return q === sel ? [move] : []; };
     click(cards.t_9);
-    expect(actions().queried).toEqual(expect.arrayContaining([".ticket-assign", ".ticket-archive", ".ticket-actions button[data-to]"]));
+    expect(els["ticket-view-row-actions"].queried).toEqual(expect.arrayContaining([".ticket-archive", sel]));
+    expect(actions().queried).toEqual(expect.arrayContaining([".ticket-assign", ".ticket-move"]));
     await move.handlers.click();
     expect(posts.at(-1)).toEqual({ path: "/tickets/t_9/transition", body: { by: "human", to: "in_review" } });
   });
@@ -1196,17 +1394,21 @@ describe("ticket view dialog", () => {
     click(cards.t_9);
     ctx.TicketBoard.onTicket({ ticket_id: "t_9", version: 6, snapshot: T({ version: 6, title: "Renamed", status: "in_review", assignee: "bob" }) });
     expect(els["ticket-view-title"].textContent).toBe("Renamed");
-    expect(content()).toContain("in_review");
-    expect(content()).toContain("bob");
+    expect(head()).toContain("In review");
+    expect(panel()).toContain("bob");
     expect(view().open).toBe(true);
   });
 
   test("an approval verdict updates the open dialog", async () => {
     const cards = await board(T({ blast_radius: "high", approval_request_id: "abcde", approval: { id: "abcde", status: "pending", resolved_by: null, version: 1 } }));
     click(cards.t_9);
-    expect(content()).toContain("waiting for your approval");
+    expect(content()).toContain("Waiting for your approval.");
+    expect(content()).toContain("asks to move this high-radius ticket to Done.");
+    expect(content()).toContain('data-approval="deny" data-request="abcde"');
+    expect(content()).toContain('data-approval="allow" data-request="abcde"');
     observers.permission({ kind: "permission.resolved", permission_id: "abcde", version: 9, snapshot: { id: "abcde", tool_name: "ticket:done", input_preview: JSON.stringify({ ticket_id: "t_9" }), status: "allowed", resolved_by: "human", version: 9 } });
-    expect(content()).toContain("approved");
+    expect(content()).toContain("Approved by human · abcde");
+    expect(content()).not.toContain("data-approval=");                       // the banner is gone once the request is answered
   });
 
   test("the keyboard stays on the same control after a live redraw", async () => {
@@ -1331,78 +1533,63 @@ describe("ticket notes", () => {
     ...ticket("", null), id, title: id, status: "in_review", blast_radius: "low", priority: "medium", assignee: "alice",
     approval_request_id: null, archived_at_ms: null, notes_count: count, ...extra,
   });
-  const detailsOf = () => cols.innerHTML.match(/<details class="ticket-notes"[^>]*>.*?<\/details>/s)?.[0] ?? "";
+  // 15.3: the card shows a notes counter; the notes themselves are in the dialog (opened with openView).
+  const detailsOf = () => (els["ticket-view-content"].innerHTML + els["ticket-view-notes"].innerHTML) as string;
+  const cardNotes = () => /title="Notes">.*?<\/svg>(\d+)<\/span>/s.exec(cols.innerHTML)?.[1];
+  const open = (id: string) => ctx.TicketBoard.openView(id);
   async function show(...tickets: any[]) {
     list = tickets;
     ctx.TicketBoard._tickets.clear();
     await ctx.TicketBoard.load();
   }
-  function fakeDetails(id: string, open = false) {
-    const d: any = { dataset: { ticket: id }, open, handlers: {} as Record<string, () => void> };
-    d.addEventListener = (type: string, fn: () => void) => { d.handlers[type] = fn; };
-    return d;
-  }
-  async function expand(d: any) {
-    d.open = true;
-    d.handlers.toggle();
-    await settle();
-  }
-  const withDetails = (...ds: any[]) => { cols.querySelectorAll = (q: string) => (q === ".ticket-notes" ? ds : []); };
 
-  test("a card shows a collapsed Notes (N) section; a ticket with no notes shows none", async () => {
+  test("a card shows a notes counter, not a Notes section; a ticket with no notes shows no counter", async () => {
     await show(T("a", 2), T("b", 0));
-    expect(detailsOf()).toContain("<summary>Notes (2)</summary>");
-    expect(detailsOf()).not.toMatch(/<details class="ticket-notes"[^>]* open/);
-    expect(cols.innerHTML.match(/class="ticket-notes"/g)?.length).toBe(1);        // b has none
+    expect(cardNotes()).toBe("2");
+    expect(cols.innerHTML).not.toContain('class="ticket-notes"');
+    expect(cols.innerHTML.match(/title="Notes"/g)?.length).toBe(1);               // b has none
   });
 
-  test("expanding reads the notes once and shows author, time and text", async () => {
+  test("opening the dialog reads the notes once and shows author, time and text", async () => {
     notesOnHub.a = [N(1, "alice", "Built in a.ts"), N(2, "bob", "Tested: 5 pass")];
-    const d = fakeDetails("a");
-    withDetails(d);
     await show(T("a", 2));
     expect(notesFetches).toEqual([]);                                             // nothing is read until it is opened
-    await expand(d);
+    open("a"); await settle();
     expect(notesFetches).toEqual(["a"]);
     const html = detailsOf();
     for (const text of ["alice", "Built in a.ts", "bob", "Tested: 5 pass", "<time>"]) expect(html).toContain(text);
-    d.open = false; d.handlers.toggle();
-    await expand(d);
+    els["ticket-view"].close();
+    open("a"); await settle();
     expect(notesFetches).toEqual(["a"]);                                          // cached: no second read
   });
 
-  test("the expanded state survives a redraw", async () => {
+  test("an open dialog keeps its notes through a board redraw", async () => {
     notesOnHub.a = [N(1, "alice", "x")];
-    const d = fakeDetails("a");
-    withDetails(d);
     await show(T("a", 1));
-    await expand(d);
+    open("a"); await settle();
     ctx.TicketBoard.setFilter(ctx.TicketBoard._filter());                          // any redraw
-    expect(detailsOf()).toMatch(/<details class="ticket-notes"[^>]* open>/);
-    d.open = false; d.handlers.toggle();
-    ctx.TicketBoard.setFilter(ctx.TicketBoard._filter());
-    expect(detailsOf()).not.toMatch(/<details class="ticket-notes"[^>]* open/);
+    expect(detailsOf()).toContain('Notes <span class=\"ticket-view-count\">1</span>');
+    expect(detailsOf()).toContain("ticket-note-text");
   });
 
   test("a live note is added to a list that is already read, once, and the count follows", async () => {
     notesOnHub.a = [N(1, "alice", "first")];
-    const d = fakeDetails("a");
-    withDetails(d);
     await show(T("a", 1));
-    await expand(d);
+    open("a"); await settle();
     const live = { kind: "ticket.noted", ticket_id: "a", room: "r", notes_count: 2, note: N(2, "alice", "second") };
     observers.ticket(live);
     observers.ticket(live);                                                         // a repeat adds nothing
-    expect(detailsOf()).toContain("Notes (2)");
+    expect(detailsOf()).toContain('Notes <span class=\"ticket-view-count\">2</span>');
     expect(detailsOf()).toContain("second");
     expect((detailsOf().match(/ticket-note-text/g) ?? []).length).toBe(2);
+    expect(cardNotes()).toBe("2");
     expect(notesFetches).toEqual(["a"]);                                            // no re-read needed
   });
 
   test("a live note for a list not read yet only moves the count", async () => {
     await show(T("a", 1));
     observers.ticket({ kind: "ticket.noted", ticket_id: "a", room: "r", notes_count: 2, note: N(2, "alice", "second") });
-    expect(detailsOf()).toContain("Notes (2)");
+    expect(cardNotes()).toBe("2");
     expect(notesFetches).toEqual([]);
   });
 
@@ -1417,42 +1604,38 @@ describe("ticket notes", () => {
     await show(T("a", 1));
     observers.ticket({ kind: "ticket.noted", ticket_id: "a", room: "elsewhere", notes_count: 5, note: N(9, "x", "y") });
     observers.ticket({ kind: "ticket.noted", ticket_id: "ghost", room: "r", notes_count: 1, note: N(9, "x", "y") });
-    expect(detailsOf()).toContain("Notes (1)");
+    expect(cardNotes()).toBe("1");
     expect(ctx.TicketBoard._tickets.has("ghost")).toBe(false);
   });
 
   test("a move that carried a note (ticket.update with a higher notes_count) refreshes an open list", async () => {
     notesOnHub.a = [N(1, "alice", "first")];
-    const d = fakeDetails("a");
-    withDetails(d);
     await show(T("a", 1, { version: 5 }));
-    await expand(d);
+    open("a"); await settle();
     notesOnHub.a = [N(1, "alice", "first"), N(2, "alice", "Built X. Tested Y.")];
     observers.ticket({ kind: "ticket.update", ticket_id: "a", version: 6, notes_count: 2, snapshot: T("a", 0, { version: 6 }) });
     await settle();
     expect(notesFetches).toEqual(["a", "a"]);
     expect(detailsOf()).toContain("Built X. Tested Y.");
-    expect(detailsOf()).toContain("Notes (2)");
+    expect(detailsOf()).toContain('Notes <span class=\"ticket-view-count\">2</span>');
   });
 
   test("an update without notes_count keeps the known count", async () => {
     await show(T("a", 3, { version: 5 }));
     observers.ticket({ kind: "ticket.update", ticket_id: "a", version: 6, snapshot: { ...T("a", 0), notes_count: undefined, version: 6, title: "renamed" } });
-    expect(detailsOf()).toContain("Notes (3)");
+    expect(cardNotes()).toBe("3");
   });
 
   test("the list read carries notes_count into the card", async () => {
     await show(T("a", 4));
-    expect(detailsOf()).toContain("Notes (4)");
+    expect(cardNotes()).toBe("4");
   });
 
   test("author and text are escaped", async () => {
     ctx.escHtml = (s: unknown) => String(s).replace(/</g, "&lt;");
     notesOnHub.a = [N(1, "<b>al", "<script>x</script>")];
-    const d = fakeDetails("a");
-    withDetails(d);
     await show(T("a", 1));
-    await expand(d);
+    open("a"); await settle();
     expect(detailsOf()).toContain("&lt;b>al");
     expect(detailsOf()).toContain("&lt;script>x");
     expect(detailsOf()).not.toContain("<script>");
@@ -1465,12 +1648,12 @@ describe("ticket notes", () => {
     await show(T("a", 1));
     card.handlers.click({ target: { closest: () => null } });
     await settle();
-    const content = () => els["ticket-view-content"].innerHTML as string;
+    const content = () => (els["ticket-view-content"].innerHTML + els["ticket-view-notes"].innerHTML) as string;
     expect(notesFetches).toEqual(["a"]);
-    expect(content()).toContain("Notes (1)");
+    expect(content()).toContain('Notes <span class=\"ticket-view-count\">1</span>');
     expect(content()).toContain("Built in a.ts");
     observers.ticket({ kind: "ticket.noted", ticket_id: "a", room: "r", notes_count: 2, note: N(2, "alice", "Tested: ok") });
-    expect(content()).toContain("Notes (2)");
+    expect(content()).toContain('Notes <span class=\"ticket-view-count\">2</span>');
     expect(content()).toContain("Tested: ok");
   });
 
@@ -1479,21 +1662,19 @@ describe("ticket notes", () => {
     cols.querySelectorAll = (q: string) => (q === ".ticket-card" ? [card] : []);
     await show(T("a", 0));
     card.handlers.click({ target: { closest: () => null } });
-    expect(els["ticket-view-content"].innerHTML).toContain("Notes (0)");
-    expect(els["ticket-view-content"].innerHTML).toContain("No notes");
+    expect((els["ticket-view-content"].innerHTML + els["ticket-view-notes"].innerHTML)).toContain('Notes <span class=\"ticket-view-count\">0</span>');
+    expect((els["ticket-view-content"].innerHTML + els["ticket-view-notes"].innerHTML)).toContain("No notes");
     expect(notesFetches).toEqual([]);
   });
 
-  test("a room change forgets the notes and the expanded state", async () => {
+  test("a room change forgets the notes: they are not read again until the dialog opens", async () => {
     notesOnHub.a = [N(1, "alice", "x")];
-    const d = fakeDetails("a");
-    withDetails(d);
     await show(T("a", 1));
-    await expand(d);
+    open("a"); await settle();
+    els["ticket-view"].close();
     ctx.SELECTED_ROOM = "r2";
     list = [T("a", 1, { room: "r2" })];
     await ctx.TicketBoard.load();
-    expect(detailsOf()).not.toMatch(/<details class="ticket-notes"[^>]* open/);
     expect(notesFetches).toEqual(["a"]);                                            // not read again until opened
   });
 });
@@ -1505,7 +1686,7 @@ describe("ticket notes: races and failures", () => {
     approval_request_id: null, archived_at_ms: null, notes_count: count, ...extra,
   });
   const count = (id: string) => ctx.TicketBoard._tickets.get(id).notes_count;
-  const viewHtml = () => els["ticket-view-content"].innerHTML as string;
+  const viewHtml = () => (els["ticket-view-content"].innerHTML + els["ticket-view-notes"].innerHTML) as string;
   async function show(...tickets: any[]) {
     list = tickets;
     ctx.TicketBoard._tickets.clear();
@@ -1528,7 +1709,7 @@ describe("ticket notes: races and failures", () => {
     await settle();
     expect(viewHtml()).toContain("live new note");
     expect(viewHtml()).toContain("old note");
-    expect(viewHtml().indexOf("old note")).toBeLessThan(viewHtml().indexOf("live new note"));   // oldest first
+    expect(viewHtml().indexOf("live new note")).toBeLessThan(viewHtml().indexOf("old note"));   // newest first
   });
 
   test("1b. a read that repeats a note the board already has does not duplicate it", async () => {
@@ -1607,7 +1788,7 @@ describe("ticket notes: races and failures", () => {
       path.endsWith("/notes") ? (++calls, Promise.resolve(ok ? { ok: true, json: async () => [N(1, "fine")] } : { ok: false })) : normal(path, init);
     const retry: any = { dataset: { ticket: "a" }, handlers: {} as Record<string, () => void> };
     retry.addEventListener = (type: string, fn: () => void) => { retry.handlers[type] = fn; };
-    els["ticket-view-content"].querySelectorAll = (q: string) => (q === ".ticket-notes-retry" ? [retry] : []);
+    els["ticket-view-notes"].querySelectorAll = (q: string) => (q === ".ticket-notes-retry" ? [retry] : []);
     ctx.TicketBoard.openView("a");
     await settle();
     expect(calls).toBe(1);
@@ -1922,7 +2103,7 @@ describe("filters panel", () => {
     expect([...at].sort((a, b) => a - b)).toEqual(at);                            // in this order
     expect(row).toContain('id="ticket-filter-panel" role="group" aria-label="Board filters" hidden');
     expect(row).toContain('aria-haspopup="true" aria-expanded="false" aria-controls="ticket-filter-panel"');
-    expect(row).not.toContain("<select");                                          // the radius select is gone
+    expect(row).not.toContain('<select id="ticket-filter-radius"');                                          // the radius select is gone
     expect(row).not.toContain("ticket-archive-all");                              // Archive all moved to the Done header
     expect((row.match(/type="checkbox"/g) ?? []).length).toBe(7);                 // 5 priorities + Archived + Cancelled
     expect((row.match(/type="radio"/g) ?? []).length).toBe(3);
@@ -1936,7 +2117,7 @@ describe("ticket attachments", () => {
     ...ticket("", null), id, title: id, status: "in_progress", blast_radius: "low", priority: "medium", assignee: "alice",
     approval_request_id: null, archived_at_ms: null, notes_count: 0, attachments_count: count, ...extra,
   });
-  const view = () => els["ticket-view-content"].innerHTML as string;
+  const view = () => (els["ticket-view-content"].innerHTML + els["ticket-view-notes"].innerHTML) as string;
   async function show(...tickets: any[]) {
     list = tickets;
     ctx.TicketBoard._tickets.clear();
@@ -1984,7 +2165,7 @@ describe("ticket attachments", () => {
       ["/tickets/a/attachments", { by: "human", url: "/image/u1.pdf", name: "one.pdf" }],
       ["/tickets/a/attachments", { by: "human", url: "/image/u2.png", name: "two.png" }],
     ]);
-    expect(els["ticket-view-attach-status"].textContent).toBe("Attached 2 files");
+    expect(els["ticket-view-attach-status"].textContent).toBe("2 files saved");
     expect(els["ticket-view-file"].value).toBe("");                              // the picker is cleared: the same file can be chosen again
   });
 
@@ -2021,12 +2202,12 @@ describe("ticket attachments", () => {
     open("a");
     await settle();
     expect(attachFetches).toEqual(["a"]);
-    expect(view()).toContain("Attachments (2)");
+    expect(view()).toContain('Attachments <span class=\"ticket-view-count\">2</span>');
     expect(view()).toContain('href="http://hub/image/x1.pdf?token=T"');
     for (const x of ["report.pdf", "notes.md", "alice", "bob", "<time", ">PDF<", ">MD<"].filter((v) => v !== "<time")) expect(view()).toContain(x);
     ctx.TicketBoard.closeView();
     open("b");
-    expect(view()).toContain("Attachments (0)");
+    expect(view()).toContain('Attachments <span class=\"ticket-view-count\">0</span>');
     expect(view()).toContain("No attachments");
     expect(attachFetches).toEqual(["a"]);                                         // none to read
   });
@@ -2044,7 +2225,7 @@ describe("ticket attachments", () => {
 
   test("names are escaped", async () => {
     ctx.escHtml = (x: unknown) => String(x).replace(/</g, "&lt;");
-    ctx.escAttr = (x: unknown) => String(x).replace(/"/g, "&quot;");
+    ctx.escAttr = (x: unknown) => String(x).replace(/"/g, "&quot;").replace(/</g, "&lt;");
     attachmentsOnHub.a = [A(1, '<img onerror=x>"q".pdf', "/image/e1.pdf", "<b>me")];
     await show(T("a", 1));
     open("a");
@@ -2052,6 +2233,219 @@ describe("ticket attachments", () => {
     expect(view()).toContain("&lt;img onerror=x>");
     expect(view()).toContain("&lt;b>me");
     expect(view()).not.toContain("<img onerror");
+  });
+
+  test("11: each file has Replace and Remove on an open ticket, not on a finished one", async () => {
+    attachmentsOnHub.a = [A(1, "one.pdf", "/image/o1.pdf")];
+    attachmentsOnHub.b = [A(2, "two.pdf", "/image/o2.pdf")];
+    await show(T("a", 1), T("b", 1, { status: "done" }));
+    open("a"); await settle();
+    expect(view()).toContain('class="ticket-file-replace" data-ticket="a" data-attachment="1"');
+    expect(view()).toContain('class="ticket-file-remove" data-ticket="a" data-attachment="1"');
+    els["ticket-view"].close();
+    open("b"); await settle();
+    expect(view()).not.toContain("ticket-file-replace");
+    expect(view()).not.toContain("ticket-file-remove");
+  });
+
+  test("11: Remove needs a second click and acts at once", async () => {
+    attachmentsOnHub.a = [A(1, "one.pdf", "/image/o1.pdf")];
+    await show(T("a", 1));
+    const btn: any = { dataset: { ticket: "a", attachment: "1" }, handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { btn.handlers[t] = fn; } };
+    els["ticket-view-content"].querySelectorAll = (sel: string) => (sel === ".ticket-file-remove" ? [btn] : []);
+    let fire: any = null;
+    ctx.setTimeout = (fn: any, ms: number) => { expect(ms).toBe(5000); fire = fn; return 1; };
+    posts = [];
+    open("a"); await settle();
+    btn.handlers.click();
+    expect(view()).toContain("Confirm remove");
+    expect(posts).toEqual([]);
+    fire();
+    expect(view()).not.toContain("Confirm remove");
+    btn.handlers.click();
+    btn.handlers.click();
+    expect(posts).toEqual([{ path: "/tickets/a/attachments/1/remove", body: { by: "human" } }]);
+    ctx.setTimeout = setTimeout;
+    delete els["ticket-view-content"].querySelectorAll;
+  });
+
+  test("11: Replace attaches the new file first, then removes the old one; a failed attach removes nothing", async () => {
+    attachmentsOnHub.a = [A(1, "one.pdf", "/image/o1.pdf")];
+    await show(T("a", 1));
+    const btn: any = { dataset: { ticket: "a", attachment: "1" }, handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { btn.handlers[t] = fn; } };
+    els["ticket-view-content"].querySelectorAll = (sel: string) => (sel === ".ticket-file-replace" ? [btn] : []);
+    posts = [];
+    open("a"); await settle();
+    const input = els["ticket-view-replace"];
+    btn.handlers.click();
+    expect(input.clicks).toBeGreaterThan(0);                                                // the picker opens
+    await pick(input, [F("new.pdf")]);
+    expect(posts.map((p) => p.path)).toEqual(["/tickets/a/attachments", "/tickets/a/attachments/1/remove"]);   // attach, then remove
+    posts = []; uploadFails = true;
+    btn.handlers.click();
+    await pick(input, [F("newer.pdf")]);
+    expect(posts).toEqual([]);                                                              // nothing attached, nothing removed
+    expect(els["ticket-view-notice"].innerHTML).toContain("Not saved:");
+    uploadFails = false;
+    delete els["ticket-view-content"].querySelectorAll;
+  });
+
+  test("11: after Attach, Remove and Replace a line says the file was saved; closing clears it", async () => {
+    attachmentsOnHub.a = [A(1, "one.pdf", "/image/o1.pdf")];
+    await show(T("a", 1));
+    const status = () => els["ticket-view-attach-status"].textContent as string;
+    const btn: any = { dataset: { ticket: "a", attachment: "1" }, handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { btn.handlers[t] = fn; } };
+    els["ticket-view-content"].querySelectorAll = (sel: string) => (sel === ".ticket-file-replace" ? [btn] : []);
+    open("a"); await settle();
+    await pick(els["ticket-view-file"], [F("one.pdf")]);
+    expect(status()).toBe("File saved");                                       // Attach
+    btn.handlers.click();
+    await pick(els["ticket-view-replace"], [F("new.pdf")]);
+    expect(status()).toBe("File replaced");                                    // Replace: attached, then the old file removed
+    els["ticket-view"].close();
+    expect(status()).toBe("");
+    delete els["ticket-view-content"].querySelectorAll;
+  });
+
+  test("11: after a confirmed Remove the line says the file was removed", async () => {
+    attachmentsOnHub.a = [A(1, "one.pdf", "/image/o1.pdf")];
+    await show(T("a", 1));
+    const btn: any = { dataset: { ticket: "a", attachment: "1" }, handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { btn.handlers[t] = fn; } };
+    els["ticket-view-content"].querySelectorAll = (sel: string) => (sel === ".ticket-file-remove" ? [btn] : []);
+    ctx.setTimeout = () => 1;
+    open("a"); await settle();
+    btn.handlers.click(); btn.handlers.click();
+    await settle();
+    expect(els["ticket-view-attach-status"].textContent).toBe("File removed");
+    ctx.setTimeout = setTimeout;
+    delete els["ticket-view-content"].querySelectorAll;
+  });
+
+  // A file action answers late: its message belongs to the dialog that started it.
+  function holdRemoves() {
+    const normal = ctx.authedFetch;
+    const held: Array<() => void> = [];
+    ctx.authedFetch = (path: string, init?: any) =>
+      path.endsWith("/remove") ? new Promise((r) => { held.push(() => r(normal(path, init))); }) : normal(path, init);
+    return { release: async () => { held.splice(0).forEach((f) => f()); await settle(); }, restore: () => { ctx.authedFetch = normal; } };
+  }
+
+  test("11: a late Remove answer shows no message in another ticket's dialog", async () => {
+    attachmentsOnHub.a = [A(1, "one.pdf", "/image/o1.pdf")];
+    attachmentsOnHub.b = [A(2, "two.pdf", "/image/o2.pdf")];
+    await show(T("a", 1), T("b", 1));
+    const btn: any = { dataset: { ticket: "a", attachment: "1" }, handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { btn.handlers[t] = fn; } };
+    els["ticket-view-content"].querySelectorAll = (sel: string) => (sel === ".ticket-file-remove" ? [btn] : []);
+    ctx.setTimeout = () => 1;
+    const h = holdRemoves();
+    open("a"); await settle();
+    btn.handlers.click(); btn.handlers.click();                                // Remove on A starts; its answer is held
+    els["ticket-view"].close();
+    open("b"); await settle();
+    await h.release();                                                         // the answer for A arrives while B is open
+    expect(els["ticket-view-attach-status"].textContent).toBe("");
+    els["ticket-view"].close();                                                // the same ticket reopened is a new dialog instance too
+    h.restore(); ctx.setTimeout = setTimeout;
+    delete els["ticket-view-content"].querySelectorAll;
+  });
+
+  test("11: a late Remove answer shows nothing when the same ticket was closed and reopened", async () => {
+    attachmentsOnHub.a = [A(1, "one.pdf", "/image/o1.pdf")];
+    await show(T("a", 1));
+    const btn: any = { dataset: { ticket: "a", attachment: "1" }, handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { btn.handlers[t] = fn; } };
+    els["ticket-view-content"].querySelectorAll = (sel: string) => (sel === ".ticket-file-remove" ? [btn] : []);
+    ctx.setTimeout = () => 1;
+    const h = holdRemoves();
+    open("a"); await settle();
+    btn.handlers.click(); btn.handlers.click();
+    els["ticket-view"].close();
+    open("a"); await settle();
+    await h.release();
+    expect(els["ticket-view-attach-status"].textContent).toBe("");
+    h.restore(); ctx.setTimeout = setTimeout;
+    delete els["ticket-view-content"].querySelectorAll;
+  });
+
+  test("11: a late Replace failure shows no notice in another ticket's dialog", async () => {
+    attachmentsOnHub.a = [A(1, "one.pdf", "/image/o1.pdf")];
+    await show(T("a", 1), T("b", 0));
+    const btn: any = { dataset: { ticket: "a", attachment: "1" }, handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { btn.handlers[t] = fn; } };
+    els["ticket-view-content"].querySelectorAll = (sel: string) => (sel === ".ticket-file-replace" ? [btn] : []);
+    const h = holdRemoves();
+    open("a"); await settle();
+    failPath = "/tickets/a/attachments/1/remove";
+    btn.handlers.click();
+    const picking = pick(els["ticket-view-replace"], [F("new.pdf")]);          // attach goes through; the remove is held
+    await settle();
+    els["ticket-view"].close();
+    open("b"); await settle();
+    await h.release();
+    await picking;
+    expect(els["ticket-view-notice"].innerHTML).toBe("");
+    expect(els["ticket-view-attach-status"].textContent).toBe("");
+    els["ticket-view"].close();
+    h.restore(); delete els["ticket-view-content"].querySelectorAll;
+  });
+
+  test("11: closing the dialog resets an armed Remove", async () => {
+    attachmentsOnHub.a = [A(1, "one.pdf", "/image/o1.pdf")];
+    await show(T("a", 1));
+    const btn: any = { dataset: { ticket: "a", attachment: "1" }, handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { btn.handlers[t] = fn; } };
+    els["ticket-view-content"].querySelectorAll = (sel: string) => (sel === ".ticket-file-remove" ? [btn] : []);
+    ctx.setTimeout = () => 1;
+    posts = [];
+    open("a"); await settle();
+    btn.handlers.click();
+    expect(view()).toContain("Confirm remove");
+    els["ticket-view"].close();
+    open("a"); await settle();
+    expect(view()).not.toContain("Confirm remove");                       // the armed state did not survive the close
+    btn.handlers.click();
+    expect(posts).toEqual([]);                                            // the first click after reopening only arms
+    ctx.setTimeout = setTimeout;
+    delete els["ticket-view-content"].querySelectorAll;
+  });
+
+  test("11: when the remove fails after the attach, the notice names the new and the old file", async () => {
+    attachmentsOnHub.a = [A(1, "report.pdf", "/image/o1.pdf")];
+    await show(T("a", 1));
+    const btn: any = { dataset: { ticket: "a", attachment: "1" }, handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { btn.handlers[t] = fn; } };
+    els["ticket-view-content"].querySelectorAll = (sel: string) => (sel === ".ticket-file-replace" ? [btn] : []);
+    open("a"); await settle();
+    failPath = "/tickets/a/attachments/1/remove";
+    btn.handlers.click();
+    await pick(els["ticket-view-replace"], [F("report.pdf")]);               // a replacement with the same file name
+    const n = els["ticket-view-notice"].innerHTML as string;
+    expect(n).toContain('The new file "report.pdf" is attached');
+    expect(n).toContain('the old file "report.pdf" was not removed');
+    expect(n).toContain("Remove the old file by hand");
+    delete els["ticket-view-content"].querySelectorAll;
+  });
+
+  test("11: when the hub answers the attach with the attachment being replaced, nothing is removed", async () => {
+    attachmentsOnHub.a = [A(1, "report.pdf", "/image/o1.pdf")];
+    await show(T("a", 1));
+    const btn: any = { dataset: { ticket: "a", attachment: "1" }, handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { btn.handlers[t] = fn; } };
+    els["ticket-view-content"].querySelectorAll = (sel: string) => (sel === ".ticket-file-replace" ? [btn] : []);
+    open("a"); await settle();
+    attachReplyId = 1;                                                      // the same file: the hub's attach is idempotent
+    posts = [];
+    btn.handlers.click();
+    await pick(els["ticket-view-replace"], [F("report.pdf")]);
+    expect(posts.map((p) => p.path)).toEqual(["/tickets/a/attachments"]);   // no remove: it would delete the only copy
+    expect(els["ticket-view-notice"].innerHTML).toContain("Nothing was replaced");
+    delete els["ticket-view-content"].querySelectorAll;
+  });
+
+  test("11: a ticket.detached event lowers the count and drops the file from the open list", async () => {
+    attachmentsOnHub.a = [A(1, "one.pdf", "/image/o1.pdf"), A(2, "two.pdf", "/image/o2.pdf")];
+    await show(T("a", 2));
+    open("a"); await settle();
+    expect(view()).toContain('Attachments <span class=\"ticket-view-count\">2</span>');
+    observers["ticket"]({ kind: "ticket.detached", ticket_id: "a", room: "r", attachments_count: 1, attachment_id: 1, version: 9 });
+    expect(view()).toContain('Attachments <span class=\"ticket-view-count\">1</span>');
+    expect(view()).not.toContain("one.pdf");
+    expect(view()).toContain("two.pdf");
   });
 
   test("a live ticket.attached entry is merged into a list already read, once, and the count follows", async () => {
@@ -2062,7 +2456,7 @@ describe("ticket attachments", () => {
     const live = { kind: "ticket.attached", ticket_id: "a", room: "r", attachments_count: 2, attachment: A(2, "second.md", "/image/l2.md") };
     observers.ticket(live);
     observers.ticket(live);
-    expect(view()).toContain("Attachments (2)");
+    expect(view()).toContain('Attachments <span class=\"ticket-view-count\">2</span>');
     expect((view().match(/ticket-attach-name/g) ?? []).length).toBe(2);
     expect(attachFetches).toEqual(["a"]);                                         // no re-read needed
   });
@@ -2107,28 +2501,76 @@ describe("ticket attachments", () => {
     expect(ctx.TicketBoard._tickets.get("a").attachments_count).toBe(2);
   });
 
-  test("the count only grows: an older entry, a late list and a ticket.update cannot lower it", async () => {
+  test("the count follows the newest word from the hub, up or down: a detach, a later list and a ticket.update lower it", async () => {
     await show(T("a", 1));
-    for (const n of [3, 2, 1]) observers.ticket({ kind: "ticket.attached", ticket_id: "a", room: "r", attachments_count: n, attachment: A(10 + n, `n${n}.pdf`, `/image/n${n}.pdf`) });
-    expect(ctx.TicketBoard._tickets.get("a").attachments_count).toBe(3);
-    list = [T("a", 1)];
-    await ctx.TicketBoard.load();                                                 // a list read at count 1
-    expect(ctx.TicketBoard._tickets.get("a").attachments_count).toBe(3);
+    for (const n of [3, 2]) observers.ticket({ kind: "ticket.attached", ticket_id: "a", room: "r", attachments_count: n, attachment: A(10 + n, `n${n}.pdf`, `/image/n${n}.pdf`) });
+    expect(ctx.TicketBoard._tickets.get("a").attachments_count).toBe(2);
+    observers.ticket({ kind: "ticket.detached", ticket_id: "a", room: "r", attachments_count: 1, attachment_id: 12, version: 50 });
+    expect(ctx.TicketBoard._tickets.get("a").attachments_count).toBe(1);
+    list = [T("a", 0)];
+    await ctx.TicketBoard.load();                                                 // a later list at count 0
+    expect(ctx.TicketBoard._tickets.get("a").attachments_count).toBe(0);
     observers.ticket({ kind: "ticket.update", ticket_id: "a", version: 99, snapshot: { ...T("a", 0), version: 99 } });
-    expect(ctx.TicketBoard._tickets.get("a").attachments_count).toBe(3);
+    expect(ctx.TicketBoard._tickets.get("a").attachments_count).toBe(0);          // an entry with no count keeps it
   });
 
-  test("a read that answers after a live attachment merges and keeps it", async () => {
-    await show(T("a", 1));
+  test("a late list replaces the cached list: a file removed while the read was in flight does not come back", async () => {
+    await show(T("a", 2));
     let finish!: (r: any) => void;
     const normal = ctx.authedFetch;
     ctx.authedFetch = (path: string, init?: any) => (path.endsWith("/attachments") && !init ? new Promise((r) => { finish = r; }) : normal(path, init));
     open("a");
-    observers.ticket({ kind: "ticket.attached", ticket_id: "a", room: "r", attachments_count: 2, attachment: A(7, "live.pdf", "/image/live.pdf") });
-    finish({ ok: true, json: async () => [A(6, "old.pdf", "/image/old.pdf")] });
+    finish({ ok: true, json: async () => [A(1, "keep.pdf", "/image/k.pdf")] });   // the hub's answer after the removal
     await settle();
-    expect(view()).toContain("live.pdf");
-    expect(view()).toContain("old.pdf");
+    ctx.authedFetch = normal;
+    expect(view()).toContain("keep.pdf");
+    expect(view()).not.toContain("gone.pdf");
+  });
+
+  test("a read that started before a real ticket.detached cannot write the removed file back", async () => {
+    attachmentsOnHub.a = [A(1, "keep.pdf", "/image/k.pdf"), A(2, "gone.pdf", "/image/g.pdf")];
+    await show(T("a", 2));
+    const normal = ctx.authedFetch;
+    const pending: Array<(r: any) => void> = [];
+    ctx.authedFetch = (path: string, init?: any) => (path.endsWith("/attachments") && !init ? new Promise((r) => { pending.push(r); }) : normal(path, init));
+    open("a");                                                                    // read 1 starts: it will answer with both files
+    expect(pending.length).toBe(1);
+    attachmentsOnHub.a = [A(1, "keep.pdf", "/image/k.pdf")];                      // the hub removes gone.pdf ...
+    observers.ticket({ kind: "ticket.detached", ticket_id: "a", room: "r", attachments_count: 1, attachment_id: 2, version: 60 });   // ... and the entry arrives
+    pending[0]({ ok: true, json: async () => [A(1, "keep.pdf", "/image/k.pdf"), A(2, "gone.pdf", "/image/g.pdf")] });   // the old answer comes back late
+    await settle();
+    expect(pending.length).toBe(2);                                               // the stale answer was discarded and the list read again
+    pending[1]({ ok: true, json: async () => [A(1, "keep.pdf", "/image/k.pdf")] });
+    await settle();
+    ctx.authedFetch = normal;
+    expect(view()).toContain("keep.pdf");
+    expect(view()).not.toContain("gone.pdf");
+    expect(ctx.TicketBoard._tickets.get("a").attachments_count).toBe(1);
+  });
+
+  test("a missed ticket.detached: a lower count rereads the open list and the removed file leaves it", async () => {
+    attachmentsOnHub.a = [A(1, "one.pdf", "/image/o1.pdf"), A(2, "two.pdf", "/image/o2.pdf")];
+    await show(T("a", 2));
+    open("a"); await settle();
+    expect(view()).toContain("two.pdf");
+    attachmentsOnHub.a = [A(1, "one.pdf", "/image/o1.pdf")];                       // removed elsewhere; its entry was missed
+    list = [T("a", 1)];
+    await ctx.TicketBoard.load();
+    await settle();
+    expect(view()).toContain("one.pdf");
+    expect(view()).not.toContain("two.pdf");
+    expect(attachFetches).toEqual(["a", "a"]);
+  });
+
+  test("a reconnect resets the attachment lists: the open list is read again", async () => {
+    attachmentsOnHub.a = [A(1, "one.pdf", "/image/o1.pdf")];
+    await show(T("a", 1));
+    open("a"); await settle();
+    attachmentsOnHub.a = [A(3, "three.pdf", "/image/o3.pdf")];                     // same count, different file: only a reset sees it
+    ctx.syncTicketBoard();
+    await settle();
+    expect(view()).toContain("three.pdf");
+    expect(view()).not.toContain("one.pdf");
   });
 
   test("a failed read is not retried by a redraw; Retry and opening the view again read it", async () => {
@@ -2471,32 +2913,41 @@ describe("acceptance criteria editor and Markdown", () => {
     });
     async function show(t: any) { list = [t]; ctx.TicketBoard._tickets.clear(); await ctx.TicketBoard.load(); }
 
-    test("the card renders the criteria as Markdown inside its details", async () => {
+    // 15.3: the card no longer holds the criteria; it shows the checklist progress and the dialog renders the Markdown.
+    test("the card shows the checklist progress; the dialog renders the criteria as Markdown", async () => {
       ctx.escHtml = real;
-      await show(T("- [ ] one\n- **two**"));
-      expect(cols.innerHTML).toContain('<details class="ticket-criteria"><summary>Acceptance criteria</summary><div class="md"><ul class="md-checklist">');
-      expect(cols.innerHTML).toContain("<strong>two</strong>");
+      await show(T("- [x] one\n- [ ] **two**"));
+      expect(cols.innerHTML).not.toContain('<details class="ticket-criteria">');
+      expect(cols.innerHTML).toMatch(/title="Criteria checked">.*?<\/svg>1\/2<\/span>/s);
+      ctx.TicketBoard.openView("t_md");
+      const html = (els["ticket-view-content"].innerHTML + els["ticket-view-notes"].innerHTML) as string;
+      expect(html).toContain('<div class="ticket-view-criteria md"><ul class="md-checklist">');
+      expect(html).toContain("<strong>two</strong>");
     });
 
-    test("the card escapes hostile criteria", async () => {
+    test("the dialog escapes hostile criteria and the card shows none of it", async () => {
       ctx.escHtml = real;
       await show(T('<img src=x onerror=alert(1)> **b**'));
       expect(cols.innerHTML).not.toContain("<img");
-      expect(cols.innerHTML).toContain("&lt;img src=x onerror=alert(1)&gt; <strong>b</strong>");
+      ctx.TicketBoard.openView("t_md");
+      const html = (els["ticket-view-content"].innerHTML + els["ticket-view-notes"].innerHTML) as string;
+      expect(html).not.toContain("<img");
+      expect(html).toContain("&lt;img src=x onerror=alert(1)&gt; <strong>b</strong>");
     });
 
     test("the full view renders it too", async () => {
       ctx.escHtml = real;
       await show(T("run `bun test`\n\n- a"));
       ctx.TicketBoard.openView("t_md");
-      const html = els["ticket-view-content"].innerHTML as string;
+      const html = (els["ticket-view-content"].innerHTML + els["ticket-view-notes"].innerHTML) as string;
       expect(html).toContain('<div class="ticket-view-criteria md"><p>run <code>bun test</code></p><ul class="md-list"><li>a</li></ul></div>');
     });
 
     test("plain criteria (no Markdown) still read as before, line breaks kept", async () => {
       ctx.escHtml = real;
       await show(T("line one\nline two"));
-      expect(cols.innerHTML).toContain("<p>line one<br>line two</p>");
+      ctx.TicketBoard.openView("t_md");
+      expect((els["ticket-view-content"].innerHTML + els["ticket-view-notes"].innerHTML)).toContain("<p>line one<br>line two</p>");
     });
   });
 });
@@ -2539,23 +2990,28 @@ describe("moving tickets: the Move to select and drag and drop", () => {
     return m ? [...m[1].matchAll(/<option value="([^"]*)"([^>]*)>([^<]*)</g)].map((o) => [o[1], o[3], /disabled/.test(o[2])]) : null;
   };
 
-  test("an open card has a Move to select with the four columns; its own column is shown and disabled", async () => {
+  test("an open card has a Move to select with the five columns; its own column is shown and disabled", async () => {
     await show(T("a", "queued"), T("b", "claimed"), T("c", "in_review"));
-    expect(optionsOf("a")).toEqual([["queued", "Queued", true], ["in_progress", "In progress", false], ["in_review", "In review", false], ["done", "Done", false]]);
-    expect(optionsOf("b")!.map((o) => o[2])).toEqual([false, true, false, false]);   // claimed sits in In progress
-    expect(optionsOf("c")!.map((o) => o[2])).toEqual([false, false, true, false]);
+    expect(optionsOf("a")).toEqual([["draft", "Draft", false], ["queued", "Queued", true], ["in_progress", "In progress", false], ["in_review", "In review", false], ["done", "Done", false]]);
+    expect(optionsOf("b")!.map((o) => o[2])).toEqual([false, false, true, false, false]);   // claimed sits in In progress
+    expect(optionsOf("c")!.map((o) => o[2])).toEqual([false, false, false, true, false]);
     expect(cols.innerHTML).toContain("Move to");
   });
 
-  test("Move to and Assignee share one fields row, Move to first, with their aria-labels", async () => {
+  test("15.4 the Assignee select is in the footer in place of the name, Move to is in the controls row with the Cancel icon; both have aria-labels", async () => {
     await show(T("a", "queued"));
-    const m = /<div class="ticket-fields">(.*?)<\/div>/s.exec(cols.innerHTML);
-    expect(m).not.toBeNull();
-    const row = m![1];
-    expect(row.indexOf("ticket-move-label")).toBeGreaterThanOrEqual(0);
-    expect(row.indexOf("ticket-move-label")).toBeLessThan(row.indexOf("ticket-assign-label"));
+    const html = cols.innerHTML as string;
+    const foot = /<div class="ticket-card-foot">(.*?)<div class="ticket-card-controls">/s.exec(html)![1];
+    expect(foot).toContain('<span class="ticket-who-name">alice</span>');
+    expect(foot).toContain('aria-label="Assignee of T a"');
+    const row = /<div class="ticket-card-controls">(.*?)<\/div>\s*<\/div>\s*<\/div>/s.exec(html)![1];
     expect(row).toContain('aria-label="Move T a to column"');
-    expect(row).toContain('aria-label="Assignee of T a"');
+    expect(row).toContain('aria-label="Cancel ticket T a"');
+    expect(row).not.toContain("ticket-assign");
+    expect(row.indexOf("ticket-move")).toBeLessThan(row.indexOf("ticket-cancel-icon"));
+    // Keyboard order: the Assignee (footer) comes first, then Move, then Cancel.
+    expect(html.indexOf("ticket-assign")).toBeLessThan(html.indexOf("ticket-move"));
+    expect(html.indexOf("ticket-move")).toBeLessThan(html.indexOf("ticket-cancel-icon"));
   });
 
   test("done and cancelled cards have no select and are not draggable; the per-status move buttons are gone", async () => {
@@ -2565,7 +3021,7 @@ describe("moving tickets: the Move to select and drag and drop", () => {
     expect(optionsOf("x")).toBeNull();
     expect(cols.innerHTML.match(/draggable="true"/g)?.length).toBe(1);
     for (const gone of ["Claim<", "Start<", "To review<", "Rework<"]) expect(cols.innerHTML).not.toContain(gone);
-    expect(cols.innerHTML).toContain('data-to="cancelled">Cancel</button>');
+    expect(cols.innerHTML).toContain('data-to="cancelled" aria-label="Cancel ticket T q">');
   });
 
   test("choosing a column sends the human move; choosing nothing new sends nothing", async () => {
@@ -2577,6 +3033,50 @@ describe("moving tickets: the Move to select and drag and drop", () => {
     selects.a.value = "queued";                                   // its own column
     await selects.a.handlers.change();
     expect(posts.length).toBe(n);
+  });
+
+  test("15.2 an empty column is a collapsed strip with count, label and +, still a drop target; a column with tickets has + in its header", async () => {
+    await show(T("a", "draft"), T("d", "done"));
+    const html = cols.innerHTML as string;
+    for (const [status, label] of [["queued", "Queued"], ["in_progress", "In progress"], ["in_review", "In review"]]) {
+      expect(html).toContain(`<section class="ticket-col collapsed" data-status="${status}"><h3>${label} <span class="count">0</span></h3><button type="button" class="ticket-add" data-col=`);
+    }
+    // Draft has a ticket: a full column, "+" at the right of its header, no strip.
+    expect(html).toMatch(/<section class="ticket-col" data-status="draft"><h3>Draft <span class="count">1<\/span><button type="button" class="ticket-add" data-col="draft"[^>]*>\+<\/button><\/h3>/);
+    // Done has a ticket: "Archive all done" stays in its header, before "+".
+    expect(html).toMatch(/<section class="ticket-col" data-status="done"><h3>Done <span class="count">1<\/span><button[^>]*class="ticket-archive-all"[^>]*>[^<]*<\/button><button type="button" class="ticket-add" data-col="done"/);
+    expect(html.match(/class="ticket-add"/g)?.length).toBe(5);                  // every column keeps its +
+  });
+
+  test("15.2 widths: tickets take the free space, a strip is 40 px; one Draft ticket gets at least 550 px of 770 px", () => {
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toContain(".ticket-col { flex: 1 1 210px; min-width: 200px; }");
+    expect(css).toMatch(/\.ticket-col\.collapsed \{\s*flex: 0 0 40px; min-width: 40px;/);
+    expect(css).toMatch(/\.ticket-board-columns \{[^}]*display: flex;[^}]*overflow: auto/);               // scrolls sideways when columns do not fit
+    expect(css).toMatch(/\.ticket-col\.collapsed h3 \{[^}]*writing-mode: vertical-rl/);
+    const pane = 770, padding = 2 * 8, gap = 8, strips = 4;                      // four empty columns, five columns, four gaps
+    expect(pane - padding - strips * 40 - strips * gap).toBeGreaterThanOrEqual(550);
+  });
+
+  test("15.2 the toolbar has 'All N tickets' after Filters and a primary '+ New ticket' that opens the dialog for Queued", async () => {
+    const html = readFileSync("ui/index.html", "utf8");
+    const at = (x: string) => html.indexOf(x);
+    expect(at('id="ticket-filters-btn"')).toBeLessThan(at('id="ticket-filter-summary"'));
+    expect(at('id="ticket-filter-summary"')).toBeLessThan(at('id="ticket-new-btn"'));
+    expect(html).toContain('<button type="button" class="ticket-new-btn" id="ticket-new-btn">+ New ticket</button>');
+    await show(T("a", "queued"));
+    expect(els["ticket-filter-summary"].textContent).toBe("All 1 ticket");
+    await show(T("a", "queued"), T("b", "draft"));
+    expect(els["ticket-filter-summary"].textContent).toBe("All 2 tickets");
+    els["ticket-modal"] = { open: false, style: {}, showModal() { this.open = true; }, close() { this.open = false; } };
+    els["ticket-modal-title"] = { textContent: "" };
+    els["ticket-new-btn"].handlers.click();
+    expect(els["ticket-modal-title"].textContent).toBe("New ticket — Queued");
+    expect(els["ticket-modal"].open).toBe(true);
+    delete els["ticket-modal-title"]; delete els["ticket-modal"];
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toMatch(/\.ticket-new-btn \{ margin-left: auto; background: var\(--orange\); color: var\(--bg-inset\);/);
+    expect(css).toContain('[data-theme="rose-pine-dawn"] .ticket-new-btn, [data-theme="rose-pine-dawn"] .ticket-new-btn:hover { background: var(--text); color: var(--bg-inset); }');
   });
 
   test("a drop on another column sends the same move; a drop on its own column or on Cancelled does nothing", async () => {
@@ -2646,7 +3146,7 @@ describe("moving tickets: the Move to select and drag and drop", () => {
     expect(cols.innerHTML).toBe("STALE");                          // the dragged card was not replaced
     cards.a.handlers.dragend();
     expect(cols.innerHTML).not.toBe("STALE");
-    expect(optionsOf("a")!.map((o) => o[2])).toEqual([false, true, false, false]);
+    expect(optionsOf("a")!.map((o) => o[2])).toEqual([false, false, true, false, false]);
   });
 
   test("a drag that starts on a control does not start", async () => {
@@ -2657,5 +3157,1159 @@ describe("moving tickets: the Move to select and drag and drop", () => {
     const over = ev();
     columns.in_progress.handlers.dragover(over);
     expect(over.prevented).toBe(false);                            // nothing is being dragged
+  });
+});
+
+describe("request label and blockers (6.2, 6.3)", () => {
+  const mk = (id: string, status: string, extra: object = {}) => ({
+    ...ticket("", null), id, title: `title-${id}`, status, blast_radius: "low", priority: "medium", approval_request_id: null, assignee: null,
+    request_id: null, blocked_by: [], open_blockers: [], ...extra,
+  });
+  const card = (id: string) => (cols.innerHTML.match(new RegExp(`<div class="ticket-card [^>]*data-ticket="${id}"[\\s\\S]*?(?=<div class="ticket-card |</section>)`)) ?? [""])[0];
+  // 15.3: the blocker count is in the card's status line ("Blocked by N open tickets").
+  const lock = (id: string) => /ticket-status-line is-blocked">.*?<\/svg>Blocked by (\d+) open/s.exec(card(id))?.[1] ?? null;
+  async function show(...tickets: any[]) {
+    list = tickets;
+    ctx.TicketBoard._tickets.clear();
+    await ctx.TicketBoard.load();
+  }
+  const ev = (t: any, version: number) => observers.ticket({ kind: "ticket.update", ticket_id: t.id, room: "r", version, snapshot: { ...t, version } });
+
+  test("a card shows its request label, and a lock with the open-blocker count only when it has some", async () => {
+    await show(mk("a", "queued", { request_id: "r-1", blocked_by: ["b", "c"], open_blockers: ["b", "c"] }), mk("b", "queued"), mk("c", "queued"));
+    expect(card("a")).toContain("r-1");
+    expect(lock("a")).toBe("2");
+    expect(lock("b")).toBeNull();
+  });
+
+  test("a blocker that moves to done lowers the count by one; cancelled does not; an older event is discarded", async () => {
+    await show(mk("a", "queued", { version: 1, blocked_by: ["b", "c"], open_blockers: ["b", "c"] }), mk("b", "queued", { version: 1 }), mk("c", "queued", { version: 1 }));
+    ev(mk("b", "done"), 5);
+    expect(lock("a")).toBe("1");
+    ev(mk("c", "cancelled"), 5);
+    expect(lock("a")).toBe("1");                         // a cancelled blocker still blocks
+    ev(mk("b", "queued"), 3);                            // older than version 5: discarded
+    expect(lock("a")).toBe("1");
+    ev(mk("b", "queued"), 6);                            // the human reopens it
+    expect(lock("a")).toBe("2");
+  });
+
+  test("a blocker the board does not hold keeps the server's result; absence never counts as done", async () => {
+    await show(mk("a", "queued", { blocked_by: ["x", "y"], open_blockers: ["x"] }));
+    expect(lock("a")).toBe("1");                         // x open on the server, y done on the server
+  });
+
+  test("lightOf is unchanged by a blocker: a blocked queued ticket still shows green", async () => {
+    await show(mk("a", "queued", { blocked_by: ["b"], open_blockers: ["b"] }), mk("b", "queued"));
+    expect(card("a")).toContain("no one is working on it");
+  });
+
+  // ---- 15.3: the new card ----
+  const cardOf = (extra: object, id = "a") => { return mk(id, "queued", extra); };
+
+  test("15.3 top row: the tag chip, the code and the priority bars with their label; the title is the parsed main text, then the sub", async () => {
+    await show(cardOf({ title: "[code] 8.3a Hot reload: link [idle at once]", priority: "high" }));
+    const c = card("a");
+    expect(c).toContain('<span class="ticket-tag tag-code">code</span><span class="ticket-code">8.3a</span>');
+    expect(c).toContain('<span class="ticket-bars" aria-hidden="true"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span>High</span>');
+    expect(c).toContain('<div class="ticket-title">Hot reload: link</div>');
+    expect(c).toContain('<div class="ticket-sub">idle at once</div>');
+    await show(cardOf({ title: "plain title", priority: "lowest" }));
+    expect(card("a")).not.toContain("ticket-tag");
+    expect(card("a")).not.toContain("ticket-sub");
+    expect(card("a")).toContain("<i></i><i></i><i></i><i></i></span>Lowest");                  // no bars on
+  });
+
+  test("15.3 chips: request, external ref and High radius; no meta line; a chip is one nowrap block", async () => {
+    await show(cardOf({ request_id: "r-1", external_ref: "GH-142", blast_radius: "high" }), mk("b", "queued"));
+    const c = card("a");
+    expect(c).toContain('<span class="ticket-request-label">r-1</span>');
+    expect(c).toContain('<span class="ticket-chip">GH-142</span>');
+    expect(c).toContain('<span class="ticket-chip ticket-radius">High radius</span>');
+    expect(cols.innerHTML).not.toContain("ticket-meta");
+    expect(card("b")).not.toContain("ticket-chips");                                           // no chips: no row
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toMatch(/\.ticket-chip \{[^}]*white-space: nowrap; overflow: hidden; text-overflow: ellipsis;/);
+  });
+
+  test("15.3 the status line: blockers, the human, the approval; none otherwise", async () => {
+    await show(
+      cardOf({ blocked_by: ["x"], open_blockers: ["x"] }),
+      mk("h", "queued", { assignee: "human" }),
+      mk("p", "in_review", { assignee: "alice", blast_radius: "high", approval_request_id: "req1", approval: { id: "req1", status: "pending", version: 1 } }),
+      mk("n", "queued"),
+    );
+    expect(card("a")).toMatch(/ticket-status-line is-blocked">.*Blocked by 1 open ticket<\/div>/s);
+    expect(card("h")).toMatch(/ticket-status-line is-human">.*Assigned to you<\/div>/s);
+    expect(card("p")).toMatch(/ticket-status-line is-approval">.*Waiting for your approval<\/div>/s);
+    expect(card("n")).not.toContain("ticket-status-line");
+  });
+
+  test("15.3 footer: the assignee circle and name or Unassigned; progress, attachments and notes only above 0; the light is last", async () => {
+    await show(
+      cardOf({ assignee: "alice", acceptance_criteria: "- [x] a\n- [ ] b\n- [ ] c", attachments_count: 2, notes_count: 4 }),
+      mk("b", "queued"),
+    );
+    const a = card("a");
+    expect(a).toContain('<span class="ticket-avatar" aria-hidden="true">A</span><span class="ticket-who-name">alice</span>');
+    expect(a).toMatch(/title="Criteria checked">.*?<\/svg>1\/3<\/span>/s);
+    expect(a).toMatch(/title="Attachments">.*?<\/svg>2<\/span>/s);
+    expect(a).toMatch(/title="Notes">.*?<\/svg>4<\/span>/s);
+    expect(a.indexOf("ticket-counts")).toBeLessThan(a.indexOf("ticket-light"));
+    const foot = /<div class="ticket-card-foot">(.*?)<div class="ticket-card-controls">/s.exec(a)![1];
+    expect(foot.trimEnd().endsWith("</div>")).toBe(true);
+    expect(foot).toMatch(/<span class="ticket-light"[^>]*>.*<\/span><\/div>\s*$/s);              // the light ends the footer
+    const b = card("b");
+    expect(b).toMatch(/<span class="ticket-who ticket-unassigned"><span class="ticket-who-name">Unassigned<\/span>/);
+    for (const t of ["Criteria checked", "Attachments", 'title="Notes"']) expect(b).not.toContain(t);
+  });
+
+  test("15.3 the card has no details, no always-visible controls and no orange border; the hooks stay", async () => {
+    await show(cardOf({ acceptance_criteria: "c", notes_count: 3 }));
+    const c = card("a");
+    expect(c).not.toContain("<details");
+    expect(c).toContain('role="button" tabindex="0" draggable="true" data-ticket="a" aria-label="Open ticket: title-a"');
+    expect(c).toMatch(/<div class="ticket-card-controls">.*class="ticket-move".*data-to="cancelled"/s);
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toMatch(/\.ticket-card-controls \{ visibility: hidden; height: 0;/);            // hidden until hover or focus, not display: none
+    expect(css).toContain(".ticket-card:hover .ticket-card-controls, .ticket-card:focus-within .ticket-card-controls { visibility: visible; height: auto;");
+    expect(css).not.toContain(".ticket-card.radius-high");
+    expect(c).not.toContain("radius-high");
+  });
+
+  // ---- 15.4: card actions on hover and keyboard focus ----
+  test("15.4 hover and focus: the name swaps for the Assignee select (max 104 px); the controls row shows; hidden by visibility and height 0, not display: none", () => {
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toMatch(/\.ticket-card-controls \{ visibility: hidden; height: 0; overflow: hidden; \}/);
+    expect(css).toContain(".ticket-card:hover .ticket-card-controls, .ticket-card:focus-within .ticket-card-controls { visibility: visible; height: auto; overflow: visible; }");
+    expect(css).toContain(".ticket-card:hover .ticket-who:has(.ticket-assign-label) .ticket-who-name, .ticket-card:focus-within .ticket-who:has(.ticket-assign-label) .ticket-who-name { display: none; }");
+    expect(css).toMatch(/\.ticket-who \.ticket-assign-label \{[^}]*visibility: hidden;/);                // out of the tab order until hover or focus
+    expect(css).toContain(".ticket-who .ticket-assign { width: 104px; max-width: 104px; }");
+    expect(css).toMatch(/\.ticket-card-controls \.ticket-move \{ width: 100%; \}/);                       // "In review" has the card's full width
+    expect(css).toMatch(/\.ticket-cancel-icon \{[^}]*min-width: 26px; height: 26px;/);
+    const hidden = css.split("}").filter((b) => /\.ticket-card-controls \{ visibility: hidden/.test(b) || /\.ticket-who \.ticket-assign-label \{/.test(b));
+    for (const b of hidden) expect(b).not.toContain("display: none");
+  });
+
+  test("15.4 the card's Cancel is an icon button with an aria-label; the first click arms it and shows Confirm, the second cancels", async () => {
+    await show(mk("a", "queued"));
+    expect(card("a")).toContain('<button type="button" class="ticket-cancel-icon" data-ticket="a" data-to="cancelled" aria-label="Cancel ticket title-a"><svg');
+    expect(card("a")).not.toContain("Confirm");
+    const btn: any = { dataset: { ticket: "a", to: "cancelled" }, handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { btn.handlers[t] = fn; } };
+    const orig = cols.querySelectorAll;
+    cols.querySelectorAll = (sel: string) => (sel.includes(".ticket-actions button[data-to]") ? [btn] : []);
+    ctx.setTimeout = () => 1;
+    ctx.TicketBoard.setFilter(ctx.TicketBoard._filter());
+    posts = [];
+    btn.handlers.click();
+    expect(card("a")).toContain('class="ticket-cancel-icon armed"');
+    expect(card("a")).toContain('aria-label="Confirm cancel ticket title-a"');
+    expect(card("a")).toContain("<span>Confirm</span>");
+    expect(posts).toEqual([]);
+    btn.handlers.click();
+    expect(posts).toEqual([{ path: "/tickets/a/transition", body: { by: "human", to: "cancelled" } }]);
+    ctx.setTimeout = setTimeout;
+    cols.querySelectorAll = orig;
+  });
+
+  test("15.4 an unassigned ticket in a room with no agents keeps its label (no select to swap in); finished cards have no controls", async () => {
+    await show(mk("a", "queued"), mk("d", "done"));
+    const roster = ctx.ROSTER;
+    ctx.ROSTER = [];                                                                         // no agents in the room
+    ctx.TicketBoard.setFilter(ctx.TicketBoard._filter());
+    expect(card("a")).not.toContain("ticket-assign");
+    expect(card("a")).toContain('<span class="ticket-who-name">Unassigned</span>');
+    ctx.ROSTER = roster;
+    expect(card("d")).not.toContain("ticket-move");
+    expect(card("d")).not.toContain("ticket-cancel-icon");
+  });
+
+  // ---- 15.5: the dialog shell ----
+  const headMeta = () => els["ticket-view-head-meta"].innerHTML as string;
+  const panelHtml = () => els["ticket-view-actions"].innerHTML as string;
+
+  test("15.5 the page has a header, a body and a footer; only the body scrolls; Close, Cancel and Save sit in the footer", () => {
+    const html = readFileSync("ui/index.html", "utf8");
+    const dlg = html.slice(html.indexOf('id="ticket-view"'), html.indexOf("</dialog>", html.indexOf('id="ticket-view"')));
+    const at = (x: string) => dlg.indexOf(x);
+    const order = [at('class="ticket-view-head"'), at('id="ticket-view-head-meta"'), at('id="ticket-view-x"'), at('id="ticket-view-title"'), at('id="ticket-view-sub"'),
+      at('id="ticket-view-body"'), at('id="ticket-view-content"'), at('id="ticket-view-attach-btn"'), at('id="ticket-view-actions"'),
+      at('id="ticket-view-foot"'), at('id="ticket-view-row-actions"'), at('id="ticket-view-close"'), at('id="ticket-view-save"')];
+    expect(order.every((n, i) => n >= 0 && (i === 0 || n > order[i - 1]))).toBe(true);
+    expect(dlg).toContain('<button type="button" class="ticket-view-x" id="ticket-view-x" aria-label="Close">');
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toMatch(/#ticket-view \.modal\.ticket-view \{[^}]*overflow: hidden; display: flex; flex-direction: column;/);   // the shell does not scroll
+    expect(css).toMatch(/\.ticket-view-body \{[^}]*overflow: auto;/);                                                          // the body does
+    expect(css).toMatch(/#ticket-view \.ticket-view-foot \{ position: static; flex: none;/);                                    // the footer stays
+  });
+
+  test("15.5 the body wraps: content left, panel right; in a narrow pane the panel goes above (container query), nothing scrolls sideways", () => {
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toMatch(/\.ticket-view-body \{[^}]*display: flex; flex-wrap: wrap;[^}]*container-type: inline-size;/);
+    expect(css).toContain(".ticket-view-main { flex: 999 1 380px; min-width: 0; }");
+    expect(css).toContain(".ticket-view-panel { flex: 1 1 264px; min-width: 264px;");   // 20 % wider than 220 px (15.12)
+    expect(css).toContain("@container (max-width: 600px) { .ticket-view-panel { order: -1; flex-basis: 100%; } }");
+  });
+
+  test("15.5 the header: tag chip and code, status pill, the light with its label; the title once and the subtitle", async () => {
+    await show(mk("a", "in_review", { title: "[code] 8.3b Hot reload: briefing [idle at once]", assignee: "alice" }));
+    ctx.TicketBoard.openView("a");
+    expect(headMeta()).toContain('<span class="ticket-tag tag-code">code</span><span class="ticket-code">8.3b</span>');
+    expect(headMeta()).toContain('<span class="ticket-pill pill-in_review">In review</span>');
+    expect(headMeta()).toContain('<span class="ticket-view-light"><span class="ticket-light"');
+    expect(headMeta()).toContain('<span class="ticket-view-light-label">no one is working on it</span>');
+    expect(els["ticket-view-title"].textContent).toBe("Hot reload: briefing");
+    expect(els["ticket-view-sub"].textContent).toBe("idle at once");
+    expect(els["ticket-view-sub"].hidden).toBe(false);
+    // The title is not repeated in the content or the panel.
+    const visible = (h: string) => h.replace(/<[^>]*>/g, "");                              // text only: an aria-label is not shown
+    expect(visible(els["ticket-view-content"].innerHTML)).not.toContain("Hot reload: briefing");
+    expect(visible(panelHtml())).not.toContain("Hot reload: briefing");
+    await show(mk("b", "claimed"), mk("d", "done"));
+    ctx.TicketBoard.openView("b");
+    expect(headMeta()).toContain('pill-in_progress">In progress</span>');                 // claimed reads as In progress
+    ctx.TicketBoard.openView("d");
+    expect(headMeta()).toContain('pill-done">Done</span>');
+    expect(headMeta()).not.toContain("ticket-view-light");                                 // a finished ticket has no light
+    expect(els["ticket-view-sub"].hidden).toBe(true);
+  });
+
+  test("15.5 the pill colours follow the status: Draft dashed, Queued blue, In progress amber, In review purple, Done green, Cancelled red", () => {
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toContain(".ticket-pill.pill-draft { border: 1px dashed var(--line-hover); }");
+    for (const [pill, token] of [["queued", "blue"], ["in_progress", "amber"], ["in_review", "purple"], ["done", "green"], ["cancelled", "red"]]) {
+      expect(css).toContain(`.ticket-pill.pill-${pill} { background: color-mix(in srgb, var(--${token}) 20%, transparent); }`);
+    }
+  });
+
+  test("15.5 the panel: Status, Assignee, Priority, Blast radius, Request, External ref, a rule, Created by, Updated only when different, Archived, ID with Copy", async () => {
+    await show(mk("a", "in_review", { assignee: "alice", priority: "high", blast_radius: "high", request_id: "r-9", external_ref: "GH-1", creator: "carol", created_at_ms: 1000, updated_at_ms: 5000, archived_at_ms: 9000 }));
+    ctx.TicketBoard.openView("a");
+    const p = panelHtml();
+    const order = ["ticket-move", "<dt>Assignee</dt>", "<dt>Priority</dt>", "<dt>Blast radius</dt>", '<dt class="dt-strong">Request</dt>', "<dt>External ref</dt>", "ticket-view-rule", "<dt>Created</dt>", "<dt>Updated</dt>", "<dt>Archived</dt>", "<dt>ID</dt>"].map((x) => p.indexOf(x));
+    expect(order.every((n, i) => n >= 0 && (i === 0 || n > order[i - 1]))).toBe(true);
+    expect(p).toContain("by carol");
+    expect(p).toContain('aria-label="Copy ticket ID"');
+    expect(p).toContain(">Status <select");                                                  // the Move control is labelled Status
+    await show(mk("b", "queued", { created_at_ms: 1000, updated_at_ms: 1000 }));
+    ctx.TicketBoard.openView("b");
+    expect(panelHtml()).not.toContain("<dt>Updated</dt>");                                   // same as Created
+    expect(panelHtml()).not.toContain("<dt>Archived</dt>");
+  });
+
+  test("15.5 section headings are sentence case in the sans font with no uppercase mono label", () => {
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toMatch(/\.ticket-view-h \{[^}]*font-size: var\(--fs-xl\); font-weight: 600;[^}]*text-transform: none;[^}]*font-family: var\(--sans\)/);
+  });
+
+  test("15.5 the header Close button asks first when there are changes, like the footer Close and Escape", async () => {
+    await show(draftT());
+    const m = mount(draftVals);
+    ctx.TicketBoard.openView("a");
+    els["ticket-view-x"].handlers.click();
+    expect(els["ticket-view"].open).toBe(false);                                             // no changes: closes
+    ctx.TicketBoard.openView("a");
+    m.type("title", "changed");
+    els["ticket-view-x"].handlers.click();
+    expect(els["ticket-view"].open).toBe(true);
+    expect(els["ticket-view-notice"].innerHTML).toContain("Unsaved changes");
+    unmount();
+  });
+
+  // ---- 15.11: fixes from the browser check ----
+  test("15.11 after the picker adds or removes a blocker, Save is enabled and the count is 1", async () => {
+    await show(mk("a", "queued", { title: "[code] 9.1 Main", blocked_by: ["d"], open_blockers: [] }), mk("d", "done", { title: "[code] 8.2 Done" }), mk("c", "queued", { title: "[code] 8.4 Candidate" }));
+    startEdit("a");
+    const add: any = { handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { add.handlers[t] = fn; } };
+    const search: any = { value: "", handlers: {} as Record<string, any>, setAttribute() {}, addEventListener(t: string, fn: any) { search.handlers[t] = fn; } };
+    const rm: any = { dataset: { id: "d" }, handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { rm.handlers[t] = fn; } };
+    els["ticket-view-content"].querySelectorAll = (sel: string) => (sel === ".ticket-blocker-remove" ? [rm] : []);
+    els["ticket-view-content"].querySelector = (sel: string) => (sel === "#ticket-blocker-add" ? add : sel === "#ticket-edit-blockers-search" ? search : null);
+    ctx.TicketBoard.openView("a");
+    expect(els["ticket-view-save"].disabled).toBe(true);
+    expect(els["ticket-view-dirty"].hidden).toBe(true);
+    add.handlers.click();
+    ctx.TicketBoard.openView("a");
+    search.handlers.keydown({ key: "Enter", preventDefault() {}, stopPropagation() {} });   // add the candidate
+    expect(els["ticket-view-save"].disabled).toBe(false);
+    expect(els["ticket-view-dirty"].textContent).toBe("1 unsaved change");
+    expect(els["ticket-view-dirty"].hidden).toBe(false);
+    ctx.TicketBoard.openView("a");                                                          // a redraw keeps them
+    rm.handlers.click();                                                                    // remove the done blocker: 2 changes against the ticket? no: the list is d,c minus d = c
+    expect(els["ticket-view-save"].disabled).toBe(false);
+    expect(els["ticket-view-dirty"].textContent).toBe("1 unsaved change");                  // one field (blocked_by) differs
+    delete els["ticket-view-content"].querySelectorAll; delete els["ticket-view-content"].querySelector;
+  });
+
+  test("15.11 the picker leaves out cancelled tickets; done ones stay, after the open ones", async () => {
+    await show(mk("a", "queued", { title: "[code] 9.1 Main" }), mk("x", "cancelled", { title: "[code] 8.1 Cancelled" }),
+      mk("d", "done", { title: "[code] 8.2 Done" }), mk("o", "queued", { title: "[code] 8.3 Open" }));
+    startEdit("a");
+    const add: any = { handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { add.handlers[t] = fn; } };
+    els["ticket-view-content"].querySelector = (sel: string) => (sel === "#ticket-blocker-add" ? add : null);
+    ctx.TicketBoard.openView("a");
+    add.handlers.click();
+    const ids = [...content().matchAll(/<li role="option" id="ticket-blocker-opt-\d+"[^>]*data-id="(\w+)"/g)].map((m) => m[1]);
+    expect(ids).toEqual(["o", "d"]);
+    delete els["ticket-view-content"].querySelector;
+  });
+
+  test("15.11 the approval line after an answer: Approved by human · id, Denied by human · id; another resolver keeps the old text", async () => {
+    const hi = (a: object) => mk("a", "in_review", { blast_radius: "high", approval_request_id: "req1", approval: { id: "req1", version: 1, ...a } });
+    await show(hi({ status: "denied", resolved_by: "human" }));
+    ctx.TicketBoard.openView("a");
+    expect(content()).toContain("Denied by human · req1");
+    expect(content()).not.toContain("not your approval");
+    await show(hi({ status: "allowed", resolved_by: "human" }));
+    ctx.TicketBoard.openView("a");
+    expect(content()).toContain("Approved by human · req1");
+    await show(hi({ status: "allowed", resolved_by: "Worker1" }));
+    ctx.TicketBoard.openView("a");
+    expect(content()).toContain("request allowed by Worker1 — not your approval");
+  });
+
+  test("15.11 layout: the dialog fills the board pane; the panel is at least 220 px; labels sit above their fields; long values wrap", () => {
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toMatch(/#ticket-view \.modal\.ticket-view \{[^}]*width: calc\(100% - 32px\); max-width: none;/);
+    expect(css).toContain(".ticket-view-panel { flex: 1 1 264px; min-width: 264px;");   // 20 % wider than 220 px (15.12)
+    expect(css).toContain(".ticket-view-panel .ticket-view-fields:first-of-type { grid-template-columns: minmax(0, 1fr);");
+    expect(css).toContain(".ticket-view-panel dd { overflow-wrap: anywhere; }");
+  });
+
+  test("15.11 in a draft Status is the Move select; the hint shows only in the edit mode of another ticket", async () => {
+    await show(mk("d", "draft"), mk("q", "queued"));
+    ctx.TicketBoard.openView("d");
+    expect(els["ticket-view-actions"].innerHTML).toContain('<label class="ticket-move-label">Status <select class="ticket-move"');
+    expect(els["ticket-view-actions"].innerHTML).not.toContain("Move the ticket after you save.");
+    els["ticket-view"].close();
+    startEdit("q");
+    expect(els["ticket-view-actions"].innerHTML).not.toContain("ticket-move");
+    expect(els["ticket-view-actions"].innerHTML).toContain("Move the ticket after you save.");
+  });
+
+  test("15.11 the criteria heading: the count on the same line, the Write and Preview tabs at its right", async () => {
+    await show(mk("d", "draft", { acceptance_criteria: "- [x] a\n- [ ] b" }));
+    ctx.TicketBoard.openView("d");
+    expect(content()).toMatch(/<div class="ticket-crit-head"><label for="ticket-edit-criteria">Acceptance criteria <span class="ticket-view-count" id="ticket-edit-progress">1 of 2 checked<\/span><\/label><div class="ticket-tabs" role="tablist"/);
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toContain(".ticket-crit-head { display: flex; align-items: baseline; justify-content: space-between;");
+    expect(css).toContain(".ticket-request-form .ticket-crit-head label { display: inline;");
+  });
+
+  test("15.3 the traffic light is the same as before for every status", async () => {
+    const lit = (id: string) => /<i class="on light-(\w+)">/.exec(card(id))?.[1] ?? null;
+    await show(mk("q", "queued"), mk("c", "claimed", { assignee: "alice" }), mk("i", "in_progress", { assignee: "alice" }), mk("r", "in_review", { assignee: "alice" }),
+      mk("d", "done"), mk("h", "queued", { assignee: "human" }));
+    expect([lit("q"), lit("c"), lit("i"), lit("r"), lit("d"), lit("h")]).toEqual(["green", "orange", "orange", "green", null, "red"]);
+  });
+
+  test("the open dialog lists the blockers with title and status and updates when a blocker changes", async () => {
+    await show(mk("a", "queued", { request_id: "r-1", blocked_by: ["b", "x"], open_blockers: ["b", "x"] }), mk("b", "in_progress", { version: 1 }));
+    ctx.TicketBoard.openView("a");
+    let html = els["ticket-view-content"].innerHTML as string;
+    expect(html).toContain('<span class="ticket-blocker-title" title="title-b">title-b</span>');
+    expect(html).toContain('<span class="ticket-pill ticket-blocker-state is-open">In progress</span>');
+    expect(html).toContain('<span class="ticket-blocker-title" title="x">x</span>');                      // not on the board: its id
+    expect(html).toContain('<span class="ticket-pill ticket-blocker-state is-open">Open</span>');          // the server says open
+    expect(els["ticket-view-actions"].innerHTML).toContain("r-1");                     // read mode: the Request row
+    els["ticket-view-edit"].handlers.click();                                           // Edit: the fields
+    expect(els["ticket-view-actions"].innerHTML).toContain('id="ticket-edit-request" value="r-1"');
+    expect(els["ticket-view-content"].innerHTML).toContain('id="ticket-edit-blockers" class="ticket-blocker-edit" role="group" aria-label="Blockers" tabindex="-1" data-ids="b,x"');
+    ev(mk("b", "done"), 5);
+    html = els["ticket-view-content"].innerHTML as string;
+    expect(html).toContain('<span class="ticket-pill ticket-blocker-state is-done">Done</span>');
+  });
+
+  test("the human saves the request and blockers through POST /tickets/:id/edit; only changed fields are sent; an empty label sends null", async () => {
+    await show(mk("a", "queued", { request_id: "r-1", blocked_by: ["b"], open_blockers: ["b"] }), mk("b", "queued"));
+    const req = { value: "r-1", addEventListener() {} }, blk = { value: "b", addEventListener() {} };
+    let submit: any;
+    const form = { addEventListener: (t: string, fn: any) => { if (t === "submit") submit = fn; } };
+    els["ticket-view-content"].querySelector = (sel: string) => ({ "#ticket-request-form": form, "#ticket-edit-request": req, "#ticket-edit-blockers": blk } as any)[sel] ?? null;
+    posts = [];
+    ctx.TicketBoard.openView("a");
+    els["ticket-view-edit"].handlers.click();                                   // a queued ticket opens in read mode: Edit unlocks the fields
+    await submit({ preventDefault() {} });
+    expect(posts).toEqual([]);                                   // nothing changed: no request
+    req.value = "  r-2 "; blk.value = "b, c ,";
+    await submit({ preventDefault() {} });
+    expect(posts).toEqual([{ path: "/tickets/a/edit", body: { by: "human", request_id: "r-2", blocked_by: ["b", "c"] } }]);
+    req.value = "r-1"; blk.value = "b";
+    ctx.TicketBoard.openView("a");
+    req.value = ""; blk.value = "b";
+    await submit({ preventDefault() {} });
+    expect(posts[1].body).toEqual({ by: "human", request_id: null });
+    delete els["ticket-view-content"].querySelector;
+  });
+
+  // ---- 6.7: the editor in the ticket dialog ----
+  const stub = (v = "") => { const h: Record<string, any[]> = {}; return { value: v, handlers: h, addEventListener(t: string, fn: any) { (h[t] ??= []).push(fn); }, focus() {}, setSelectionRange() {} }; };
+  // Fake the form controls of the open dialog; returns them with `type` (sets a value and fires input) and `submit`.
+  function mount(values: Record<string, string>) {
+    const f: any = {};
+    for (const k of Object.keys(values)) f[k] = stub(values[k]);
+    let submit: any;
+    const form = { addEventListener: (t: string, fn: any) => { if (t === "submit") submit = fn; } };
+    els["ticket-view-content"].querySelector = (sel: string) => {
+      if (sel === "#ticket-request-form") return form;
+      const m = /#ticket-edit-(\w+)/.exec(sel);
+      return m ? f[m[1]] ?? null : null;
+    };
+    return {
+      f,
+      submit: () => submit({ preventDefault() {} }),
+      type: (k: string, v: string) => { f[k].value = v; for (const fn of f[k].handlers.input ?? []) fn(); },
+    };
+  }
+  const unmount = () => { delete els["ticket-view-content"].querySelector; };
+  const draftVals = { title: "title-a", criteria: "crit", radius: "low", priority: "medium", assignee: "", ref: "", request: "", blockers: "" };
+  const draftT = (extra: object = {}) => mk("a", "draft", { acceptance_criteria: "crit", ...extra });
+
+  test("1: a draft opens in edit mode with no Edit button: the title in the header, the criteria and blockers in the content, the other fields in the panel", async () => {
+    await show(draftT());
+    ctx.TicketBoard.openView("a");
+    const html = els["ticket-view-content"].innerHTML as string;
+    const panel = els["ticket-view-actions"].innerHTML as string;
+    const order = (h: string, ids: string[]) => ids.map((x) => h.indexOf(x));
+    const ok = (n: number[]) => n.every((v, i) => v >= 0 && (i === 0 || v > n[i - 1]));
+    expect(ok(order(html, ['data-edit-md="bold"', 'id="ticket-edit-criteria"', 'id="ticket-edit-blockers"']))).toBe(true);
+    expect(ok(order(panel, ['id="ticket-edit-assignee"', 'id="ticket-edit-priority"', 'id="ticket-edit-radius"', 'id="ticket-edit-request"', 'id="ticket-edit-ref"']))).toBe(true);
+    expect(els["ticket-view-title"].innerHTML).toContain('id="ticket-edit-title"');       // the one title: an input in the header
+    for (const gone of ['id="ticket-edit-title"', 'id="ticket-edit-assignee"', 'id="ticket-edit-priority"', 'id="ticket-edit-request"', 'id="ticket-edit-ref"']) expect(html).not.toContain(gone);
+    expect(panel).toContain('<option value="alice">alice</option>');
+    expect(panel).toContain('<input type="radio" name="ticket-edit-radius" value="low" checked />');   // the Low and High radio pair
+    expect(panel).toContain('role="radiogroup"');
+    expect(panel).toContain("ticket-move");                                              // a draft's Status is the Move select (15.11)
+    expect(panel).not.toContain("Move the ticket after you save.");                      // the hint is for the edit mode of other tickets
+    expect(els["ticket-view-edit"].hidden).toBe(true);                                   // no Edit button on a draft
+    expect(els["ticket-view-save"].hidden).toBe(false);
+  });
+
+  test("15.7: edit mode has Write and Preview tabs; Preview renders the current text; the count follows the checklist lines", async () => {
+    await show(draftT({ acceptance_criteria: "- [x] a\n- [ ] b" }));
+    ctx.TicketBoard.openView("a");
+    const html = els["ticket-view-content"].innerHTML as string;
+    expect(html).toContain('role="tablist"');
+    expect(html).toContain('id="ticket-tab-write" aria-controls="ticket-pane-write" aria-selected="true" tabindex="0"');
+    expect(html).toContain('id="ticket-tab-preview" aria-controls="ticket-pane-preview" aria-selected="false" tabindex="-1"');
+    expect(html.indexOf('data-edit-md="bold"')).toBeGreaterThan(html.indexOf('id="ticket-pane-write"'));   // the toolbar and the field are in Write
+    expect(html.indexOf('id="ticket-edit-criteria"')).toBeLessThan(html.indexOf('id="ticket-pane-preview"'));
+    expect(html).toMatch(/id="ticket-pane-preview"[^>]* hidden>.*md-checklist/s);                        // Preview holds mdHtml() of the text
+    expect(html).toContain("1 of 2 checked");
+  });
+
+
+  test("2: queued, claimed, in progress and in review open in read mode with an Edit button; Edit unlocks the fields; done and cancelled have none", async () => {
+    await show(mk("a", "queued"), mk("c", "in_progress"), mk("r", "in_review"), mk("d", "done"), mk("x", "cancelled"));
+    for (const id of ["a", "c", "r"]) {
+      ctx.TicketBoard.openView(id);
+      expect([id, els["ticket-view-edit"].hidden]).toEqual([id, false]);
+      expect([id, (els["ticket-view-content"].innerHTML as string).includes("ticket-edit-")]).toEqual([id, false]);   // read mode: no fields
+      expect([id, els["ticket-view-save"].hidden]).toEqual([id, true]);
+      els["ticket-view"].close();
+    }
+    ctx.TicketBoard.openView("r");
+    els["ticket-view-edit"].handlers.click();
+    expect(els["ticket-view-edit"].hidden).toBe(true);                                   // in edit mode the button is gone
+    expect(els["ticket-view-head-meta"].innerHTML).toContain('<span class="ticket-pill pill-editing">Editing</span>');
+    const html = els["ticket-view-content"].innerHTML as string, panel = els["ticket-view-actions"].innerHTML as string;
+    for (const id of ["criteria", "blockers"]) expect(html).toContain(`id="ticket-edit-${id}"`);
+    for (const id of ["assignee", "priority", "radius", "request", "ref"]) expect(panel).toContain(`id="ticket-edit-${id}"`);
+    expect(els["ticket-view-title"].innerHTML).toContain('id="ticket-edit-title"');
+    expect(els["ticket-view-save"].hidden).toBe(false);
+    els["ticket-view"].close();
+    for (const id of ["d", "x"]) {
+      ctx.TicketBoard.openView(id);
+      expect([id, els["ticket-view-edit"].hidden]).toEqual([id, true]);                  // finished: the hub refuses edits
+      expect([id, els["ticket-view-save"].hidden]).toEqual([id, true]);
+      els["ticket-view"].close();
+    }
+  });
+
+  test("5: Save changes is disabled until a field differs; it sends only the changed fields, then assign when the assignee changed", async () => {
+    await show(draftT());
+    const m = mount(draftVals);
+    posts = [];
+    ctx.TicketBoard.openView("a");
+    expect(els["ticket-view-save"].hidden).toBe(false);
+    expect(els["ticket-view-save"].disabled).toBe(true);
+    m.type("title", "new title");
+    expect(els["ticket-view-save"].disabled).toBe(false);
+    m.type("title", "title-a");
+    expect(els["ticket-view-save"].disabled).toBe(true);                       // back to the ticket's value
+    m.type("title", "new title"); m.type("priority", "highest"); m.type("ref", " AUD-1 "); m.type("assignee", "alice");
+    await m.submit();
+    expect(posts).toEqual([
+      { path: "/tickets/a/edit", body: { by: "human", title: "new title", priority: "highest", external_ref: "AUD-1" } },
+      { path: "/tickets/a/assign", body: { by: "human", assignee: "alice" } },
+    ]);
+    unmount();
+  });
+
+  test("5: with nothing changed, Save sends nothing", async () => {
+    await show(draftT());
+    const m = mount(draftVals);
+    posts = [];
+    ctx.TicketBoard.openView("a");
+    await m.submit();
+    expect(posts).toEqual([]);
+    unmount();
+  });
+
+  test("8: a refused edit shows the hub error above the action row and the fields keep the typed values", async () => {
+    await show(draftT());
+    const m = mount(draftVals);
+    ctx.TicketBoard.openView("a");
+    m.type("title", "typed");
+    failPath = "/tickets/a/edit";
+    await m.submit();
+    expect(els["ticket-view-notice"].innerHTML).toContain("Not saved: upload refused");   // the harness's parseErrorBody text
+    expect(m.f.title.value).toBe("typed");
+    expect(els["ticket-view-title"].innerHTML).toContain('id="ticket-edit-title" class="ticket-title-input" aria-label="Title" value="title-a"');
+    ctx.TicketBoard.openView("a");                                                          // a redraw restores what was typed
+    expect(els["ticket-view-title"].innerHTML).toContain('value="typed"');
+    expect(els["ticket-view-save"].disabled).toBe(false);
+    m.type("title", "typed again");                                                         // typing clears the error
+    expect(els["ticket-view-notice"].innerHTML).toBe("");
+    failPath = null;
+    unmount();
+  });
+
+  // ---- 6.8: a refused Save shows its message where the human looks ----
+  test("6.8 a refused Blocked by shows a red field error under it, aria-invalid, role alert; typed values stay", async () => {
+    await show(mk("a", "queued"));
+    const m = mount({ request: "", blockers: "" });
+    els["ticket-edit-blockers"] = m.f.blockers;                             // the field exists in the page, so the error can focus it
+    ctx.TicketBoard.openView("a");
+    els["ticket-view-edit"].handlers.click();                                   // a queued ticket opens in read mode: Edit unlocks the fields
+    m.type("blockers", "Blocker");
+    refuseText = "invalid blocker id: Blocker";
+    failPath = "/tickets/a/edit";
+    await m.submit();
+    const html = els["ticket-view-content"].innerHTML as string;
+    expect(html).toContain('aria-invalid="true" aria-describedby="ticket-edit-blockers-error"');                         // on the blockers group
+    expect(html).toContain('<div class="ticket-field-error" id="ticket-edit-blockers-error" role="alert">Not saved: invalid blocker id: Blocker</div>');
+    expect(html.indexOf("ticket-edit-blockers-error")).toBeGreaterThan(html.indexOf('id="ticket-edit-blockers"'));   // under the list
+    expect(els["ticket-view-notice"].innerHTML).toBe("");                   // not also above the action row
+    expect(els["ticket-view-save"].disabled).toBe(false);                   // the typed value stays and can be fixed
+    delete els["ticket-edit-blockers"]; failPath = null; unmount();
+  });
+
+  test("6.8 editing the refused field clears the red border and the message; editing another field does not", async () => {
+    await show(mk("a", "queued"));
+    const m = mount({ request: "", blockers: "" });
+    const attrs: Record<string, Set<string>> = { blockers: new Set(["aria-invalid", "aria-describedby"]) };
+    m.f.blockers.removeAttribute = (a: string) => attrs.blockers.delete(a);
+    let errorEl = true;
+    const base = els["ticket-view-content"].querySelector;
+    els["ticket-view-content"].querySelector = (sel: string) => (sel === "#ticket-edit-blockers-error" ? (errorEl ? { remove: () => { errorEl = false; } } : null) : base(sel));
+    els["ticket-edit-blockers"] = m.f.blockers;
+    ctx.TicketBoard.openView("a");
+    els["ticket-view-edit"].handlers.click();                                   // a queued ticket opens in read mode: Edit unlocks the fields
+    m.type("blockers", "Blocker");
+    refuseText = "invalid blocker id: Blocker";
+    failPath = "/tickets/a/edit";
+    await m.submit();
+    m.type("request", "r-1");                                              // another field: the error stays
+    expect(errorEl).toBe(true);
+    expect(attrs.blockers.has("aria-invalid")).toBe(true);
+    m.type("blockers", "t_0123456789abcdef");                              // the refused field: it goes
+    expect(errorEl).toBe(false);
+    expect(attrs.blockers.size).toBe(0);
+    ctx.TicketBoard.openView("a");                                         // and a redraw shows none
+    expect(els["ticket-view-content"].innerHTML).not.toContain("ticket-field-error");
+    delete els["ticket-edit-blockers"]; failPath = null; unmount();
+  });
+
+  test("6.8 a refused Request shows its error under Request; any other refusal shows above the action row, in --text with a red bar", async () => {
+    await show(mk("a", "queued"));
+    const m = mount({ request: "", blockers: "" });
+    els["ticket-edit-request"] = m.f.request;
+    ctx.TicketBoard.openView("a");
+    els["ticket-view-edit"].handlers.click();                                   // a queued ticket opens in read mode: Edit unlocks the fields
+    m.type("request", "bad label");
+    refuseText = "invalid request_id";
+    failPath = "/tickets/a/edit";
+    await m.submit();
+    expect(els["ticket-view-actions"].innerHTML).toContain('id="ticket-edit-request-error" role="alert">Not saved: invalid request_id</div>');   // under the Request input, in the panel
+    delete els["ticket-edit-request"];
+    m.type("request", "r-2");
+    refuseText = "ticket already cancelled";                                // no field fits
+    await m.submit();
+    expect(els["ticket-view-notice"].innerHTML).toContain('class="ticket-view-notice-text ticket-view-notice-error">Not saved: ticket already cancelled');
+    ctx.TicketBoard.openView("a");                                         // a redraw: no field error is drawn for it
+    expect(els["ticket-view-content"].innerHTML).not.toContain("ticket-field-error");
+    m.type("request", "r-3");                                              // any edit clears a message with no field
+    expect(els["ticket-view-notice"].innerHTML).toBe("");
+    failPath = null; unmount();
+  });
+
+  test("6.8 the error line and the action row sit in one sticky footer with the dialog background", () => {
+    const html = readFileSync("ui/index.html", "utf8");
+    const foot = html.slice(html.indexOf('id="ticket-view-foot"'), html.indexOf("</dialog>", html.indexOf('id="ticket-view-foot"')));
+    for (const id of ['id="ticket-view-notice"', 'id="ticket-view-bottom"', 'id="ticket-view-close"', 'id="ticket-view-save"']) expect(foot).toContain(id);
+    expect(html).toContain('<div class="ticket-view-foot" id="ticket-view-foot">');
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toContain(".ticket-view-foot { position: sticky; bottom: 0; background: var(--bg-raised);");
+    expect(css).toMatch(/\.ticket-dialog \.modal \{[^}]*overflow: auto/);                // the dialog is the scroll container the footer sticks in
+  });
+
+  test("6.8 a refused assignee change shows its error under the Assignee select; every key setViewError gets has a field that renders it", async () => {
+    await show(draftT({ assignee: "alice" }));
+    const m = mount({ ...draftVals, assignee: "alice" });
+    els["ticket-edit-assignee"] = m.f.assignee;
+    ctx.TicketBoard.openView("a");
+    m.type("assignee", "bob");
+    refuseText = "ticket already claimed";
+    failPath = "/tickets/a/assign";
+    await m.submit();
+    const html = els["ticket-view-actions"].innerHTML as string;                       // the Assignee select is in the panel
+    expect(html).toContain('<select id="ticket-edit-assignee" aria-invalid="true" aria-describedby="ticket-edit-assignee-error">');
+    expect(html).toContain('id="ticket-edit-assignee-error" role="alert">Not saved: ticket already claimed</div>');
+    expect(els["ticket-view-notice"].innerHTML).toBe("");                   // shown once, under the field
+    m.type("assignee", "alice");                                            // editing the field clears it
+    ctx.TicketBoard.openView("a");                                          // (the fake DOM keeps the old string until a redraw)
+    expect(els["ticket-view-actions"].innerHTML).not.toContain("assignee-error");
+    // Every field key a refusal can name renders its error and attributes on a draft.
+    for (const [key, text] of [["title", "invalid title"], ["criteria", "invalid acceptance_criteria"], ["radius", "invalid blast_radius"], ["priority", "invalid priority"],
+      ["ref", "invalid external_ref"], ["request", "invalid request_id"], ["blockers", "invalid blocker id: x"], ["assignee", "cannot assign"]] as const) {
+      refuseText = text;
+      els[`ticket-edit-${key}`] = m.f[key];
+      m.type(key, key === "assignee" ? "bob" : "x");
+      failPath = key === "assignee" ? "/tickets/a/assign" : "/tickets/a/edit";
+      await m.submit();
+      const where = key === "title" ? "ticket-view-title" : ["criteria", "blockers"].includes(key) ? "ticket-view-content" : "ticket-view-actions";   // header, content or panel
+      const h = els[where].innerHTML as string;
+      expect([key, h.includes(`id="ticket-edit-${key}-error" role="alert"`)]).toEqual([key, true]);
+      expect([key, h.includes(`id="ticket-edit-${key}" `) && /aria-invalid="true"/.test(h)]).toEqual([key, true]);
+      delete els[`ticket-edit-${key}`];
+      ctx.TicketBoard.openView("a");
+      m.type(key, key === "assignee" ? "alice" : key === "title" ? "title-a" : key === "criteria" ? "crit" : key === "radius" ? "low" : key === "priority" ? "medium" : "");
+    }
+    delete els["ticket-edit-assignee"]; failPath = null; unmount();
+  });
+
+  test("6.8 the error text is --text with the red as a border (no red token reaches 4.5:1 on all three themes)", () => {
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toContain(".ticket-field-error, .ticket-view-notice-error { color: var(--text);");
+    // The invalid border must win over ".modal input:focus" and ":hover" (specificity 0,2,1), also while the refused field has focus.
+    expect(css).toContain('#ticket-view .ticket-request-form [aria-invalid="true"], #ticket-view .ticket-request-form [aria-invalid="true"]:focus, #ticket-view .ticket-request-form [aria-invalid="true"]:hover { border-color: var(--red);');
+    expect(css).toMatch(/\.ticket-field-error \{[^}]*border-left: 3px solid var\(--red\); padding-left/);   // the field message has the same red bar as the generic notice
+    expect(css).toContain(".ticket-view-notice-error { display: inline-block; border-left: 3px solid var(--red);");
+  });
+
+  test("6: Cancel ticket needs a second click: the first arms it for 5 seconds", async () => {
+    await show(draftT());
+    const row = els["ticket-view-row-actions"];
+    const btn: any = { dataset: { ticket: "a", cancel: "1" }, handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { btn.handlers[t] = fn; } };
+    row.querySelectorAll = (sel: string) => (sel === ".ticket-cancel-btn" ? [btn] : []);
+    let fire: any = null;
+    ctx.setTimeout = (fn: any, ms: number) => { expect(ms).toBe(5000); fire = fn; return 1; };
+    posts = [];
+    ctx.TicketBoard.openView("a");
+    expect(row.innerHTML).toContain(">Cancel ticket</button>");
+    btn.handlers.click();
+    expect(row.innerHTML).toContain(">Confirm cancel</button>");
+    expect(posts).toEqual([]);                                                              // nothing cancelled yet
+    fire();                                                                                 // 5 seconds pass
+    expect(row.innerHTML).toContain(">Cancel ticket</button>");
+    btn.handlers.click();
+    btn.handlers.click();                                                                   // second click within 5 seconds
+    expect(posts).toEqual([{ path: "/tickets/a/transition", body: { by: "human", to: "cancelled" } }]);
+    ctx.setTimeout = setTimeout;
+    row.querySelectorAll = function (this: any, sel: string) { this.queried.push(sel); return []; };
+  });
+
+  test("7: Close, the backdrop and Escape ask first when there are changes; Keep editing stays, Discard closes", async () => {
+    await show(draftT());
+    const m = mount(draftVals);
+    ctx.TicketBoard.openView("a");
+    els["ticket-view-close"].handlers.click();                                              // no changes: closes
+    expect(els["ticket-view"].open).toBe(false);
+    ctx.TicketBoard.openView("a");
+    m.type("title", "changed");
+    els["ticket-view-close"].handlers.click();
+    expect(els["ticket-view"].open).toBe(true);
+    expect(els["ticket-view-notice"].innerHTML).toContain("Unsaved changes");
+    expect(els["ticket-view-notice"].innerHTML).toContain(">Discard</button>");
+    expect(els["ticket-view-notice"].innerHTML).toContain(">Keep editing</button>");
+    els["ticket-view-notice"].querySelector("#ticket-view-keep").handlers.click();
+    expect(els["ticket-view-notice"].innerHTML).toBe("");
+    expect(els["ticket-view"].open).toBe(true);
+    let prevented = 0;
+    els["ticket-view"].handlers.cancel({ preventDefault() { prevented++; } });              // Escape
+    expect(prevented).toBe(1);
+    expect(els["ticket-view-notice"].innerHTML).toContain("Unsaved changes");
+    els["ticket-view"].handlers.click({ target: els["ticket-view"] });                      // the backdrop
+    expect(els["ticket-view"].open).toBe(true);
+    els["ticket-view-notice"].querySelector("#ticket-view-discard").handlers.click();
+    expect(els["ticket-view"].open).toBe(false);
+    unmount();
+  });
+
+  test("5: saving Unassigned on a draft goes through the assign route with a null assignee", async () => {
+    await show(draftT({ assignee: "alice" }));
+    const m = mount({ ...draftVals, assignee: "alice" });
+    posts = [];
+    ctx.TicketBoard.openView("a");
+    m.type("assignee", "");
+    expect(els["ticket-view-save"].disabled).toBe(false);
+    await m.submit();
+    expect(posts).toEqual([{ path: "/tickets/a/assign", body: { by: "human", assignee: null } }]);
+    unmount();
+  });
+
+  test("contrast: the new dialog labels and buttons use --text, not --text-dim or --text-muted", () => {
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toContain("#ticket-view .ticket-view-attach button, #ticket-view .ticket-view-bottom button, #ticket-view #ticket-view-notice button { color: var(--text); }");
+    expect(css).toContain('#ticket-new-form label[for="ticket-f-request"], #ticket-new-form label[for="ticket-f-blockers"] { color: var(--text); }');
+  });
+
+  // ---- 15.6: read mode, edit mode, the Edit button ----
+  const editVals = { title: "title-r", criteria: "crit", radius: "low", priority: "medium", assignee: "alice", ref: "", request: "", blockers: "" };
+  const inReview = (extra: object = {}) => mk("r", "in_review", { assignee: "alice", acceptance_criteria: "crit", ...extra });
+  const startEdit = (id = "r") => { ctx.TicketBoard.openView(id); els["ticket-view-edit"].handlers.click(); };
+
+  test("15.6 the human edits the title and priority of an in-review ticket; one edit with only those fields; edit mode ends and the card shows the new values", async () => {
+    await show(inReview());
+    const m = mount(editVals);
+    posts = [];
+    startEdit();
+    m.type("title", "new title"); m.type("priority", "highest");
+    await m.submit();
+    expect(posts).toEqual([{ path: "/tickets/r/edit", body: { by: "human", title: "new title", priority: "highest" } }]);
+    expect(els["ticket-view-edit"].hidden).toBe(false);                                  // back in read mode
+    expect(els["ticket-view-save"].hidden).toBe(true);
+    ev(inReview({ title: "new title", priority: "highest" }), 9);                        // the hub's event
+    expect(card("r")).toContain('<div class="ticket-title">new title</div>');
+    expect(card("r")).toContain("Highest");
+    unmount();
+  });
+
+  test("15.6 edit mode: Editing pill; N unsaved changes next to Save; Discard changes at the left leaves edit mode and drops what was typed", async () => {
+    await show(inReview());
+    const m = mount(editVals);
+    startEdit();
+    expect(els["ticket-view-actions"].innerHTML).toContain("Move the ticket after you save.");
+    expect(els["ticket-view-row-actions"].innerHTML).toContain('id="ticket-discard-btn">Discard changes</button>');
+    expect(els["ticket-view-row-actions"].innerHTML).not.toContain("Cancel ticket");     // Discard replaces Cancel ticket in edit mode
+    expect(els["ticket-view-dirty"].hidden).toBe(true);
+    m.type("title", "x");
+    expect(els["ticket-view-dirty"].textContent).toBe("1 unsaved change");
+    m.type("priority", "high");
+    expect(els["ticket-view-dirty"].textContent).toBe("2 unsaved changes");
+    const discard: any = { handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { discard.handlers[t] = fn; } };
+    els["ticket-view-row-actions"].querySelector = (sel: string) => (sel === "#ticket-discard-btn" ? discard : null);
+    ctx.TicketBoard.openView("r");                                                       // a redraw wires the button
+    discard.handlers.click();
+    expect(els["ticket-view-edit"].hidden).toBe(false);                                  // read mode again
+    expect(els["ticket-view-content"].innerHTML).not.toContain("ticket-edit-");
+    expect(els["ticket-view-dirty"].hidden).toBe(true);
+    els["ticket-view-edit"].handlers.click();                                            // edit again: the typed values are gone
+    expect(els["ticket-view-title"].innerHTML).toContain('value="title-r"');
+    unmount();
+  });
+
+  test("15.6 Close in edit mode with changes asks first; Save is the only primary button in edit mode", async () => {
+    await show(inReview());
+    const m = mount(editVals);
+    startEdit();
+    els["ticket-view-close"].handlers.click();
+    expect(els["ticket-view"].open).toBe(false);                                         // no changes: closes
+    startEdit();
+    m.type("title", "changed");
+    els["ticket-view-close"].handlers.click();
+    expect(els["ticket-view"].open).toBe(true);
+    expect(els["ticket-view-notice"].innerHTML).toContain("Unsaved changes");
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toContain(".ticket-view-bottom #ticket-view-save:not([hidden]), .ticket-view-bottom:has(#ticket-view-save[hidden]) #ticket-view-close {");   // Close is primary only when Save is hidden
+    unmount();
+  });
+
+  test("15.6 with a pending approval, edit mode shows the warning; without one it does not", async () => {
+    await show(inReview({ blast_radius: "high", approval_request_id: "req1", approval: { id: "req1", status: "pending", version: 1 } }), mk("n", "in_review", { assignee: "alice" }));
+    startEdit("r");
+    expect(els["ticket-view-content"].innerHTML).toContain("This ticket waits for your approval. If you save new acceptance criteria or set the blast radius to low, alice&#39;s approval request is cancelled.".replace("&#39;", "'"));
+    els["ticket-view"].close();
+    ctx.TicketBoard.openView("r");
+    expect(els["ticket-view-content"].innerHTML).not.toContain("waits for your approval. If you save");   // read mode: no warning
+    els["ticket-view"].close();
+    startEdit("n");
+    expect(els["ticket-view-content"].innerHTML).not.toContain("ticket-edit-warning");
+  });
+
+  test("15.6 saving new criteria on a ticket with a pending approval: the hub clears the pointer, and the card light is no longer red", async () => {
+    await show(inReview({ blast_radius: "high", approval_request_id: "req1", approval: { id: "req1", status: "pending", version: 1 }, version: 1 }));
+    expect(card("r")).toContain("Waiting for your approval");
+    expect(card("r")).toContain("light-red");
+    const m = mount({ ...editVals, radius: "high" });
+    posts = [];
+    startEdit();
+    m.type("criteria", "new criteria");
+    await m.submit();
+    expect(posts[0].body).toEqual({ by: "human", acceptance_criteria: "new criteria" });
+    ev(inReview({ blast_radius: "high", approval_request_id: null, acceptance_criteria: "new criteria" }), 9);   // the hub's event: pointer cleared
+    expect(card("r")).not.toContain("Waiting for your approval");
+    expect(card("r")).not.toContain("light-red");
+    unmount();
+  });
+
+  test("15.6 the blast radius is a Low and High radio pair; the checked radio is what Save sends", async () => {
+    await show(inReview());
+    const m = mount({ ...editVals, radius: "ignored" });
+    m.f.radius.value = undefined;
+    m.f.radius.querySelector = (sel: string) => (sel === "input:checked" ? { value: "high" } : null);   // the group element, as in the page
+    posts = [];
+    startEdit();
+    m.type("radius", "x");                                                               // fires the change handler
+    await m.submit();
+    expect(posts[0].body).toEqual({ by: "human", blast_radius: "high" });
+    unmount();
+  });
+
+  test("15.6 typed values survive a redraw in edit mode, and a refused edit shows under its field", async () => {
+    await show(inReview());
+    const m = mount(editVals);
+    startEdit();
+    m.type("title", "typed");
+    ev(inReview({ version: 7 }), 7);                                                     // a ticket event redraws the dialog
+    expect(els["ticket-view-title"].innerHTML).toContain('value="typed"');
+    expect(els["ticket-view-edit"].hidden).toBe(true);                                   // still in edit mode
+    failPath = "/tickets/r/edit"; refuseText = "invalid title";
+    els["ticket-edit-title"] = m.f.title;                                                // the field exists in the page, so the error can focus it
+    await m.submit();
+    expect(els["ticket-view-title"].innerHTML).toContain('id="ticket-edit-title-error" role="alert">Not saved: invalid title</div>');
+    delete els["ticket-edit-title"]; failPath = null;
+    unmount();
+  });
+
+  test("15.6 the editor stays closed for a ticket that becomes done while the dialog is open", async () => {
+    await show(inReview());
+    startEdit();
+    expect(els["ticket-view-save"].hidden).toBe(false);
+    ev(mk("r", "done"), 9);
+    expect(els["ticket-view-save"].hidden).toBe(true);
+    expect(els["ticket-view-edit"].hidden).toBe(true);
+  });
+
+  test("15.6 order of the content: criteria, Blocked by, attachments, then notes; headings carry their count in --text-meta; labels are sentence case", async () => {
+    await show(mk("a", "in_review", { blocked_by: ["b"], open_blockers: ["b"], acceptance_criteria: "- [x] one\n- [ ] two", attachments_count: 1, notes_count: 2 }), mk("b", "queued"));
+    ctx.TicketBoard.openView("a");
+    const html = (els["ticket-view-content"].innerHTML as string) + (els["ticket-view-notes"].innerHTML as string);
+    const order = ["Acceptance criteria", "Blocked by", "Attachments", "Notes"].map((x) => html.indexOf(x));
+    expect(order.every((n, i) => n >= 0 && (i === 0 || n > order[i - 1]))).toBe(true);
+    expect(html).toContain('Acceptance criteria <span class="ticket-view-count">1 of 2 checked</span>');
+    expect(html).toContain('Blocked by <span class="ticket-view-count">1 open</span>');
+    expect(html).toContain('Notes <span class="ticket-view-count">2</span>');
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toContain(".ticket-view-count { font-family: var(--sans); font-weight: 400; font-size: var(--fs-sm); color: var(--text-meta); }");
+    expect(css).toMatch(/#ticket-view label, #ticket-view \.ticket-field-label, #ticket-view \.ticket-view-panel dt \{[^}]*text-transform: none;/);
+    const page = readFileSync("ui/index.html", "utf8");
+    expect(page.indexOf('id="ticket-view-attach-btn"')).toBeLessThan(page.indexOf('id="ticket-view-notes"'));   // the Attach button is under the attachments, above the notes
+  });
+
+  // ---- 15.8: blocker rows and the picker ----
+  const bt = (id: string, status: string, title: string, extra: object = {}) => mk(id, status, { title, ...extra });
+  const content = () => els["ticket-view-content"].innerHTML as string;
+  const chain = () => [
+    mk("a", "queued", { title: "[code] 9.1 Main ticket", blocked_by: ["d", "x"], open_blockers: ["x"] }),
+    bt("d", "done", "[code] 8.2 Done blocker"),
+    bt("o", "in_review", "[code] 8.3a Open one"),
+    bt("c", "queued", "[code] 8.4 Candidate"),
+    bt("l", "queued", "[code] 8.5 Waits on a", { blocked_by: ["a"], open_blockers: ["a"] }),   // would close a loop
+    bt("g", "queued", "[code] 8.6 Waits on l", { blocked_by: ["l"], open_blockers: ["l"] }),   // a loop through l
+  ];
+
+  test("15.8 each blocker is a row: status icon, code, title with ellipsis, status pill; no strikethrough; unknown ones from open_blockers", async () => {
+    await show(...chain());
+    ctx.TicketBoard.openView("a");
+    const rows = content().match(/<li class="ticket-blocker-row[^>]*>.*?<\/li>/gs) ?? [];
+    expect(rows.length).toBe(2);
+    expect(rows[0]).toContain("blocker-done");
+    expect(rows[0]).toContain('<span class="ticket-code">8.2</span><span class="ticket-blocker-title" title="Done blocker">Done blocker</span>');
+    expect(rows[0]).toContain('is-done">Done</span>');
+    expect(rows[1]).toContain("blocker-open");
+    expect(rows[1]).toContain('title="x">x</span><span class="ticket-pill ticket-blocker-state is-open">Open</span>');
+    expect(content()).not.toContain("ticket-blocker-remove");                           // read mode: no remove button
+    expect(content()).not.toContain("ticket-blocker-add");
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).not.toContain("text-decoration: line-through");
+    expect(css).toMatch(/\.ticket-blocker-title \{[^}]*text-overflow: ellipsis;/);
+  });
+
+  test("15.8 edit mode: each row has a Remove button named by the code or title; Remove drops it from the list that Save sends", async () => {
+    await show(...chain());
+    const m = mount({ request: "", blockers: "" });
+    posts = [];
+    startEdit("a");
+    expect(content()).toContain('aria-label="Remove blocker 8.2"');
+    expect(content()).toContain('aria-label="Remove blocker x"');                       // no code: the title (here the id)
+    const rm: any = { dataset: { id: "d" }, handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { rm.handlers[t] = fn; } };
+    els["ticket-view-content"].querySelectorAll = (sel: string) => (sel === ".ticket-blocker-remove" ? [rm] : []);
+    els["ticket-view-content"].querySelector = (sel: string) => (sel === "#ticket-request-form" ? { addEventListener() {} } : null);
+    ctx.TicketBoard.openView("a");                                                      // a redraw wires the button
+    rm.handlers.click();
+    expect(content()).not.toContain('aria-label="Remove blocker 8.2"');
+    expect(els["ticket-view-save"].disabled).toBe(false);                               // the list differs from the ticket's
+    expect(content()).toContain('data-ids="x"');
+    delete els["ticket-view-content"].querySelectorAll; unmount();
+  });
+
+  test("15.8 the picker lists the room's tickets without the ticket, its blockers and loop makers; open first; text matches code and title", async () => {
+    await show(...chain(), bt("z", "done", "[code] 1.0 Old and done"));
+    startEdit("a");
+    els["ticket-view-content"].querySelector = () => null;
+    const add: any = { handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { add.handlers[t] = fn; } };
+    els["ticket-view-content"].querySelector = (sel: string) => (sel === "#ticket-blocker-add" ? add : null);
+    ctx.TicketBoard.openView("a");
+    add.handlers.click();                                                               // opens the search
+    const html = content();
+    expect(html).toContain('role="combobox" aria-expanded="true" aria-controls="ticket-blocker-listbox" aria-autocomplete="list"');
+    expect(html).toContain('aria-activedescendant="ticket-blocker-opt-0"');
+    expect(html).toContain('<ul id="ticket-blocker-listbox" role="listbox"');
+    const opts = [...html.matchAll(/<li role="option" id="ticket-blocker-opt-(\d+)"[^>]*data-id="(\w+)"/g)].map((m) => m[2]);
+    expect(opts).toEqual(["o", "c", "z"]);                  // not a (itself), d (a blocker), l (waits on a) or g (waits on l); open ones first, a done one last
+    expect(opts).not.toContain("l");
+    expect(html).toContain("tickets that would make a loop are left out");
+    delete els["ticket-view-content"].querySelector; unmount();
+  });
+
+  test("15.8 keyboard only: Up and Down move, Enter adds the highlighted ticket, Escape closes; Enter does not submit the form", async () => {
+    await show(...chain());
+    startEdit("a");
+    const add: any = { handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { add.handlers[t] = fn; } };
+    const search: any = { value: "", handlers: {} as Record<string, any>, setAttribute() {}, addEventListener(t: string, fn: any) { search.handlers[t] = fn; } };
+    const pick = (sel: string) => (sel === "#ticket-blocker-add" ? add : sel === "#ticket-edit-blockers-search" ? search : null);
+    els["ticket-view-content"].querySelector = pick;
+    ctx.TicketBoard.openView("a");
+    add.handlers.click();
+    ctx.TicketBoard.openView("a");                                                      // the redraw wires the search
+    const key = (k: string) => { const e: any = { key: k, prevented: false, stopped: false, preventDefault() { this.prevented = true; }, stopPropagation() { this.stopped = true; } }; search.handlers.keydown(e); return e; };
+    const active = () => /ticket-blocker-opt-(\d+)"[^>]*aria-selected="true"/.exec(content())?.[1];
+    expect(key("ArrowDown").prevented).toBe(true);
+    expect(search.handlers.input).toBeDefined();
+    const opts = () => [...content().matchAll(/class="ticket-blocker-opt( active)?" data-id="(\w+)"/g)];
+    key("ArrowUp");                                                                      // wraps to the last option
+    posts = [];
+    const enter = key("Enter");
+    expect(enter.prevented).toBe(true);                                                  // does not submit
+    expect(enter.stopped).toBe(true);
+    expect(posts).toEqual([]);
+    expect(content()).toMatch(/data-ids="d,x,(o|c)"/);                                   // added: a new id at the end
+    expect(els["ticket-view-save"].disabled).toBe(false);
+    void active; void opts;
+    // Escape closes the picker.
+    add.handlers.click();
+    ctx.TicketBoard.openView("a");
+    const esc = key("Escape");
+    expect(esc.prevented).toBe(true);
+    expect(content()).not.toContain('role="combobox"');
+    delete els["ticket-view-content"].querySelector; unmount();
+  });
+
+  test("15.8 typing in the search filters by code and title", async () => {
+    await show(...chain());
+    startEdit("a");
+    const add: any = { handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { add.handlers[t] = fn; } };
+    const listbox: any = { innerHTML: "", querySelectorAll: () => [] };
+    const search: any = { value: "", handlers: {} as Record<string, any>, setAttribute() {}, addEventListener(t: string, fn: any) { search.handlers[t] = fn; } };
+    els["ticket-view-content"].querySelector = (sel: string) => (sel === "#ticket-blocker-add" ? add : sel === "#ticket-edit-blockers-search" ? search : sel === "#ticket-blocker-listbox" ? listbox : null);
+    ctx.TicketBoard.openView("a");
+    add.handlers.click();
+    ctx.TicketBoard.openView("a");
+    search.value = "8.3"; search.handlers.input();
+    expect([...listbox.innerHTML.matchAll(/data-id="(\w+)"/g)].map((m: any) => m[1])).toEqual(["o"]);
+    search.value = "candid"; search.handlers.input();
+    expect([...listbox.innerHTML.matchAll(/data-id="(\w+)"/g)].map((m: any) => m[1])).toEqual(["c"]);
+    search.value = "zzz"; search.handlers.input();
+    expect(listbox.innerHTML).toContain("No ticket matches");
+    delete els["ticket-view-content"].querySelector; unmount();
+  });
+
+  test("15.8 Save sends the ids; a loop the hub refuses shows its message under the list", async () => {
+    await show(...chain());
+    const m = mount({ request: "", blockers: "" });
+    m.f.blockers.dataset = { ids: "d,x,c" };                                             // the group, as in the page
+    els["ticket-edit-blockers"] = m.f.blockers;
+    posts = [];
+    startEdit("a");
+    m.type("blockers", "");
+    refuseText = "blocker would create a cycle: c";
+    failPath = "/tickets/a/edit";
+    await m.submit();
+    expect(posts[0].body).toEqual({ by: "human", blocked_by: ["d", "x", "c"] });
+    expect(content()).toContain('id="ticket-edit-blockers-error" role="alert">Not saved: blocker would create a cycle: c</div>');
+    expect(content().indexOf('id="ticket-edit-blockers-error"')).toBeGreaterThan(content().indexOf('id="ticket-blocker-add"'));   // under the list
+    delete els["ticket-edit-blockers"]; failPath = null; unmount();
+  });
+
+  // ---- 15.10: files and notes ----
+  test("15.10 a file row: a 44 px thumbnail or the extension, the name link, author and date, and 30 px icon buttons with aria-labels", async () => {
+    attachmentsOnHub.a = [{ id: 1, author: "alice", name: "doc.pdf", url: "/image/d1.pdf", created_at_ms: 1791960000001 }];
+    await show(mk("a", "in_progress", { attachments_count: 1 }));
+    ctx.TicketBoard.openView("a"); await settle();
+    const html = content();
+    expect(html).toContain('<span class="ticket-attach-ext">PDF</span>');
+    expect(html).toContain('class="ticket-attach-name"');
+    expect(html).toContain('class="ticket-file-replace" data-ticket="a" data-attachment="1" aria-label="Replace doc.pdf"><svg');
+    expect(html).toContain('class="ticket-file-remove" data-ticket="a" data-attachment="1" aria-label="Remove doc.pdf"><svg');
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toContain(".ticket-attach-thumb { width: 44px; height: 44px; }");
+    expect(css).toMatch(/\.ticket-attach-actions button \{ width: 30px; height: 30px;/);
+  });
+
+  test("15.10 Remove keeps arm-then-confirm: the armed button shows Confirm remove next to the icon", async () => {
+    attachmentsOnHub.a = [{ id: 1, author: "alice", name: "doc.pdf", url: "/image/d1.pdf", created_at_ms: 1791960000001 }];
+    await show(mk("a", "in_progress", { attachments_count: 1 }));
+    const btn: any = { dataset: { ticket: "a", attachment: "1" }, handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { btn.handlers[t] = fn; } };
+    els["ticket-view-content"].querySelectorAll = (sel: string) => (sel === ".ticket-file-remove" ? [btn] : []);
+    ctx.setTimeout = () => 1;
+    ctx.TicketBoard.openView("a"); await settle();
+    btn.handlers.click();
+    expect(content()).toMatch(/class="ticket-file-remove armed"[^>]*aria-label="Confirm remove doc.pdf"><svg.*<span>Confirm remove<\/span>/s);
+    ctx.setTimeout = setTimeout; delete els["ticket-view-content"].querySelectorAll;
+  });
+
+  test("15.10 the drop area says what it takes; browse opens the file picker; a file dropped on it is attached", async () => {
+    const html = readFileSync("ui/index.html", "utf8");
+    expect(html).toContain('Drop files here or <button type="button" class="ticket-browse" id="ticket-view-attach-btn">browse</button> &middot; pdf, md, txt, png, jpg &middot; up to 8 MB');
+    expect(readFileSync("ui/styles/kinds.css", "utf8")).toContain(".ticket-view-attach { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--sp-8); margin-top: var(--sp-8); padding: var(--sp-14, 14px) var(--sp-10, 10px); border: 1px dashed var(--line-hover);");
+    await show(mk("a", "in_progress"));
+    ctx.TicketBoard.openView("a");
+    posts = []; uploads.length = 0;
+    const over: any = { prevented: false, preventDefault() { this.prevented = true; } };
+    els["ticket-view-drop"].handlers.dragover(over);
+    expect(over.prevented).toBe(true);                                                     // the drop is allowed
+    expect(els["ticket-view-drop"].cls.has("over")).toBe(true);
+    await els["ticket-view-drop"].handlers.drop({ preventDefault() {}, dataTransfer: { files: [{ name: "dropped.pdf", size: 100 }] } });
+    expect(uploads).toEqual(["dropped.pdf"]);
+    expect(posts.map((p) => p.path)).toEqual(["/tickets/a/attachments"]);
+    expect(els["ticket-view-attach-status"].textContent).toBe("File saved");
+    expect(els["ticket-view-drop"].cls.has("over")).toBe(false);
+  });
+
+  test("15.10 a file dropped on a finished ticket is not attached", async () => {
+    await show(mk("d", "done"));
+    ctx.TicketBoard.openView("d");
+    posts = []; uploads.length = 0;
+    await els["ticket-view-drop"].handlers.drop({ preventDefault() {}, dataTransfer: { files: [{ name: "dropped.pdf", size: 100 }] } });
+    expect(uploads).toEqual([]);
+    expect(posts).toEqual([]);
+  });
+
+  test("15.10 notes: newest first, three show, 'Show all N notes' shows the rest; the author has a role class; no notes has its own text", async () => {
+    const mkN = (id: number, author: string) => ({ id, author, text: `note ${id}`, created_at_ms: 1791960000000 + id });
+    notesOnHub.a = [1, 2, 3, 4, 5, 6, 7, 8].map((i) => mkN(i, i % 2 ? "Worker1" : "Tester2"));
+    await show(mk("a", "in_review", { notes_count: 8 }), mk("e", "in_review"));
+    const btn: any = { dataset: { ticket: "a" }, handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { btn.handlers[t] = fn; } };
+    els["ticket-view-notes"].querySelectorAll = (sel: string) => (sel === ".ticket-notes-all" ? [btn] : []);
+    ctx.TicketBoard.openView("a"); await settle();
+    const html = () => els["ticket-view-notes"].innerHTML as string;
+    expect((html().match(/ticket-note-text/g) ?? []).length).toBe(3);
+    expect(html().indexOf("note 8")).toBeLessThan(html().indexOf("note 7"));                // newest first
+    expect(html()).toContain("note 6");
+    expect(html()).not.toContain("note 5");
+    expect(html()).toContain('<span class="ticket-note-author note-role-worker">Worker1</span>');
+    expect(html()).toContain('<span class="ticket-note-author note-role-tester">Tester2</span>');
+    expect(html()).toContain(">Show all 8 notes</button>");
+    btn.handlers.click();
+    expect((html().match(/ticket-note-text/g) ?? []).length).toBe(8);
+    expect(html()).not.toContain("Show all");
+    els["ticket-view"].close();
+    ctx.TicketBoard.openView("e");
+    expect(html()).toContain("No notes yet. Agents add notes while they work on the ticket.");
+    delete els["ticket-view-notes"].querySelectorAll;
+  });
+
+  test("15.10 the role colours are 30 % token tints mixed into --text", () => {
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    for (const [role, token] of [["worker", "amber"], ["tester", "green"], ["validator", "purple"], ["orchestrator", "blue"]]) {
+      expect(css).toContain(`.ticket-note-author.note-role-${role} { color: color-mix(in srgb, var(--${token}) 30%, var(--text)); }`);
+    }
+    expect(css).toContain(".ticket-note-author { font-family: var(--mono); font-weight: 600; color: var(--text); }");
+  });
+
+  test("9: the New ticket dialog has Request and Blocked by after External ref, and creates with them", async () => {
+    const html = readFileSync("ui/index.html", "utf8");
+    const at = (x: string) => html.indexOf(x);
+    expect(at('id="ticket-f-ref"')).toBeLessThan(at('id="ticket-f-request"'));
+    expect(at('id="ticket-f-request"')).toBeLessThan(at('id="ticket-f-blockers"'));
+    expect(at('id="ticket-f-blockers"')).toBeLessThan(at('class="ticket-f-attach"'));
+    const form = {
+      title: { value: "T" }, criteria: { value: "c" }, radius: { value: "low" }, priority: { value: "medium" },
+      external_ref: { value: "" }, request_id: { value: " r-1 " }, blocked_by: { value: "t_1, t_2 ," }, reset: () => {},
+    };
+    posts = [];
+    ctx.TicketBoard.openNew("draft");
+    await formSubmit!({ preventDefault: () => {}, target: form });
+    expect(posts[0].body.request_id).toBe("r-1");
+    expect(posts[0].body.blocked_by).toEqual(["t_1", "t_2"]);
+    form.request_id.value = ""; form.blocked_by.value = "";
+    posts = [];
+    ctx.TicketBoard.openNew("draft");
+    await formSubmit!({ preventDefault: () => {}, target: form });
+    expect("request_id" in posts[0].body).toBe(false);
+    expect("blocked_by" in posts[0].body).toBe(false);
+  });
+
+  test("every new control is native and labelled; the new texts carry a high-contrast class", async () => {
+    await show(mk("a", "draft", { request_id: "r-1", blocked_by: ["b"], open_blockers: ["b"] }), mk("b", "queued"));
+    // Draft "+": a native button with an accessible name.
+    expect(cols.innerHTML).toContain('<button type="button" class="ticket-add" data-col="draft" aria-label="Add a ticket to Draft">+</button>');
+    // The blocker line: an icon plus the words "Blocked by 1 open ticket", not colour alone.
+    expect(card("a")).toContain("Blocked by 1 open ticket</div>");
+    expect(card("a")).toContain('<span class="ticket-request-label">r-1</span>');
+    ctx.TicketBoard.openView("a");
+    const html = els["ticket-view-content"].innerHTML as string;
+    // Dialog fields: each input sits inside its <label>; the submit is a real button (Enter submits, Space presses it).
+    expect(els["ticket-view-actions"].innerHTML).toMatch(/<label for="ticket-edit-request">Request<\/label><\/dt><dd><input id="ticket-edit-request"/);
+    expect(html).toContain('<button type="button" id="ticket-blocker-add" class="ticket-blocker-add" aria-expanded="false">+ Add blocker</button>');
+    expect(els["ticket-view-save"].hidden).toBe(false);
+    expect(html).toContain('ticket-view-h ticket-view-h-strong">Blocked by <span class="ticket-view-count">1 open</span>');
+  });
+
+  test("keyboard focus is visible in the ticket dialogs: a :focus-visible outline beats the global outline: none", () => {
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    const rule = (sel: string) => css.split("}").find((b) => b.includes(sel) && b.includes("outline: 2px solid"));
+    for (const sel of ["#ticket-modal button:focus-visible", "#ticket-modal input:focus-visible", "#ticket-modal textarea:focus-visible",
+      "#ticket-modal select:focus-visible", "#ticket-view button:focus-visible", "#ticket-view input:focus-visible",
+      "#ticket-filters select:focus-visible", ".ticket-add:focus-visible"]) {
+      expect([sel, !!rule(sel)]).toEqual([sel, true]);
+    }
+    // The buttons the human could not see (Attach files, Cancel, Save) are native, enabled, not tabindex -1 and not hidden.
+    const html = readFileSync("ui/index.html", "utf8");
+    const form = html.slice(html.indexOf('id="ticket-new-form"'), html.indexOf('id="ticket-view"'));
+    for (const id of ['id="ticket-f-attach-btn"', 'id="ticket-modal-cancel"', '<button type="submit">Save</button>']) expect(form).toContain(id);
+    expect(form).not.toMatch(/tabindex="-1"[^>]*(ticket-f-attach-btn|ticket-modal-cancel)/);
+    expect(form).not.toContain("hidden />\n        <span class=\"ticket-f-attach-hint\"><");   // only the file input is hidden
+  });
+
+  test("3 and 4: Attach file sits under the Attachments list; the bottom row is Cancel ticket slot, Close, Save changes; primary look and dawn fill", () => {
+    const html = readFileSync("ui/index.html", "utf8");
+    const dlg = html.slice(html.indexOf('id="ticket-view"'), html.indexOf("</dialog>", html.indexOf('id="ticket-view"')));
+    const at = (id: string) => dlg.indexOf(id);
+    const order = [at('id="ticket-view-content"'), at('id="ticket-view-attach-btn"'), at('id="ticket-view-actions"'), at('id="ticket-view-notice"'),
+      at('id="ticket-view-row-actions"'), at('id="ticket-view-close"'), at('id="ticket-view-save"')];
+    expect(order.every((n, i) => n >= 0 && (i === 0 || n > order[i - 1]))).toBe(true);
+    const row = dlg.slice(at('id="ticket-view-bottom"'));
+    expect(row).not.toContain("ticket-view-attach-btn");                        // not in the action row
+    expect(row).toContain('type="submit" id="ticket-view-save" form="ticket-request-form" hidden disabled>Save changes</button>');
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toContain("#ticket-view-save:not([hidden]), .ticket-view-bottom:has(#ticket-view-save[hidden]) #ticket-view-close {\n  background: var(--orange); color: var(--bg-inset)");
+    expect(css).toMatch(/\[data-theme="rose-pine-dawn"\][^{]*#ticket-view-save[^{]*\{ background: var\(--text\); color: var\(--bg-inset\)/);
+    expect(css).toMatch(/\.ticket-cancel-btn \{[^}]*margin-right: auto;[^}]*border: 1px solid var\(--red\)/);   // left, apart, danger outline
+  });
+
+  test("the Request filter select has a label for it in the page", () => {
+    const html = readFileSync("ui/index.html", "utf8");
+    expect(html).toContain('<label class="ff-label" for="ticket-filter-request">Request</label>');
+    expect(html).toContain('<select id="ticket-filter-request">');
+  });
+
+  test("a done ticket's dialog shows no edit form", async () => {
+    await show(mk("a", "done", { request_id: "r-1" }));
+    ctx.TicketBoard.openView("a");
+    expect(els["ticket-view-content"].innerHTML).not.toContain("ticket-request-form");
+    expect(els["ticket-view-actions"].innerHTML).toContain("r-1");                        // the Request row of the panel
   });
 });

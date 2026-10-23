@@ -43,9 +43,11 @@ export type BridgeEvent = {
   factory_version?: string | null;
   // ticket.new or ticket.assigned for an unassigned ticket: the room lead, who triages it (null/absent: no lead).
   lead?: string | null;
+  // ticket.promoted: who made the draft → queued move (the hub sets it); the lead is not woken by its own move.
+  by?: string;
   paused?: boolean;
   // permission.* events carry the permission snapshot; only tool_name is read here.
-  snapshot?: { tool_name?: string; assignee?: string | null; creator?: string };
+  snapshot?: { tool_name?: string; assignee?: string | null; creator?: string; status?: string };
 };
 
 export type BridgeOpts = {
@@ -130,10 +132,20 @@ export function modeFor(evt: BridgeEvent, agent: string): DeliveryMode {
   // ticket.assigned is a later event the creator has not seen, so it always wakes the assignee.
   if (evt.kind === "ticket.assigned" || evt.kind === "ticket.new") {
     const s = evt.snapshot;
+    // A draft wakes no one, the lead included: it wakes on ticket.promoted when the draft is queued.
+    if (s?.status === "draft") return "context";
     if (evt.kind === "ticket.new" && s?.creator === agent) return "context";
     if (s?.assignee === agent) return "wake";
     // An unassigned ticket (new, or just unassigned) goes to the room lead to triage.
     if (!s?.assignee && evt.lead === agent) return "wake";
+    return "context";
+  }
+  // A draft moved to queued: the assignee wakes once, also when it created the ticket (it has not seen the move).
+  // An unassigned one wakes the room lead, unless the lead made the move itself.
+  if (evt.kind === "ticket.promoted") {
+    const s = evt.snapshot;
+    if (s?.assignee === agent) return "wake";
+    if (!s?.assignee && evt.lead === agent && evt.by !== agent) return "wake";
     return "context";
   }
   if (evt.kind?.startsWith("ticket.")) return "context";

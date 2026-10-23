@@ -254,7 +254,7 @@ describe("create_ticket and list_tickets", () => {
 
   test("the list_tickets schema offers no room argument", () => {
     const props = (findTool("list_tickets")!.inputSchema as { properties: Record<string, unknown> }).properties;
-    expect(Object.keys(props)).toEqual(["status"]);
+    expect(Object.keys(props)).toEqual(["status", "request_id"]);
   });
 
   test("list_tickets shows the note and file counts only when a ticket has some", async () => {
@@ -269,6 +269,28 @@ describe("create_ticket and list_tickets", () => {
     expect(lines[1]).toBe("  done when: c");
     expect(lines[2]).toBe("  2 notes, 1 files");
     expect(lines.filter((l) => /notes,/.test(l))).toHaveLength(1);                 // none for the tickets with no notes or files
+  });
+
+  test("list_tickets sends request_id as a query parameter and shows the label and the open blockers", async () => {
+    const base = { status: "queued", priority: "high", blast_radius: "low", assignee: null, acceptance_criteria: "c" };
+    const B = "t_fedcba9876543210";
+    const f = fake({
+      "GET /tickets?room=r&status=open&request_id=r-1": {
+        status: 200,
+        body: [{ id: TID, title: "x", ...base, request_id: "r-1", open_blockers: [B, "t_1111111111111111"] }, { id: B, title: "y", ...base, request_id: "r-1", open_blockers: [] }],
+      },
+    });
+    const lines = (await run("list_tickets", f.host, { request_id: "r-1" }, "r")).split("\n");
+    expect(f.calls.map((c) => c.key)).toEqual(["GET /tickets?room=r&status=open&request_id=r-1"]);
+    expect(lines).toContain("  request r-1");
+    expect(lines).toContain(`  blocked by ${B}, t_1111111111111111`);
+    expect(lines.filter((l) => l.startsWith("  blocked by"))).toHaveLength(1);   // none for a ticket with no open blocker
+  });
+  test("list_tickets without request_id sends no request_id and prints no label line for an unlabelled ticket", async () => {
+    const f = fake({ "GET /tickets?room=r&status=open": { status: 200, body: [{ id: TID, title: "x", status: "queued", priority: "high", blast_radius: "low", assignee: null, acceptance_criteria: "c", request_id: null }] } });
+    const text = await run("list_tickets", f.host, {}, "r");
+    expect(f.calls[0].key).toBe("GET /tickets?room=r&status=open");
+    expect(text).not.toContain("request ");
   });
 
   test("list without any room is an error", async () => {
@@ -449,5 +471,43 @@ describe("edit_ticket", () => {
     const s = findTool("edit_ticket")!.inputSchema as { properties: { blast_radius: { enum: string[] } }; required: string[] };
     expect(s.required).toEqual(["ticket_id"]);
     expect(s.properties.blast_radius.enum).toEqual(["low", "high"]);
+  });
+});
+
+describe("ticket grouping tool fields", () => {
+  const B2 = "t_fedcba9876543210";
+  test("transition_ticket offers draft and queued and passes the move as the agent", async () => {
+    const enumOf = (findTool("transition_ticket")!.inputSchema as { properties: { to: { enum: string[] } } }).properties.to.enum;
+    expect(enumOf).toContain("draft");
+    expect(enumOf).toContain("queued");
+    const f = fake({ [`POST /tickets/${TID}/transition`]: { status: 200 } });
+    expect(await run("transition_ticket", f.host, { ticket_id: TID, to: "queued" })).toBe(`ticket ${TID} is now queued`);
+    await run("transition_ticket", f.host, { ticket_id: TID, to: "draft" });
+    expect(f.calls.map((c) => c.body)).toEqual([{ by: "alice", to: "queued" }, { by: "alice", to: "draft" }]);
+  });
+  test("transition_ticket to queued by a refused actor is a tool error", async () => {
+    const f = fake({ [`POST /tickets/${TID}/transition`]: { status: 403, body: { error: "only the human or the lead may promote" } } });
+    await expect(run("transition_ticket", f.host, { ticket_id: TID, to: "queued" })).rejects.toThrow("403 only the human or the lead may promote");
+  });
+  test("create_ticket sends status, request_id and blocked_by only when given", async () => {
+    const f = fake({ "POST /tickets": { status: 201, body: { snapshot: { id: TID } } } });
+    const base = { title: "t", acceptance_criteria: "c", blast_radius: "low" };
+    await run("create_ticket", f.host, { ...base, status: "draft", request_id: "r-1", blocked_by: [B2] });
+    expect(f.calls[0].body).toMatchObject({ status: "draft", request_id: "r-1", blocked_by: [B2] });
+    await run("create_ticket", f.host, base);
+    for (const k of ["status", "request_id", "blocked_by"]) expect(k in f.calls[1].body).toBe(false);
+    const props = (findTool("create_ticket")!.inputSchema as { properties: Record<string, unknown> }).properties;
+    for (const k of ["status", "request_id", "blocked_by"]) expect(props).toHaveProperty(k);
+  });
+  test("edit_ticket sends request_id and blocked_by, including null and []", async () => {
+    const f = fake({ [`POST /tickets/${TID}/edit`]: { status: 200, body: { snapshot: {} } } });
+    await run("edit_ticket", f.host, { ticket_id: TID, request_id: "r-2", blocked_by: [B2] });
+    await run("edit_ticket", f.host, { ticket_id: TID, request_id: null, blocked_by: [] });
+    await run("edit_ticket", f.host, { ticket_id: TID, blocked_by: null });
+    expect(f.calls.map((c) => c.body)).toEqual([
+      { by: "alice", request_id: "r-2", blocked_by: [B2] },
+      { by: "alice", request_id: null, blocked_by: [] },
+      { by: "alice", blocked_by: null },
+    ]);
   });
 });

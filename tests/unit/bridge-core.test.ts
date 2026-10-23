@@ -505,6 +505,33 @@ describe("ticket kinds and kind briefing lines", () => {
     expect(modeFor(moved, "bob")).toBe("wake");
   });
 
+  test("a draft ticket.new or ticket.assigned wakes no one, the assignee and the lead included", () => {
+    for (const kind of ["ticket.new", "ticket.assigned"]) {
+      const draft = (assignee: string | null) => ({ kind, from: "human", lead: "lee", snapshot: { assignee, creator: "human", status: "draft" } });
+      expect(modeFor(draft("bob"), "bob")).toBe("context");
+      expect(modeFor(draft(null), "lee")).toBe("context");
+      // The same ticket queued still wakes, so the draft rule is the only difference.
+      expect(modeFor({ ...draft("bob"), snapshot: { assignee: "bob", creator: "human", status: "queued" } }, "bob")).toBe("wake");
+    }
+  });
+
+  test("ticket.promoted wakes the assignee once, the lead for an unassigned ticket unless the lead moved it, nobody else", () => {
+    const promoted = (assignee: string | null, by: string, lead: string | null = "lee", creator = "human") =>
+      ({ kind: "ticket.promoted", from: by, by, lead, snapshot: { assignee, creator } });
+    expect(modeFor(promoted("bob", "human"), "bob")).toBe("wake");           // the assignee
+    expect(modeFor(promoted("bob", "human"), "alice")).toBe("context");      // a peer only reads it
+    expect(modeFor(promoted("bob", "human"), "lee")).toBe("context");        // assigned: the lead is not woken
+    expect(modeFor(promoted("bob", "lee", "lee", "bob"), "bob")).toBe("wake");   // assignee = creator: it still wakes
+    expect(modeFor(promoted(null, "human"), "lee")).toBe("wake");            // unassigned: the lead triages it
+    expect(modeFor(promoted(null, "lee"), "lee")).toBe("context");           // the lead made the move itself
+    expect(modeFor(promoted(null, "human", null), "lee")).toBe("context");   // no lead set
+    expect(modeFor(promoted(null, "human"), "bob")).toBe("context");
+    expect(modeFor({ kind: "ticket.promoted", from: "human", lead: "lee", snapshot: { assignee: null, creator: "human" } }, "lee")).toBe("wake");   // no `by` field
+    expect(modeFor({ ...promoted("bob", "human"), paused: true }, "bob")).toBe("context");   // a paused agent is never woken
+    // The other ticket kinds keep their delivery: `by` and `lead` mean nothing there.
+    expect(modeFor({ kind: "ticket.update", by: "human", lead: "lee", snapshot: { assignee: null, creator: "human" } }, "lee")).toBe("context");
+  });
+
   test("ticket:done approval: the verdict wakes the requester only; the request wakes nobody", () => {
     const done = { snapshot: { tool_name: "ticket:done" }, from: "alice" };
     // verdict (permission.resolved) for alice's request

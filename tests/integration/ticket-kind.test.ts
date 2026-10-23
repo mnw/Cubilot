@@ -3,7 +3,7 @@
 // Briefing hook. Registration through the real hub is in ticket-http.test.ts.
 
 import { describe, test, expect, beforeEach } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
@@ -120,7 +120,356 @@ async function toReview(over: Record<string, unknown> = {}): Promise<string> {
   return id;
 }
 
+describe("blocked_by rows", () => {
+  const blockers = (id: string) =>
+    t.db.query<{ blocker_id: string }, [string]>("SELECT blocker_id FROM ticket_blockers WHERE ticket_id = ? ORDER BY blocker_id").all(id).map((r) => r.blocker_id);
+  const edit = (id: string, body: Record<string, unknown>) => t.call("POST", `/tickets/${id}/edit`, { by: "alice", ...body });
+
+  test("create writes the event and the rows together; edit replaces the list; a blocker-only edit emits ticket.edited", async () => {
+    const b1 = await create();
+    const b2 = await create();
+    const id = await create({ blocked_by: [b1] });
+    expect(blockers(id)).toEqual([b1]);
+    expect(t.events(id).map((e) => e.kind)).toEqual(["ticket.created"]);
+
+    const r = await edit(id, { blocked_by: [b2] });
+    expect(r.status).toBe(200);
+    expect(blockers(id)).toEqual([b2]);
+    expect(t.events(id).map((e) => e.kind)).toEqual(["ticket.created", "ticket.edited"]);
+    expect(t.emitted.at(-1)!.entry).toMatchObject({ kind: "ticket.update", ticket_id: id });
+
+    // Same set again: nothing changes, no event.
+    const same = await edit(id, { blocked_by: [b2] });
+    expect(same.json.idempotent).toBe(true);
+    expect(t.events(id).length).toBe(2);
+
+    // null and [] clear.
+    expect((await edit(id, { blocked_by: null })).status).toBe(200);
+    expect(blockers(id)).toEqual([]);
+    expect((await edit(id, { blocked_by: [b1, b2] })).status).toBe(200);
+    expect((await edit(id, { blocked_by: [] })).status).toBe(200);
+    expect(blockers(id)).toEqual([]);
+  });
+
+  test("a bad list gets 400 and writes nothing", async () => {
+    const b1 = await create();
+    const id = await create({ blocked_by: [b1] });
+    const events = t.events(id).length;
+    expect((await edit(id, { blocked_by: [id] })).status).toBe(400);
+    expect((await edit(id, { blocked_by: ["t_" + "0".repeat(16)] })).status).toBe(400);
+    expect((await t.call("POST", "/tickets", spec({ blocked_by: [b1, b1] }))).status).toBe(400);
+    expect(blockers(id)).toEqual([b1]);
+    expect(t.events(id).length).toBe(events);
+  });
+
+  test("a failing side effect leaves no event, keeps the old rows and sends no broadcast", async () => {
+    const b1 = await create();
+    const b2 = await create();
+    const id = await create({ blocked_by: [b1] });
+    t.db.exec(`CREATE TRIGGER fail_blocker BEFORE INSERT ON ticket_blockers WHEN NEW.blocker_id = '${b2}' BEGIN SELECT RAISE(ABORT, 'boom'); END`);
+    const events = t.events(id).length;
+    const sent = t.emitted.length;
+    await expect(edit(id, { blocked_by: [b2] })).rejects.toThrow();
+    expect(blockers(id)).toEqual([b1]);
+    expect(t.events(id).length).toBe(events);
+    expect(t.emitted.length).toBe(sent);
+    await expect(t.call("POST", "/tickets", spec({ blocked_by: [b2] }))).rejects.toThrow();
+    expect(t.emitted.length).toBe(sent);
+  });
+});
+
+describe("blocked_by and open_blockers on reads and broadcasts", () => {
+  test("GET /tickets and the ticket.update entry carry both arrays; open_blockers drops a done blocker only", async () => {
+    const b1 = await create();
+    const b2 = await create();
+    const id = await create({ blocked_by: [b1, b2] });
+    const listed = async () => (await t.call("GET", "/tickets?room=r1&status=all")).json.find((x: any) => x.id === id);
+    expect(await listed()).toMatchObject({ blocked_by: [b1, b2], open_blockers: [b1, b2] });
+    expect((await t.call("GET", "/tickets?room=r1")).json.find((x: any) => x.id === b1)).toMatchObject({ blocked_by: [], open_blockers: [] });
+
+    // The broadcast of a change to the dependent carries them too (in the entry text and snapshot).
+    expect((await t.call("POST", `/tickets/${id}/edit`, { by: "alice", title: "Renamed" })).status).toBe(200);
+    const entry = t.emitted.at(-1)!.entry as any;
+    expect(entry.kind).toBe("ticket.update");
+    expect(entry.snapshot).toMatchObject({ blocked_by: [b1, b2], open_blockers: [b1, b2] });
+    expect(JSON.parse(entry.text)).toMatchObject({ blocked_by: [b1, b2], open_blockers: [b1, b2] });
+
+    // b1 done: gone from open_blockers. b2 cancelled: still open.
+    expect((await claim(b1, "carol")).status).toBe(200);
+    expect((await as(b1, "carol", "in_progress")).status).toBe(200);
+    expect((await as(b1, "carol", "in_review")).status).toBe(200);
+    expect((await as(b1, HUMAN, "done")).status).toBe(200);
+    expect((await as(b2, HUMAN, "cancelled")).status).toBe(200);
+    expect(await listed()).toMatchObject({ blocked_by: [b1, b2], open_blockers: [b2] });
+  });
+});
+
+describe("draft intake moves", () => {
+  const lead = () => t.call("POST", "/rooms/r1/lead", { by: HUMAN, agent: "bob" });
+  const mv = (id: string, by: string, to: string) => as(id, by, to);
+
+  test("the human and the lead move draft <-> queued; the creator, the assignee and others are refused", async () => {
+    await lead();
+    const id = await create({ status: "draft" });   // alice creates
+    expect((await mv(id, "alice", "queued")).status).toBe(403);
+    expect((await mv(id, "carol", "queued")).status).toBe(403);
+    expect((await mv(id, "bob", "queued")).status).toBe(200);
+    expect(t.row(id).status).toBe("queued");
+    expect((await mv(id, "alice", "draft")).status).toBe(403);
+    expect((await mv(id, "bob", "draft")).status).toBe(200);
+    expect((await mv(id, HUMAN, "queued")).status).toBe(200);
+    expect((await mv(id, HUMAN, "draft")).status).toBe(200);
+  });
+
+  test("from a later status only the human moves back to queued or draft", async () => {
+    await lead();
+    const id = await toReview();   // bob is the assignee, and the lead
+    expect((await mv(id, "bob", "queued")).status).toBe(403);
+    expect((await mv(id, "bob", "draft")).status).toBe(403);
+    const id2 = await create();
+    expect((await claim(id2, "carol")).status).toBe(200);
+    expect((await mv(id2, "carol", "draft")).status).toBe(403);
+    expect((await mv(id2, "bob", "queued")).status).toBe(403);
+    expect((await mv(id2, HUMAN, "draft")).status).toBe(200);
+  });
+
+  test("the lead is refused while the request holds a non-terminal high ticket; the human is not", async () => {
+    await lead();
+    const low = await create({ status: "draft", request_id: "req-1" });
+    const high = await create({ status: "draft", request_id: "req-1", blast_radius: "high" });
+    expect((await mv(low, "bob", "queued")).status).toBe(403);
+    expect((await mv(high, "bob", "queued")).status).toBe(403);
+    expect((await mv(low, HUMAN, "queued")).status).toBe(200);
+    // queued -> draft is not gated by the radius.
+    expect((await mv(low, "bob", "draft")).status).toBe(200);
+    // Once the high ticket is terminal, the lead may queue the rest.
+    expect((await mv(high, HUMAN, "cancelled")).status).toBe(200);
+    expect((await mv(low, "bob", "queued")).status).toBe(200);
+  });
+
+  test("a high ticket with the same label in another room does not refuse the lead", async () => {
+    await lead();
+    const other = await t.call("POST", "/tickets", spec({ by: HUMAN, room: "r2", request_id: "req-2", blast_radius: "high", status: "draft" }));
+    expect(other.status).toBe(201);
+    const id = await create({ status: "draft", request_id: "req-2" });
+    expect((await mv(id, "bob", "queued")).status).toBe(200);
+  });
+
+  test("a ticket without a label is checked alone", async () => {
+    await lead();
+    const high = await create({ status: "draft", blast_radius: "high" });
+    const low = await create({ status: "draft" });
+    expect((await mv(high, "bob", "queued")).status).toBe(403);
+    expect((await mv(low, "bob", "queued")).status).toBe(200);
+    expect((await mv(high, HUMAN, "queued")).status).toBe(200);
+  });
+});
+
+describe("draft promotion entry", () => {
+  const lead = () => t.call("POST", "/rooms/r1/lead", { by: HUMAN, agent: "bob" });
+
+  test("draft -> queued writes ticket.queued and broadcasts ticket.promoted with by and the lead; other moves stay ticket.update", async () => {
+    await lead();
+    const id = await create({ status: "draft" });
+    expect((await as(id, "bob", "queued")).status).toBe(200);
+    expect(t.events(id).map((e) => e.kind)).toEqual(["ticket.created", "ticket.queued"]);
+    const e = t.emitted.at(-1)!.entry as any;
+    expect(e).toMatchObject({ kind: "ticket.promoted", ticket_id: id, by: "bob", lead: "bob" });
+    expect(e.snapshot.status).toBe("queued");
+
+    // The human's move carries by = the human. A retry is idempotent and emits nothing.
+    const id2 = await create({ status: "draft" });
+    expect((await as(id2, HUMAN, "queued")).status).toBe(200);
+    expect((t.emitted.at(-1)!.entry as any)).toMatchObject({ kind: "ticket.promoted", by: HUMAN });
+    const sent = t.emitted.length;
+    expect((await as(id2, HUMAN, "queued")).json.idempotent).toBe(true);
+    expect(t.emitted.length).toBe(sent);
+
+    // queued -> draft and other moves are ordinary updates.
+    expect((await as(id2, HUMAN, "draft")).status).toBe(200);
+    expect((t.emitted.at(-1)!.entry as any).kind).toBe("ticket.update");
+  });
+
+  test("the lead's retry of queued or draft is idempotent: 200, no event, no broadcast; a non-lead retry is still 403", async () => {
+    await lead();
+    const id = await create({ status: "draft" });   // unassigned
+    expect((await as(id, "bob", "queued")).status).toBe(200);
+    let sent = t.emitted.length;
+    let events = t.events(id).length;
+    const again = await as(id, "bob", "queued");
+    expect(again.status).toBe(200);
+    expect(again.json.idempotent).toBe(true);
+    expect(t.emitted.length).toBe(sent);
+    expect(t.events(id).length).toBe(events);
+    expect((await as(id, "carol", "queued")).status).toBe(403);
+
+    expect((await as(id, "bob", "draft")).status).toBe(200);
+    sent = t.emitted.length;
+    events = t.events(id).length;
+    expect((await as(id, "bob", "draft")).json.idempotent).toBe(true);
+    expect(t.emitted.length).toBe(sent);
+    expect(t.events(id).length).toBe(events);
+  });
+
+  test("a draft's ticket.new carries no lead; a queued one does", async () => {
+    await lead();
+    await create({ status: "draft" });
+    expect((t.emitted.at(-1)!.entry as any)).toMatchObject({ kind: "ticket.new" });
+    expect("lead" in (t.emitted.at(-1)!.entry as any)).toBe(false);
+    await create();
+    expect((t.emitted.at(-1)!.entry as any).lead).toBe("bob");
+  });
+});
+
+describe("GET /tickets?request_id=", () => {
+  test("filters inside the room; the same label in another room is not returned; a bad label gets 400", async () => {
+    const a1 = await create({ request_id: "req-a" });
+    const a2 = await create({ request_id: "req-a" });
+    await create({ request_id: "req-b" });
+    await create();
+    await t.call("POST", "/tickets", spec({ by: HUMAN, room: "r2", request_id: "req-a" }));
+    const ids = async (q: string) => (await t.call("GET", `/tickets?room=r1&status=all&${q}`)).json.map((x: any) => x.id).sort();
+    expect(await ids("request_id=req-a")).toEqual([a1, a2].sort());
+    expect((await ids("request_id=none")).length).toBe(0);
+    expect((await ids("")).length).toBe(4);
+    expect((await t.call("GET", "/tickets?room=r1&request_id=bad%20label")).status).toBe(400);
+  });
+});
+
+describe("briefing: request label, open blockers, draft", () => {
+  test("an agent's own tickets show the label, the open blockers (not done ones) and draft", async () => {
+    const b1 = await create();
+    const b2 = await create();
+    const id = await create({ status: "draft", request_id: "req-9", blocked_by: [b1, b2], assignee: "bob" });
+    const lines = () => t.kinds.find((k) => k.kind === "ticket")!.briefingLines!({ name: "bob", room: "r1", permanent: false }, t.cap).join("\n");
+    const text = lines();
+    expect(text).toContain(`${id} [draft] (low radius, priority medium, request req-9)`);
+    expect(text).toContain(`Blocked by: ${b1} (queued), ${b2} (queued)`);
+
+    expect((await claim(b1, "carol")).status).toBe(200);
+    expect((await as(b1, "carol", "in_progress")).status).toBe(200);
+    expect((await as(b1, "carol", "in_review")).status).toBe(200);
+    expect((await as(b1, HUMAN, "done")).status).toBe(200);
+    expect(lines()).toContain(`Blocked by: ${b2} (queued)`);
+    expect(lines()).not.toContain(b1);
+
+    // No label and no blockers: the line is as before.
+    await create({ assignee: "bob" });
+    expect(lines().split("\n").filter((l) => l.startsWith("- ") && !l.includes("req-9") ).every((l) => !l.includes("request"))).toBe(true);
+  });
+});
+
+describe("who edits request_id and blocked_by", () => {
+  const edit = (id: string, by: string, body: Record<string, unknown>) => t.call("POST", `/tickets/${id}/edit`, { by, ...body });
+  beforeEach(async () => {
+    t.roster.erin = "r1";
+    await t.call("POST", "/rooms/r1/lead", { by: HUMAN, agent: "bob" });
+  });
+
+  test("the human, the creator and the lead edit them while draft or queued; the assignee and others are refused", async () => {
+    const blocker = await create();
+    for (const status of ["draft", "queued"]) {
+      const id = await create({ status, assignee: "carol" });   // alice creates, carol is the assignee, bob leads
+      for (const [by, code] of [["carol", 403], ["erin", 403], ["alice", 200], ["bob", 200], [HUMAN, 200]] as const) {
+        const label = `r-${by}`;
+        expect((await edit(id, by, { request_id: label })).status).toBe(code);
+        expect((await edit(id, by, { blocked_by: [blocker] })).status).toBe(code === 200 ? 200 : 403);
+        if (code === 200) expect(t.row(id).request_id).toBe(label);
+      }
+      expect((await edit(id, "alice", { request_id: null })).status).toBe(200);
+      expect(t.row(id).request_id).toBeNull();
+      expect((await edit(id, "alice", { request_id: "bad label!" })).status).toBe(400);
+    }
+  });
+
+  test("existing fields keep their rule: the assignee edits the title, the lead does not", async () => {
+    const id = await create({ assignee: "carol" });
+    expect((await edit(id, "carol", { title: "By assignee" })).status).toBe(200);
+    expect((await edit(id, "bob", { title: "By lead" })).status).toBe(403);
+    expect((await edit(id, "bob", { title: "By lead", request_id: "x" })).status).toBe(403);
+    expect(t.row(id).title).toBe("By assignee");
+  });
+
+  test("after the claim an agent gets 409 and the human succeeds; a terminal ticket refuses both", async () => {
+    const blocker = await create();
+    const id = await create({ assignee: "carol", request_id: "req-1" });
+    expect((await claim(id, "carol")).status).toBe(200);
+    for (const by of ["alice", "bob", "carol"]) {
+      expect((await edit(id, by, { request_id: "req-2" })).status).toBe(by === "carol" ? 403 : 409);
+      expect((await edit(id, by, { blocked_by: [blocker] })).status).toBe(by === "carol" ? 403 : 409);
+    }
+    expect(t.row(id).request_id).toBe("req-1");
+    expect((await edit(id, HUMAN, { request_id: "req-2", blocked_by: [blocker] })).status).toBe(200);
+    expect(t.row(id).request_id).toBe("req-2");
+
+    expect((await as(id, HUMAN, "cancelled")).status).toBe(200);
+    expect((await edit(id, "alice", { request_id: "req-3" })).status).toBe(409);
+    expect((await edit(id, HUMAN, { request_id: "req-3" })).status).toBe(409);
+    expect(t.row(id).request_id).toBe("req-2");
+  });
+});
+
+describe("claim gate on blockers", () => {
+  test("blocked while a blocker is not done (cancelled still blocks); open after done; the human is not gated", async () => {
+    const blocker = await create();
+    const id = await create({ blocked_by: [blocker] });
+    const first = await claim(id, "bob");
+    expect(first.status).toBe(409);
+    expect(first.json.error).toBe(`blocked by ${blocker} (queued)`);
+    expect(t.row(id).status).toBe("queued");
+
+    // In progress and cancelled both keep blocking.
+    expect((await claim(blocker, "carol")).status).toBe(200);
+    expect((await claim(id, "bob")).json.error).toBe(`blocked by ${blocker} (claimed)`);
+    expect((await as(blocker, "carol", "cancelled")).status).toBe(200);
+    expect((await claim(id, "bob")).json.error).toBe(`blocked by ${blocker} (cancelled)`);
+
+    // The human claims a blocked ticket.
+    expect((await claim(id, HUMAN)).status).toBe(200);
+
+    // A done blocker opens the gate.
+    const b2 = await create();
+    const id2 = await create({ blocked_by: [b2] });
+    expect((await claim(id2, "bob")).status).toBe(409);
+    expect((await claim(b2, "carol")).status).toBe(200);
+    expect((await as(b2, "carol", "in_progress")).status).toBe(200);
+    expect((await as(b2, "carol", "in_review")).status).toBe(200);
+    expect((await as(b2, HUMAN, "done")).status).toBe(200);
+    expect((await claim(id2, "bob")).status).toBe(200);
+  });
+
+  test("a draft cannot be claimed", async () => {
+    const id = await create({ status: "draft" });
+    expect((await claim(id, "bob")).status).toBe(409);
+  });
+});
+
 describe("create", () => {
+  test("request_id: a valid label is returned and stored; a bad one gets 400 and persists nothing", async () => {
+    const ok = await t.call("POST", "/tickets", spec({ request_id: "req-1.a_B" }));
+    expect(ok.status).toBe(201);
+    expect(ok.json.snapshot.request_id).toBe("req-1.a_B");
+    expect(t.row(ok.json.snapshot.id).request_id).toBe("req-1.a_B");
+    expect((await t.call("POST", "/tickets", spec())).json.snapshot.request_id).toBeNull();
+    const before = t.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM tickets").get()!.n;
+    const eventsBefore = t.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM events").get()!.n;
+    for (const bad of ["bad label!", "", "a".repeat(65), 7, ["x"]]) {
+      expect((await t.call("POST", "/tickets", spec({ request_id: bad }))).status).toBe(400);
+    }
+    expect(t.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM tickets").get()!.n).toBe(before);
+    expect(t.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM events").get()!.n).toBe(eventsBefore);
+  });
+
+  test("status draft makes a draft ticket; no status makes a queued one; an agent cannot claim a draft", async () => {
+    const d = await t.call("POST", "/tickets", spec({ status: "draft" }));
+    expect(d.status).toBe(201);
+    expect(d.json.snapshot.status).toBe("draft");
+    expect((await t.call("POST", "/tickets", spec())).json.snapshot.status).toBe("queued");
+    const refused = await claim(d.json.snapshot.id, "bob");
+    expect(refused.status).toBe(409);
+    expect(refused.json.error).toBe("ticket is draft: it cannot be claimed");
+  });
+
   test("queued, unassigned, creator = sender, external_ref verbatim, room broadcast", async () => {
     const r = await t.call("POST", "/tickets", spec({ external_ref: "EUSPACE-246", priority: "high" }));
     expect(r.status).toBe(201);
@@ -718,6 +1067,19 @@ describe("assignment", () => {
     expect((await claim(id, "carol")).status).toBe(200);           // first claim wins again
     const second = await create({ assignee: "bob" });
     expect((await assign(second, HUMAN, null)).json.snapshot.assignee).toBeNull();
+  });
+
+  test("a draft ticket can be unassigned: one ticket.assigned event, the entry names no lead (no wake)", async () => {
+    await t.call("POST", "/rooms/r1/lead", { by: HUMAN, agent: "bob" });
+    const id = await create({ status: "draft", assignee: "carol" });
+    const events = t.events(id).length;
+    const r = await assign(id, "alice", null);
+    expect(r.status).toBe(200);
+    expect(r.json.snapshot).toMatchObject({ status: "draft", assignee: null });
+    expect(t.events(id).length).toBe(events + 1);
+    expect(t.events(id).at(-1)).toEqual({ kind: "ticket.assigned", actor: "alice" });
+    expect("lead" in (lastEntry().entry as any)).toBe(false);      // the lead is not woken while draft
+    expect((await assign(id, "alice", null)).json.idempotent).toBe(true);
   });
 
   test("unassigning is refused once the ticket is not queued, and for anyone but the human or creator", async () => {
@@ -1670,5 +2032,106 @@ describe("ticket entries carry the actor as `from`", () => {
     await as(id, "bob", "in_review"); await as(id, HUMAN, "done");
     expect((await t.call("POST", `/tickets/${id}/archive`, { by: HUMAN, archived: true })).status).toBe(200);
     expect(fromOf("ticket.archived")).toBe(HUMAN);
+  });
+});
+
+describe("edit priority and external_ref", () => {
+  const edit = (id: string, by: string, body: Record<string, unknown>) => t.call("POST", `/tickets/${id}/edit`, { by, ...body });
+  const order = async () => ((await t.call("GET", "/tickets?room=r1")).json as { id: string }[]).map((x) => x.id);
+
+  test("a priority edit changes the backlog order; same value is idempotent; a bad name gets 400", async () => {
+    const a = await create({ assignee: "carol" });
+    const b = await create({ assignee: "carol" });
+    expect((await order())[0]).toBe(a);
+    const r = await edit(b, "alice", { priority: "high" });
+    expect(r.status).toBe(200);
+    expect(r.json.snapshot.priority).toBe("high");
+    expect((await order())[0]).toBe(b);
+    expect((await edit(b, "alice", { priority: "high" })).json.idempotent).toBe(true);
+    expect((await edit(b, "alice", { priority: "urgent" })).status).toBe(400);
+  });
+
+  test("external_ref is set, cleared and bounded", async () => {
+    const id = await create({ assignee: "carol" });
+    expect((await edit(id, "carol", { external_ref: "JIRA-1" })).status).toBe(200);
+    expect(t.row(id).external_ref).toBe("JIRA-1");
+    expect((await edit(id, "carol", { external_ref: null })).status).toBe(200);
+    expect(t.row(id).external_ref).toBeNull();
+    expect((await edit(id, "carol", { external_ref: "x".repeat(201) })).status).toBe(400);
+    expect((await edit(id, "carol", { external_ref: 5 })).status).toBe(400);
+  });
+
+  test("the human, creator and assignee edit them; other agents get 403", async () => {
+    t.roster.erin = "r1";
+    const id = await create({ assignee: "carol" });
+    for (const [by, code] of [["erin", 403], ["alice", 200], ["carol", 200], [HUMAN, 200]] as const) {
+      expect((await edit(id, by, { priority: by === "carol" ? "low" : "high", external_ref: `by-${by}` })).status).toBe(code);
+    }
+    expect(t.row(id).external_ref).toBe(`by-${HUMAN}`);
+  });
+});
+
+describe("remove an attachment", () => {
+  const uploaded = (id: string, ext: string) => { writeFileSync(join(ATT_DIR, `${id}.${ext}`), "x"); return `/image/${id}.${ext}`; };
+  const attach = async (id: string, by: string, ext = "txt") => {
+    const r = await t.call("POST", `/tickets/${id}/attachments`, { by, url: uploaded(`rm${Math.random().toString(36).slice(2, 10)}`, ext), name: "f" });
+    expect(r.status).toBe(201);
+    return r.json.attachment as { id: number; url: string };
+  };
+  const remove = (id: string, aid: number, by: string) => t.call("POST", `/tickets/${id}/attachments/${aid}/remove`, { by });
+  const rowCount = (id: string) => t.db.query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM ticket_attachments WHERE ticket_id = ?").get(id)!.n;
+
+  test("one event, the row goes, the file stays on disk, the list and the count follow", async () => {
+    const id = await create({ assignee: "bob" });
+    const keep = await attach(id, "alice");
+    const gone = await attach(id, "alice", "pdf");
+    const events = t.events(id).length;
+    const r = await remove(id, gone.id, "alice");
+    expect(r.status).toBe(200);
+    expect(r.json.attachments_count).toBe(1);
+    expect(t.events(id).length).toBe(events + 1);
+    expect(t.events(id).at(-1)).toEqual({ kind: "ticket.detached", actor: "alice" });
+    expect(rowCount(id)).toBe(1);
+    expect(existsSync(join(ATT_DIR, gone.url.slice("/image/".length)))).toBe(true);
+    const list = (await t.call("GET", `/tickets/${id}/attachments`)).json;
+    expect(list.map((x: any) => x.id)).toEqual([keep.id]);
+  });
+
+  test("the human removes on in_progress; the creator on draft, but gets 409 once claimed", async () => {
+    const id = await create({ assignee: "bob" });
+    const f = await attach(id, "alice");
+    await claim(id, "bob"); await as(id, "bob", "in_progress");
+    expect((await remove(id, f.id, "alice")).status).toBe(409);
+    expect(rowCount(id)).toBe(1);
+    expect((await remove(id, f.id, HUMAN)).status).toBe(200);
+    const d = await create({ status: "draft" });
+    const g = await attach(d, "alice");
+    expect((await remove(d, g.id, "alice")).status).toBe(200);
+  });
+
+  test("an unrelated agent is 403, an unknown id 404, a retry 200, a terminal ticket 409", async () => {
+    const id = await create({ assignee: "bob" });
+    const f = await attach(id, "alice");
+    expect((await remove(id, f.id, "carol")).status).toBe(403);
+    expect((await remove(id, 999999, "alice")).status).toBe(404);
+    expect((await remove(id, f.id, "alice")).status).toBe(200);
+    const events = t.events(id).length;
+    const again = await remove(id, f.id, "alice");
+    expect(again.status).toBe(200);
+    expect(again.json.idempotent).toBe(true);
+    expect(t.events(id).length).toBe(events);
+    const g = await attach(id, "alice", "md");
+    await claim(id, "bob"); await as(id, "bob", "in_progress"); await as(id, "bob", "in_review"); await as(id, HUMAN, "done");
+    expect((await remove(id, g.id, HUMAN)).status).toBe(409);
+  });
+
+  test("an author who is not the creator gets 200 on a retry; a stranger still gets 403", async () => {
+    const id = await create({ assignee: "bob" });   // alice creates; bob attaches
+    const f = await attach(id, "bob");
+    expect((await remove(id, f.id, "bob")).status).toBe(200);
+    const again = await remove(id, f.id, "bob");
+    expect(again.status).toBe(200);
+    expect(again.json.idempotent).toBe(true);
+    expect((await remove(id, f.id, "carol")).status).toBe(403);
   });
 });
