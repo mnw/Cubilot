@@ -100,6 +100,7 @@ Most mockup colours match existing tokens. Use the token, not the mockup value.
 Token changes:
 
 1. **Meta text.** `--text-dim` (#6b5d51) on `--bg` has a contrast of about 2.6:1. That fails 4.5:1. Add the skin token `--text-meta`. Set it to #978B78 in the default theme (about 5:1). Set it to the `--text-muted` value in the two Rosé Pine blocks. Use it for times, counts and section labels. Do not change `--text-dim`, because other rules use it.
+   Measured on 2026-10-23 (ticket-grouping, task 6.5): four texts use `--text-dim` at 2.2 to 3.0:1 in all three themes. These are the roster, the nutshell, the chat time and the usage bar. Each text that gives information moves to `--text-meta`. `--text-dim` stays only for decoration (borders, disabled controls). In dawn and moon, `--text-muted` is now #6a6587 and #a29fbb (4.5:1 or more on every surface).
 2. **Role colours.** Add these skin tokens. Each one points to an existing accent, so the themes need no new values.
    - `--role-lead: var(--orange)` for `orchestrator`
    - `--role-worker: var(--amber)` for `worker`
@@ -415,6 +416,7 @@ The UI cannot tell if an agent is running a turn or waiting. The bridge core alr
    - drag and drop onto a collapsed column (T11)
    - the needs-attention pulse on a rail row (T03)
    - "Reload settings" from the title bar and from the roster view (T02, T14)
+4. Contrast: measure every text in the main window, the board, the dialog and the roster view, in the three themes. No text that gives information is below 4.5:1. Record the measurements.
 
 ## Open questions for the human
 

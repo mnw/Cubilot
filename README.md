@@ -45,7 +45,7 @@ Cubilot is a macOS desktop app. It runs a team of coding agents (Claude Code, an
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/06-build-order-dark.png">
-  <img alt="Build order: migration, rebrand and roles done, then Parts 3 to 14" src="docs/readme/06-build-order-light.png" width="100%">
+  <img alt="Build order: migration, rebrand, roles and ticket grouping done, then Parts 4 to 15" src="docs/readme/06-build-order-light.png" width="100%">
 </picture>
 
 ## Build from source

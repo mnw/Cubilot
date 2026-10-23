@@ -11,10 +11,10 @@ Date: 2026-10-16. Line numbers refer to the working tree on that date, with the 
 
 The app has the name Cubilot (Part 1, done). The app must also launch any agent with a factory role, and must launch a full factory team in one action. A role gives the agent its instructions, its model, its tool limits and only its own skills. The role definitions and skills are in `factory/` (see `README.md`).
 
-The brief has fourteen parts. The numbers follow the build order (decision 2026-10-19). Each part is one file in this folder:
+The brief has fifteen parts. The numbers follow the build order (decision 2026-10-19). Each part is one file in this folder:
 1. [01-rebrand.md](01-rebrand.md): Rebrand to Cubilot (done). The names in use, the open items, and how to retire the previous app.
 2. [02-factory-roles.md](02-factory-roles.md): Factory roles (done): launch agents with a role. First, use a launch script, before the app work.
-3. [03-ticket-grouping-checkpoints.md](03-ticket-grouping-checkpoints.md): Ticket grouping: requests, `blocked_by` and the `draft` status. The context checkpoints stay an idea.
+3. [03-ticket-grouping-checkpoints.md](03-ticket-grouping-checkpoints.md): Ticket grouping (done): requests, `blocked_by` and the `draft` status. The context checkpoints stay an idea.
 4. [04-sessions.md](04-sessions.md): Visible sessions: no sub-agents, and one new session for each ticket stage. First, use a ticket runner outside the app.
 5. [05-delivery-backup.md](05-delivery-backup.md): Internal remote, clean delivery to the client, backups and recovery. You can set up the hourly backup at once.
 6. [06-warp-patterns.md](06-warp-patterns.md): Patterns from the Warp cloud factory: triage states, a spec stage, the `review.json` format, the trust boundary, follow-up reviews.
@@ -26,6 +26,7 @@ The brief has fourteen parts. The numbers follow the build order (decision 2026-
 12. [12-hub-first-linux.md](12-hub-first-linux.md): Hub-first architecture, browser access and Linux hosting (idea).
 13. [13-mutation-testing.md](13-mutation-testing.md): Mutation testing: advisory first, opt-in for each project. Last, because of its risk.
 14. [14-ui-redesign.md](14-ui-redesign.md): UI redesign (refined warm terminal). One agent rail, one title bar and a compact chat log. One tab bar for the right pane, clearer ticket cards and an Agent roster view.
+15. [15-ticket-card-dialog.md](15-ticket-card-dialog.md): Ticket card and ticket dialog redesign. It replaces T11, T12 and T13 of Part 14.
 
 ## How to use these files
 

@@ -198,7 +198,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
         <div class="n planned"><span class="t">Triage states, spec stage</span><span class="d">Ready / spec / needs info / wait</span><span class="ref">§6</span></div>
         <div class="n planned"><span class="t">Dashboard route</span><span class="d">Read-only, per room</span><span class="ref">§11</span></div>
         <div class="n planned"><span class="t">Context pack</span><span class="d">Stable prefix first (cache), primer, graph query, signatures, stage notes; no model</span><span class="ref">§4</span></div>
-        <div class="n idea"><span class="t">Requests and tasks</span><span class="d">blocked_by, context checkpoint at each task done</span><span class="ref">§3</span></div>
+        <div class="n built"><span class="t">Requests and tasks</span><span class="d">request_id, blocked_by, draft status; context checkpoints stay an idea</span><span class="ref">§3</span></div>
         <div class="n idea"><span class="t">Jev decision points</span><span class="d">Narrow typed decisions, see section 05</span></div>
       </div></div>
 
@@ -430,12 +430,12 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
 <!-- 6 BUILD ORDER -->
 <section class="sec" aria-labelledby="h-seq">
   <h2 id="h-seq"><span class="num">06</span>Build order</h2>
-  <p class="intro">The migration comes first, then the rebrand, so Cubilot runs beside the previous app without touching it. Parts 1 to 5 give a working factory with fresh sessions and safe delivery; Parts 6 to 10 add review format, toolchain, setup and the two councils; 11 to 13 improve it; 14 redesigns the window.</p>
+  <p class="intro">The migration comes first, then the rebrand, so Cubilot runs beside the previous app without touching it. Parts 1 to 5 give a working factory with fresh sessions and safe delivery; Parts 6 to 10 add review format, toolchain, setup and the two councils; 11 to 13 improve it; 14 and 15 redesign the window.</p>
   <div class="seq">
     <div class="n built first"><span class="step">Step 0</span><span class="t">Migrate to new repo</span><span class="d">done: mnw/Cubilot, fresh history</span></div>
     <div class="n built"><span class="step">1</span><span class="t">Rebrand to Cubilot</span><span class="d">done: own identifier and data folder, side by side with the previous app</span><span class="ref">§1</span></div>
     <div class="n built"><span class="step">2</span><span class="t">Roles</span><span class="d">done: launch with a role, role plugins, no sub-agents</span><span class="ref">§2</span></div>
-    <div class="n planned"><span class="step">3</span><span class="t">Ticket grouping</span><span class="d">request_id, blocked_by, draft status</span><span class="ref">§3</span></div>
+    <div class="n built"><span class="step">3</span><span class="t">Ticket grouping</span><span class="d">done: request_id, blocked_by, draft status</span><span class="ref">§3</span></div>
     <div class="n planned"><span class="step">4</span><span class="t">Session per ticket stage</span><span class="d">ticket runner first, then in the hub; spec review, context pack</span><span class="ref">§4</span></div>
     <div class="n planned"><span class="step">5</span><span class="t">Delivery and backup</span><span class="d">hourly backup at once; internal remote, Deliver step, leak gate</span><span class="ref">§5</span></div>
     <div class="n planned"><span class="step">6</span><span class="t">Warp patterns</span><span class="d">triage, spec stage, review.json, trust boundary</span><span class="ref">§6</span></div>
@@ -446,12 +446,13 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
     <div class="n planned"><span class="step">11</span><span class="t">Dashboard</span><span class="d">waiting for you, stuck, flow, quality, cost</span><span class="ref">§11</span></div>
     <div class="n idea"><span class="step">12</span><span class="t">Hub-first and Linux</span><span class="d">terminal layer into hub, browser access</span><span class="ref">§12</span></div>
     <div class="n planned"><span class="step">13</span><span class="t">Mutation testing</span><span class="d">advisory first, opt-in, the most risk</span><span class="ref">§13</span></div>
-    <div class="n planned"><span class="step">14</span><span class="t">UI redesign</span><span class="d">agent rail, title bar, tab bar, ticket cards, roster view</span><span class="ref">§14</span></div>
+    <div class="n planned"><span class="step">14</span><span class="t">UI redesign</span><span class="d">agent rail, title bar, tab bar, roster view</span><span class="ref">§14</span></div>
+    <div class="n planned"><span class="step">15</span><span class="t">Ticket card and dialog</span><span class="d">replaces the card tickets of Part 14</span><span class="ref">§15</span></div>
   </div>
 </section>
 
 <footer>
-  <span>Sources: <code>factory/README.md</code>, <code>factory/brief/</code> (index + 14 part files; §N = <code>brief/NN-*.md</code>), and <code>MIGRATION.md</code> for the source of the code.</span>
+  <span>Sources: <code>factory/README.md</code>, <code>factory/brief/</code> (index + 15 part files; §N = <code>brief/NN-*.md</code>), and <code>MIGRATION.md</code> for the source of the code.</span>
   <span>Model names are defaults. Check the OpenAI model with <code>pi --list-models</code> before release.</span>
 </footer>
 

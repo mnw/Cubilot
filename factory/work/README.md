@@ -6,7 +6,8 @@ Each folder here is one OpenSpec change, drafted from one part of the brief (`..
 |---|---|---|
 | Part 1, `01-rebrand.md` | (done without an OpenSpec change) | done |
 | Part 2, `02-factory-roles.md` | `openspec/changes/archive/2026-10-22-factory-roles/` | done (archived 2026-10-22) |
-| Part 3, `03-ticket-grouping-checkpoints.md` | `openspec/changes/ticket-grouping/` | active (drafted 2026-10-22, valid with `--strict`) |
+| Part 3, `03-ticket-grouping-checkpoints.md` | `openspec/changes/archive/2026-10-23-ticket-grouping/` | done (archived 2026-10-23) |
+| Part 4, `04-sessions.md` | `openspec/changes/stage-sessions/` | active (valid with `--strict`). Two more changes follow: `spec-review-stage` and `context-pack`. |
 
 Rules:
 - The brief keeps the research and the reasons. The change keeps the work. Do not copy the research into the change. Link to the brief.
