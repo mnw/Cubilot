@@ -14,9 +14,9 @@ The hub SHALL store an optional role on each ticket. The allowed roles are `work
 - **WHEN** a client sets the role `chef` on a ticket
 - **THEN** the hub returns HTTP 400 and the ticket is unchanged
 
-### Requirement: A launched session owns its ticket
+### Requirement: A launch assigns the ticket to its session
 
-When the hub starts a stage session, the hub SHALL set the ticket's assignee to the session name, in the same transaction as the stage's `launching` state. The hub SHALL reassign the ticket to the new session name on each retry. The assignment SHALL use the `ticket.assigned` event with the actor `system`. No other route SHALL accept the actor `system`. The assignment SHALL NOT wake the session on its first turn.
+When the hub starts a stage session, the hub SHALL set the ticket's assignee to the session name, in the same transaction as the stage's `launching` state. The assignment SHALL use the `ticket.assigned` event with the actor `system`.
 
 #### Scenario: Launch assigns the ticket
 
@@ -29,14 +29,27 @@ When the hub starts a stage session, the hub SHALL set the ticket's assignee to 
 - **WHEN** the retry of a stage launches session `worker-2`
 - **THEN** the ticket assignee is `worker-2`
 
-#### Scenario: System actor is refused elsewhere
+### Requirement: The launch assignment does not wake the session
 
-- **WHEN** a client sends `by: "system"` on a ticket edit
+The `ticket.assigned` event of a launch SHALL NOT wake the session on its first turn, because the initial prompt already holds the ticket.
+
+#### Scenario: No wake on first turn
+
+- **WHEN** a launch assigns the ticket to the new session
+- **THEN** the session receives no wake for that assignment
+
+### Requirement: The system actor is limited to hub-internal paths
+
+The actor `system` SHALL be accepted only on hub-internal paths: the launch, the retry, and the spec-review PASS (`spec-review-stage`). Every HTTP route SHALL refuse the actor `system` with HTTP 400.
+
+#### Scenario: System actor is refused on every HTTP route
+
+- **WHEN** a client sends `by: "system"` to any HTTP route of the hub
 - **THEN** the hub returns HTTP 400 and records nothing
 
 ### Requirement: A stage is one role's work on one ticket
 
-The hub SHALL keep a stage for each role's work on a ticket. The hub SHALL record each stage state change as one ledger event and one table update in one transaction. The states SHALL be `queued`, `launching`, `running`, `passed` and `failed`.
+The hub SHALL keep a stage for each role's work on a ticket. The hub SHALL record each stage state change as one ledger event and one table update in one transaction. The states SHALL be `queued`, `launching`, `running`, `retrying`, `passed` and `failed`. `retrying` is the state between a failed first attempt and its relaunch.
 
 #### Scenario: One event per change
 
@@ -44,9 +57,9 @@ The hub SHALL keep a stage for each role's work on a ticket. The hub SHALL recor
 - **THEN** the ledger holds one `stage.launching` event
 - **AND** the stage row shows `launching`
 
-### Requirement: A stage is ready only when all conditions hold
+### Requirement: A stage needs an eligible ticket
 
-The hub SHALL create a stage for a ticket and a role only when all of these hold: the ticket has that role; the ticket is not `draft`, `done` or `cancelled`; no ticket in its `blocked_by` list is open; and either no stage exists for the ticket and role, or a handoff to that role arrived after the last stage was created. While a stage for the ticket and role is `queued`, `launching` or `running`, the hub SHALL NOT create another.
+The hub SHALL create a stage for a ticket only when the ticket is not `draft`, `done` or `cancelled`, and no ticket in its `blocked_by` list is open.
 
 #### Scenario: Blocked ticket
 
@@ -66,11 +79,37 @@ The hub SHALL create a stage for a ticket and a role only when all of these hold
 - **WHEN** the hub evaluates the ticket
 - **THEN** the hub creates no stage
 
+### Requirement: The ticket role starts only the first stage
+
+The ticket's `role` SHALL start a stage only when no stage exists for the ticket and that role. Stages of any role after that SHALL come from `to_role` handoffs.
+
+#### Scenario: New ticket with a role
+
+- **GIVEN** a `queued` ticket with `role` `worker` and no stages
+- **WHEN** the hub evaluates the ticket
+- **THEN** the hub creates one `worker` stage
+
+#### Scenario: A handoff starts a stage of another role
+
+- **GIVEN** a `queued` ticket with `role` `worker` and a `passed` worker stage
+- **WHEN** a `to_role: "tester"` handoff arrives for the ticket
+- **THEN** the hub creates one `tester` stage for the ticket
+
 #### Scenario: New handoff starts a new stage
 
 - **GIVEN** the last `tester` stage of a ticket has passed
 - **WHEN** a handoff to role `tester` arrives for that ticket
 - **THEN** the hub creates one new `tester` stage
+
+### Requirement: One live stage per ticket and role
+
+While a stage for a ticket and role is `queued`, `launching` or `running`, the hub SHALL NOT create another stage for that ticket and role.
+
+#### Scenario: Second stage refused while live
+
+- **GIVEN** a `worker` stage for ticket `t42` is `running`
+- **WHEN** the hub evaluates ticket `t42`
+- **THEN** the hub creates no second `worker` stage
 
 ### Requirement: A handoff can name a role
 
@@ -103,7 +142,7 @@ The room settings SHALL hold a maximum number of live sessions for each role. A 
 
 ### Requirement: The hub names sessions by role and number
 
-The hub SHALL name a session `<role>-<n>`, where `n` is the lowest number of at least 1 that no live session of the role in the room uses.
+The hub SHALL name a session `<role>-<n>`, where `n` is the lowest number of at least 1 that no live session of the role uses on the tmux socket, in any room. Session names SHALL be unique across rooms. The role limits stay per room.
 
 #### Scenario: Name reuse
 
@@ -131,19 +170,46 @@ The hub SHALL NOT start or stop a process. For each session, the hub SHALL queue
 - **WHEN** the hub queues a close for `tester-1`
 - **THEN** the shell closes `tester-1` only
 
-### Requirement: Only the hub launches sessions
+### Requirement: The Orchestrator and chatbridge tools cannot start a session
 
-The Orchestrator, a role session and every chatbridge tool SHALL NOT start a session. No route and no chatbridge tool SHALL queue a launch request. Only the stage evaluation and the stage retry path SHALL queue one. The hub SHALL NOT use per-role tokens for this; a holder of the hub token can reach the launch stream (see the design risks).
+The Orchestrator, a role session and every chatbridge tool SHALL NOT start a session.
 
 #### Scenario: Orchestrator cannot launch
 
 - **WHEN** the Orchestrator calls a chatbridge tool that would start a session
 - **THEN** the tool does not exist, or it returns an error and the shell starts nothing
 
+### Requirement: Only the stage logic queues launches
+
+No route and no chatbridge tool SHALL queue a launch request directly. Only the stage evaluator and the stage retry path SHALL queue one, and only when the ready conditions and the role limit allow it. No route SHALL have a launch parameter.
+
 #### Scenario: No route queues a launch
 
 - **WHEN** a client calls every route that the hub exposes for tickets, handoffs and rooms
-- **THEN** none of them queues a launch request
+- **THEN** none of them queues a launch request unless the stage evaluator finds a ready stage
+
+#### Scenario: Only one function queues launches
+
+- **WHEN** the code is searched for the launch enqueue function
+- **THEN** its only callers are the stage evaluator and the stage retry path
+
+### Requirement: A queued or retried stage keeps its authorization
+
+A `queued` stage and a retry SHALL keep the authorization they were created with. A launch SHALL still require that the ticket is not `draft`, `done` or `cancelled`, and that no ticket in its `blocked_by` list is open.
+
+#### Scenario: Role handoff on a non-ready ticket queues nothing
+
+- **WHEN** a `to_role` handoff arrives for a ticket that is `draft`, blocked, `done`, or whose role is at its limit
+- **THEN** the hub queues no launch request
+
+### Requirement: Per-role tokens are not used for launches
+
+The hub SHALL NOT use per-role tokens to gate launches. A holder of the hub token can reach the launch stream; this is a recorded risk in the design.
+
+#### Scenario: Shared token
+
+- **WHEN** a role session holds the hub token
+- **THEN** the design risk "Launch stream token" is the only control on the launch stream
 
 ### Requirement: Stage worktrees come from the room's project folder
 
@@ -203,7 +269,7 @@ The hub SHALL render each session's first message from `factory/<role>/first-mes
 
 ### Requirement: Results are checked against a schema
 
-A stage SHALL end with a result handoff that names `context.stage_id` and `context.ticket_id`. A Validator or Reviewer result SHALL also contain `context.verdict` (`pass` or `fail`) and `context.findings` (a list of objects with `ticket_id` and `text`). The hub SHALL check the result when it arrives. A result that fails the check SHALL NOT change the stage. The hub SHALL send the errors to the same session and the session SHALL stay open.
+A stage SHALL end with a result handoff that names `context.stage_id` and `context.ticket_id`. A Validator or Reviewer result SHALL also contain `context.verdict` (`PASS` or `FAIL`, uppercase, for code and spec reviews alike) and `context.findings` (a list of objects with `ticket_id` and `text`). The hub SHALL check the result when it arrives. A result that fails the check SHALL NOT change the stage. The hub SHALL send the errors to the same session and the session SHALL stay open.
 
 #### Scenario: Invalid verdict
 
@@ -213,7 +279,7 @@ A stage SHALL end with a result handoff that names `context.stage_id` and `conte
 
 #### Scenario: Valid verdict
 
-- **WHEN** a Validator sends a result with `verdict: "pass"` and an empty findings list
+- **WHEN** a Validator sends a result with `verdict: "PASS"` and an empty findings list
 - **THEN** the stage moves to `passed`
 
 ### Requirement: A passed stage closes its session at the end of the turn
@@ -256,6 +322,20 @@ When a session reaches the end of a turn without a result, the hub SHALL send on
 - **WHEN** the relaunched session also stops without a result
 - **THEN** the stage moves to `failed`
 - **AND** the Orchestrator receives a handoff about the failed stage
+
+### Requirement: The stage table holds ticket and request stages
+
+The `stage` table SHALL hold ticket stages and request-level spec-review stages. `ticket_id` SHALL be set for a ticket stage and NULL for a spec-review stage. `request_id` SHALL be set for a spec-review stage. `review` SHALL be NULL for a ticket stage and `spec` for a spec-review stage. `verdict` SHALL be NULL until a result is recorded.
+
+#### Scenario: Ticket stage row
+
+- **WHEN** a worker stage for ticket `t42` is created
+- **THEN** the row has `ticket_id` `t42` and `review` NULL
+
+#### Scenario: Spec-review stage row
+
+- **WHEN** a spec-review stage for request `r-1` is created
+- **THEN** the row has `ticket_id` NULL, `request_id` `r-1` and `review` `spec`
 
 ### Requirement: Schema migrations take a snapshot first
 
