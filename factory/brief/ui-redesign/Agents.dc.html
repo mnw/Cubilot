@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cubilot — Agent roster</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#15120E}
+a{color:#E8A47F}a:hover{color:#F3C3A6}
+*{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:#3A322A transparent}
+:root{color-scheme:dark}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#3A322A;border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:#4A4036}
+::-webkit-scrollbar-corner{background:transparent}
+@media (max-width: 860px){.cb-body{flex-direction:column !important;height:auto !important}.cb-rail{width:auto !important;border-right:0 !important;border-bottom:1px solid #2A241D}.cb-pane{min-height:620px;border-right:0 !important}.cb-hide-sm{display:none !important}}
+</style>
+</helmet>
+<div style="height: 100vh; min-height: 720px; display: flex; flex-direction: column; background: #15120E; color: #EEE7DB; font-family: 'IBM Plex Sans', -apple-system, 'Segoe UI', sans-serif; font-size: 13px">
+
+<header style="height: 48px; flex: none; display: flex; align-items: center; gap: 14px; padding: 0 12px 0 16px; border-bottom: 1px solid #2A241D; background: #15120E">
+<div aria-hidden="true" style="display: flex; gap: 8px; padding-right: 10px">
+<span style="width: 12px; height: 12px; border-radius: 50%; background: #3A332B"></span>
+<span style="width: 12px; height: 12px; border-radius: 50%; background: #3A332B"></span>
+<span style="width: 12px; height: 12px; border-radius: 50%; background: #3A332B"></span>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; color: {{accent}}">
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 3 7v10l9 5 9-5V7z"></path><path d="m3 7 9 5 9-5"></path><path d="M12 12v10"></path></svg>
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-weight: 600; font-size: 13px; color: #EEE7DB; letter-spacing: 0.02em">cubilot</span>
+</div>
+<span aria-hidden="true" style="width: 1px; height: 20px; background: #362F27"></span>
+<button style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid #362F27; border-radius: 7px; background: #1E1A15; color: #EEE7DB; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12.5px; cursor: pointer"><span style="color: #978B78">#</span>cubilot<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#978B78" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button>
+<div class="cb-hide-sm" style="display: flex; align-items: center; gap: 8px; min-width: 0">
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #B4A893">Nutshell</span>
+<span style="font-size: 12.5px; color: #978B78; white-space: nowrap">No summary yet</span>
+<button style="border: 0; background: none; padding: 0; color: #E8A47F; font: inherit; font-size: 12.5px; cursor: pointer">Write one</button>
+</div>
+<div style="flex: 1"></div>
+<button title="Chat history resets when the hub restarts" style="display: flex; align-items: center; gap: 7px; height: 28px; padding: 0 10px; border: 1px solid #4A3E25; border-radius: 999px; background: #1F1A10; color: #E2B350; font: inherit; font-size: 12px; cursor: pointer"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: #E2B350"></span>Transcript not saved</button>
+<button style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid #362F27; border-radius: 7px; background: transparent; color: #B4A893; font: inherit; font-size: 12.5px; cursor: pointer">Lead<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; color: #EE9A6B">Orchestrator</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#978B78" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button>
+<div style="display: flex; gap: 2px">
+<button aria-label="Pause all agents" style="width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: #B4A893; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 5v14M15 5v14"></path></svg></button>
+<button aria-label="Add agent" style="width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: #B4A893; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
+<button aria-label="Room settings" style="width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: #B4A893; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"></path><circle cx="15" cy="6" r="2"></circle><circle cx="9" cy="12" r="2"></circle><circle cx="17" cy="18" r="2"></circle></svg></button>
+</div>
+</header>
+
+<div class="cb-body" style="flex: 1; min-height: 0; display: flex">
+
+<nav class="cb-rail" aria-label="Rooms and agents" style="width: 248px; flex: none; display: flex; flex-direction: column; border-right: 1px solid #2A241D; background: #17140F; min-height: 0">
+<div style="padding: 14px 12px 6px 16px; display: flex; justify-content: space-between; align-items: center">
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #978B78">Rooms</span>
+<button aria-label="New room" style="width: 24px; height: 24px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: #978B78; cursor: pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
+</div>
+<div style="padding: 0 8px; display: flex; flex-direction: column; gap: 2px">
+<a href="Main.dc.html" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 6px; background: transparent; color: #E3DACB; text-decoration: none; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12.5px"><span style="color: #978B78">#</span>cubilot<span style="margin-left: auto; font-size: 11px; color: #978B78">10</span></a>
+</div>
+<div style="padding: 18px 12px 6px 16px; display: flex; justify-content: space-between; align-items: center">
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #978B78">Agents</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: #978B78">10/10 online</span>
+</div>
+<div style="flex: 1; min-height: 0; overflow: auto; padding: 0 8px 10px; display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; align-items: center; gap: 10px; padding: 6px 8px">
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: #93BC78; flex: none"></span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12.5px; color: #EEE7DB">human</span>
+<span style="font-size: 11.5px; color: #978B78">you</span>
+</div>
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="5">
+<div style="display: flex; flex-direction: column; gap: 1px">
+<div style="padding: 4px 8px 2px; font-size: 11px; color: #978B78">{{g.label}}</div>
+<sc-for list="{{g.agents}}" as="a" hint-placeholder-count="2">
+<a href="Main.dc.html" style="display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border-radius: 6px; background: transparent; color: inherit; text-decoration: none">
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; flex: none; {{a.dotStyle}}"></span>
+<span style="display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1">
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12.5px; color: {{a.color}}; font-weight: 500">{{a.name}}</span>
+<span style="font-size: 11.5px; color: #978B78; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{a.activity}}</span>
+</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; color: #B4A893; border: 1px solid #362F27; border-radius: 4px; padding: 1px 5px">{{a.rt}}</span>
+</a>
+</sc-for>
+</div>
+</sc-for>
+</div>
+<div style="padding: 10px; border-top: 1px solid #2A241D; display: flex; gap: 6px">
+<a href="Agents.dc.html" aria-current="page" style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; height: 32px; border: 1px solid #4A3F33; border-radius: 7px; background: #241F19; color: #EEE7DB; text-decoration: none; font-size: 12.5px; font-weight: 500"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"></circle><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"></path><path d="M16 4.5a3.5 3.5 0 0 1 0 7M21 20c0-2.6-1.6-4.9-4-5.7"></path></svg>Manage agents</a>
+<button aria-label="Add agent" style="width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid #362F27; border-radius: 7px; background: transparent; color: #E3DACB; cursor: pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
+</div>
+</nav>
+
+<main class="cb-pane" style="flex: 1 1 0; min-width: 0; min-height: 0; overflow: auto; background: #110F0B">
+<div style="max-width: 1180px; padding: 26px 28px 32px; display: flex; flex-direction: column; gap: 22px">
+
+<div style="display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<a href="Main.dc.html" style="font-size: 12px; text-decoration: none">← Back to #cubilot</a>
+<h1 style="margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em">Agents</h1>
+<p style="margin: 0; font-size: 13px; color: #B4A893">Every agent runs in a visible session. Open any row to watch or steer it.</p>
+</div>
+<div style="flex: 1"></div>
+<div style="display: flex; gap: 8px">
+<button style="display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border: 1px solid #362F27; border-radius: 7px; background: transparent; color: #E3DACB; font: inherit; font-size: 13px; cursor: pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add agent</button>
+<button style="display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px; border: 0; border-radius: 7px; background: {{accent}}; color: #1A120C; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"></path></svg>Reload settings</button>
+</div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 1px; background: #2A241D; border: 1px solid #2A241D; border-radius: 10px; overflow: hidden">
+<div style="background: #17140F; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 12px; color: #978B78">Online</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 18px; color: #EEE7DB">10<span style="color: #978B78">/10</span></span>
+</div>
+<div style="background: #17140F; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 12px; color: #978B78">Factory version</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 14px; color: #EEE7DB; padding-top: 3px">v-01b7e18c79a51d3f</span>
+</div>
+<div style="background: #17140F; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 12px; color: #978B78">Pending reloads</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 18px; color: #93BC78">0</span>
+</div>
+<div style="background: #17140F; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 12px; color: #978B78">Hub</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 18px; color: #EEE7DB">:63318</span>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+<h2 style="margin: 0; font-size: 14px; font-weight: 600">Roster</h2>
+<div role="group" aria-label="Filter agents by role" style="display: flex; gap: 2px; padding: 2px; border: 1px solid #2A241D; border-radius: 7px">
+<button aria-pressed="true" style="height: 24px; padding: 0 9px; border: 0; border-radius: 5px; background: #2A241D; color: #EEE7DB; font: inherit; font-size: 12px; cursor: pointer">All</button>
+<button aria-pressed="false" style="height: 24px; padding: 0 9px; border: 0; border-radius: 5px; background: transparent; color: #B4A893; font: inherit; font-size: 12px; cursor: pointer">Factory roles</button>
+<button aria-pressed="false" style="height: 24px; padding: 0 9px; border: 0; border-radius: 5px; background: transparent; color: #B4A893; font: inherit; font-size: 12px; cursor: pointer">Probes</button>
+</div>
+<div style="flex: 1"></div>
+<div style="display: flex; align-items: center; gap: 14px; font-size: 11.5px; color: #978B78">
+<span style="display: flex; align-items: center; gap: 6px"><span aria-hidden="true" style="width: 7px; height: 7px; border-radius: 50%; background: #E2B350"></span>Running</span>
+<span style="display: flex; align-items: center; gap: 6px"><span aria-hidden="true" style="width: 7px; height: 7px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px #E2B350"></span>Waiting</span>
+<span style="display: flex; align-items: center; gap: 6px"><span aria-hidden="true" style="width: 7px; height: 7px; border-radius: 50%; background: #93BC78"></span>Idle</span>
+</div>
+</div>
+
+<div style="overflow-x: auto; border: 1px solid #2A241D; border-radius: 10px; background: #15120E">
+<table style="width: 100%; min-width: 960px; border-collapse: collapse; font-size: 12.5px">
+<thead>
+<tr style="text-align: left; color: #978B78; font-size: 11.5px">
+<th scope="col" style="padding: 10px 16px; font-weight: 500; border-bottom: 1px solid #2A241D">Agent</th>
+<th scope="col" style="padding: 10px 12px; font-weight: 500; border-bottom: 1px solid #2A241D">Role</th>
+<th scope="col" style="padding: 10px 12px; font-weight: 500; border-bottom: 1px solid #2A241D">Runtime</th>
+<th scope="col" style="padding: 10px 12px; font-weight: 500; border-bottom: 1px solid #2A241D">Now</th>
+<th scope="col" style="padding: 10px 12px; font-weight: 500; border-bottom: 1px solid #2A241D">Factory</th>
+<th scope="col" style="padding: 10px 12px; font-weight: 500; border-bottom: 1px solid #2A241D">Context</th>
+<th scope="col" style="padding: 10px 12px; font-weight: 500; border-bottom: 1px solid #2A241D; text-align: right">Cost</th>
+<th scope="col" style="padding: 10px 16px; font-weight: 500; border-bottom: 1px solid #2A241D"><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Actions</span></th>
+</tr>
+</thead>
+<tbody>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="9">
+<tr style="border-bottom: 1px solid #221D17">
+<td style="padding: 11px 16px; white-space: nowrap"><span style="display: flex; align-items: center; gap: 10px"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; flex: none; {{r.dotStyle}}"></span><span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-weight: 600; color: {{r.color}}">{{r.name}}</span></span></td>
+<td style="padding: 11px 12px; color: #E3DACB; white-space: nowrap">{{r.role}}</td>
+<td style="padding: 11px 12px; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11.5px; color: #B4A893; white-space: nowrap">{{r.runtime}}</td>
+<td style="padding: 11px 12px; color: #E3DACB"><span style="display: flex; flex-direction: column; gap: 1px"><span>{{r.activity}}</span><span style="font-size: 11.5px; color: #978B78">{{r.status}}</span></span></td>
+<td style="padding: 11px 12px; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11.5px; white-space: nowrap"><span style="display: flex; flex-direction: column; gap: 1px"><span style="color: #E3DACB">v-01b7e18c</span><span style="color: #978B78">{{r.applied}}</span></span></td>
+<td style="padding: 11px 12px; white-space: nowrap"><span style="display: flex; align-items: center; gap: 8px; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11.5px; color: #E3DACB"><span aria-hidden="true" style="width: 64px; height: 4px; border-radius: 2px; background: #2A241D; display: block; overflow: hidden"><span style="display: block; height: 100%; width: {{r.ctx}}; background: {{r.ctxColor}}"></span></span>{{r.ctx}}</span></td>
+<td style="padding: 11px 12px; text-align: right; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12px; color: #E3DACB; white-space: nowrap">{{r.cost}}</td>
+<td style="padding: 11px 16px; white-space: nowrap"><span style="display: flex; align-items: center; justify-content: flex-end; gap: 4px"><a href="Main.dc.html" style="display: flex; align-items: center; height: 28px; padding: 0 10px; border: 1px solid #362F27; border-radius: 6px; color: #E3DACB; text-decoration: none; font-size: 12px">Session</a><button aria-label="More actions for {{r.name}}" style="width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: #B4A893; cursor: pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.6"></circle><circle cx="12" cy="12" r="1.6"></circle><circle cx="19" cy="12" r="1.6"></circle></svg></button></span></td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+</div>
+
+</div>
+</main>
+
+</div>
+
+<footer style="height: 28px; flex: none; display: flex; align-items: center; gap: 16px; padding: 0 14px; border-top: 1px solid #2A241D; background: #110F0B; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: #978B78; white-space: nowrap; overflow: hidden">
+<span style="display: flex; align-items: center; gap: 6px"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: #93BC78"></span>hub :63318</span>
+<span>10/10 agents online</span>
+<span style="margin-left: auto">session <span style="color: #E3DACB">$696</span></span>
+<span>resets in <span style="color: #E3DACB">1h 06m</span></span>
+<span>weekly <span style="color: #E3DACB">$7,135</span> · last 7d</span>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#E8834F","options":["#E8834F","#E2B350","#8CC4A6","#82B8DC"]},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const C = { lead: '#EE9A6B', worker: '#D9B76C', tester: '#8CC4A6', validator: '#B3ADEB', probe: '#82B8DC' };
+    const S = {
+      running: 'background: #E2B350',
+      waiting: 'background: transparent; box-shadow: inset 0 0 0 1.5px #E2B350',
+      idle: 'background: #93BC78'
+    };
+    const L = { running: 'Running', waiting: 'Waiting', idle: 'Idle' };
+    const mk = (name, role, status, activity, rt) => ({ name: name, activity: activity, rt: rt, color: C[role], dotStyle: S[status] });
+    const row = (name, roleKey, role, runtime, status, activity, applied, ctx, cost) => ({
+      name: name, role: role, runtime: runtime, activity: activity, status: L[status],
+      applied: applied, ctx: ctx, cost: cost, color: C[roleKey], dotStyle: S[status],
+      ctxColor: parseFloat(ctx) > 60 ? '#E2B350' : '#93BC78'
+    });
+    return {
+      accent: this.props.accent ?? '#E8834F',
+      groups: [
+        { label: 'Lead', agents: [mk('Orchestrator', 'lead', 'waiting', 'Awaiting “ready 2”', 'cc')] },
+        { label: 'Build', agents: [mk('Worker1', 'worker', 'running', 'Spawn window fix', 'cc'), mk('Worker2', 'worker', 'idle', '8.3a in review', 'cc')] },
+        { label: 'Test', agents: [mk('Tester1', 'tester', 'idle', 'Idle', 'cc'), mk('Tester2', 'tester', 'running', 'Hot-reload round 2', 'cc')] },
+        { label: 'Review', agents: [mk('Validator', 'validator', 'waiting', 'Waiting on Tester2', 'cc')] },
+        { label: 'Probes', agents: [mk('t-hr-claude', 'probe', 'idle', 'v-01b7e18c applied', 'cc'), mk('t-hr-pi', 'probe', 'idle', 'v-01b7e18c applied', 'pi'), mk('t-pi-role', 'probe', 'idle', 'Idle', 'pi')] }
+      ],
+      rows: [
+        row('Orchestrator', 'lead', 'Lead', 'Claude Code', 'waiting', 'Awaiting “ready 2” from Tester2', 'applied', '41%', '$2.84'),
+        row('Worker1', 'worker', 'Builder', 'Claude Code', 'running', 'Spawn window still launches with no role', 'applied', '63%', '$4.12'),
+        row('Worker2', 'worker', 'Builder', 'Claude Code', 'idle', '8.3a in review', 'applied', '22%', '$1.97'),
+        row('Tester1', 'tester', 'Tester', 'Claude Code', 'idle', 'No assignment', 'applied', '9%', '$0.41'),
+        row('Tester2', 'tester', 'Tester', 'Claude Code', 'running', 'Hot-reload test, round 2', 'applied', '34%', '$1.18'),
+        row('Validator', 'validator', 'Reviewer', 'Claude Code', 'waiting', 'Waiting on Tester2’s report', 'applied', '27%', '$0.96'),
+        row('t-hr-claude', 'probe', 'Probe', 'Claude Code', 'idle', 'Quoted HOTRELOAD-MARKER-1', 'applied 20:38:46', '6%', '$0.22'),
+        row('t-hr-pi', 'probe', 'Probe', 'pi · gpt-5.6-sol', 'idle', 'Quoted HOTRELOAD-MARKER-1', 'applied 20:38:57', '8.3%', '$0.136'),
+        row('t-pi-role', 'probe', 'Probe', 'pi · gpt-5.6-sol', 'idle', 'No assignment', 'applied', '5%', '$0.09')
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

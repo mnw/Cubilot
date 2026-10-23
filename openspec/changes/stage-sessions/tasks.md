@@ -1,0 +1,47 @@
+## 1. Data
+
+- [ ] 1.1 Snapshot before migration: copy `ledger.db` to `<app data>/snapshots/` (mode `0600`) before `migrate()` runs; stop the migration if the copy fails → verify: unit test with a ledger that needs a migration: snapshot exists before the schema changes; a forced copy failure leaves the schema unchanged
+- [ ] 1.2 `migrate()`: add `tickets.role TEXT`, `room_settings.role_limits TEXT`, `room_settings.stage_timeout_min INTEGER`, and create table `stage`; each guarded so a second run changes nothing → verify: `migrate()` twice on a fresh ledger and on a current one gives no error and the same schema
+- [ ] 1.3 Ticket `role` in `create_ticket`, `edit_ticket`, `TicketSnapshot` and read routes; allowed values are the six roles; edit rule as `request_id` in `ticket-grouping` → verify: create with `tester` stores it; `chef` gets 400 and persists nothing; an agent that is not the creator or lead cannot change it
+
+## 2. Stage kind
+
+- [ ] 2.1 Create `hub/kinds/stage.ts` implementing `KindModule`; add it to `KINDS` in `hub/hub.ts` → verify: `bun x tsc --noEmit` passes; the kind routes are mounted
+- [ ] 2.2 Transition function: each of `queued`, `launching`, `running`, `passed`, `failed`, `retrying` writes one event and one row update in `applyWithSideEffect` → verify: integration test: one event per transition; a failing side effect leaves no event and no row change
+- [ ] 2.3 `evaluateStages(ticket)` implements the ready conditions (role set; not `draft`, `done` or `cancelled`; no open blocker; no live stage, or a new handoff since the last stage) → verify: unit tests: blocked ticket creates no stage; draft creates none; done and cancelled create none; a new `tester` handoff after a passed stage creates one new stage; a second call while `queued` creates none (brief tests 1 and 9 cover claim/launch)
+- [ ] 2.4 Role handoffs: `POST /handoffs` takes `to_role`; exactly one of `to` and `to_role`; the evaluator runs in the same dispatch → verify: `to_role` creates a stage; both fields get 400 and nothing is written; a `to`-only handoff behaves as before (existing handoff tests pass)
+- [ ] 2.5 Ticket ownership on launch: in the `launching` transaction, set `ticket.assignee` to the session name with actor `system` via `ticket.assigned`; reassign on retry; refuse the actor `system` on every other route; the first-turn assignment wakes no one → verify: integration test: launch of `worker-1` gives assignee `worker-1` and one `ticket.assigned` event by `system`; retry gives `worker-2`; `by: "system"` on `PATCH`/`POST` routes gets 400 and writes nothing
+
+## 3. Slots and limits
+
+- [ ] 3.1 Room defaults for `role_limits` (worker 2, tester 2, validator 1, writer 1, editor 1, reviewer 1) and `stage_timeout_min` 30; `PUT /rooms/<room>/settings` accepts a limit from 0 to 10 → verify: a new room has the defaults; 11 gets 400
+- [ ] 3.2 Queue: a full role keeps the stage `queued`; on a free slot, the oldest queued stage of that role starts; name `<role>-<n>` takes the lowest free number → verify: brief test 2 (limit 1, second ticket waits, starts on close); name reuse after `worker-1` closes gives `worker-1`
+
+## 4. Launch channel
+
+- [ ] 4.1 **High blast radius.** Hub launch-request queue: `GET /launches/stream` (SSE, bearer or `?token=`), `POST /launches/<id>/ack`; requests `launch` and `close`; a launch with no ack in 15 s counts as a failed attempt → verify: integration test with a fake shell client: a launch request arrives, an ack moves the stage to `running`; no ack in 15 s moves it to `retrying`; a `POST` to every existing ticket, handoff and room route and to every chatbridge tool queues no launch (no route and no chatbridge tool queues a launch; no per-role token, see design risks)
+- [ ] 4.2 **High blast radius.** Rust shell: opens the launch stream with the hub token at startup; on `launch` calls `pty_spawn` with the role, the cwd, the initial prompt and env `CUBILOT_STAGE_ID`; on `close` runs `tmux kill-session` for that name only; never kills sessions on app exit → verify: `cargo test --manifest-path src-tauri/Cargo.toml` passes; add a test for `close` naming one session; brief test 3 check: a tester launch starts in its worktree (live check in 6.5)
+- [ ] 4.3 Initial prompt: render the ticket part (no role prompt) to `<app data>/sessions/<session>/first-message.md` and pass it as one quoted argument of the launch command, read through `$(cat …)` in the single `$SHELL -ic` argv element; retries add the stop reason line; untested points: pi accepts a positional prompt; the largest ticket part fits the argv limit → verify: launch command of a worker contains `--append-system-prompt-file` and the prompt argument, and no role text in the prompt; two worker launches for different tickets share the role prompt file and differ only in the ticket part; a ticket part of 100 KB launches (or the limit is recorded here); a pi launch receives the prompt (or the gap is recorded here)
+- [ ] 4.4 **High blast radius.** Read-only worktrees: for Validator and Reviewer, `chmod -R a-w` on the work tree (not `.git`), and `git status` plus a read of the tree work inside it → verify: a write attempt inside the worktree fails; `git status` and `git diff` still run; record the result in this file; if git needs `.git` writes that fail, record the exception here before the change ships
+- [ ] 4.5 Worktrees from the room's project folder: Worker and Writer use `ticket/<id>` (created from the room base if missing) and reuse it; other roles get `--detach` at the handoff commit; temporary worktrees are removed after pass or final fail; a room with no project folder refuses the launch with `room has no project folder`, marks the stage `failed` and counts no attempt → verify: brief test 3: a tester handoff gets a worktree detached at the named commit; a worker stage is on `ticket/<id>`; the temporary worktree is gone after pass; a room without a project folder gets the error and no session
+
+## 5. Results, reminders, retries and close
+
+- [ ] 5.1 Result schema check on result handoffs: `context.stage_id` and `context.ticket_id` always; `context.verdict` and `context.findings` for Validator and Reviewer → verify: brief test 4: an invalid verdict returns errors to the same session with `stage.rejected`, the stage stays `running`; a valid one passes
+- [ ] 5.2 Turn end: the bridge core reports end of turn (`onRunEnd`, both harnesses) to `POST /stages/<CUBILOT_STAGE_ID>/turn-end`; the first end without a result sends one `stage.reminder`; a passing result writes `stage.passed`, then the hub queues `close`; transcript kept → verify: brief test 5: after pass and turn end, the session closes and the transcript is in the room history; one end without a result gets one reminder and the stage stays `running`
+- [ ] 5.3 Retry: a second end of turn without a result, or a time-out, or agent gone longer than `STALE_AGENT_MS`, ends attempt 1 with `stage.retrying`; attempt 2 uses the same ticket part plus a reason note and reassigns the ticket (2.5); a second failure moves to `failed` and sends a handoff to the Orchestrator → verify: brief test 6: one relaunch on first stop; second stop sends the Orchestrator a message; a reminder followed by one more end of turn counts as a stop
+- [ ] 5.4 Interrupts: an interrupt on a stage session changes nothing → verify: integration test: stage stays `running`, session stays open
+- [ ] 5.5 Pane "finished" list in the UI (`ui/`, vanilla JS; no framework) → verify: a closed stage session appears in the list; the list survives a reload from the ledger
+
+## 6. Tool limits and checks
+
+- [ ] 6.1 Hub-launched Claude session blocks `Task` and `Agent`; `ack_permission` blocked (reuses `factory-roles` launch) → verify: brief test 7: the launch command of a hub-started `worker` contains both blocks; a live check in the app with a launched worker
+- [ ] 6.2 Orchestrator and chatbridge tools cannot start a session; `factory/orchestrator/orchestrator.md` says so → verify: brief test 8: a tool list check shows no launch tool; the Orchestrator's launch attempt via any tool fails
+- [ ] 6.3 Rebuild bridges and sidecars: `./scripts/build-sidecars.sh` and `./scripts/check-mod.sh` → verify: both pass
+- [ ] 6.4 Checks: `bun test`, `cargo test --manifest-path src-tauri/Cargo.toml`, `bun x tsc --noEmit` → verify: all pass; record the output in this file
+- [ ] 6.5 Live check in the app: a Worker and a Tester stage on one ticket with a handoff; back up the ledger first; install with `./scripts/install.sh` → verify: record the result in this file
+
+## 7. Docs
+
+- [ ] 7.1 `docs/PROTOCOL.md`: `to_role`, the `stage` kind, the launch stream, the result schema, the `system` actor on launch → verify: Writer and Reviewer pass (`[doc]` ticket)
+- [ ] 7.2 `CLAUDE.md`: hard rules for launches (hub only, shell executes), stage events, read-only worktrees, the stage id env. Add this line: "A stage launch writes `stage.launching` and `ticket.assigned` in one transaction; this is the only cross-kind transaction." → verify: review; `grep -n "only cross-kind transaction" CLAUDE.md` finds the line

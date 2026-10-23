@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cubilot — Ticket dialog, in review with approval</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#14110f}
+a{color:#e08265}a:hover{color:#f0a88e}
+*{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:#352c26 transparent}
+:root{color-scheme:dark}
+</style>
+</helmet>
+<div role="dialog" aria-labelledby="tr-title" style="width: 780px; height: 1080px; display: flex; flex-direction: column; background: #221d19; color: #f5ede2; font-family: Inter, -apple-system, 'Segoe UI', sans-serif; font-size: 13px; border: 1px solid #352c26; border-radius: 10px; overflow: hidden">
+
+<header style="flex: none; display: flex; flex-direction: column; gap: 10px; padding: 16px 22px 16px; border-bottom: 1px solid #2a231e">
+<div style="display: flex; align-items: center; gap: 10px">
+<span style="padding: 1px 6px; border-radius: 4px; background: #33281a; color: #e8a857; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase">code</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11.5px; color: #978b78">8.3b</span>
+<span style="display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 999px; background: #2b2433; color: #c3aedb; font-size: 11.5px; font-weight: 500"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid #c3aedb"></span>In review</span>
+<span style="display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: #e38f7a">
+<span role="img" aria-label="Status: waiting for the human" style="display: inline-flex; gap: 4px"><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #ff5f57"></i><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #8a8a8e; opacity: 0.35"></i><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #8a8a8e; opacity: 0.35"></i></span>
+Waiting for you</span>
+<button style="margin-left: auto; display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border: 1px solid #352c26; border-radius: 6px; background: transparent; color: #f5ede2; font: inherit; font-size: 12.5px; cursor: pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"></path><path d="m13 7 4 4"></path></svg>Edit</button>
+<button aria-label="Close" style="width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: #a69583; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg></button>
+</div>
+<div style="display: flex; flex-direction: column; gap: 3px">
+<h2 id="tr-title" style="margin: 0; font-size: 18px; font-weight: 600; line-height: 1.35">Hot reload: briefing factory_version and bridge reload</h2>
+<p style="margin: 0; font-size: 13px; color: #a69583">idle at once, busy after the run</p>
+</div>
+</header>
+
+<div style="flex: 1; min-height: 0; overflow: auto; padding: 20px 22px; display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start">
+
+<div style="flex: 999 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 24px">
+
+<section role="region" aria-label="Approval" style="display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border: 1px solid #5a2e25; border-radius: 8px; background: #2a1b17">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e38f7a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 1px"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px">
+<strong style="font-size: 13px; font-weight: 600; color: #f5ede2">Waiting for your approval</strong>
+<span style="font-size: 12.5px; line-height: 1.5; color: #e3d6c6">Worker1 asks to move this high-radius ticket to Done.</span>
+</div>
+<div style="display: flex; gap: 6px; flex: none">
+<button style="height: 30px; padding: 0 12px; border: 1px solid #5a2e25; border-radius: 6px; background: transparent; color: #f5ede2; font: inherit; font-size: 12.5px; cursor: pointer">Deny</button>
+<button style="height: 30px; padding: 0 14px; border: 0; border-radius: 6px; background: #7fb069; color: #14200f; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer">Allow</button>
+</div>
+</section>
+
+<section aria-labelledby="tr-ac" style="display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: center; gap: 10px">
+<h3 id="tr-ac" style="margin: 0; font-size: 13px; font-weight: 600">Acceptance criteria</h3>
+<span style="font-size: 11.5px; color: #978b78">2 of 3 checked</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px; font-size: 13px; line-height: 1.55; color: #e3d6c6">
+<p style="margin: 0; font-weight: 600; color: #f5ede2">Done when</p>
+<ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px">
+<li style="display: flex; gap: 9px; align-items: flex-start"><span role="img" aria-label="Checked" style="width: 15px; height: 15px; flex: none; margin-top: 3px; border-radius: 4px; background: #7fb069; display: grid; place-items: center"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#14200f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg></span><span>The briefing carries <code style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12px; background: #2a231e; border-radius: 4px; padding: 1px 5px; color: #f0c4b0">factory_version</code>.</span></li>
+<li style="display: flex; gap: 9px; align-items: flex-start"><span role="img" aria-label="Checked" style="width: 15px; height: 15px; flex: none; margin-top: 3px; border-radius: 4px; background: #7fb069; display: grid; place-items: center"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#14200f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg></span><span>An idle agent reloads at once after Reload settings.</span></li>
+<li style="display: flex; gap: 9px; align-items: flex-start"><span role="img" aria-label="Not checked" style="width: 15px; height: 15px; flex: none; margin-top: 3px; border-radius: 4px; border: 1.5px solid #6b5d51"></span><span>A busy agent reloads only after its run ends (<code style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12px; background: #2a231e; border-radius: 4px; padding: 1px 5px; color: #f0c4b0">.applied</code> time after the reply).</span></li>
+</ul>
+<p style="margin: 0">Verify: Tester2 runs hot-reload rounds 1 and 2 on a Claude agent and a Pi agent.</p>
+</div>
+</section>
+
+<section aria-labelledby="tr-no" style="display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: center; gap: 10px">
+<h3 id="tr-no" style="margin: 0; font-size: 13px; font-weight: 600">Notes</h3>
+<span style="font-size: 11.5px; color: #978b78">8 · newest first</span>
+</div>
+<ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column">
+<li style="display: flex; flex-direction: column; gap: 3px; padding: 10px 0; border-top: 1px solid #2a231e">
+<div style="display: flex; align-items: baseline; gap: 8px; font-size: 12px"><span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-weight: 600; color: #6ab5a3">Tester2</span><time style="color: #978b78">22 Oct, 20:41</time></div>
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: #e3d6c6">Round 1 (idle case) PASS on both agents: each one quoted HOTRELOAD-MARKER-1.</p>
+</li>
+<li style="display: flex; flex-direction: column; gap: 3px; padding: 10px 0; border-top: 1px solid #2a231e">
+<div style="display: flex; align-items: baseline; gap: 8px; font-size: 12px"><span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-weight: 600; color: #e8a857">Worker1</span><time style="color: #978b78">22 Oct, 20:12</time></div>
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: #e3d6c6">The bridge now waits for the end of the run before it reloads a busy agent.</p>
+</li>
+<li style="display: flex; flex-direction: column; gap: 3px; padding: 10px 0; border-top: 1px solid #2a231e">
+<div style="display: flex; align-items: baseline; gap: 8px; font-size: 12px"><span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-weight: 600; color: #a788c4">Validator</span><time style="color: #978b78">22 Oct, 19:58</time></div>
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: #e3d6c6">Installed verification remains required before completion.</p>
+</li>
+</ol>
+<button style="align-self: flex-start; height: 28px; padding: 0 10px; border: 1px solid #352c26; border-radius: 6px; background: transparent; color: #f5ede2; font: inherit; font-size: 12px; cursor: pointer">Show all 8 notes</button>
+</section>
+
+<section aria-labelledby="tr-at" style="display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; align-items: center; gap: 10px">
+<h3 id="tr-at" style="margin: 0; font-size: 13px; font-weight: 600">Attachments</h3>
+<span style="font-size: 11.5px; color: #978b78">0</span>
+</div>
+<div style="display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; border: 1px dashed #352c26; border-radius: 7px; font-size: 12px; color: #978b78; flex-wrap: wrap">
+<span>Drop files here or</span>
+<button style="border: 0; padding: 0; background: none; color: #e08265; font: inherit; font-size: 12px; cursor: pointer">browse</button>
+<span>· pdf, md, txt, png, jpg · up to 8 MB</span>
+</div>
+</section>
+
+</div>
+
+<aside aria-label="Properties" style="flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 14px; padding: 14px; border: 1px solid #2a231e; border-radius: 9px; background: #1a1714">
+<div style="display: flex; flex-direction: column; gap: 5px">
+<label for="tr-status" style="font-size: 12px; color: #978b78">Status</label>
+<select id="tr-status" style="height: 32px; padding: 0 8px; border: 1px solid #352c26; border-radius: 6px; background: #221d19; color: #f5ede2; font: inherit; font-size: 13px"><option>Draft</option><option>Queued</option><option>In progress</option><option selected>In review</option><option>Done</option></select>
+</div>
+<div style="display: flex; flex-direction: column; gap: 5px">
+<label for="tr-assignee" style="font-size: 12px; color: #978b78">Assignee</label>
+<select id="tr-assignee" style="height: 32px; padding: 0 8px; border: 1px solid #352c26; border-radius: 6px; background: #221d19; color: #f5ede2; font: inherit; font-size: 13px"><option selected>Worker1</option><option>Worker2</option><option>Tester1</option><option>Tester2</option><option>Validator</option></select>
+</div>
+<dl style="margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px 12px; align-items: center; font-size: 12.5px">
+<dt style="color: #978b78; font-size: 12px">Priority</dt>
+<dd style="margin: 0; display: flex; align-items: center; gap: 6px; color: #f5ede2"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="0" y="8" width="2" height="4" fill="#d97757"></rect><rect x="3.3" y="5.5" width="2" height="6.5" fill="#d97757"></rect><rect x="6.6" y="3" width="2" height="9" fill="#d97757"></rect><rect x="9.9" y="0" width="2" height="12" fill="#3a3029"></rect></svg>High</dd>
+<dt style="color: #978b78; font-size: 12px">Blast radius</dt>
+<dd style="margin: 0"><span style="padding: 1px 7px; border-radius: 4px; background: #3a201b; color: #e38f7a; font-size: 12px">High</span></dd>
+<dt style="color: #978b78; font-size: 12px">Request</dt>
+<dd style="margin: 0; color: #978b78">—</dd>
+<dt style="color: #978b78; font-size: 12px">External ref</dt>
+<dd style="margin: 0; color: #978b78">—</dd>
+</dl>
+<div aria-hidden="true" style="height: 1px; background: #2a231e"></div>
+<dl style="margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 10px; font-size: 12px">
+<dt style="color: #978b78">Created</dt>
+<dd style="margin: 0; color: #a69583">22 Oct 2026, 18:02 by <span style="color: #ee9a6b">Orchestrator</span></dd>
+<dt style="color: #978b78">Updated</dt>
+<dd style="margin: 0; color: #a69583">22 Oct 2026, 20:41</dd>
+<dt style="color: #978b78">ID</dt>
+<dd style="margin: 0; display: flex; align-items: center; gap: 4px; min-width: 0"><span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: #a69583; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">t_9c41e07a3b2d5f18</span><button aria-label="Copy ticket ID" style="width: 24px; height: 24px; flex: none; display: grid; place-items: center; border: 0; border-radius: 4px; background: transparent; color: #978b78; cursor: pointer"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"></path></svg></button></dd>
+</dl>
+</aside>
+
+</div>
+
+<footer style="flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 12px 22px; border-top: 1px solid #2a231e; background: #221d19">
+<button style="height: 32px; padding: 0 12px; border: 1px solid #5a2e25; border-radius: 6px; background: transparent; color: #e38f7a; font: inherit; font-size: 12.5px; cursor: pointer">Cancel ticket</button>
+<div style="flex: 1"></div>
+<button style="height: 32px; padding: 0 14px; border: 1px solid #352c26; border-radius: 6px; background: transparent; color: #f5ede2; font: inherit; font-size: 12.5px; cursor: pointer">Close</button>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":780,"height":1080}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

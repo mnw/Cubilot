@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cubilot — Ticket dialog, in review, editing</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#14110f}
+a{color:#e08265}a:hover{color:#f0a88e}
+*{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:#352c26 transparent}
+:root{color-scheme:dark}
+</style>
+</helmet>
+<div role="dialog" aria-labelledby="te-title-label" style="width: 780px; height: 1080px; display: flex; flex-direction: column; background: #221d19; color: #f5ede2; font-family: Inter, -apple-system, 'Segoe UI', sans-serif; font-size: 13px; border: 1px solid #352c26; border-radius: 10px; overflow: hidden">
+
+<header style="flex: none; display: flex; flex-direction: column; gap: 12px; padding: 16px 22px 16px; border-bottom: 1px solid #2a231e">
+<div style="display: flex; align-items: center; gap: 10px">
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11.5px; color: #978b78">8.3b</span>
+<span style="display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 999px; background: #2b2433; color: #c3aedb; font-size: 11.5px; font-weight: 500"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid #c3aedb"></span>In review</span>
+<span style="display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: #e38f7a">
+<span role="img" aria-label="Status: waiting for the human" style="display: inline-flex; gap: 4px"><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #ff5f57"></i><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #8a8a8e; opacity: 0.35"></i><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #8a8a8e; opacity: 0.35"></i></span>
+Waiting for you</span>
+<span style="margin-left: auto; display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: 999px; background: #33281a; color: #e8a857; font-size: 11.5px; font-weight: 500"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"></path><path d="m13 7 4 4"></path></svg>Editing</span>
+<button aria-label="Close (asks first when there are unsaved changes)" style="width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: #a69583; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg></button>
+</div>
+<label id="te-title-label" for="te-title" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap">Ticket title</label>
+<input id="te-title" type="text" value="[code] 8.3b Hot reload: briefing factory_version and bridge reload (idle at once, busy after the run)" style="width: 100%; height: 42px; padding: 0 10px; border: 1px solid #4a3d34; border-radius: 7px; background: #1a1714; color: #f5ede2; font-family: Inter, -apple-system, sans-serif; font-size: 16px; font-weight: 600">
+</header>
+
+<div style="flex: 1; min-height: 0; overflow: auto; padding: 20px 22px; display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start">
+
+<div style="flex: 999 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 24px">
+
+<div role="note" style="display: flex; align-items: flex-start; gap: 10px; padding: 11px 14px; border: 1px solid #4d3d22; border-radius: 8px; background: #2a2216; font-size: 12.5px; line-height: 1.5; color: #ead9bd">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e8a857" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 2px"><path d="M12 3 2 20h20z"></path><path d="M12 10v4M12 17h.01"></path></svg>
+<span>This ticket waits for your approval. If you save new acceptance criteria or set the blast radius to low, Worker1's approval request is cancelled.</span>
+</div>
+
+<section aria-labelledby="te-ac" style="display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; align-items: center; gap: 10px">
+<h3 id="te-ac" style="margin: 0; font-size: 13px; font-weight: 600">Acceptance criteria</h3>
+<span style="font-size: 11.5px; color: #978b78">2 of 3 checked</span>
+<div role="tablist" aria-label="Criteria view" style="margin-left: auto; display: flex; gap: 2px; padding: 2px; border: 1px solid #2a231e; border-radius: 6px">
+<button role="tab" aria-selected="true" style="height: 22px; padding: 0 9px; border: 0; border-radius: 4px; background: #2f2621; color: #f5ede2; font: inherit; font-size: 11.5px; cursor: pointer">Write</button>
+<button role="tab" aria-selected="false" style="height: 22px; padding: 0 9px; border: 0; border-radius: 4px; background: transparent; color: #a69583; font: inherit; font-size: 11.5px; cursor: pointer">Preview</button>
+</div>
+</div>
+<div role="toolbar" aria-label="Format the acceptance criteria" style="display: flex; gap: 4px">
+<button aria-label="Bold" style="width: 28px; height: 26px; display: grid; place-items: center; border: 1px solid #352c26; border-radius: 5px; background: transparent; color: #f5ede2; font: inherit; font-weight: 700; font-size: 12px; cursor: pointer">B</button>
+<button aria-label="Bulleted list" style="width: 28px; height: 26px; display: grid; place-items: center; border: 1px solid #352c26; border-radius: 5px; background: transparent; color: #f5ede2; cursor: pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"></path><circle cx="4.5" cy="6" r="1"></circle><circle cx="4.5" cy="12" r="1"></circle><circle cx="4.5" cy="18" r="1"></circle></svg></button>
+<button aria-label="Checklist item" style="width: 28px; height: 26px; display: grid; place-items: center; border: 1px solid #352c26; border-radius: 5px; background: transparent; color: #f5ede2; cursor: pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="m8 12 3 3 5-6"></path></svg></button>
+<button aria-label="Inline code" style="width: 28px; height: 26px; display: grid; place-items: center; border: 1px solid #352c26; border-radius: 5px; background: transparent; color: #f5ede2; cursor: pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5"></path></svg></button>
+</div>
+<label for="te-criteria" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap">Acceptance criteria (Markdown)</label>
+<textarea id="te-criteria" rows="7" spellcheck="false" style="width: 100%; resize: vertical; padding: 10px 12px; border: 1px solid #352c26; border-radius: 7px; background: #14110f; color: #f5ede2; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.6">**Done when**
+- [x] The briefing carries `factory_version`.
+- [x] An idle agent reloads at once after Reload settings.
+- [ ] A busy agent reloads only after its run ends (`.applied` time after the reply).
+
+Verify: Tester2 runs hot-reload rounds 1 and 2 on a Claude agent and a Pi agent.</textarea>
+</section>
+
+<section aria-labelledby="te-bl" style="display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; align-items: center; gap: 10px">
+<h3 id="te-bl" style="margin: 0; font-size: 13px; font-weight: 600">Blocked by</h3>
+<span style="font-size: 11.5px; color: #978b78">none</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<label for="te-blocker-search" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap">Search tickets to add as a blocker</label>
+<div style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border: 1px solid #4a3d34; border-radius: 7px; background: #1a1714">
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#978b78" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg>
+<input id="te-blocker-search" type="text" role="combobox" aria-expanded="true" aria-controls="te-blocker-list" aria-activedescendant="te-opt-1" value="8." style="flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: #f5ede2; font: inherit; font-size: 13px">
+<span style="font-size: 11px; color: #978b78">Esc to close</span>
+</div>
+<ul id="te-blocker-list" role="listbox" aria-label="Tickets in this room" style="list-style: none; margin: 0; padding: 4px; border: 1px solid #352c26; border-radius: 7px; background: #1a1714; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); display: flex; flex-direction: column; gap: 2px">
+<li id="te-opt-1" role="option" aria-selected="true" style="display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 8px; border-radius: 5px; background: #2f2621"><span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: #978b78; width: 32px">8.3a</span><span style="flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Hot reload: per-agent version link, launch paths</span><span style="height: 20px; display: flex; align-items: center; padding: 0 8px; border-radius: 999px; background: #2b2433; color: #c3aedb; font-size: 11px">In review</span></li>
+<li role="option" aria-selected="false" style="display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 8px; border-radius: 5px"><span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: #978b78; width: 32px">8.4</span><span style="flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Export button in the room menu</span><span style="height: 20px; display: flex; align-items: center; padding: 0 8px; border-radius: 999px; background: #2a231e; color: #a69583; font-size: 11px">Draft</span></li>
+<li role="option" aria-selected="false" style="display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 8px; border-radius: 5px"><span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: #978b78; width: 32px">8.2</span><span style="flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Live check of a draft request with one blocker</span><span style="height: 20px; display: flex; align-items: center; padding: 0 8px; border-radius: 999px; background: #243020; color: #9dc285; font-size: 11px">Done</span></li>
+</ul>
+<p style="margin: 0; font-size: 11.5px; color: #978b78">Tickets in this room. The ticket itself and tickets that would make a loop are left out.</p>
+</div>
+</section>
+
+<section aria-labelledby="te-no" style="display: flex; align-items: center; gap: 10px">
+<h3 id="te-no" style="margin: 0; font-size: 13px; font-weight: 600">Notes</h3>
+<span style="font-size: 11.5px; color: #978b78">8</span>
+<span style="font-size: 12px; color: #978b78">· agents' notes are not editable</span>
+<button style="margin-left: auto; height: 26px; padding: 0 10px; border: 1px solid #352c26; border-radius: 6px; background: transparent; color: #f5ede2; font: inherit; font-size: 12px; cursor: pointer">Show notes</button>
+</section>
+
+</div>
+
+<aside aria-label="Properties" style="flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 14px; padding: 14px; border: 1px solid #2a231e; border-radius: 9px; background: #1a1714">
+<div style="display: flex; flex-direction: column; gap: 3px">
+<span style="font-size: 12px; color: #978b78">Status</span>
+<span style="font-size: 13px; color: #f5ede2">In review</span>
+<span style="font-size: 11.5px; color: #978b78">Move the ticket after you save.</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 5px">
+<label for="te-assignee" style="font-size: 12px; color: #978b78">Assignee</label>
+<select id="te-assignee" style="height: 32px; padding: 0 8px; border: 1px solid #352c26; border-radius: 6px; background: #221d19; color: #f5ede2; font: inherit; font-size: 13px"><option selected>Worker1</option><option>Worker2</option><option>Tester1</option><option>Tester2</option><option>Validator</option></select>
+</div>
+<div style="display: flex; flex-direction: column; gap: 5px">
+<label for="te-priority" style="font-size: 12px; color: #978b78">Priority</label>
+<select id="te-priority" style="height: 32px; padding: 0 8px; border: 1px solid #352c26; border-radius: 6px; background: #221d19; color: #f5ede2; font: inherit; font-size: 13px"><option>Highest</option><option selected>High</option><option>Medium</option><option>Low</option><option>Lowest</option></select>
+</div>
+<fieldset style="margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 5px">
+<legend style="padding: 0; margin-bottom: 5px; font-size: 12px; color: #978b78">Blast radius</legend>
+<div style="display: flex; gap: 2px; padding: 2px; border: 1px solid #352c26; border-radius: 6px; background: #221d19">
+<label style="flex: 1; display: flex; align-items: center; justify-content: center; height: 26px; border-radius: 4px; color: #a69583; font-size: 12.5px; cursor: pointer"><input type="radio" name="te-radius" value="low" style="position: absolute; opacity: 0; width: 1px; height: 1px">Low</label>
+<label style="flex: 1; display: flex; align-items: center; justify-content: center; height: 26px; border-radius: 4px; background: #3a201b; color: #e38f7a; font-size: 12.5px; font-weight: 500; cursor: pointer"><input type="radio" name="te-radius" value="high" checked style="position: absolute; opacity: 0; width: 1px; height: 1px">High</label>
+</div>
+</fieldset>
+<div style="display: flex; flex-direction: column; gap: 5px">
+<label for="te-request" style="font-size: 12px; color: #978b78">Request</label>
+<input id="te-request" type="text" placeholder="r-2026-10-23-name" style="height: 32px; padding: 0 8px; border: 1px solid #352c26; border-radius: 6px; background: #221d19; color: #f5ede2; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12px">
+</div>
+<div style="display: flex; flex-direction: column; gap: 5px">
+<label for="te-ref" style="font-size: 12px; color: #978b78">External ref</label>
+<input id="te-ref" type="text" placeholder="GH-123" style="height: 32px; padding: 0 8px; border: 1px solid #352c26; border-radius: 6px; background: #221d19; color: #f5ede2; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12px">
+</div>
+<div aria-hidden="true" style="height: 1px; background: #2a231e"></div>
+<dl style="margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 10px; font-size: 12px">
+<dt style="color: #978b78">Created</dt>
+<dd style="margin: 0; color: #a69583">22 Oct 2026, 18:02 by <span style="color: #ee9a6b">Orchestrator</span></dd>
+<dt style="color: #978b78">Updated</dt>
+<dd style="margin: 0; color: #a69583">22 Oct 2026, 20:41</dd>
+</dl>
+</aside>
+
+</div>
+
+<footer style="flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 12px 22px; border-top: 1px solid #2a231e; background: #221d19">
+<button style="height: 32px; padding: 0 12px; border: 1px solid #352c26; border-radius: 6px; background: transparent; color: #f5ede2; font: inherit; font-size: 12.5px; cursor: pointer">Discard changes</button>
+<div style="flex: 1"></div>
+<span style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #a69583"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: #e8a857"></span>2 unsaved changes</span>
+<button style="height: 32px; padding: 0 16px; border: 0; border-radius: 6px; background: #d97757; color: #1a1210; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer">Save changes</button>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":780,"height":1080}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

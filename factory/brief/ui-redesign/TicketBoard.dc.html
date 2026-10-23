@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cubilot — Board pane with ticket cards</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#14110f}
+a{color:#e08265}a:hover{color:#f0a88e}
+*{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:#352c26 transparent}
+:root{color-scheme:dark}
+</style>
+</helmet>
+<div style="width: 780px; height: 760px; display: flex; flex-direction: column; background: #14110f; color: #f5ede2; font-family: Inter, -apple-system, 'Segoe UI', sans-serif; font-size: 12px; border-left: 1px solid #2a231e">
+
+<div style="flex: none; display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid #2a231e">
+<button style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid #352c26; border-radius: 6px; background: #221d19; color: #f5ede2; font: inherit; font-size: 12px; cursor: pointer"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16l-6 8v6l-4-2v-4z"></path></svg>Filters</button>
+<span style="font-size: 12px; color: #978b78">All 6 tickets</span>
+<div style="flex: 1"></div>
+<button style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border: 0; border-radius: 6px; background: #d97757; color: #1a1210; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New ticket</button>
+</div>
+
+<div style="flex: 1; min-height: 0; display: flex; gap: 10px; padding: 12px 16px 16px; overflow-x: auto">
+
+<!-- Draft -->
+<section aria-label="Draft" style="flex: 1 1 210px; min-width: 200px; display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; align-items: center; gap: 8px; height: 26px">
+<h3 style="margin: 0; font-size: 12px; font-weight: 600; color: #f5ede2">Draft</h3>
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: #978b78">2</span>
+<button aria-label="Add a ticket to Draft" style="margin-left: auto; width: 24px; height: 24px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #978b78; cursor: pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
+</div>
+
+<article tabindex="0" aria-label="Open ticket: Example: export the room transcript as Markdown" style="background: #221d19; border: 1px solid #2f2822; border-radius: 8px; padding: 10px 11px; display: flex; flex-direction: column; gap: 8px; cursor: pointer">
+<div style="display: flex; align-items: center; gap: 6px; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px">
+<span style="padding: 1px 5px; border-radius: 4px; background: #33281a; color: #e8a857; letter-spacing: 0.06em; text-transform: uppercase">code</span>
+<span style="margin-left: auto; display: flex; align-items: center; gap: 5px; color: #a69583"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="0" y="8" width="2" height="4" fill="#d97757"></rect><rect x="3.3" y="5.5" width="2" height="6.5" fill="#d97757"></rect><rect x="6.6" y="3" width="2" height="9" fill="#d97757"></rect><rect x="9.9" y="0" width="2" height="12" fill="#3a3029"></rect></svg>High</span>
+</div>
+<h4 style="margin: 0; font-size: 13px; font-weight: 600; line-height: 1.4; color: #f5ede2">Example: export the room transcript as Markdown</h4>
+<div style="display: flex; flex-wrap: wrap; gap: 4px; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px">
+<span title="Request" style="display: flex; align-items: center; gap: 4px; max-width: 100%; padding: 1px 6px; border-radius: 4px; background: #2a231e; color: #a69583; overflow: hidden; white-space: nowrap; text-overflow: ellipsis"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5z"></path><path d="m3 13 9 5 9-5"></path></svg>r-2026-10-23-mockup</span>
+<span title="External ref" style="padding: 1px 6px; border-radius: 4px; background: #2a231e; color: #a69583">GH-142</span>
+<span style="padding: 1px 6px; border-radius: 4px; background: #3a201b; color: #e38f7a">High radius</span>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid #2a231e; font-size: 11px; color: #978b78">
+<span aria-hidden="true" style="width: 18px; height: 18px; border-radius: 50%; background: #3a2f1c; color: #e8a857; display: grid; place-items: center; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; font-weight: 600; flex: none">W</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; color: #e8a857; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Worker2</span>
+<span style="margin-left: auto; display: flex; align-items: center; gap: 8px">
+<span title="1 of 3 criteria checked" style="display: flex; align-items: center; gap: 3px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="m8 12 3 3 5-6"></path></svg>1/3</span>
+<span title="1 attachment" style="display: flex; align-items: center; gap: 3px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5 12.5 20a5 5 0 0 1-7-7L14 4.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.7-7.7"></path></svg>1</span>
+</span>
+<span role="img" aria-label="Status: no one is working on it" title="no one is working on it" style="display: inline-flex; gap: 4px; flex: none"><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #8a8a8e; opacity: 0.35"></i><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #8a8a8e; opacity: 0.35"></i><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #28c840"></i></span>
+</div>
+</article>
+
+<article tabindex="0" aria-label="Open ticket: Export button in the room menu" style="background: #221d19; border: 1px solid #2f2822; border-radius: 8px; padding: 10px 11px; display: flex; flex-direction: column; gap: 8px; cursor: pointer">
+<div style="display: flex; align-items: center; gap: 6px; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px">
+<span style="padding: 1px 5px; border-radius: 4px; background: #33281a; color: #e8a857; letter-spacing: 0.06em; text-transform: uppercase">code</span>
+<span style="color: #978b78">8.4</span>
+<span style="margin-left: auto; display: flex; align-items: center; gap: 5px; color: #a69583"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="0" y="8" width="2" height="4" fill="#d97757"></rect><rect x="3.3" y="5.5" width="2" height="6.5" fill="#d97757"></rect><rect x="6.6" y="3" width="2" height="9" fill="#3a3029"></rect><rect x="9.9" y="0" width="2" height="12" fill="#3a3029"></rect></svg>Medium</span>
+</div>
+<h4 style="margin: 0; font-size: 13px; font-weight: 600; line-height: 1.4; color: #f5ede2">Export button in the room menu</h4>
+<div style="display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #e8a857"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>Blocked by 1 open ticket</div>
+<div style="display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid #2a231e; font-size: 11px; color: #978b78">
+<span style="font-style: italic">Unassigned</span>
+<span role="img" aria-label="Status: no one is working on it" title="no one is working on it" style="margin-left: auto; display: inline-flex; gap: 4px; flex: none"><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #8a8a8e; opacity: 0.35"></i><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #8a8a8e; opacity: 0.35"></i><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #28c840"></i></span>
+</div>
+</article>
+</section>
+
+<!-- Queued (empty, collapsed) -->
+<section aria-label="Queued, empty" style="width: 40px; flex: none; border: 1px dashed #352c26; border-radius: 8px; display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 10px 0">
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: #978b78">0</span>
+<span style="writing-mode: vertical-rl; font-size: 12px; font-weight: 600; color: #a69583">Queued</span>
+<button aria-label="Add a ticket to Queued" style="width: 24px; height: 24px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #978b78; cursor: pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
+</section>
+
+<!-- In progress -->
+<section aria-label="In progress" style="flex: 1 1 210px; min-width: 200px; display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; align-items: center; gap: 8px; height: 26px">
+<h3 style="margin: 0; font-size: 12px; font-weight: 600; color: #f5ede2">In progress</h3>
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: #978b78">1</span>
+<button aria-label="Add a ticket to In progress" style="margin-left: auto; width: 24px; height: 24px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #978b78; cursor: pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
+</div>
+
+<article tabindex="0" aria-label="Open ticket: Spawn window still launches with no role" style="background: #221d19; border: 1px solid #2f2822; border-radius: 8px; padding: 10px 11px; display: flex; flex-direction: column; gap: 8px; cursor: pointer">
+<div style="display: flex; align-items: center; gap: 6px; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px">
+<span style="padding: 1px 5px; border-radius: 4px; background: #33281a; color: #e8a857; letter-spacing: 0.06em; text-transform: uppercase">code</span>
+<span style="margin-left: auto; display: flex; align-items: center; gap: 5px; color: #a69583"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="0" y="8" width="2" height="4" fill="#d97757"></rect><rect x="3.3" y="5.5" width="2" height="6.5" fill="#d97757"></rect><rect x="6.6" y="3" width="2" height="9" fill="#d97757"></rect><rect x="9.9" y="0" width="2" height="12" fill="#d97757"></rect></svg>Highest</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px">
+<h4 style="margin: 0; font-size: 13px; font-weight: 600; line-height: 1.4; color: #f5ede2">Spawn window still launches with no role</h4>
+<p style="margin: 0; font-size: 11.5px; line-height: 1.4; color: #a69583">install 11, 2 of 3 launches</p>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 4px; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px">
+<span style="padding: 1px 6px; border-radius: 4px; background: #3a201b; color: #e38f7a">High radius</span>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid #2a231e; font-size: 11px; color: #978b78">
+<span aria-hidden="true" style="width: 18px; height: 18px; border-radius: 50%; background: #3a2f1c; color: #e8a857; display: grid; place-items: center; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; font-weight: 600; flex: none">W</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; color: #e8a857">Worker1</span>
+<span role="img" aria-label="Status: an agent is busy with it" title="an agent is busy with it" style="margin-left: auto; display: inline-flex; gap: 4px; flex: none"><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #8a8a8e; opacity: 0.35"></i><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #febc2e"></i><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #8a8a8e; opacity: 0.35"></i></span>
+</div>
+</article>
+</section>
+
+<!-- In review -->
+<section aria-label="In review" style="flex: 1 1 210px; min-width: 200px; display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; align-items: center; gap: 8px; height: 26px">
+<h3 style="margin: 0; font-size: 12px; font-weight: 600; color: #f5ede2">In review</h3>
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: #978b78">3</span>
+<button aria-label="Add a ticket to In review" style="margin-left: auto; width: 24px; height: 24px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #978b78; cursor: pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
+</div>
+
+<article tabindex="0" aria-label="Open ticket: Hot reload: per-agent version link, launch paths, staging on Reload settings" style="background: #2a231e; border: 1px solid #4a3d34; border-radius: 8px; padding: 10px 11px; display: flex; flex-direction: column; gap: 8px; cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35)">
+<div style="display: flex; align-items: center; gap: 6px; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px">
+<span style="padding: 1px 5px; border-radius: 4px; background: #33281a; color: #e8a857; letter-spacing: 0.06em; text-transform: uppercase">code</span>
+<span style="color: #978b78">8.3a</span>
+<span style="margin-left: auto; display: flex; align-items: center; gap: 5px; color: #a69583"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="0" y="8" width="2" height="4" fill="#d97757"></rect><rect x="3.3" y="5.5" width="2" height="6.5" fill="#d97757"></rect><rect x="6.6" y="3" width="2" height="9" fill="#d97757"></rect><rect x="9.9" y="0" width="2" height="12" fill="#3a3029"></rect></svg>High</span>
+</div>
+<h4 style="margin: 0; font-size: 13px; font-weight: 600; line-height: 1.4; color: #f5ede2">Hot reload: per-agent version link, launch paths, staging on Reload settings</h4>
+<div style="display: flex; flex-wrap: wrap; gap: 4px; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px">
+<span style="padding: 1px 6px; border-radius: 4px; background: #3a201b; color: #e38f7a">High radius</span>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid #352c26; font-size: 11px; color: #978b78">
+<span aria-hidden="true" style="width: 18px; height: 18px; border-radius: 50%; background: #3a2f1c; color: #e8a857; display: grid; place-items: center; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; font-weight: 600; flex: none">W</span>
+<label for="tb-assign" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap">Assignee of 8.3a</label>
+<select id="tb-assign" style="min-width: 0; max-width: 104px; height: 24px; padding: 0 4px; border: 1px solid #352c26; border-radius: 5px; background: #14110f; color: #e8a857; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px"><option>Unassigned</option><option>Worker1</option><option selected>Worker2</option><option>Tester1</option></select>
+<span style="margin-left: auto; display: flex; align-items: center; gap: 8px">
+<span title="4 notes" style="display: flex; align-items: center; gap: 3px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12z"></path></svg>4</span>
+</span>
+<span role="img" aria-label="Status: no one is working on it" title="no one is working on it" style="display: inline-flex; gap: 4px; flex: none"><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #8a8a8e; opacity: 0.35"></i><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #8a8a8e; opacity: 0.35"></i><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #28c840"></i></span>
+</div>
+<div style="display: flex; align-items: center; gap: 6px">
+<label for="tb-move" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap">Move 8.3a to column</label>
+<select id="tb-move" style="flex: 1 1 0; min-width: 0; height: 26px; padding: 0 6px; border: 1px solid #352c26; border-radius: 5px; background: #14110f; color: #f5ede2; font: inherit; font-size: 11.5px"><option>Draft</option><option>Queued</option><option>In progress</option><option selected>In review</option><option>Done</option></select>
+<button aria-label="Cancel ticket 8.3a" title="Cancel ticket (asks once)" style="width: 26px; height: 26px; flex: none; display: grid; place-items: center; border: 1px solid #352c26; border-radius: 5px; background: transparent; color: #e38f7a; cursor: pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="m15 9-6 6M9 9l6 6"></path></svg></button>
+</div>
+</article>
+
+<article tabindex="0" aria-label="Open ticket: Hot reload: briefing factory_version and bridge reload" style="background: #221d19; border: 1px solid #2f2822; border-radius: 8px; padding: 10px 11px; display: flex; flex-direction: column; gap: 8px; cursor: pointer">
+<div style="display: flex; align-items: center; gap: 6px; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px">
+<span style="padding: 1px 5px; border-radius: 4px; background: #33281a; color: #e8a857; letter-spacing: 0.06em; text-transform: uppercase">code</span>
+<span style="color: #978b78">8.3b</span>
+<span style="margin-left: auto; display: flex; align-items: center; gap: 5px; color: #a69583"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="0" y="8" width="2" height="4" fill="#d97757"></rect><rect x="3.3" y="5.5" width="2" height="6.5" fill="#d97757"></rect><rect x="6.6" y="3" width="2" height="9" fill="#d97757"></rect><rect x="9.9" y="0" width="2" height="12" fill="#3a3029"></rect></svg>High</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px">
+<h4 style="margin: 0; font-size: 13px; font-weight: 600; line-height: 1.4; color: #f5ede2">Hot reload: briefing factory_version and bridge reload</h4>
+<p style="margin: 0; font-size: 11.5px; line-height: 1.4; color: #a69583">idle at once, busy after the run</p>
+</div>
+<div style="display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 500; color: #e38f7a"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>Waiting for your approval</div>
+<div style="display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid #2a231e; font-size: 11px; color: #978b78">
+<span aria-hidden="true" style="width: 18px; height: 18px; border-radius: 50%; background: #3a2f1c; color: #e8a857; display: grid; place-items: center; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; font-weight: 600; flex: none">W</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; color: #e8a857">Worker1</span>
+<span style="margin-left: auto; display: flex; align-items: center; gap: 8px">
+<span title="8 notes" style="display: flex; align-items: center; gap: 3px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12z"></path></svg>8</span>
+</span>
+<span role="img" aria-label="Status: waiting for the human" title="waiting for the human" style="display: inline-flex; gap: 4px; flex: none"><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #ff5f57"></i><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #8a8a8e; opacity: 0.35"></i><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #8a8a8e; opacity: 0.35"></i></span>
+</div>
+</article>
+
+<article tabindex="0" aria-label="Open ticket: Safe cleanup of old staged factory versions" style="background: #221d19; border: 1px solid #2f2822; border-radius: 8px; padding: 10px 11px; display: flex; flex-direction: column; gap: 8px; cursor: pointer">
+<div style="display: flex; align-items: center; gap: 6px; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10.5px">
+<span style="padding: 1px 5px; border-radius: 4px; background: #2a231e; color: #a69583; letter-spacing: 0.06em; text-transform: uppercase">backlog</span>
+<span style="margin-left: auto; display: flex; align-items: center; gap: 5px; color: #a69583"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="0" y="8" width="2" height="4" fill="#a69583"></rect><rect x="3.3" y="5.5" width="2" height="6.5" fill="#3a3029"></rect><rect x="6.6" y="3" width="2" height="9" fill="#3a3029"></rect><rect x="9.9" y="0" width="2" height="12" fill="#3a3029"></rect></svg>Low</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px">
+<h4 style="margin: 0; font-size: 13px; font-weight: 600; line-height: 1.4; color: #f5ede2">Safe cleanup of old staged factory versions</h4>
+<p style="margin: 0; font-size: 11.5px; line-height: 1.4; color: #a69583">not part of factory-roles</p>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid #2a231e; font-size: 11px; color: #978b78">
+<span aria-hidden="true" style="width: 18px; height: 18px; border-radius: 50%; background: #3a2f1c; color: #e8a857; display: grid; place-items: center; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 10px; font-weight: 600; flex: none">W</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; color: #e8a857">Worker2</span>
+<span style="margin-left: auto; display: flex; align-items: center; gap: 8px">
+<span title="3 notes" style="display: flex; align-items: center; gap: 3px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12z"></path></svg>3</span>
+</span>
+<span role="img" aria-label="Status: no one is working on it" title="no one is working on it" style="display: inline-flex; gap: 4px; flex: none"><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #8a8a8e; opacity: 0.35"></i><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #8a8a8e; opacity: 0.35"></i><i style="display: block; width: 8px; height: 8px; border-radius: 50%; background: #28c840"></i></span>
+</div>
+</article>
+</section>
+
+<!-- Done (empty, collapsed) -->
+<section aria-label="Done, empty" style="width: 40px; flex: none; border: 1px dashed #352c26; border-radius: 8px; display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 10px 0">
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: #978b78">0</span>
+<span style="writing-mode: vertical-rl; font-size: 12px; font-weight: 600; color: #a69583">Done</span>
+</section>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":780,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>
