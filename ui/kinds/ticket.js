@@ -1406,7 +1406,11 @@ const TicketBoard = (() => {
     if (viewDirty()) {
       unsavedPrompt = true;
       renderNotice();
-      document.getElementById('ticket-view-keep')?.focus?.();
+      // The focus goes to "Keep editing", so Tab reaches Discard and Keep editing in order. Escape reaches here from the dialog's cancel
+      // event, after which the browser may move the focus: set it again once the event is over.
+      const keep = () => document.getElementById('ticket-view-keep')?.focus?.();
+      keep();
+      setTimeout(keep, 0);
       return;
     }
     closeView();
@@ -1500,10 +1504,14 @@ const TicketBoard = (() => {
       ?? document.getElementById('ticket-view-title')?.querySelector?.(`#ticket-edit-${id}`) ?? null;   // the fields are in the panel and the header's title input
     const f = { request: q('request'), blockers: q('blockers'), title: q('title'), criteria: q('criteria'), radius: q('radius'), priority: q('priority'), assignee: q('assignee'), ref: q('ref') };
     // The blast radius is a radio pair: its value is the checked radio. Every other field has a value of its own.
-    // The blockers are a list of rows: their ids are in data-ids.
-    const valueOf = (k, el) => (k === 'radius' && typeof el.querySelector === 'function' ? (el.querySelector('input:checked')?.value ?? '')
-      : k === 'blockers' && el.dataset && el.dataset.ids !== undefined ? el.dataset.ids.split(',').filter(Boolean).join(', ') : el.value);
-    const read = () => Object.fromEntries(Object.entries(f).filter(([, el]) => el).map(([k, el]) => [k, valueOf(k, el)]));
+    // The blockers are a list the picker changes through commitBlockers(), not a field the human types in: the typed values hold it, never the DOM
+    // (a typed letter in the search box bubbles an input event to the group, which must not rewrite the list).
+    const valueOf = (k, el) => (k === 'radius' && typeof el.querySelector === 'function' ? (el.querySelector('input:checked')?.value ?? '') : el.value);
+    const read = () => {
+      const t = viewId ? tickets.get(viewId) : null;
+      const own = Object.fromEntries(Object.entries(f).filter(([k, el]) => el && k !== 'blockers').map(([k, el]) => [k, valueOf(k, el)]));
+      return f.blockers && t ? { ...own, blockers: formValues(t).blockers } : own;
+    };
     const remember = (key) => {
       viewDraft = { id: viewId, ...read() };
       if (viewError && (!viewErrorField || viewErrorField === key)) {   // editing the refused field (or any field, for a message with no field) clears the error
@@ -1512,7 +1520,10 @@ const TicketBoard = (() => {
       }
       refreshSave(); renderNotice();
     };
-    for (const [key, el] of Object.entries(f)) { el?.addEventListener('input', () => remember(key)); el?.addEventListener('change', () => remember(key)); }
+    for (const [key, el] of Object.entries(f)) {
+      if (key === 'blockers') continue;               // the group holds buttons and the search box: its events are not edits
+      el?.addEventListener('input', () => remember(key)); el?.addEventListener('change', () => remember(key));
+    }
     // The title and the panel's inputs are outside the form: Enter in one of them submits like Enter in a field of the form.
     for (const el of Object.values(f)) {
       if (el?.tagName !== 'INPUT' || el.type === 'radio' || form.contains?.(el)) continue;
@@ -1677,7 +1688,7 @@ const TicketBoard = (() => {
     }   // Cancel ticket / Archive sit in the bottom row
     refreshSave();
     renderNotice();
-    if (keep) (actions.querySelector?.(keep) ?? row?.querySelector?.(keep) ?? document.getElementById('ticket-view-close'))?.focus?.();
+    if (keep) (actions.querySelector?.(keep) ?? row?.querySelector?.(keep) ?? document.getElementById('ticket-view-x'))?.focus?.();
   }
 
   function refreshView() {
@@ -1706,7 +1717,7 @@ const TicketBoard = (() => {
     if (r?.width) Object.assign(d.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
     drawView();
     if (viewId && !d.open) d.showModal();
-    document.getElementById('ticket-view-close')?.focus?.();
+    document.getElementById('ticket-view-x')?.focus?.();   // the header Close (the first control): Tab then walks the dialog in order
   }
 
   function closeView() {
@@ -1940,5 +1951,5 @@ const TicketBoard = (() => {
   KindCardRenderer.observe('room', onRoomLead);
   if (typeof document !== 'undefined' && document.getElementById) wire();
 
-  return { load, onTicket, onPermission, openNew, setFilter, matchesFilter, sanitizeFilter, readFilter, setLead, onRoomLead, archiveAllDone, setFilterPanel, attachFiles, addPendingFiles, applyMarkdownAction, mdHtml, applyToCriteria, onCriteriaKeydown, openView, closeView, onNoted, lightOf, parseTitle, criteriaProgress, priorityBars, statusLine, _tickets: tickets, _filter: () => filter, _lead: () => lead };
+  return { load, onTicket, onPermission, openNew, setFilter, matchesFilter, sanitizeFilter, readFilter, setLead, onRoomLead, archiveAllDone, setFilterPanel, attachFiles, addPendingFiles, applyMarkdownAction, mdHtml, applyToCriteria, onCriteriaKeydown, openView, closeView, _commitBlockers: (ids) => commitBlockers(ids), onNoted, lightOf, parseTitle, criteriaProgress, priorityBars, statusLine, _tickets: tickets, _filter: () => filter, _lead: () => lead };
 })();

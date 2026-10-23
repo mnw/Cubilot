@@ -267,7 +267,7 @@
   --line-soft:    #f4ede8;
   --line-hover:   #cecacd;  /* highlight-high */
   --text:         #575279;  /* text */
-  --text-muted:   #797593;  /* subtle */
+  --text-muted:   #6a6587;  /* subtle, darkened toward text: 4.5:1+ on bg, raised, inset, elev */
   --text-dim:     #9893a5;  /* muted */
   --text-meta:    #6c6789;  /* 4.5:1+ on bg, raised and inset */
 
@@ -325,7 +325,7 @@
   --line-soft:    #2a283e;
   --line-hover:   #56526e;
   --text:         #e0def4;
-  --text-muted:   #908caa;
+  --text-muted:   #a29fbb;  /* subtle, lightened toward text: 4.5:1+ on bg, raised, inset, elev */
   --text-dim:     #6e6a86;
   --text-meta:    #938fad;  /* 4.5:1+ on bg, raised and inset */
 

@@ -105,7 +105,7 @@ beforeEach(async () => {
   els["ticket-view-notes"] = control({ innerHTML: "" });                         // 15.6: the notes sit below the Attach block
   els["ticket-view-edit"] = control({ hidden: true });                            // 15.6: the Edit button
   els["ticket-view-dirty"] = control({ textContent: "", hidden: true });          // 15.6: "N unsaved changes"
-  els["ticket-view-x"] = control({});                                        // the header's Close icon button
+  els["ticket-view-x"] = control({ focus() { active = this; } });                                        // the header's Close icon button
   els["ticket-view-content"] = control({ innerHTML: "" });
   els["ticket-view-actions"] = control({ innerHTML: "", queried: [] as string[], contains: () => false, querySelector: () => null,
     querySelectorAll(sel: string) { this.queried.push(sel); return []; } });
@@ -1298,7 +1298,7 @@ describe("ticket view dialog", () => {
     expect(panel()).toContain("Copy");                                        // the ID has a copy button
     expect(content()).toContain("Acceptance criteria");
     expect(content()).toContain("Waiting for your approval.");              // the approval banner
-    expect(active).toBe(els["ticket-view-close"]);                         // focus moves into the dialog
+    expect(active).toBe(els["ticket-view-x"]);                             // focus moves into the dialog: the header Close, the first control
   });
 
   test("an unassigned ticket says so; an archived one shows when", async () => {
@@ -3531,12 +3531,14 @@ describe("request label and blockers (6.2, 6.3)", () => {
     els["ticket-view-edit"].handlers.click();                                   // a queued ticket opens in read mode: Edit unlocks the fields
     await submit({ preventDefault() {} });
     expect(posts).toEqual([]);                                   // nothing changed: no request
-    req.value = "  r-2 "; blk.value = "b, c ,";
+    req.value = "  r-2 ";
+    ctx.TicketBoard._commitBlockers(["b", "c"]);                 // the picker's path: the list is a model, not a typed value
     await submit({ preventDefault() {} });
     expect(posts).toEqual([{ path: "/tickets/a/edit", body: { by: "human", request_id: "r-2", blocked_by: ["b", "c"] } }]);
-    req.value = "r-1"; blk.value = "b";
+    req.value = "r-1";
     ctx.TicketBoard.openView("a");
-    req.value = ""; blk.value = "b";
+    req.value = "";
+    ctx.TicketBoard._commitBlockers(["b"]);
     await submit({ preventDefault() {} });
     expect(posts[1].body).toEqual({ by: "human", request_id: null });
     delete els["ticket-view-content"].querySelector;
@@ -3682,7 +3684,7 @@ describe("request label and blockers (6.2, 6.3)", () => {
     els["ticket-edit-blockers"] = m.f.blockers;                             // the field exists in the page, so the error can focus it
     ctx.TicketBoard.openView("a");
     els["ticket-view-edit"].handlers.click();                                   // a queued ticket opens in read mode: Edit unlocks the fields
-    m.type("blockers", "Blocker");
+    ctx.TicketBoard._commitBlockers(["Blocker"]);
     refuseText = "invalid blocker id: Blocker";
     failPath = "/tickets/a/edit";
     await m.submit();
@@ -3706,17 +3708,15 @@ describe("request label and blockers (6.2, 6.3)", () => {
     els["ticket-edit-blockers"] = m.f.blockers;
     ctx.TicketBoard.openView("a");
     els["ticket-view-edit"].handlers.click();                                   // a queued ticket opens in read mode: Edit unlocks the fields
-    m.type("blockers", "Blocker");
+    ctx.TicketBoard._commitBlockers(["Blocker"]);
     refuseText = "invalid blocker id: Blocker";
     failPath = "/tickets/a/edit";
     await m.submit();
     m.type("request", "r-1");                                              // another field: the error stays
     expect(errorEl).toBe(true);
     expect(attrs.blockers.has("aria-invalid")).toBe(true);
-    m.type("blockers", "t_0123456789abcdef");                              // the refused field: it goes
-    expect(errorEl).toBe(false);
-    expect(attrs.blockers.size).toBe(0);
-    ctx.TicketBoard.openView("a");                                         // and a redraw shows none
+    ctx.TicketBoard._commitBlockers(["t_0123456789abcdef"]);               // the refused list is changed: the error goes with the redraw
+    ctx.TicketBoard.openView("a");
     expect(els["ticket-view-content"].innerHTML).not.toContain("ticket-field-error");
     delete els["ticket-edit-blockers"]; failPath = null; unmount();
   });
@@ -3775,7 +3775,7 @@ describe("request label and blockers (6.2, 6.3)", () => {
       ["ref", "invalid external_ref"], ["request", "invalid request_id"], ["blockers", "invalid blocker id: x"], ["assignee", "cannot assign"]] as const) {
       refuseText = text;
       els[`ticket-edit-${key}`] = m.f[key];
-      m.type(key, key === "assignee" ? "bob" : "x");
+      if (key === "blockers") ctx.TicketBoard._commitBlockers(["x"]); else m.type(key, key === "assignee" ? "bob" : "x");
       failPath = key === "assignee" ? "/tickets/a/assign" : "/tickets/a/edit";
       await m.submit();
       const where = key === "title" ? "ticket-view-title" : ["criteria", "blockers"].includes(key) ? "ticket-view-content" : "ticket-view-actions";   // header, content or panel
@@ -3784,7 +3784,7 @@ describe("request label and blockers (6.2, 6.3)", () => {
       expect([key, h.includes(`id="ticket-edit-${key}" `) && /aria-invalid="true"/.test(h)]).toEqual([key, true]);
       delete els[`ticket-edit-${key}`];
       ctx.TicketBoard.openView("a");
-      m.type(key, key === "assignee" ? "alice" : key === "title" ? "title-a" : key === "criteria" ? "crit" : key === "radius" ? "low" : key === "priority" ? "medium" : "");
+      if (key === "blockers") ctx.TicketBoard._commitBlockers([]); else m.type(key, key === "assignee" ? "alice" : key === "title" ? "title-a" : key === "criteria" ? "crit" : key === "radius" ? "low" : key === "priority" ? "medium" : "");
     }
     delete els["ticket-edit-assignee"]; failPath = null; unmount();
   });
@@ -4129,11 +4129,10 @@ describe("request label and blockers (6.2, 6.3)", () => {
   test("15.8 Save sends the ids; a loop the hub refuses shows its message under the list", async () => {
     await show(...chain());
     const m = mount({ request: "", blockers: "" });
-    m.f.blockers.dataset = { ids: "d,x,c" };                                             // the group, as in the page
     els["ticket-edit-blockers"] = m.f.blockers;
     posts = [];
     startEdit("a");
-    m.type("blockers", "");
+    ctx.TicketBoard._commitBlockers(["d", "x", "c"]);
     refuseText = "blocker would create a cycle: c";
     failPath = "/tickets/a/edit";
     await m.submit();
@@ -4227,6 +4226,112 @@ describe("request label and blockers (6.2, 6.3)", () => {
       expect(css).toContain(`.ticket-note-author.note-role-${role} { color: color-mix(in srgb, var(--${token}) 30%, var(--text)); }`);
     }
     expect(css).toContain(".ticket-note-author { font-family: var(--mono); font-weight: 600; color: var(--text); }");
+  });
+
+  // ---- 15.13: the keyboard path of the blocker picker, and two focus rules ----
+  const two = () => [
+    mk("a", "draft", { title: "[code] 9.1 Main", blocked_by: ["d"], open_blockers: [] }),
+    bt("d", "done", "[code] 8.2 Done blocker"),
+    bt("o", "queued", "[code] 8.3 Other"),
+  ];
+  const rows = () => (content().match(/<li class="ticket-blocker-row/g) ?? []).length;
+  const idsIn = () => /data-ids="([^"]*)"/.exec(content())?.[1] ?? "";
+  // The fake page: the "Add blocker" button, the search box and the group hold the handlers a browser would call.
+  function pickerPage() {
+    const mkEl = (extra: object = {}) => { const e: any = { handlers: {} as Record<string, any>, value: "", setAttribute() {}, ...extra }; e.addEventListener = (t: string, fn: any) => { e.handlers[t] = fn; }; return e; };
+    const add = mkEl(), search = mkEl(), group = mkEl(), rm: any[] = [];
+    els["ticket-view-content"].querySelector = (sel: string) => (sel === "#ticket-blocker-add" ? add : sel === "#ticket-edit-blockers-search" ? search : sel === "#ticket-edit-blockers" ? group : null);
+    els["ticket-view-content"].querySelectorAll = (sel: string) => (sel === ".ticket-blocker-remove" ? rm : []);
+    const key = (k: string) => { const e: any = { key: k, prevented: false, preventDefault() { this.prevented = true; }, stopPropagation() {} }; search.handlers.keydown?.(e); return e; };
+    return { add, search, group, rm, key, off: () => { delete els["ticket-view-content"].querySelector; delete els["ticket-view-content"].querySelectorAll; } };
+  }
+
+  test("15.13 keyboard add: Enter on Add blocker, type, ArrowDown, Enter: two rows, Save enabled, the count 1, Save sends both ids", async () => {
+    await show(...two());
+    const m = mount({ request: "", blockers: "" });
+    posts = [];
+    ctx.TicketBoard.openView("a");                                                       // a draft: edit mode
+    expect(rows()).toBe(1);
+    const p = pickerPage();
+    ctx.TicketBoard.openView("a");                                                       // the redraw wires the button
+    p.add.handlers.click();                                                              // Enter on the button is a click
+    ctx.TicketBoard.openView("a");                                                       // the redraw wires the search
+    p.search.value = "other"; p.search.handlers.input();                                 // typing
+    expect(Object.keys(p.group.handlers)).toEqual([]);                                   // the group has no input/change listener: a bubbled keystroke cannot rewrite the list
+    const down = p.key("ArrowDown");
+    expect(down.prevented).toBe(true);
+    p.key("Enter");
+    expect(rows()).toBe(2);
+    expect(idsIn()).toBe("d,o");
+    expect(els["ticket-view-save"].disabled).toBe(false);
+    expect(els["ticket-view-dirty"].textContent).toBe("1 unsaved change");
+    await m.submit();
+    expect(posts[0].body).toEqual({ by: "human", blocked_by: ["d", "o"] });              // the rows shown are the ids Save sends
+    p.off(); unmount();
+  });
+
+  test("15.13 the mouse path gives the same state as the keyboard path", async () => {
+    await show(...two());
+    const m = mount({ request: "", blockers: "" });
+    posts = [];
+    ctx.TicketBoard.openView("a");
+    ctx.TicketBoard._commitBlockers(["d", "o"]);                                         // what a mousedown on an option does
+    expect(rows()).toBe(2);
+    expect(idsIn()).toBe("d,o");
+    expect(els["ticket-view-save"].disabled).toBe(false);
+    expect(els["ticket-view-dirty"].textContent).toBe("1 unsaved change");
+    await m.submit();
+    expect(posts[0].body).toEqual({ by: "human", blocked_by: ["d", "o"] });
+    unmount();
+  });
+
+  test("15.13 Remove on one of two rows removes only that row", async () => {
+    await show(...two());
+    ctx.TicketBoard.openView("a");
+    ctx.TicketBoard._commitBlockers(["d", "o"]);
+    expect(rows()).toBe(2);
+    const p = pickerPage();
+    const mkRm = (id: string) => { const b: any = { dataset: { id }, handlers: {} as Record<string, any> }; b.addEventListener = (t: string, fn: any) => { b.handlers[t] = fn; }; return b; };
+    const rmO = mkRm("o"), rmD = mkRm("d");
+    p.rm.push(rmD, rmO);
+    ctx.TicketBoard.openView("a");                                                       // wires both buttons
+    rmO.handlers.click();
+    expect(rows()).toBe(1);
+    expect(idsIn()).toBe("d");                                                           // "o" went, "d" stays
+    expect(els["ticket-view-save"].disabled).toBe(true);                                 // back to the ticket's own list
+    p.off();
+  });
+
+  test("15.13 Escape with unsaved changes shows the line and puts the focus on Keep editing, again after the event", async () => {
+    await show(...two());
+    const m = mount({ ...draftVals, title: "[code] 9.1 Main" });
+    ctx.TicketBoard.openView("a");
+    m.type("title", "changed");
+    const keep: any = { id: "ticket-view-keep", handlers: {} as Record<string, any>, addEventListener(t: string, fn: any) { keep.handlers[t] = fn; }, focus() { active = this; } };
+    els["ticket-view-notice"].querySelector = (sel: string) => (sel === "#ticket-view-keep" ? keep : null);
+    const old = ctx.document.getElementById;
+    ctx.document.getElementById = (id: string) => (id === "ticket-view-keep" ? keep : old(id));
+    let later: any = null;
+    ctx.setTimeout = (fn: any) => { later = fn; return 1; };
+    let prevented = 0;
+    els["ticket-view"].handlers.cancel({ preventDefault() { prevented++; } });           // Escape
+    expect(prevented).toBe(1);
+    expect(els["ticket-view-notice"].innerHTML).toContain("Unsaved changes");
+    expect(active).toBe(keep);
+    active = null;
+    later();                                                                             // once the cancel event is over the browser may have moved it
+    expect(active).toBe(keep);
+    ctx.document.getElementById = old; ctx.setTimeout = setTimeout; unmount();
+  });
+
+  test("15.13 when the dialog opens the focus is on the header Close, the first control", async () => {
+    await show(mk("a", "queued"));
+    active = null;
+    ctx.TicketBoard.openView("a");
+    expect(active).toBe(els["ticket-view-x"]);
+    const page = readFileSync("ui/index.html", "utf8");
+    const dlg = page.slice(page.indexOf('id="ticket-view"'), page.indexOf("</dialog>", page.indexOf('id="ticket-view"')));
+    expect(dlg.indexOf('id="ticket-view-x"')).toBeLessThan(dlg.indexOf('id="ticket-view-close"'));   // so the first Tab from it walks the dialog in order
   });
 
   test("9: the New ticket dialog has Request and Blocked by after External ref, and creates with them", async () => {

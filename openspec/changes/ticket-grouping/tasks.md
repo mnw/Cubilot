@@ -34,14 +34,14 @@
 
 ## 6. Board
 
-- [ ] 6.1 Draft column before Queued; `+` in the Draft column creates a draft ticket → verify: visual check in the three themes
-- [ ] 6.2 Card: request label, and a lock mark with the count of open blockers; `lightOf()` unchanged; the open-blocker count comes from the board's tickets, so it updates when a blocker changes status; a blocker the board does not hold keeps the server's result (design decision 8) → verify: visual check; the count goes down by one when a blocker moves to `done`, and does not change when a blocker moves to `cancelled` (a cancelled blocker still blocks); an older event version is discarded; a blocker absent from the board still counts as open when the server says so; `lightOf()` diff is empty
-- [ ] 6.3 Ticket dialog: request label and blockers (title and status), editable by the human; an open dialog updates when a blocker changes status → verify: the human edits both fields and the card updates; an open dialog shows a blocker's new status
-- [ ] 6.4 Filters panel: filter by request → verify: with two requests on the board, the filter shows one
-- [ ] 6.5 Keyboard: every new control works from the keyboard, text contrast 4.5:1 or more → verify: keyboard-only walk through the dialog; measured contrast of each new text in the three themes
-- [ ] 6.6 Filters request select lists only the labels of tickets the board shows (not all cancelled or archived); a stored filter on a gone label falls back to All requests (human check, 2026-10-23) → verify: unit test; human check on the next install
-- [ ] 6.7 Ticket dialog (human, 2026-10-23): in a draft, edit fields replace the read-only rows in the New ticket order (title, criteria, radius, priority, assignee, external ref, request, blocked by); a queued ticket edits only request and blockers; "Attach file" under the Attachments list; one bottom row: "Cancel ticket" (danger, left, second click confirms), Close, "Save changes" (primary, disabled until a change, sends only changed fields); unsaved-changes line on Close; refused edit shown inline; New ticket dialog gets Request and Blocked by; each attachment has Replace (attach new first, then remove old) and Remove; no browser dialogs → verify: unit tests (see ticket t_04b74cd1d98b0d1e); the human creates a ticket with a request, edits a draft, saves, reopens it and sees the new values
-- [ ] 6.8 A refused Save shows a red message with role="alert" under the field the hub refused (Blocked by, Request) and a red border with aria-invalid, or above the action row for other refusals; editing the field clears it; the bottom action row and the error line stay visible (sticky) when the dialog content scrolls (human, 2026-10-23: the grey "Not saved" line was missed) → verify: unit tests; browser run with screenshots in the three themes
+- [x] 6.1 Draft column before Queued; `+` in the Draft column creates a draft ticket → verify: visual check in the three themes
+- [x] 6.2 Card: request label, and a lock mark with the count of open blockers; `lightOf()` unchanged; the open-blocker count comes from the board's tickets, so it updates when a blocker changes status; a blocker the board does not hold keeps the server's result (design decision 8) → verify: visual check; the count goes down by one when a blocker moves to `done`, and does not change when a blocker moves to `cancelled` (a cancelled blocker still blocks); an older event version is discarded; a blocker absent from the board still counts as open when the server says so; `lightOf()` diff is empty
+- [x] 6.3 Ticket dialog: request label and blockers (title and status), editable by the human; an open dialog updates when a blocker changes status → verify: the human edits both fields and the card updates; an open dialog shows a blocker's new status
+- [x] 6.4 Filters panel: filter by request → verify: with two requests on the board, the filter shows one
+- [x] 6.5 Keyboard: every new control works from the keyboard, text contrast 4.5:1 or more → verify: keyboard-only walk through the dialog; measured contrast of each new text in the three themes
+- [x] 6.6 Filters request select lists only the labels of tickets the board shows (not all cancelled or archived); a stored filter on a gone label falls back to All requests (human check, 2026-10-23) → verify: unit test; human check on the next install
+- [x] 6.7 Ticket dialog (human, 2026-10-23): in a draft, edit fields replace the read-only rows in the New ticket order (title, criteria, radius, priority, assignee, external ref, request, blocked by); a queued ticket edits only request and blockers; "Attach file" under the Attachments list; one bottom row: "Cancel ticket" (danger, left, second click confirms), Close, "Save changes" (primary, disabled until a change, sends only changed fields); unsaved-changes line on Close; refused edit shown inline; New ticket dialog gets Request and Blocked by; each attachment has Replace (attach new first, then remove old) and Remove; no browser dialogs → verify: unit tests (see ticket t_04b74cd1d98b0d1e); the human creates a ticket with a request, edits a draft, saves, reopens it and sees the new values
+- [x] 6.8 A refused Save shows a red message with role="alert" under the field the hub refused (Blocked by, Request) and a red border with aria-invalid, or above the action row for other refusals; editing the field clears it; the bottom action row and the error line stay visible (sticky) when the dialog content scrolls (human, 2026-10-23: the grey "Not saved" line was missed) → verify: unit tests; browser run with screenshots in the three themes
 
 ## 7. Docs and role text
 
@@ -51,8 +51,8 @@
 
 ## 8. Checks
 
-- [ ] 8.1 `bun test`, `cargo test --manifest-path src-tauri/Cargo.toml`, `bun x tsc --noEmit` → verify: all pass
-- [ ] 8.2 Live check in the app: the Orchestrator creates a request of three draft tickets with one blocker, moves them to `queued`, a Worker claims the free one and is refused on the blocked one; a Claude agent and a Pi agent each create a draft ticket with a label and one blocker, and replace the blocker list of their own draft (from 4.1, 4.2); before the install, back up the ledger and pass 8.1 and `./scripts/check-mod.sh` → verify: record the result in this file
+- [x] 8.1 `bun test`, `cargo test --manifest-path src-tauri/Cargo.toml`, `bun x tsc --noEmit` → verify: all pass
+- [x] 8.2 Live check in the app: the Orchestrator creates a request of three draft tickets with one blocker, moves them to `queued`, a Worker claims the free one and is refused on the blocked one; a Claude agent and a Pi agent each create a draft ticket with a label and one blocker, and replace the blocker list of their own draft (from 4.1, 4.2); before the install, back up the ledger and pass 8.1 and `./scripts/check-mod.sh` → verify: record the result in this file
 
 ### 8.2 live check, part 1 (2026-10-22, installed build)
 
@@ -69,3 +69,43 @@
 - Each called `create_ticket` with `status: "draft"`, `request_id: "r-2026-10-22-probe"`, `blocked_by: [X]`: t_ed85dcc9c523018c (Claude) and t_7ae9f98323bfebbd (Pi), both `draft` with `open_blockers` [X].
 - Each called `edit_ticket` with `blocked_by: [Y]` on its own draft: both now `blocked_by` [Y], `open_blockers` [Y].
 - Each called `list_tickets` with `request_id: "r-2026-10-22-probe"`: both returned exactly the two probe drafts, each with "request r-2026-10-22-probe" and "blocked by t_40573ddea1304291". Result: PASS for Claude and Pi.
+
+### 6.x board checks (2026-10-23, Orchestrator, Chrome against a throwaway hub, code at 10e3609)
+
+- 6.1: "+" in the Draft column opens the New ticket dialog; saved with request `r-flow`, the ticket is `draft` with that request. The board was checked in default, rose-pine-dawn and rose-pine-moon.
+- 6.2: card C blocked by A and B showed "Blocked by 2 open tickets"; A moved to `done` gave "Blocked by 1 open ticket"; B moved to `cancelled` kept "Blocked by 1 open ticket". `lightOf()` is unchanged (Part 15 rule 6). The older-version and absent-blocker rules are covered by `tests/unit/ticket-board.test.ts`.
+- 6.3: with the dialog of C open, blocker E moved from `queued` to `done` and its row changed from "Queued" to "Done" without a reload. The human saved `blocked_by` on a draft in the installed app (ledger event 1360, install 8).
+- 6.4: with requests `r-one` and `r-two` on the board, the filter `r-two` showed only its ticket.
+- 6.6: a label whose only ticket is cancelled is not in the request select (checked 2026-10-23 on install 8 code).
+- 6.7: created a draft with a request in the New ticket dialog, changed its title in the draft dialog, saved, closed and opened it again: the new title showed. Part 15 (15.5, 15.6, 15.11) replaced this dialog layout.
+- 6.8: refused Save showed the red message under "Blocked by", the red border on focus and the clear on edit, in all three themes (Validator PASS on the source).
+- 6.5 was first open (contrast below 4.5:1 in rose-pine-dawn and rose-pine-moon); fixed and checked below.
+
+### 6.5 contrast and keyboard (2026-10-23, Orchestrator, Chrome against a throwaway hub)
+
+- `--text-muted` in `ui/styles/tokens.css` (the human's instruction: adjust the token, do not move elements to `--text-meta`). Each new value is the Rose Pine "subtle" colour moved toward the theme's text colour to the first value that reaches 4.5:1 on every panel, card, column and dialog background:
+  - rose-pine-dawn: `#797593` → `#6a6587`. Ratios: `--bg` 5.03, `--bg-raised` 5.29, `--bg-inset` 4.74, `--bg-elev` 4.58 (were 4.02, 4.23, 3.79, 3.67). On `--bg-hover` 3.97 (was 3.17).
+  - rose-pine-moon: `#908caa` → `#a29fbb`. Ratios: `--bg` 6.12, `--bg-raised` 5.62, `--bg-inset` 5.58, `--bg-elev` 4.55 (were 4.86, 4.46, 4.43, 3.61). On `--bg-hover` 3.82 (was 3.03).
+- Measured in the page (every visible text node against its composited background): the board, a draft dialog and a read-mode dialog have no text below 4.5:1 in default, dawn and moon. Lowest: default 4.99, dawn 4.58, moon 4.55. The pills and chips on tints pass (an earlier report of 3.94 and 4.37 came from a parser error in the script for `color()` values).
+- Rest of the app, dawn and moon (screenshots `/tmp/cubilot-ui-harness/6.5-main-board-dawn.jpg`, `-moon.jpg`): nothing breaks. Texts outside the ticket UI still measure 2.2 to 3.0 (roster labels, nutshell, chat time, composer hints, usage bar), also in the default theme: they use `--text-dim`, which this change does not touch (Part 14 scope).
+- Keyboard-only walk of the ticket dialog (draft with a blocker), after ticket 15.13:
+  1. Enter on the focused card opens the dialog; the focus is on the header Close (✕).
+  2. Tab order: Close, Title, Write tab, the four toolbar buttons, criteria, each blocker's Remove, Add blocker, browse, Move, Assignee, Priority, Low/High, Request, External ref, Copy ID, Cancel ticket, then the footer.
+  3. Blockers: Enter on "Add blocker", type "other", Down, Enter adds the ticket; Save becomes enabled with "1 unsaved change". Enter on that row's Remove removes only that row; the count goes back to none.
+  4. Refused save: Request "bad label!", Enter: "Not saved: invalid request_id" under Request (`role="alert"`), the field has `aria-invalid="true"` and keeps the focus.
+  5. Save: Request "r-one" and a title change, Enter: the hub stored both; the alert went away.
+  6. Close: Escape with an unsaved change shows "Unsaved changes" with the focus on "Keep editing"; Shift+Tab to "Discard", Enter closes; the focus returns to the card; nothing was saved.
+  - The first walk found three defects (keyboard blocker add left Save disabled; Escape put the focus on the body; the dialog opened with the focus on the footer Close). Ticket 15.13 fixed them; the second walk above passed. `bun test` 972 pass, tsc exit 0.
+
+### 8.1 (2026-10-23, commit 10e3609)
+
+- `bun test`: 967 pass, 0 fail. `cargo test --manifest-path src-tauri/Cargo.toml`: 117 passed, 1 ignored. `bun x tsc --noEmit`: exit 0. PASS.
+
+### 8.2 live check, part 3 (2026-10-23, install 10)
+
+- Orchestrator (lead) created A, B, C as `draft` in request `r-2026-10-23-live82`, C `blocked_by` [A], and moved all three to `queued` (200 each, `ticket.promoted`).
+- Worker2 (Claude) `claim_ticket` B: claimed. `claim_ticket` C: `409 blocked by t_d15a542d6d018514 (queued)`.
+- Worker1 (Claude) `create_ticket` draft with `request_id` and `blocked_by` [A]; `edit_ticket` replaced it with [B]; `list_tickets` by request showed the label and "blocked by t_1bf70e6759bc545e". PASS.
+- Pi: the only Pi sessions (Validator, Tester2) started before the grouping tools were built and expose the old schemas, so they could not repeat the check. The Pi pass of part 2 (probe-pi, 2026-10-22) stands: `hub/channel/tools.ts`, `core.ts`, `pi-extension.ts` and `hub-client.ts` have not changed since 2026-10-22 22:38, before that run, and the installed `pi-extension.js` carries `request_id`.
+- Test tickets cancelled after the check.
+
