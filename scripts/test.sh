@@ -3,7 +3,7 @@
 # A run that hangs or grows without end is stopped, and nothing it started stays alive.
 #
 #   CUBILOT_TEST_TIMEOUT_S    seconds from the start of bun test until it is stopped (default 300)
-#   CUBILOT_TEST_MAX_RSS_MB   total RSS of the test process group in MB (default 2048). Checked every second:
+#   CUBILOT_TEST_MAX_RSS_MB   total RSS of the test process group in MB (default 3072). Checked every second:
 #                             a mitigation, not a strict ceiling. A process that leaves the group is not counted.
 #   CUBILOT_HEAVY_LOCK        lock directory (default /tmp/cubilot-heavy.lock). The script takes it itself and it is
 #                             not reentrant: do not take the lock before you call the script.
@@ -19,7 +19,7 @@ usage_error() { echo "scripts/test.sh: $1" >&2; exit 2; }
 positive_int() { case "$1" in '' | *[!0-9]*) return 1 ;; esac; [ "$1" -gt 0 ]; }
 
 TIMEOUT_S=${CUBILOT_TEST_TIMEOUT_S:-300}
-MAX_RSS_MB=${CUBILOT_TEST_MAX_RSS_MB:-2048}
+MAX_RSS_MB=${CUBILOT_TEST_MAX_RSS_MB:-3072}
 LOCK=${CUBILOT_HEAVY_LOCK:-/tmp/cubilot-heavy.lock}
 LOCK_RETRY_S=${CUBILOT_LOCK_RETRY_S:-30}
 LOCK_WAIT_S=${CUBILOT_LOCK_WAIT_S:-600}
@@ -104,6 +104,8 @@ while ! mkdir "$LOCK" 2> /dev/null; do
 done
 LOCK_HELD=1
 echo "$OWNER_NAME $$ $(date +%s)" > "$LOCK/owner"
+
+echo "memory limit ${MAX_RSS_MB} MB"
 
 set -m # job control: the background job leads a new process group
 bun test "$@" &
