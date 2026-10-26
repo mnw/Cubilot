@@ -2965,6 +2965,10 @@ mod spawn_argv_tests {
         let (root_w, w) = staged_role("worker", "worker-2");
         let wc = cmd(&w);
         assert!(!wc.contains("--effort"), "{wc}");
+        // byte-equal to the command before role efforts existed; temp paths are normalised
+        let ver = w.plugin_dir.parent().unwrap().to_string_lossy().to_string();
+        let norm = wc.replace(&ver, "<V>").replace(&*root_w.to_string_lossy(), "<R>");
+        assert_eq!(norm, "CHATBRIDGE_AGENT='orchestrator' CHATBRIDGE_ROOM='r' CHATBRIDGE_ROLE='worker' '/c' --plugin-dir '/m' --plugin-dir '<V>/worker' --plugin-dir '<V>/shared' --append-system-prompt-file '<V>/worker/role.md' --settings '<R>/settings/worker-2.json' --model 'sonnet' --disallowed-tools 'Task,Agent,mcp__chatbridge__ack_permission' --allowed-tools 'mcp__chatbridge__post,mcp__chatbridge__post_file,mcp__chatbridge__send_handoff,mcp__chatbridge__accept_handoff,mcp__chatbridge__decline_handoff,mcp__chatbridge__cancel_handoff,mcp__chatbridge__send_interrupt,mcp__chatbridge__ack_interrupt,mcp__chatbridge__create_ticket,mcp__chatbridge__claim_ticket,mcp__chatbridge__transition_ticket,mcp__chatbridge__assign_ticket,mcp__chatbridge__attach_ticket_file,mcp__chatbridge__list_tickets'", "worker command must stay byte-equal");
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&root_w);
     }
