@@ -435,6 +435,13 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
           return Response.json({ error: `unknown sender ${from}: connect /agent-stream first` }, { status: 409 });
         }
         const fromAgent = cap.agents.get(from)!;
+        // G2: a handoff with the stage_id of a running worker stage is checked first, so a missing or wrong ticket_id
+        // gets the worker refusal and stage.rejected, not a generic 400 or 404.
+        let workerResult: string[] | null = null;
+        if (stage?.isWorkerResult?.(from, body.context)) {
+          workerResult = stage.checkResult(from, body.context, cap, to);
+          if (workerResult?.length) return Response.json({ error: "result rejected", errors: workerResult }, { status: 400 });
+        }
         let handoffRoom: string;
         let ticketId: string | null = null;
         // A spec review (spec-review-stage 2.1): to_role validator + review "spec" + request_id; it names a request, not a ticket.
@@ -501,7 +508,8 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
             return Response.json({ error: "a to_role handoff needs context.ticket_id" }, { status: 400 });
           }
           // The commit a Tester, Validator, Editor or Reviewer worktree is detached at (stage-sessions 4.5).
-          if (ctx.commit !== undefined && (typeof ctx.commit !== "string" || !/^[0-9a-f]{7,64}$/i.test(ctx.commit))) {
+          // A worker result with a bad hash goes to the worker check below, which gives the worker refusal and stage.rejected (G2).
+          if (ctx.commit !== undefined && !stage?.isWorkerResult?.(from, body.context) && (typeof ctx.commit !== "string" || !/^[0-9a-f]{7,64}$/i.test(ctx.commit))) {
             return Response.json({ error: "context.commit must be a commit hash" }, { status: 400 });
           }
           const t = db.query<{ room: string }, [string]>("SELECT room FROM tickets WHERE id = ?").get(ctx.ticket_id);
@@ -532,7 +540,7 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
         if (done) return Response.json({ error: done }, { status: 409 });
 
         // A result handoff of a stage session must pass the schema check; a failing one records nothing (stage-sessions 5.1).
-        const resultErrors = stage?.checkResult(from, body.context, cap, to) ?? null;
+        const resultErrors = workerResult ?? stage?.checkResult(from, body.context, cap, to) ?? null;
         if (resultErrors?.length) return Response.json({ error: "result rejected", errors: resultErrors }, { status: 400 });
 
         const id = mintHandoffId();

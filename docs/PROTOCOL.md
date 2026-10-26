@@ -757,6 +757,15 @@ A stage ends with a result handoff from its session. The hub treats a handoff as
 | `context.verdict` | — | `"PASS"` or `"FAIL"`, upper case |
 | `context.findings` | — | list of `{ticket_id, text}`. Each `ticket_id` and `text` is a non-empty string. The list can be empty. |
 
+A Worker stage (role `worker`) has a stricter rule. Its result is a handoff with `to_role: "tester"`:
+
+| Field | Worker stage |
+|---|---|
+| `to_role` | `"tester"` (the recipient is `role:tester`) |
+| `context.commit` | required. A full 40-character lowercase hex hash. It resolves to a commit, is reachable from `ticket/<ticket_id>`, and is new work. |
+
+New work: the base is an ancestor of `context.commit` and the two hashes differ (`git merge-base --is-ancestor`). The base is the `context.commit` of the newest earlier passed Worker result of the same ticket that has a valid commit (ordered by the creation event of the handoff). With none, the base is `git merge-base ticket/<ticket_id> staging`. Git runs with argv, no shell, with a time limit. Any other handoff with the stage_id of a running Worker stage → 400 `{"error": "result rejected", "errors": ["A worker result needs to_role tester and a new commit on ticket/<id>. To report a block, post to the Orchestrator without stage_id."]}`. A missing project folder, ticket branch or staging branch, or a failed git command, adds the git error text to that message. The hub records no handoff, the stage stays `running`, and the session gets `stage.rejected`.
+
 Example of a valid Validator result:
 
 ```json
