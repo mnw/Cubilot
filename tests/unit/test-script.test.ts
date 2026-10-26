@@ -91,6 +91,24 @@ describe("scripts/test.sh", () => {
     expect(existsSync(r.lock)).toBe(false);
   }, 30000);
 
+  test("it prints the effective memory limit at start: 3072 MB by default, the override when set", async () => {
+    const env = { ...process.env } as Record<string, string>;
+    delete env.CUBILOT_TEST_MAX_RSS_MB;
+    const base = await Bun.spawn(["bash", SCRIPT, join(dir, "ok.test.ts")], {
+      cwd: dir,
+      env: { ...env, PATH: `${dirname(process.execPath)}:${process.env.PATH}`, CUBILOT_HEAVY_LOCK: join(dir, `lock-${n++}`) },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [o, e, c] = await Promise.all([new Response(base.stdout).text(), new Response(base.stderr).text(), base.exited]);
+    expect(c).toBe(0);
+    expect(o + e).toContain("memory limit 3072 MB");
+    const r = await run([join(dir, "ok.test.ts")], { CUBILOT_TEST_MAX_RSS_MB: "2048" });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("memory limit 2048 MB");
+    expect(r.out).not.toContain("memory limit 3072 MB");
+  }, 30000);
+
   test("a bad setting exits 2 with a message and takes no lock", async () => {
     for (const env of [{ CUBILOT_TEST_TIMEOUT_S: "abc" }, { CUBILOT_TEST_MAX_RSS_MB: "0" }, { CUBILOT_TEST_TIMEOUT_S: "-5" }]) {
       const r = await run([join(dir, "ok.test.ts")], env);

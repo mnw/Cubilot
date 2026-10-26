@@ -329,6 +329,8 @@ export type StageHooks = {
    * that is running, the text names it: the sender probably copied a stage id from a handoff.
    */
   completedStage(from: string, context: unknown): string | null;
+  /** True when `context.stage_id` is the running worker stage of `from`: its commit is checked by checkResult (G2), not by the shared hash check. */
+  isWorkerResult?(from: string, context: unknown): boolean;
   /** `to` is the recipient of the handoff: a spec result must go to the room lead (spec-review 4.1b). */
   checkResult(from: string, context: unknown, cap: HubCapabilities, to?: string): string[] | null;
   /**
@@ -343,6 +345,10 @@ const REVIEW_ROLES = new Set(["validator", "reviewer"]);
 
 /** The recipient name stored for a handoff to a role. validName() refuses ':', so no agent can ever have it. */
 export const ROLE_RECIPIENT_PREFIX = "role:";
+const FULL_SHA_RE = /^[0-9a-f]{40}$/;
+const WORKER_GIT_TIMEOUT_MS = 10_000;
+const workerRefusal = (ticketId: string) =>
+  `A worker result needs to_role tester and a new commit on ticket/${ticketId}. To report a block, post to the Orchestrator without stage_id.`;
 
 export type StageRuntime = {
   module: KindModule;
@@ -1353,6 +1359,77 @@ export function createStageRuntime(
       (sweepTimer as { unref?: () => void }).unref?.();
     },
   };
+  /** Runs git with argv (no shell) and a time limit. Never throws. */
+  function runGit(project: string, args: string[]): { code: number | null; out: string; err: string } {
+    try {
+      const r = Bun.spawnSync(["git", "-C", project, ...args], { stdout: "pipe", stderr: "pipe", timeout: WORKER_GIT_TIMEOUT_MS });
+      const err = r.stderr.toString().trim();
+      return { code: r.exitCode, out: r.stdout.toString().trim(), err: r.exitedDueToTimeout ? `git timed out after ${WORKER_GIT_TIMEOUT_MS} ms. ${err}`.trim() : err };
+    } catch (e) {
+      return { code: null, out: "", err: String(e) };
+    }
+  }
+
+  /**
+   * G2: a worker result is a handoff to_role tester whose context.commit is new work on ticket/<id>. Returns the refusal
+   * text, or null when the result is good. The hash is checked before any git call.
+   */
+  function checkWorkerResult(stage: { id: string; ticket_id: string | null }, c: Record<string, unknown>, to: string | undefined): string | null {
+    const ticketId = stage.ticket_id ?? "";
+    const refuse = (detail?: string) => `${workerRefusal(ticketId)}${detail ? ` ${detail}` : ""}`;
+    const commit = c.commit;
+    if (c.ticket_id !== stage.ticket_id) return refuse();
+    if (to !== `${ROLE_RECIPIENT_PREFIX}tester` || typeof commit !== "string" || !FULL_SHA_RE.test(commit)) return refuse();
+    const room = roomOfStage(stage.id);
+    const project = room ? getRoomSettings(db, room)?.project_folder : null;
+    if (!project) return refuse("The room has no project folder.");
+    // rev-parse --verify --quiet exits 1 with no output when the object is not a commit; any other failure is a git error.
+    const resolve = (sha: string): { ok: boolean; error?: string } => {
+      const r = runGit(project, ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`]);
+      if (r.code === 0) return { ok: true };
+      if (r.code === 1 && !r.err) return { ok: false };
+      return { ok: false, error: `Git: ${r.err || "rev-parse failed"}` };
+    };
+    const branch = `refs/heads/ticket/${ticketId}`;
+    const tip = runGit(project, ["rev-parse", "--verify", "--quiet", branch]);
+    if (tip.code !== 0) return refuse(`Git: branch ticket/${ticketId} not found. ${tip.err}`.trim());
+    const own = resolve(commit);
+    if (own.error) return refuse(own.error);
+    if (!own.ok) return refuse("The commit does not resolve to a commit.");
+    const onBranch = runGit(project, ["merge-base", "--is-ancestor", commit, branch]);
+    if (onBranch.code === 1) return refuse(`The commit is not on ticket/${ticketId}.`);
+    if (onBranch.code !== 0) return refuse(`Git: ${onBranch.err || "merge-base failed"}`);
+    // Base: the newest earlier passed worker result of this ticket with a valid commit, else the fork point from staging.
+    const earlier = db
+      .query<{ context_json: string }, [string, string]>(
+        `SELECT h.context_json FROM handoffs h JOIN stage s ON s.id = json_extract(h.context_json, '$.stage_id')
+         WHERE json_extract(h.context_json, '$.ticket_id') = ? AND s.ticket_id = ? AND s.role = 'worker' AND s.status = 'passed'
+         ORDER BY (SELECT MIN(e.seq) FROM events e WHERE e.entity_id = h.id) DESC`,
+      )
+      .all(ticketId, ticketId);
+    let base: string | null = null;
+    for (const row of earlier) {
+      const prev = (JSON.parse(row.context_json) as Record<string, unknown>).commit;
+      if (typeof prev !== "string" || !FULL_SHA_RE.test(prev)) continue;
+      const r = resolve(prev);
+      if (r.error) return refuse(r.error);
+      if (r.ok) {
+        base = prev;
+        break;
+      }
+    }
+    if (base === null) {
+      const mb = runGit(project, ["merge-base", branch, "refs/heads/staging"]);
+      if (mb.code !== 0 || !FULL_SHA_RE.test(mb.out)) return refuse(`Git: no merge-base with staging. ${mb.err}`.trim());
+      base = mb.out;
+    }
+    if (base === commit) return refuse("The commit is not new work: it equals the base.");
+    const fromBase = runGit(project, ["merge-base", "--is-ancestor", base, commit]);
+    if (fromBase.code === 1) return refuse("The commit is not new work: it does not descend from the base.");
+    if (fromBase.code !== 0) return refuse(`Git: ${fromBase.err || "merge-base failed"}`);
+    return null;
+  }
+
   const hooks: StageHooks = {
     completedStage(from, context) {
       const id = context && typeof context === "object" && !Array.isArray(context) ? (context as Record<string, unknown>).stage_id : undefined;
@@ -1363,6 +1440,11 @@ export function createStageRuntime(
       return own
         ? `stage ${row.id} is already ${row.status}. Your running stage is ${own.id}. Send your result with that stage_id.`
         : `stage ${row.id} is already ${row.status}; it takes no more results`;
+    },
+    isWorkerResult(from, context) {
+      const id = context && typeof context === "object" && !Array.isArray(context) ? (context as Record<string, unknown>).stage_id : undefined;
+      if (typeof id !== "string") return false;
+      return !!db.query("SELECT 1 FROM stage WHERE id = ? AND session = ? AND role = 'worker' AND status = 'running'").get(id, from);
     },
     checkResult(from, context, cap, to) {
       const stage = db
@@ -1405,7 +1487,11 @@ export function createStageRuntime(
         if (c.verdict === "PASS" && blocking) errors.push("a PASS must not have a blocking finding");
       } else {
         if (c.stage_id !== stage.id) errors.push(`context.stage_id must be ${stage.id}`);
-        if (c.ticket_id !== stage.ticket_id) errors.push(`context.ticket_id must be ${stage.ticket_id}`);
+        if (stage.role === "worker") {
+          // G2: every worker result problem, a wrong ticket included, gets the one worker refusal.
+          const refusal = checkWorkerResult(stage, c, to);
+          if (refusal) errors.push(refusal);
+        } else if (c.ticket_id !== stage.ticket_id) errors.push(`context.ticket_id must be ${stage.ticket_id}`);
         if (REVIEW_ROLES.has(stage.role)) {
           if (typeof c.verdict !== "string" || !VERDICTS.has(c.verdict)) errors.push("context.verdict must be PASS or FAIL (upper case)");
           if (!Array.isArray(c.findings)) errors.push("context.findings must be a list of {ticket_id, text}");

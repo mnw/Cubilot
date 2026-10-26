@@ -17,6 +17,7 @@ describe("delivery mode of stage.rejected", () => {
   });
 });
 
+// A writer stage: its result needs only stage_id and ticket_id. A worker result also needs a commit (G2, tests/integration/worker-result.test.ts).
 function makeEnv() {
   const db = new Database(":memory:");
   migrateLedger(db);
@@ -30,7 +31,7 @@ function makeEnv() {
     `INSERT INTO tickets (id, room, title, acceptance_criteria, blast_radius, priority, creator, status, request_id, created_at_ms, updated_at_ms, version)
      VALUES ('t_0000000000000001', 'r1', 'T', 'c', 'low', 'medium', 'a', 'in_progress', 'req-1', 1, 1, 1)`,
   );
-  const s = rt.api.create({ ticket_id: "t_0000000000000001", role: "worker" }, "system", cap);
+  const s = rt.api.create({ ticket_id: "t_0000000000000001", role: "writer" }, "system", cap);
   rt.api.move(s.id, { to: "launching", session: "worker-1" }, "system", cap);
   rt.api.move(s.id, { to: "running" }, "system", cap);
   const route = rt.module.routes.find((r: RouteDef) => r.method === "POST" && String(r.path).includes("turn-end"))!;
