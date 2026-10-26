@@ -2418,6 +2418,24 @@ mod spawn_argv_tests {
     }
 
     #[test]
+    fn pi_final_spawn_command_and_argv_are_unchanged() {
+        let pi = "CHATBRIDGE_AGENT='a' 'pi' --no-approve";
+        let tail = " -- \"$(cat '/tmp/m.txt')\"";
+        let first = Some(std::path::Path::new("/tmp/m.txt"));
+        for sid in [None, Some("s_0123456789abcdef")] {
+            let (cmd, argv) = super::final_spawn("a", "/tmp", "en_US.UTF-8", None, pi.to_string(), Harness::Pi, sid, Some("/opt/a:/usr/bin"), first);
+            let want = format!("PATH='/opt/a:/usr/bin' {pi}{tail}");
+            assert_eq!(cmd, want);
+            assert_eq!(argv, build_spawn_argv("a", "/tmp", "en_US.UTF-8", None, &want, sid));
+            assert!(!argv[..argv.len() - 1].iter().any(|a| a.starts_with("PATH=")), "no -e PATH pair: {argv:?}");
+            let plain = format!("{pi}{tail}");
+            let (cmd, argv) = super::final_spawn("a", "/tmp", "en_US.UTF-8", None, pi.to_string(), Harness::Pi, sid, None, first);
+            assert_eq!(cmd, plain);
+            assert_eq!(argv, build_spawn_argv("a", "/tmp", "en_US.UTF-8", None, &plain, sid));
+        }
+    }
+
+    #[test]
     fn argv_includes_anthropic_api_key_when_provided() {
         let argv = build_spawn_argv("alice", "/tmp", "en_US.UTF-8", Some("sk-test-123"), "claude", None);
         let joined = argv.join(" ");
