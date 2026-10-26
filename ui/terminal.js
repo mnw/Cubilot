@@ -1349,8 +1349,12 @@
     return modelGrid.gridModel({ harness, models: gridModels[harness] || [], filter: spawnGridFilterEl?.value || '', role: spawnRole() });
   }
 
-  async function loadGridModels(harness) {
-    if (gridModels[harness]) return;
+  const gridLoads = {};   // harness -> pending list_models request, so one opening asks once
+  function loadGridModels(harness) {
+    if (gridModels[harness]) return Promise.resolve();
+    return (gridLoads[harness] ||= fetchGridModels(harness).finally(() => { delete gridLoads[harness]; }));
+  }
+  async function fetchGridModels(harness) {
     if (spawnGridNoteEl) spawnGridNoteEl.textContent = harness === 'pi' ? 'Loading Pi models and sign-in state…' : '';
     try {
       gridModels[harness] = await listModels(harness);
@@ -1451,20 +1455,20 @@
     if (!b) return;
     const same = gridSelected && gridSelected.rowKey === b.dataset.row && gridSelected.effort === b.dataset.effort;
     gridSelected = same ? null : { rowKey: b.dataset.row, effort: b.dataset.effort };   // a second click clears it
+    gridRefresher.explicit();   // a model list still on its way must not replace this choice
     spawnTouched.add('cell');
     renderSpawnGrid();
   });
   spawnGridFilterEl?.addEventListener('input', renderSpawnGrid);
 
   // Role or harness changed: the rows and columns change, the selection becomes the role's default cell.
-  async function refreshSpawnGrid() {
-    const harness = spawnGridHarness();
-    renderSpawnGrid();
-    await loadGridModels(harness);
-    if (spawnGridHarness() !== harness) return;   // changed again while loading
-    gridSelected = modelGrid.initialSelection(buildSpawnGrid());
-    renderSpawnGrid();
-  }
+  const gridRefresher = spawnForm.createGridRefresher({
+    render: () => renderSpawnGrid(),
+    load: (harness) => loadGridModels(harness),
+    harness: () => spawnGridHarness(),
+    apply: () => { gridSelected = modelGrid.initialSelection(buildSpawnGrid()); renderSpawnGrid(); },
+  });
+  const refreshSpawnGrid = () => gridRefresher.refresh().then((applied) => { if (!applied) renderSpawnGrid(); });
 
   // A role preselects its harness in the radios (unless keepHarness: a recalled choice already set them). The radios
   // stay free: the other harness runs the role with no default model, so the grid asks for a cell.

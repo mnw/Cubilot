@@ -99,3 +99,46 @@ describe("createRolesLoader", () => {
     expect(b.state().error).toBe("plain");
   });
 });
+
+describe("createGridRefresher", () => {
+  const setup = () => {
+    const loads: Array<() => void> = [];
+    const st = { harness: "claude", applied: 0, renders: 0 };
+    const r = sf.createGridRefresher({
+      render: () => { st.renders++; },
+      load: () => new Promise<void>((res) => loads.push(res)),
+      harness: () => st.harness,
+      apply: () => { st.applied++; },
+    });
+    return { loads, st, r };
+  };
+  test("a click between two requests wins over the late response", async () => {
+    const { loads, st, r } = setup();
+    const first = r.refresh();
+    const second = r.refresh();   // role changed quickly
+    r.explicit();                 // the human clicks a cell
+    loads[1]();
+    expect(await second).toBe(false);
+    loads[0]();                   // the late response resolves last
+    expect(await first).toBe(false);
+    expect(st.applied).toBe(0);
+  });
+  test("a response for an earlier request does not apply after a newer one did", async () => {
+    const { loads, st, r } = setup();
+    const first = r.refresh();
+    const second = r.refresh();
+    loads[1]();
+    expect(await second).toBe(true);
+    loads[0]();
+    expect(await first).toBe(false);
+    expect(st.applied).toBe(1);
+  });
+  test("the newest response applies when the human made no choice; a harness change drops it", async () => {
+    const { loads, st, r } = setup();
+    const a = r.refresh(); loads[0]();
+    expect(await a).toBe(true);
+    const b = r.refresh(); st.harness = "pi"; loads[1]();
+    expect(await b).toBe(false);
+    expect(st.applied).toBe(1);
+  });
+});

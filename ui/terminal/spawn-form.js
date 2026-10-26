@@ -72,6 +72,24 @@
     return true;
   }
 
+  // Orders the grid refreshes: only the newest refresh may apply its default cell, and an explicit cell click
+  // cancels every refresh still waiting for a model list. io: { render, load(harness), harness(), apply() }.
+  function createGridRefresher(io) {
+    let seq = 0;
+    return {
+      explicit() { seq++; },
+      async refresh() {
+        const mine = ++seq;
+        const harness = io.harness();
+        io.render();
+        await io.load(harness);
+        if (mine !== seq || io.harness() !== harness) return false;
+        io.apply();
+        return true;
+      },
+    };
+  }
+
   window.__CUBILOT_TERM__ = window.__CUBILOT_TERM__ || {};
-  window.__CUBILOT_TERM__.spawnForm = { NAME_RE, agentNameOk, cellName, invalidFields, missingFields, fillInText, createRolesLoader, launchState, tryLaunch };
+  window.__CUBILOT_TERM__.spawnForm = { NAME_RE, agentNameOk, cellName, invalidFields, missingFields, fillInText, createRolesLoader, createGridRefresher, launchState, tryLaunch };
 })();
