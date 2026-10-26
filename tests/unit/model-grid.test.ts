@@ -1,7 +1,7 @@
 // The model x effort grid of the spawn modal (task 5.5): the pure grid model (ui/terminal/model-grid.js) and the
 // DOM glue of ui/terminal.js, run in a vm with a tiny fake DOM.
 import { describe, test, expect } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import vm from "node:vm";
 
 const win: any = {};
@@ -33,12 +33,22 @@ describe("grid model", () => {
       expect(g.launchReady(grid, null, null)).toBe(false);
       expect(g.launchReady(grid, { rowKey: h === "pi" ? "openai-codex/gpt-5.6-sol" : "/opus", effort: "high" }, null)).toBe(false);
     }
-    const staged = ["orchestrator", "worker", "tester", "validator", "writer", "editor", "reviewer"];
-    for (const name of staged) {
-      for (const harness of ["claude", "pi"]) {
-        const role = { name, harness, model: "x", provider: null, thinking: null };
-        expect(g.launchReady(g.gridModel({ harness, models: harness === "pi" ? pi : claude, role }), null, role)).toBe(true);
-      }
+    // The real factory role files (frontmatter), each on its own default harness. Councils (a11y, seo) have no launch command.
+    const fm = (t: string, k: string) => t.match(new RegExp(`^---\\n[\\s\\S]*?^${k}:[ \\t]*(.*)$`, "m"))?.[1]?.trim().replace(/^["']|["']$/g, "") || null;
+    const staged = readdirSync("factory").flatMap((name) => {
+      const f = `factory/${name}/${name}.md`;
+      if (!existsSync(f)) return [];
+      const t = readFileSync(f, "utf8");
+      if (fm(t, "council") !== null) return [];
+      return [{ name, harness: fm(t, "harness") || "claude", model: fm(t, "model"), provider: fm(t, "provider"), thinking: fm(t, "thinking") }];
+    });
+    expect(staged.map((r) => r.name).sort()).toEqual(["editor", "orchestrator", "reviewer", "tester", "validator", "worker", "writer"]);
+    expect(staged.filter((r) => r.harness === "pi").map((r) => r.name).sort()).toEqual(["reviewer", "validator"]);
+    for (const role of staged) {
+      const grid = g.gridModel({ harness: role.harness, models: role.harness === "pi" ? pi : claude, role });
+      expect(g.launchReady(grid, null, role)).toBe(true);
+      expect(g.launchReady(grid, null, null)).toBe(false);
+      expect(grid.defaultCell).not.toBeNull();   // the role's own model is in the list: its cell is marked
     }
   });
 
@@ -289,6 +299,15 @@ describe("spawn modal grid glue", () => {
     expect(els.spawnRoleErrEl.textContent).toBe("");
     expect(els.spawnSubmit.disabled).toBe(false);
   });
+  test("a list_roles failure with no role keeps Launch disabled and the role text shown", async () => {
+    const { els, api } = mkCtx(async () => { throw new Error("backend gone"); });
+    els.spawnSubmit.disabled = false;
+    await api.refreshSpawnRoles();
+    expect(els.spawnSubmit.disabled).toBe(true);
+    expect(els.spawnRoleErrEl.hidden).toBe(false);
+    expect(els.spawnRoleErrEl.textContent).toContain(g.ROLE_REQUIRED);
+    expect(els.spawnRoleErrEl.textContent).toContain("backend gone");
+  });
   test("pty.listRoles rejects when the command fails (it no longer answers [])", async () => {
     const win: any = { __TAURI__: { core: { invoke: async () => { throw new Error("nope"); } } } };
     new Function("window", "TextEncoder", readFileSync("ui/terminal/pty.js", "utf8"))(win, TextEncoder);
@@ -316,6 +335,29 @@ describe("spawn modal grid glue", () => {
     expect(els.spawnRoleEl.value).toBe("");
     await new Promise((r) => setTimeout(r, 0));
     expect(els.spawnRoleEl.value).toBe("");
+    expect(modalClasses.has("open")).toBe(true);
+  });
+  test("on opening with no role, Launch is disabled and the role text shows before list_roles answers", async () => {
+    const els: Record<string, El> = {};
+    for (const id of ["spawnRoleEl", "spawnRoleErrEl", "spawnGridEl", "spawnGridFilterEl", "spawnGridCountEl", "spawnGridNoteEl", "spawnHarnessPi", "spawnHarnessClaude", "spawnAgentEl", "spawnSubmit", "spawnCwdEl", "spawnRoomEl"]) els[id] = new El("x");
+    const modalClasses = new Set<string>();
+    const Option = function (label: string, value: string) { const o = new El("option"); o._text = label; o.value = value; return o; };
+    const ctx = vm.createContext({
+      document: { createElement: (t: string) => new El(t) }, Option, console, Map, Promise, localStorage: {}, setTimeout: () => 0,
+      ...els, spawnModal: { classList: { add: (c: string) => modalClasses.add(c) } }, spawnSessionContinue: null, spawnSessionResume: null,
+      refreshSpawnRoomDatalist: () => {}, roleList: null, modelGrid: g, roleMemory: { recall: () => null },
+      listRoles: () => new Promise(() => {}), listModels: async (h: string) => lists[h],
+    });
+    const src = readFileSync("ui/terminal.js", "utf8");
+    const block = src.slice(src.indexOf("  function openSpawnModal("), src.indexOf("  function refreshSpawnRoomDatalist() {"));
+    vm.runInContext("let spawnRoles = new Map();" + block + ";this.api={openSpawnModal};", ctx);
+    const { openSpawnModal } = (ctx as any).api;
+    els.spawnSubmit.disabled = false;   // the markup starts Launch enabled; a past launch may have left it enabled
+    els.spawnRoleErrEl.hidden = true;
+    openSpawnModal();                   // list_roles has not answered
+    expect(els.spawnSubmit.disabled).toBe(true);
+    expect(els.spawnRoleErrEl.hidden).toBe(false);
+    expect(els.spawnRoleErrEl.textContent).toBe(g.ROLE_REQUIRED);
     expect(modalClasses.has("open")).toBe(true);
   });
 });

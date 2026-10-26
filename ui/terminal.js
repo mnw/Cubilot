@@ -1269,9 +1269,9 @@
     gridModels = {};   // the model lists (and Pi sign-in marks) are read again each time the modal opens
     gridSelected = null;
     if (spawnGridFilterEl) spawnGridFilterEl.value = '';
-    if (spawnRoleErrEl) { spawnRoleErrEl.textContent = ''; spawnRoleErrEl.hidden = true; }
     if (spawnRoleEl) spawnRoleEl.value = '';   // every opening starts at "Pick a role"; refreshSpawnRoles keeps only a pick made during its wait
     roleList?.sync();
+    gateSpawnWithoutRole('');   // Launch is off and the reason shows from the first moment, before the role list is read
     refreshSpawnRoles();
     spawnModal.classList.add('open');
     setTimeout(() => spawnAgentEl.focus(), 0);
@@ -1289,7 +1289,7 @@
       if (opening !== spawnOpening) return;
       // An error is not "no roles": keep the options and the role the human picked, and say so in the window.
       console.warn('[terminal] list_roles failed:', e);
-      if (spawnRoleErrEl) { spawnRoleErrEl.textContent = `Could not read the roles: ${e?.message ?? e}. The role list is not refreshed.`; spawnRoleErrEl.hidden = false; }
+      gateSpawnWithoutRole(`Could not read the roles: ${e?.message ?? e}. The role list is not refreshed.`);
       return;
     }
     if (opening !== spawnOpening) return;
@@ -1330,6 +1330,17 @@
     const sel = modelGrid.selectionFromChoice(buildSpawnGrid(), m);
     if (sel) { gridSelected = sel; renderSpawnGrid(); }
   }
+  // No role: Launch is disabled and the reason shows next to the role field. `extra` is another message of that field.
+  function gateSpawnWithoutRole(extra) {
+    const need = !spawnRoleEl?.value;
+    if (spawnSubmit && need) spawnSubmit.disabled = true;
+    if (spawnRoleErrEl) {
+      const text = [need ? modelGrid.ROLE_REQUIRED : '', extra].filter(Boolean).join(' ');
+      spawnRoleErrEl.textContent = text;
+      spawnRoleErrEl.hidden = !text;
+    }
+  }
+
   // A remembered role fills an empty choice only; a role the human picked is never replaced by the name's memory.
   function onSpawnNameCommit() { if (!spawnRoleEl?.value) return recallSpawnRole(); }
   spawnAgentEl?.addEventListener('change', onSpawnNameCommit);

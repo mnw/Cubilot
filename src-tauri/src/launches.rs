@@ -176,24 +176,44 @@ fn spawn_args(r: Request) -> Result<SpawnArgs, String> {
     Ok(SpawnArgs { session, cwd, room, harness, role, stage_id, prompt })
 }
 
-async fn launch(app: &AppHandle, r: Request) -> Result<(), String> {
+/// The arguments a hub launch hands to pty_spawn, in the order of its parameters that a launch sets.
+#[derive(Debug, PartialEq)]
+struct PtySpawnCall { agent: String, cwd: String, room: Option<String>, harness: Option<String>, role: Option<String>, stage_id: Option<String>, first_message: Option<String> }
+
+fn spawn_call(r: Request) -> Result<PtySpawnCall, String> {
     let a = spawn_args(r)?;
-    pty::pty_spawn(
-        app.clone(),
-        app.state::<pty::PtyRegistry>(),
-        a.session,
-        a.cwd,
-        None,
-        Some(a.room),
-        Some(a.harness),
-        Some(a.role),
-        None,
-        None,
-        None,
-        None,
-        Some(a.stage_id),
-        Some(a.prompt),
-    )
+    Ok(PtySpawnCall { agent: a.session, cwd: a.cwd, room: Some(a.room), harness: Some(a.harness), role: Some(a.role), stage_id: Some(a.stage_id), first_message: Some(a.prompt) })
+}
+
+/// Builds the pty_spawn call of a launch and gives it to `spawn`. A test passes a recording `spawn`.
+async fn launch_with<F, Fut>(r: Request, spawn: F) -> Result<(), String>
+where
+    F: FnOnce(PtySpawnCall) -> Fut,
+    Fut: std::future::Future<Output = Result<(), String>>,
+{
+    spawn(spawn_call(r)?).await
+}
+
+async fn launch(app: &AppHandle, r: Request) -> Result<(), String> {
+    launch_with(r, |c| {
+        let PtySpawnCall { agent, cwd, room, harness, role, stage_id, first_message } = c;
+        pty::pty_spawn(
+            app.clone(),
+            app.state::<pty::PtyRegistry>(),
+            agent,
+            cwd,
+            None,
+            room,
+            harness,
+            role,
+            None,
+            None,
+            None,
+            None,
+            stage_id,
+            first_message,
+        )
+    })
     .await
 }
 
@@ -349,6 +369,26 @@ mod tests {
         let a = spawn_args(l).unwrap();
         assert_eq!(a.role, "worker");
         assert_eq!(a, SpawnArgs { session: "worker-1".into(), cwd: "/w".into(), room: "cubilot".into(), harness: "claude".into(), role: "worker".into(), stage_id: "s_0123456789abcdef".into(), prompt: "p".into() });
+    }
+
+    #[test]
+    fn launch_hands_the_role_to_the_spawn_call() {
+        let l = parse_request(r#"{"id":"l_1","kind":"launch","stage_id":"s_0123456789abcdef","session":"worker-1","role":"worker","room":"cubilot","harness":"claude","cwd":"/w","prompt":"p","env":{}}"#).unwrap();
+        let got = std::cell::RefCell::new(None);
+        let r = tauri::async_runtime::block_on(launch_with(l, |c| { *got.borrow_mut() = Some(c); async { Ok(()) } }));
+        assert_eq!(r, Ok(()));
+        let c = got.into_inner().unwrap();
+        assert_eq!(c.role.as_deref(), Some("worker"));
+        assert_eq!(c, PtySpawnCall { agent: "worker-1".into(), cwd: "/w".into(), room: Some("cubilot".into()), harness: Some("claude".into()), role: Some("worker".into()), stage_id: Some("s_0123456789abcdef".into()), first_message: Some("p".into()) });
+    }
+
+    #[test]
+    fn a_launch_without_a_folder_never_reaches_the_spawn_call() {
+        let l = parse_request(r#"{"id":"l_1","kind":"launch","stage_id":"s_0123456789abcdef","session":"worker-1","role":"worker","room":"cubilot","harness":"claude","prompt":"p","env":{}}"#).unwrap();
+        let called = std::cell::Cell::new(false);
+        let r = tauri::async_runtime::block_on(launch_with(l, |_| { called.set(true); async { Ok(()) } }));
+        assert!(r.is_err());
+        assert!(!called.get());
     }
 
     #[test]
