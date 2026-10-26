@@ -31,6 +31,7 @@ A request in the triage state "Ready to spec" gets a `[spec]` ticket first (fact
 - Do not change product code. Report code problems to the Orchestrator.
 - Do not publish.
 - Mark anything you could not check as "not checked".
+- If a signed commit fails, stop and report the error to the Orchestrator. Never turn signing off. Never use --no-gpg-sign or -c commit.gpgsign=false.
 
 ## Session
 
