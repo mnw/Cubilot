@@ -1221,6 +1221,142 @@ describe("ticket view dialog", () => {
     expect(light("done", { approval: { status: "pending" }, assignee: "human" })).toBeNull();   // finished: no light
   });
 
+  // The human's rule 2026-10-24: when a ticket needs the human's action the light is red. Two more cases where only the human
+  // can act: the assignee is gone (not in the room roster), and a draft that only the human may queue (its request holds a
+  // non-terminal high-radius ticket in the room: the room lead gets 403). The roster of these tests: alice and bob in room r.
+  describe("red: only the human can act", () => {
+    const GONE = "Assignee ghost is gone: cancel or assign it";
+    const ONLY = "Only you can queue this";
+    const L = (t: any) => ctx.TicketBoard.lightOf(t)?.[0] ?? null;
+    const S = (t: any) => ctx.TicketBoard.statusLine(t);
+
+    test("a gone assignee is red with the status line; an agent in the roster stays orange or green", () => {
+      for (const status of ["draft", "queued", "claimed", "in_progress", "in_review"]) {
+        const t = { status, assignee: "ghost" };
+        expect(L(t)).toBe("red");
+        expect(S(t)).toBe(GONE);
+      }
+      expect(L({ status: "in_progress", assignee: "alice" })).toBe("orange");
+      expect(L({ status: "queued", assignee: "bob" })).toBe("green");
+      expect(S({ status: "in_progress", assignee: "alice" })).toBeNull();
+      expect(L({ status: "queued", assignee: null })).toBe("green");           // nobody assigned is not "gone"
+      expect(L({ status: "in_progress", assignee: "carol" })).toBe("red");     // carol is in another room: gone for this board
+    });
+
+    test("a finished ticket has no light and no line, whoever the assignee is", () => {
+      for (const status of ["done", "cancelled"]) {
+        expect(L({ status, assignee: "ghost" })).toBeNull();
+        expect(S({ status, assignee: "ghost" })).toBeNull();
+      }
+    });
+
+    test("the order: pending approval, then the human, then a gone assignee, then only-you-can-queue", async () => {
+      const gone = { status: "in_progress", assignee: "ghost" };
+      expect(S({ ...gone, approval: { status: "pending" } })).toBe("Waiting for your approval");
+      expect(S({ ...gone, assignee: "human" })).toBe("Assigned to you");
+      expect(S(gone)).toBe(GONE);
+      // a draft with a gone assignee in a request with a high ticket: the gone line comes before "only you"
+      const cards = await board(
+        T({ id: "t_d", status: "draft", assignee: "ghost", request_id: "r-1" }),
+        T({ id: "t_h", status: "queued", blast_radius: "high", assignee: null, request_id: "r-1" }),
+      );
+      expect(S(ctx.TicketBoard._tickets.get("t_d"))).toBe(GONE);
+      expect(cards).toBeDefined();
+    });
+
+    test("only you can queue: a draft whose request holds a non-terminal high ticket in the room is red", async () => {
+      await board(
+        T({ id: "t_d", status: "draft", assignee: null, request_id: "r-1" }),
+        T({ id: "t_h", status: "queued", blast_radius: "high", assignee: null, request_id: "r-1" }),
+      );
+      const d = ctx.TicketBoard._tickets.get("t_d");
+      expect(L(d)).toBe("red");
+      expect(S(d)).toBe(ONLY);
+      // the high ticket itself, when it is a draft, is also held (it is non-terminal and high)
+      await board(T({ id: "t_h", status: "draft", blast_radius: "high", assignee: null, request_id: "r-1" }));
+      expect(L(ctx.TicketBoard._tickets.get("t_h"))).toBe("red");
+    });
+
+    // The hub (hub/kinds/ticket.ts, intake rule): a ticket with no request label is checked alone, so a draft that is itself high
+    // is refused to the lead; with a label the whole request in the room counts.
+    test("a draft with no request that is itself high radius is red; with no request and low radius it is green", async () => {
+      await board(
+        T({ id: "t_hn", status: "draft", blast_radius: "high", assignee: null, request_id: null }),
+        T({ id: "t_ln", status: "draft", blast_radius: "low", assignee: null, request_id: null }),
+        T({ id: "t_hq", status: "queued", blast_radius: "high", assignee: null, request_id: null }),
+      );
+      const g = (id: string) => ctx.TicketBoard._tickets.get(id);
+      expect(L(g("t_hn"))).toBe("red");
+      expect(S(g("t_hn"))).toBe(ONLY);
+      expect(L(g("t_ln"))).toBe("green");          // another unlabelled ticket being high does not hold it
+      expect(S(g("t_ln"))).toBeNull();
+      expect(L(g("t_hq"))).toBe("green");          // not a draft: the rule is about queuing
+    });
+
+    test("a low draft with a request that holds a high ticket is red; the same draft with the high ticket done is green", async () => {
+      await board(
+        T({ id: "t_d", status: "draft", blast_radius: "low", assignee: null, request_id: "r-1" }),
+        T({ id: "t_h", status: "in_progress", blast_radius: "high", assignee: "alice", request_id: "r-1" }),
+      );
+      expect(L(ctx.TicketBoard._tickets.get("t_d"))).toBe("red");
+      await board(
+        T({ id: "t_d", status: "draft", blast_radius: "low", assignee: null, request_id: "r-1" }),
+        T({ id: "t_h", status: "done", blast_radius: "high", assignee: "alice", request_id: "r-1" }),
+      );
+      expect(L(ctx.TicketBoard._tickets.get("t_d"))).toBe("green");
+    });
+
+    test("a draft stays green when nothing holds it: no high ticket, a finished one, another request, another room, no request", async () => {
+      await board(
+        T({ id: "t_a", status: "draft", assignee: null, request_id: "r-1" }),
+        T({ id: "t_l", status: "queued", blast_radius: "low", assignee: null, request_id: "r-1" }),
+        T({ id: "t_dn", status: "done", blast_radius: "high", assignee: null, request_id: "r-1" }),
+        T({ id: "t_cn", status: "cancelled", blast_radius: "high", assignee: null, request_id: "r-1" }),
+        T({ id: "t_o", status: "queued", blast_radius: "high", assignee: null, request_id: "r-2" }),
+        T({ id: "t_n", status: "draft", assignee: null, request_id: null }),
+      );
+      const g = (id: string) => ctx.TicketBoard._tickets.get(id);
+      expect(L(g("t_a"))).toBe("green");
+      expect(S(g("t_a"))).toBeNull();
+      expect(L(g("t_n"))).toBe("green");
+      // only a draft is "only you can queue": a queued ticket of the same request is not
+      expect(L(g("t_l"))).toBe("green");
+    });
+
+    test("statusLine and lightOf never disagree on the new lines", async () => {
+      await board(
+        T({ id: "t_d", status: "draft", assignee: null, request_id: "r-1" }),
+        T({ id: "t_h", status: "queued", blast_radius: "high", assignee: "alice", request_id: "r-1" }),
+        T({ id: "t_g", status: "in_review", assignee: "ghost", request_id: null }),
+      );
+      for (const id of ["t_d", "t_h", "t_g"]) {
+        const t = ctx.TicketBoard._tickets.get(id);
+        const line = S(t);
+        if (line === GONE || line === ONLY) expect(L(t)).toBe("red");
+      }
+    });
+
+    test("a roster change redraws the cards: the light turns red when the assignee goes and back when it returns", async () => {
+      await board(T({ id: "t_x", status: "in_progress", assignee: "alice", request_id: null }));
+      expect(cols.innerHTML).toContain('class="on light-orange"');
+      const roster = ctx.ROSTER;
+      ctx.ROSTER = roster.filter((a: any) => a.name !== "alice");
+      ctx.refreshRoomLead();
+      expect(cols.innerHTML).toContain('class="on light-red"');
+      expect(cols.innerHTML).toContain(GONE.replace("ghost", "alice"));
+      ctx.ROSTER = roster;
+      ctx.refreshRoomLead();
+      expect(cols.innerHTML).toContain('class="on light-orange"');
+    });
+
+    test("before the roster is known (empty) nothing is called gone", () => {
+      const roster = ctx.ROSTER;
+      ctx.ROSTER = [];
+      expect(L({ status: "in_progress", assignee: "alice" })).toBe("orange");
+      ctx.ROSTER = roster;
+    });
+  });
+
   test("parseTitle: tag, code, main and sub", () => {
     const p = (x: string) => ctx.TicketBoard.parseTitle(x);
     expect(p("[code] 8.3a Card actions [backlog]")).toEqual({ tag: "code", code: "8.3a", main: "Card actions", sub: "backlog" });
@@ -1950,10 +2086,10 @@ describe("room lead in the top bar", () => {
     expect(header).toContain('id="ticket-lead-wrap"');
     const filters = html.slice(html.indexOf('id="ticket-filters"'), html.indexOf('id="ticket-board-columns"'));
     expect(filters).not.toContain("ticket-lead");
-    // it sits after the agent names (legend) and the add button, in the roster row
+    // the agent chips and "+ agent" moved to the agent column (4a C2): the roster row holds the lead select only
     const roster = header.slice(header.indexOf('class="roster"'), header.indexOf('class="status-cluster"'));
-    expect(roster.indexOf('id="legend"')).toBeLessThan(roster.indexOf('id="ticket-lead"'));
-    expect(roster.indexOf('id="add-agent-btn"')).toBeLessThan(roster.indexOf('id="ticket-lead"'));
+    expect(roster).not.toContain('id="legend"');
+    expect(roster).not.toContain('id="add-agent-btn"');
   });
 });
 
@@ -3157,6 +3293,51 @@ describe("moving tickets: the Move to select and drag and drop", () => {
     const over = ev();
     columns.in_progress.handlers.dragover(over);
     expect(over.prevented).toBe(false);                            // nothing is being dragged
+  });
+
+  // t_2a272087075e960f: the Draft column sits 4 px from the 6 px splitter, so a splitter drag used to pick up a card.
+  describe("a drag near the splitter belongs to the splitter", () => {
+    const SPLIT = { left: 1178, right: 1184 };
+    beforeEach(() => { els["splitter"] = { getBoundingClientRect: () => SPLIT }; });
+
+    test("a card drag that starts on the splitter or within 8 px of it does not start and moves nothing", async () => {
+      await show(T("a", "queued"));
+      for (const clientX of [1178, 1181, 1184, 1170, 1192]) {
+        const e = ev({ clientX });
+        cards.a.handlers.dragstart(e);
+        expect(e.prevented).toBe(true);
+        const over = ev();
+        columns.in_progress.handlers.dragover(over);
+        expect(over.prevented).toBe(false);                        // nothing is being dragged
+        columns.in_progress.handlers.drop(ev());
+      }
+      await settle();
+      expect(posts.filter((p) => p.path.endsWith("/transition"))).toEqual([]);
+    });
+
+    test("a card drag that starts 9 px from the splitter or further still starts and moves the ticket", async () => {
+      await show(T("a", "queued"));
+      for (const clientX of [1169, 1193, 1400]) {
+        const e = ev({ clientX });
+        cards.a.handlers.dragstart(e);
+        expect(e.prevented).toBe(false);
+        expect(cards.a.cls.has("dragging")).toBe(true);
+        cards.a.handlers.dragend();
+      }
+      cards.a.handlers.dragstart(ev({ clientX: 1400 }));
+      columns.in_progress.handlers.drop(ev());
+      await settle();
+      expect(posts.at(-1)).toEqual({ path: "/tickets/a/transition", body: { by: "human", to: "in_progress" } });
+    });
+
+    test("the splitter is 8 px wider on each side and above the board; the chat input row wraps and the input keeps a width", () => {
+      const layout = readFileSync("ui/styles/layout.css", "utf8");
+      expect(layout).toMatch(/\.splitter \{[^}]*z-index: 2;/);
+      expect(layout).toMatch(/\.splitter::after \{[^}]*top: 0;\s*bottom: 0;\s*left: calc\(-1 \* var\(--size-8\)\);\s*right: calc\(-1 \* var\(--size-8\)\);/);
+      const composer = readFileSync("ui/styles/composer.css", "utf8");
+      expect(composer).toMatch(/\.input-row \{[^}]*flex-wrap: wrap;/);
+      expect(composer).toMatch(/textarea#msg-input \{[^}]*flex: 1 1 var\(--size-160\);[^}]*min-width: 0;/);
+    });
   });
 });
 

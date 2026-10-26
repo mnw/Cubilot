@@ -38,13 +38,13 @@ The `ticket.assigned` event of a launch SHALL NOT wake the session on its first 
 - **WHEN** a launch assigns the ticket to the new session
 - **THEN** the session receives no wake for that assignment
 
-### Requirement: The system actor is limited to hub-internal paths
+### Requirement: Only hub-internal code writes the system actor
 
-The actor `system` SHALL be accepted only on hub-internal paths: the launch, the retry, and the spec-review PASS (`spec-review-stage`). Every HTTP route SHALL refuse the actor `system` with HTTP 400.
+Only hub-internal code SHALL write the actor `system`. Every mutating HTTP route SHALL refuse the actor `system` with HTTP 400.
 
-#### Scenario: System actor is refused on every HTTP route
+#### Scenario: System actor is refused on every mutating HTTP route
 
-- **WHEN** a client sends `by: "system"` to any HTTP route of the hub
+- **WHEN** a client sends `by: "system"` to any mutating HTTP route of the hub
 - **THEN** the hub returns HTTP 400 and records nothing
 
 ### Requirement: A stage is one role's work on one ticket
@@ -103,7 +103,7 @@ The ticket's `role` SHALL start a stage only when no stage exists for the ticket
 
 ### Requirement: One live stage per ticket and role
 
-While a stage for a ticket and role is `queued`, `launching` or `running`, the hub SHALL NOT create another stage for that ticket and role.
+While a stage for a ticket and role is `queued`, `launching`, `running` or `retrying`, the hub SHALL NOT create another stage for that ticket and role.
 
 #### Scenario: Second stage refused while live
 
@@ -235,7 +235,7 @@ For a Worker or Writer stage, the hub SHALL use the worktree of the branch `tick
 
 ### Requirement: Temporary worktrees are detached and removed
 
-For a Tester, Validator, Editor or Reviewer stage, the hub SHALL create a temporary worktree at the commit named in the handoff, or at HEAD when none is named. The hub SHALL remove a temporary worktree when its stage passes or fails for good.
+For a Tester, Validator, Editor or Reviewer stage, the hub SHALL create a temporary worktree at the commit named in the handoff. When the handoff names no commit, the hub SHALL use the head of `ticket/<id>` when that branch exists, else HEAD. The hub SHALL remove a temporary worktree after the close of its session is acked. When no session runs (the stage fails for good, or an attempt ends before a retry), the hub SHALL remove it at once.
 
 #### Scenario: Tester uses the handoff commit
 
@@ -266,6 +266,89 @@ The hub SHALL render each session's first message from `factory/<role>/first-mes
 
 - **WHEN** the retry of a stage launches a session
 - **THEN** the initial prompt holds the same ticket part and one line with the reason of the earlier stop
+
+### Requirement: The first message holds the handoff that started the stage
+
+When a `to_role` handoff started a stage, the first message SHALL hold a section `## Handoff` with the sender, the task and the context JSON of that handoff. The hub SHALL cap the section at 64 KB. Over the cap, the hub SHALL cut it and add one line that names the handoff id. A stage that no handoff started SHALL get no such section. A retry SHALL get the same section.
+
+#### Scenario: Validator sees the tester result
+
+- **GIVEN** a tester result handoff with `verdict` and `report` starts a `validator` stage
+- **WHEN** the validator session starts
+- **THEN** its initial prompt holds the sender, the task, the `verdict` and the `report` of that handoff
+
+#### Scenario: First stage has no handoff section
+
+- **WHEN** the first `worker` stage of a ticket starts from `ticket.role`
+- **THEN** its initial prompt has no `## Handoff` section
+
+#### Scenario: Large context is cut
+
+- **GIVEN** a handoff context larger than 64 KB starts a stage
+- **WHEN** the session starts
+- **THEN** the `## Handoff` section is cut at 64 KB and names the handoff id
+
+### Requirement: The handoff section names the session's own stage id
+
+Before the context JSON, the `## Handoff` section SHALL hold one line that names the session's own stage id. The line SHALL tell the session to use its own stage id in its result. The 64 KB cap SHALL include this line.
+
+#### Scenario: Tester sees both stage ids
+
+- **GIVEN** a worker handoff with `context.stage_id` `s_w` starts a `tester` stage `s_t`
+- **WHEN** the tester session starts
+- **THEN** the `## Handoff` section names `s_t` as the session's own stage id
+- **AND** the context JSON still holds `s_w`
+
+### Requirement: A stage session's briefing lists only its own ticket
+
+The briefing of an agent SHALL follow the newest stage row of its session name, in any status. When that stage has a ticket, the briefing SHALL list only that ticket while the ticket is open, else no ticket. A spec-review session SHALL get no ticket list. An agent with no stage row SHALL keep the usual list. The hub SHALL NOT change a ticket's assignee for this.
+
+#### Scenario: Old ticket with the same session name
+
+- **GIVEN** an open ticket `t1` has the assignee `tester-1` from an earlier run
+- **WHEN** a new `tester-1` session runs a stage for ticket `t2`
+- **THEN** its briefing lists `t2` and not `t1`
+
+#### Scenario: Passed stage whose session still runs
+
+- **GIVEN** an open ticket `t1` has the assignee `tester-1` from an earlier run
+- **AND** the newest stage of `tester-1` is a `passed` stage for ticket `t2`
+- **WHEN** the `tester-1` session is still connected before its close
+- **THEN** its briefing does not list `t1`
+
+### Requirement: A result for a completed stage is refused
+
+A handoff whose `context.stage_id` names a `passed` or `failed` stage SHALL get HTTP 409. The hub SHALL record no handoff and SHALL send no `stage.rejected`. When the sender has a `running` stage, the error text SHALL name that stage id.
+
+#### Scenario: Result for a completed stage
+
+- **GIVEN** stage `s1` is `passed`
+- **WHEN** a session sends a handoff with `context.stage_id` `s1`
+- **THEN** the hub returns HTTP 409 and records no handoff
+- **AND** the hub sends no `stage.rejected`
+
+### Requirement: A final review PASS moves the ticket
+
+When a `validator` or `reviewer` stage of a ticket passes with verdict `PASS` and the ticket is `in_review`, the hub SHALL move the ticket with actor `system`, in the transaction of `stage.passed`. A `low` ticket SHALL move to `done`. A `high` ticket SHALL be assigned to the room lead, and the hub SHALL NOT write `done` on it. A FAIL, or a ticket that is not `in_review`, SHALL NOT move.
+
+#### Scenario: Low ticket closes
+
+- **GIVEN** ticket `t1` with `blast_radius: low` is `in_review`
+- **WHEN** its `validator` stage passes with verdict `PASS`
+- **THEN** `t1` is `done` with actor `system`
+- **AND** `stage.passed` and `ticket.done` are in one transaction
+
+#### Scenario: High ticket goes to the lead
+
+- **GIVEN** ticket `t2` with `blast_radius: high` is `in_review` and the room lead is `Orchestrator`
+- **WHEN** its `validator` stage passes with verdict `PASS`
+- **THEN** `t2` stays `in_review` and its assignee is `Orchestrator`
+- **AND** the lead is woken and can ask the human's Allow
+
+#### Scenario: FAIL moves nothing
+
+- **WHEN** a `validator` stage of an `in_review` ticket passes with verdict `FAIL`
+- **THEN** the ticket does not change
 
 ### Requirement: Results are checked against a schema
 

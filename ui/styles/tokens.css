@@ -29,6 +29,8 @@
   --line-hover:   #4a3d34;
   --text:         #f5ede2;
   --text-muted:   #a69583;
+  --agent-name-l: 75%;   /* lightness of an agent name in the agent column */
+  --amber-mark:   #e8a857;   /* amber for a non-text mark (dot ring, icon): 3:1 on the agent column */
   --text-dim:     #6b5d51;
   --text-meta:    #978b78;  /* times, counts, section labels: 5:1 on --bg */
 
@@ -189,6 +191,7 @@
   --size-240:  240px;   /* terminal-col min-width, popover height caps */
   --size-260:  260px;   /* room-menu max-width */
   --size-280:  280px;   /* target-menu max-width */
+  --size-300:  300px;   /* agent column width */
   --size-320:  320px;   /* msg-body img max-height, emoji-popover max-width */
   --size-360:  360px;   /* attachment-link max-width, room/target menu max-height */
   --size-560:  560px;   /* generic modal width cap */
@@ -268,6 +271,8 @@
   --line-hover:   #cecacd;  /* highlight-high */
   --text:         #575279;  /* text */
   --text-muted:   #6a6587;  /* subtle, darkened toward text: 4.5:1+ on bg, raised, inset, elev */
+  --agent-name-l: 23%;   /* dark names on the light column: 4.5:1 for any hue */
+  --amber-mark:   #a8691a;   /* darker gold: the plain --amber is 1.7:1 on the light column */
   --text-dim:     #9893a5;  /* muted */
   --text-meta:    #6c6789;  /* 4.5:1+ on bg, raised and inset */
 
@@ -326,6 +331,8 @@
   --line-hover:   #56526e;
   --text:         #e0def4;
   --text-muted:   #a29fbb;  /* subtle, lightened toward text: 4.5:1+ on bg, raised, inset, elev */
+  --agent-name-l: 80%;   /* 4.5:1 for any hue on the moon column */
+  --amber-mark:   #f6c177;   /* gold, 3:1 or more on the moon column */
   --text-dim:     #6e6a86;
   --text-meta:    #938fad;  /* 4.5:1+ on bg, raised and inset */
 

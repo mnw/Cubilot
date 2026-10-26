@@ -1,6 +1,6 @@
 ---
 name: a11y-documents
-description: Accessibility of documents that a site publishes: PDF (PDF/UA), Word, Excel and PowerPoint. Use for an [a11y] documents ticket, for example the PDFs of an EU portal.
+description: "Accessibility of documents that a site publishes: PDF (PDF/UA), Word, Excel and PowerPoint. Use for an [a11y] documents ticket, for example the PDFs of an EU portal."
 ---
 
 > Factory skill (2026-10-19). It routes to skills that stay unchanged in `a11y/suite/`. These are "Accessibility Agents" by Taylor Arndt (https://github.com/community-access/accessibility-agents, commit decf6ba, MIT) and usability skills by mastepanoski (https://github.com/mastepanoski/claude-skills, commit b6457af, MIT). Licenses: `factory/licenses/`.

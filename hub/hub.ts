@@ -246,6 +246,7 @@ const KINDS: readonly KindModule[] = buildKinds(ledgerDb);
 
 if (ledgerDb) {
   for (const k of KINDS) k.migrate(ledgerDb);
+  for (const k of KINDS) k.start?.(buildCap());
 }
 
 const FEATURES: readonly HubFeature[] = [
@@ -254,6 +255,7 @@ const FEATURES: readonly HubFeature[] = [
   createFactoryFeature({
     dir: (process.env.CUBILOT_FACTORY_DIR ?? "").trim(),
     version: (process.env.CUBILOT_FACTORY_VERSION ?? "").trim(),
+    online: (name) => (agents.presenceSnapshot().agents as Record<string, boolean> | undefined)?.[name] === true,
   }),
   ...(ledgerDb ? [createSessionsFeature(ledgerDb)] : []),
   createAttachmentsFeature({

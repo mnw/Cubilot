@@ -44,6 +44,8 @@ export function attachmentName(raw: string): string {
 }
 
 const TICKET_ID_SCHEMA = { type: "string", pattern: "^t_[0-9a-f]{16}$" };
+// The six stage roles. The hub validates them (STAGE_ROLES in hub/core/ledger.ts); this list only feeds the tool schema.
+const TICKET_ROLES = ["worker", "tester", "validator", "writer", "editor", "reviewer"];
 
 const errorText = (r: HubResponse): string =>
   r.json && typeof r.json === "object" && typeof (r.json as { error?: unknown }).error === "string"
@@ -145,13 +147,27 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
   {
     name: "send_handoff",
     description:
-      "Transfer a bounded unit of work to another participant. Returns a handoff_id the recipient will accept or decline.",
+      "Transfer a bounded unit of work to another participant, or to a stage role. Name exactly one of to (an agent) and to_role (a stage role: the hub starts a session for it). A to_role handoff needs context.ticket_id, or review \"spec\" (to_role validator) with request_id and context.request_text. Returns a handoff_id the recipient will accept or decline.",
     inputSchema: {
       type: "object",
       properties: {
         to: {
           type: "string",
-          description: "Recipient agent name (may be the human's configured name).",
+          description: "Recipient agent name (may be the human's configured name). Not with to_role.",
+        },
+        to_role: {
+          type: "string",
+          enum: TICKET_ROLES,
+          description: "Recipient stage role. Not with to. Needs context.ticket_id, or review \"spec\" with request_id.",
+        },
+        review: {
+          type: "string",
+          enum: ["spec"],
+          description: "A spec review of a request, not of a ticket. Only with to_role validator. Needs request_id and context.request_text.",
+        },
+        request_id: {
+          type: "string",
+          description: "The request label that the spec review covers. Only with review \"spec\".",
         },
         task: {
           type: "string",
@@ -171,15 +187,22 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
           description: "Time until auto-expiry. Defaults to 3600 (1 hour).",
         },
       },
-      required: ["to", "task"],
+      required: ["task"],
     },
     handler: async (ctx, args) => {
+      // Exactly one target. The hub checks it too; refusing here saves the gate and the request.
+      const hasTo = args.to !== undefined && args.to !== null && args.to !== "";
+      const hasRole = args.to_role !== undefined && args.to_role !== null && args.to_role !== "";
+      if (hasTo === hasRole) throw new Error("send_handoff: name exactly one of to and to_role");
       await runHandoffGate(ctx.host, args);
       const body: Record<string, unknown> = {
         from: ctx.agent,
-        to: args.to,
         task: args.task,
       };
+      if (hasTo) body.to = args.to;
+      else body.to_role = args.to_role;
+      if (args.review !== undefined) body.review = args.review;
+      if (args.request_id !== undefined) body.request_id = args.request_id;
       if (args.context !== undefined) body.context = args.context;
       if (args.ttl_seconds !== undefined) body.ttl_seconds = args.ttl_seconds;
       const resp = await authedPost(ctx.host, ctx.hubEnv, "/handoffs", body);
@@ -361,7 +384,7 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
   {
     name: "create_ticket",
     description:
-      "Create a work ticket in your room. Acceptance criteria are required: state what done means. A high blast_radius ticket needs the human's approval to reach done. Use status draft to hold a ticket back: a draft cannot be claimed and wakes no one until it moves to queued. Use request_id to group the tickets of one request, and blocked_by to list ticket ids that must be done before this ticket can be claimed. Returns ticket_id.",
+      "Create a work ticket in your room. Acceptance criteria are required: state what done means. A high blast_radius ticket needs the human's approval to reach done. Use status draft to hold a ticket back: a draft cannot be claimed and wakes no one until it moves to queued. Use request_id to group the tickets of one request, and blocked_by to list ticket ids that must be done before this ticket can be claimed. Use role to name the stage role that works the ticket first. Returns ticket_id.",
     inputSchema: {
       type: "object",
       properties: {
@@ -377,6 +400,7 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
         assignee: { type: "string", description: "Optional agent of your room that owns the ticket; it is woken once. Omit it to leave the ticket in the queue." },
         status: { type: "string", enum: ["draft", "queued"], description: "Default queued. A draft cannot be claimed and wakes no one." },
         request_id: { type: "string", pattern: "^[A-Za-z0-9._-]{1,64}$", description: "Optional label that groups the tickets of one request." },
+        role: { type: "string", enum: TICKET_ROLES, description: "Optional stage role that works the ticket first." },
         blocked_by: { type: "array", items: TICKET_ID_SCHEMA, maxItems: 20, description: "Optional ids of tickets of your room that must be done before this ticket can be claimed." },
       },
       required: ["title", "acceptance_criteria", "blast_radius"],
@@ -391,7 +415,7 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
       if (args.priority !== undefined) body.priority = args.priority;
       if (args.external_ref !== undefined) body.external_ref = args.external_ref;
       if (args.assignee !== undefined) body.assignee = args.assignee;
-      for (const k of ["status", "request_id", "blocked_by"]) if (args[k] !== undefined) body[k] = args[k];
+      for (const k of ["status", "request_id", "role", "blocked_by"]) if (args[k] !== undefined) body[k] = args[k];
       const resp = await authedPost(ctx.host, ctx.hubEnv, "/tickets", body);
       if (resp.status !== 201) toolError(resp, "create_ticket");
       const id = (resp.json as { snapshot?: { id?: string } } | null)?.snapshot?.id ?? "";
@@ -486,7 +510,7 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
   {
     name: "edit_ticket",
     description:
-      "Edit an open ticket's title or acceptance criteria. Only the human, the ticket's creator and its assignee may edit. Only the human may change blast_radius: an agent that sends it is refused. A done or cancelled ticket cannot be edited. Pass only the fields you change. The human, the ticket's creator and the room lead change request_id and blocked_by, not the assignee, and only while the ticket is draft or queued (the human may change them at any time). blocked_by replaces the whole list, and null or [] clears it.",
+      "Edit an open ticket's title or acceptance criteria. Only the human, the ticket's creator and its assignee may edit. Only the human may change blast_radius: an agent that sends it is refused. A done or cancelled ticket cannot be edited. Pass only the fields you change. The human, the ticket's creator and the room lead change request_id, role and blocked_by, not the assignee, and only while the ticket is draft or queued (the human may change them at any time). blocked_by replaces the whole list, and null or [] clears it.",
     inputSchema: {
       type: "object",
       properties: {
@@ -495,6 +519,7 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
         acceptance_criteria: { type: "string", maxLength: 4000, description: "The new acceptance criteria." },
         blast_radius: { type: "string", enum: ["low", "high"], description: "The human only." },
         request_id: { type: ["string", "null"], pattern: "^[A-Za-z0-9._-]{1,64}$", description: "The label that groups the tickets of one request." },
+        role: { type: ["string", "null"], enum: [...TICKET_ROLES, null], description: "The stage role that works the ticket first. null clears it." },
         blocked_by: { type: ["array", "null"], items: TICKET_ID_SCHEMA, maxItems: 20, description: "Replaces the whole blocker list. null or [] clears it." },
       },
       required: ["ticket_id"],
@@ -502,7 +527,7 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
     handler: async (ctx, args) => {
       const id = String(args.ticket_id ?? "");
       const body: Record<string, unknown> = { by: ctx.agent };
-      for (const k of ["title", "acceptance_criteria", "blast_radius", "request_id", "blocked_by"]) if (args[k] !== undefined) body[k] = args[k];
+      for (const k of ["title", "acceptance_criteria", "blast_radius", "request_id", "role", "blocked_by"]) if (args[k] !== undefined) body[k] = args[k];
       const resp = await authedPost(ctx.host, ctx.hubEnv, `/tickets/${encodeURIComponent(id)}/edit`, body);
       if (resp.status !== 200) toolError(resp, "edit_ticket");
       const unchanged = (resp.json as { idempotent?: boolean } | undefined)?.idempotent;

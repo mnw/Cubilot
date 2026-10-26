@@ -11,6 +11,8 @@ export type HubHandle = {
   token: string;
   ledgerPath: string;
   attachmentsDir: string;
+  /** Where this hub writes room transcripts: a temp folder, never the real app data. */
+  transcriptsDir: string;
   humanName: string;
   kill: () => Promise<void>;
 };
@@ -25,6 +27,9 @@ export async function spawnHub(opts?: {
   const ledgerPath = join(base, "ledger.db");
   const attachmentsDir = join(base, "attachments");
   mkdirSync(attachmentsDir, { recursive: true });
+  // The hub writes transcripts to ~/Library/Application Support/Cubilot unless told otherwise. A test that sets the
+  // variable itself keeps its folder; every other hub gets one next to its ledger.
+  const transcriptsDir = process.env.CUBILOT_TRANSCRIPTS_DIR || join(base, "transcripts");
 
   const token = opts?.token ?? `tst-${Math.random().toString(36).slice(2, 10)}`;
   const humanName = opts?.humanName ?? "human";
@@ -37,6 +42,9 @@ export async function spawnHub(opts?: {
       CUBILOT_TOKEN: token,
       CUBILOT_LEDGER_DB: ledgerPath,
       CUBILOT_ATTACHMENTS_DIR: attachmentsDir,
+      CUBILOT_TRANSCRIPTS_DIR: transcriptsDir,
+      // Stage worktrees (4.5) go here, never to the real app data.
+      CUBILOT_DATA_DIR: join(base, "data"),
       CUBILOT_HUMAN_NAME: humanName,
       CUBILOT_DEFAULT_ROOM: defaultRoom,
       CUBILOT_ALLOWED_EXTENSIONS: opts?.allowedExtensions ?? "jpg,jpeg,png,pdf,md,txt,json",
@@ -55,6 +63,7 @@ export async function spawnHub(opts?: {
     token,
     ledgerPath,
     attachmentsDir,
+    transcriptsDir,
     humanName,
     kill: async () => {
       try { proc.kill(); } catch {}

@@ -1,6 +1,6 @@
 ---
 name: seo-content
-description: SEO content review and briefs: helpfulness, audience fit, E-E-A-T, topical coverage, snippet copy, and template-driven page systems at scale. Use for an [seo] content ticket. The Writer writes the content later from a [doc] ticket.
+description: "SEO content review and briefs: helpfulness, audience fit, E-E-A-T, topical coverage, snippet copy, and template-driven page systems at scale. Use for an [seo] content ticket. The Writer writes the content later from a [doc] ticket."
 ---
 
 > Factory skill (2026-10-19). It folds skills of "SEO-AEO-GEO Ultimate" v3.3.0 by Oegeyilmaz9 (https://github.com/oegeyilmaz9/seo-aeo-geo-ultimate), Apache License 2.0. The original skills are unchanged in `suite/skills/`. This file is new: it routes to them. License and NOTICE: `factory/licenses/SEO-AEO-GEO-ULTIMATE-LICENSE` and `-NOTICE`.

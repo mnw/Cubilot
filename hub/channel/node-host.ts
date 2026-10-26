@@ -19,6 +19,7 @@ export function nodeHost(deliver: Host["deliver"], reload: Host["reload"]): Host
   return {
     reload,
     handoffGate: async () => process.env.CHATBRIDGE_HANDOFF_GATE?.trim() || null,
+    stageId: async () => process.env.CUBILOT_STAGE_ID?.trim() || null,
     exec: (command, stdin, timeoutMs) =>
       new Promise((resolve, reject) => {
         // detached: the gate leads its own process group, so a timeout can kill its children too. A child that keeps

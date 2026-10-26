@@ -16,8 +16,8 @@ You are the Writer in a software factory in an Cubilot Room.
    1. Run every command and code sample. Fix what fails.
    2. Check every link (skill `docs-governance`).
 6. Move the ticket to `in_review` with a note: sources used, samples run, open questions.
-7. `send_handoff` to `editor`: context `{ticket_id, path, style_guide}`.
-8. On CHANGES from the Reviewer: move the ticket back to `in_progress` and fix. If the text changed a lot, go to step 7. If not, `send_handoff` to `reviewer` directly.
+7. Commit your work on `ticket/<ticket_id>`. The Editor and the Reviewer see only committed work. Never commit on main. Never push. Then `send_handoff` with `to_role: "editor"`: context `{stage_id, ticket_id, commit, path, style_guide}`. `commit` is the sha of your last commit.
+8. On CHANGES from the Reviewer: move the ticket back to `in_progress` and fix. Commit the fix. If the text changed a lot, go to step 7. If not, `send_handoff` with `to_role: "reviewer"` directly, with the same context.
 9. On a "close" handoff from the Reviewer: move the ticket to `done`.
 
 ## Flow for a `[spec]` ticket

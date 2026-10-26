@@ -1780,7 +1780,8 @@ describe("edit", () => {
       const refreshed = t.refreshes();
       const r = await edit(id, by, { title, acceptance_criteria: `criteria by ${by}` });
       expect(r.status).toBe(200);
-      expect(r.json.snapshot).toMatchObject({ title, acceptance_criteria: `criteria by ${by}`, status: "queued", blast_radius: "low" });
+      // New criteria on a queued ticket send it back to draft (spec-review-stage 5.1); the later edits find it draft.
+      expect(r.json.snapshot).toMatchObject({ title, acceptance_criteria: `criteria by ${by}`, status: "draft", blast_radius: "low" });
       expect(t.events(id).length).toBe(events + 1);
       expect(t.events(id).at(-1)).toEqual({ kind: "ticket.edited", actor: by });
       expect(t.emitted.at(-1)!.entry).toMatchObject({ kind: "ticket.update", ticket_id: id, snapshot: { title } });

@@ -12,23 +12,25 @@ Tickets live in `hub/kinds/ticket.ts` (a `KindModule`). Handoffs live in `hub/ki
 
    ```
    queued → launching → running → passed
-                 ↑          ↓  \
-                 └── retry ─┘   → failed (after attempt 2)
-   queued ← running            (session died and attempt 1 remains: relaunch)
+               │           │
+               └─────┬─────┘  (attempt 1 ends without a result)
+                     ↓
+                 retrying → launching   (relaunch, attempt 2)
+   launching | running | retrying → failed   (attempt 2 ends, or no project folder: queued → failed)
    ```
 
    Every transition is one ledger event (`stage.queued`, `stage.launching`, `stage.running`, `stage.passed`, `stage.failed`, `stage.retrying`) and one `stage` row update, in one transaction (`applyWithSideEffect`). Schema errors in a result do not change the stage: the session stays `running`.
 
 2. **Tickets carry `role`.** A nullable `tickets.role TEXT` column, set by `create_ticket` and `edit_ticket`. Allowed values: the six roles. Other values: 400. Who may change it follows the `request_id` rule of `ticket-grouping` (human, creator, lead; only while `draft` or `queued`).
 
-3. **Ticket ownership on launch.** When a `launching` stage starts, the hub sets `ticket.assignee` to the session name (`<role>-<n>`) with actor `system`, in the same transaction as the `stage.launching` event. The write uses the existing `ticket.assigned` event from `ticket-grouping`. The assignment wakes no one for that session's first turn, because the initial prompt already carries the ticket. On a retry (`stage.retrying` → new `launching`), the hub reassigns the ticket to the new session name. On `passed`, the assignee stays as the last session name, as a record. The `system` actor is accepted only on hub-internal paths: this launch, the retry, and the spec-review PASS (`spec-review-stage`). Every HTTP route refuses it with 400.
+3. **Ticket ownership on launch.** When a `launching` stage starts, the hub sets `ticket.assignee` to the session name (`<role>-<n>`) with actor `system`, in the same transaction as the `stage.launching` event. The write uses the existing `ticket.assigned` event from `ticket-grouping`. The assignment wakes no one for that session's first turn, because the initial prompt already carries the ticket. On a retry (`stage.retrying` → new `launching`), the hub reassigns the ticket to the new session name. On `passed`, the assignee stays as the last session name, as a record. Exception: the final PASS of a `validator` or `reviewer` stage moves an `in_review` ticket, with actor `system`. A `low` ticket goes to `done`. A `high` ticket is assigned to the room lead, who asks the human's Allow. The hub never writes `done` on a `high` ticket. A `system` assignment wakes no stage session, but it wakes an ordinary assignee such as the lead. Only hub-internal code writes the `system` actor. Every mutating HTTP route refuses it with 400.
 
-   This is one of two transactions that write events of two kinds (`stage` and `ticket`). The other is the spec-review PASS. Both break the one-kind-per-transaction pattern of the other kinds, so CLAUDE.md names both (task 7.2). Both events and both row updates commit or roll back together.
+   This is one of three transactions that write events of two kinds (`stage` and `ticket`). The others are the spec-review PASS and the final PASS of a ticket review. They break the one-kind-per-transaction pattern of the other kinds, so CLAUDE.md names all three. In each one, both events and both row updates commit or roll back together.
 
 4. **Ready-stage evaluation.** One function, `evaluateStages(ticket)`, called in the same dispatch as each ticket event (`ticket.queued`, `ticket.edited`, `ticket.update`), each `handoff` to a role, and each blocker status change. A stage is created for `(ticket, role)` when all hold:
    - the ticket is not `draft`, `done` or `cancelled`,
    - no `ticket_blockers` row points to a ticket that is not `done`,
-   - no stage for `(ticket, role)` is `queued`, `launching` or `running`,
+   - no stage for `(ticket, role)` is `queued`, `launching`, `running` or `retrying`,
    - and either (a) `role` equals `ticket.role` and no stage exists for `(ticket, role)`, or (b) a `to_role` handoff for that role and ticket exists, and, when a `(ticket, role)` stage already exists, the handoff was created after the last such stage's `created_seq`.
 
    `ticket.role` selects only the first stage. Every later stage, of the same role or another role, comes from a `to_role` handoff (human, 2026-10-23).
@@ -49,14 +51,16 @@ Tickets live in `hub/kinds/ticket.ts` (a `KindModule`). Handoffs live in `hub/ki
 
 8. **Worktrees.** The repository is the room's project folder, set by "New factory room". If the room has no project folder, the hub refuses the launch with the error `room has no project folder: set it in New factory room`, and the stage moves to `failed` without an attempt. No session starts.
    - Worker and Writer: `git -C <project> worktree add <app data>/worktrees/<room>/<ticket>/<session> ticket/<id>`. A new branch is created from the room base if the branch does not exist. A later Worker session on the same ticket reuses the existing worktree.
-   - Tester, Validator, Editor, Reviewer: `git -C <project> worktree add --detach <path> <handoff commit>`. The commit is taken from the handoff context, or from HEAD when the handoff has none.
+   - Tester, Validator, Editor, Reviewer: `git -C <project> worktree add --detach <path> <handoff commit>`. The commit is taken from the handoff context. When the handoff has none, the hub uses the head of `ticket/<id>` when that branch exists, else HEAD.
    - Validator and Reviewer: read-only. Enforced in three layers: the role's tool limits (`Edit`, `Write`, `NotebookEdit` blocked, as in `factory-roles`), `chmod -R a-w` on the work tree (not `.git`), and a check in the launch that the mode is read-only. The filesystem layer is untested until task 4.4.
-   - Temporary worktrees are removed (`git worktree remove --force`, then `prune`) when the stage passes or fails for good.
+   - Temporary worktrees are removed (`git worktree remove --force`, then `prune`) after the close of their session is acked. When no session runs (the stage fails for good, or an attempt ends before a retry), the hub removes the worktree at once.
 
 9. **Prompt.** The role prompt is not part of the stage. `factory-roles` passes it with `--append-system-prompt-file`. The first message holds only the ticket part, rendered from `factory/<role>/first-message.md`, and it is passed as the initial prompt of the launch command. It is not a queued entry.
    - Fields: title, acceptance criteria, `blast_radius`, `request_id`, branch, worktree path, graph status (`fresh | stale | missing`), handoff context, earlier verdicts and findings, test report paths, and the stage id.
    - The launch command passes the prompt as one quoted argument, using the quoting that `claude_command` already uses for single quotes. The prompt is written to `<app data>/sessions/<session>/first-message.md` and the command reads it through `$(cat …)` inside the single `$SHELL -ic` argv element. Whether pi accepts a positional prompt is untested; task 4.3 checks it.
    - A retry renders the same ticket part and adds one line with the reason of the earlier stop.
+   - When a `to_role` handoff started the stage, the first message also holds a section `## Handoff` with the sender, the task and the context JSON of that handoff. The hub finds it with the same lookup as the handoff commit. The section is capped at 64 KB. Over the cap, the hub cuts it and adds one line that names the handoff id. A stage that no handoff started (the first stage from `ticket.role`) gets no such section. A retry gets the same section. Before the context JSON, the section has one line that names the session's own stage id: the `stage_id` in the context is the sender's stage. The cap includes this line.
+   - The briefing of an agent follows the newest stage row of its session name, in any status. It lists only the ticket of that stage while the ticket is open, else no ticket. A spec-review session gets no ticket list. An agent with no stage row keeps the usual list. Session names are used again, so an old ticket can still name the same assignee. The assignee stays as a record.
 
 10. **Results, reminders and retries.**
    - A result is a handoff with `context.stage_id` and `context.ticket_id`. Validator and Reviewer results also need `context.verdict` (`PASS` | `FAIL`, uppercase for code and spec reviews alike) and `context.findings` (list of `{ticket_id, text}`).

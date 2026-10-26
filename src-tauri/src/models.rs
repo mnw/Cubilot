@@ -41,9 +41,11 @@ pub fn parse_pi_models(stdout: &str) -> Vec<(String, String, bool)> {
 
 const LIST_LIMIT: Duration = Duration::from_secs(20);
 
-fn run_list_models(pi: &Path) -> Result<String, String> {
+fn run_list_models(pi: &Path, path: Option<&str>) -> Result<String, String> {
     use std::io::Read as _;
-    let mut child = Command::new(pi)
+    let mut cmd = Command::new(pi);
+    crate::login_path::apply(&mut cmd, path);
+    let mut child = cmd
         .arg("--list-models")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -84,8 +86,14 @@ where
 // Cached for 5 minutes: the modal opens often and `pi auth check` may refresh a token over the network.
 static READY_CACHE: Mutex<Option<(Instant, HashMap<String, bool>)>> = Mutex::new(None);
 
+// Blocking: the first call may wait up to 5 s for the login-shell PATH.
 pub fn pi_models(pi: &Path) -> Result<Vec<ModelRow>, String> {
-    let parsed = parse_pi_models(&run_list_models(pi)?);
+    pi_models_in(pi, crate::login_path::login_path())
+}
+
+// `path` is the PATH of the pi child processes (None keeps the inherited one).
+fn pi_models_in(pi: &Path, path: Option<&str>) -> Result<Vec<ModelRow>, String> {
+    let parsed = parse_pi_models(&run_list_models(pi, path)?);
     let mut providers: Vec<String> = parsed.iter().map(|(p, _, _)| p.clone()).collect();
     providers.sort();
     providers.dedup();
@@ -96,7 +104,7 @@ pub fn pi_models(pi: &Path) -> Result<Vec<ModelRow>, String> {
     let ready = match cached {
         Some(m) if providers.iter().all(|p| m.contains_key(p)) => m,
         _ => {
-            let m = readiness(&providers, |p| crate::pty::pi_auth_check(pi, p).is_ok());
+            let m = readiness(&providers, |p| crate::pty::pi_auth_check_in(pi, p, path).is_ok());
             if let Ok(mut g) = READY_CACHE.lock() {
                 *g = Some((Instant::now(), m.clone()));
             }
@@ -190,12 +198,38 @@ echo '{{\"status\":\"not_ready\",\"reason\":\"credentials_not_configured\"}}'; e
         );
         std::fs::write(&pi, script).unwrap();
         std::fs::set_permissions(&pi, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let rows = pi_models(&pi).unwrap();
+        let rows = pi_models_in(&pi, None).unwrap();
         assert_eq!(rows.len(), 3, "{rows:?}");
         let by = |m: &str| rows.iter().find(|r| r.model == m).unwrap();
         assert!(by("gpt-5.6-sol").ready && by("gpt-5.6-sol").thinking);
         assert!(!by("gpt-4").ready && !by("gpt-4").thinking, "not signed in: kept and marked, not hidden");
         assert!(!by("claude-fable-5").ready);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_pi_shim_that_needs_a_tool_lists_models_only_with_the_resolved_path() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("cubilot-fake-pi-shim-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let tools = dir.join("tools");
+        std::fs::create_dir_all(&tools).unwrap();
+        let put = |p: &Path, body: &str| {
+            std::fs::write(p, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        // the "node" of the shim: found only on the resolved PATH; answers both calls pi makes
+        put(
+            &tools.join("cubilot-fake-node"),
+            "if [ \"$1\" = \"--list-models\" ]; then echo 'zzprov  zz-model  1K  1K  yes  yes'; exit 0; fi\necho '{\"status\":\"ready\"}'",
+        );
+        let shim = dir.join("pi");
+        put(&shim, "exec cubilot-fake-node \"$@\"");
+        let minimal = "/usr/bin:/bin";
+        assert!(pi_models_in(&shim, Some(minimal)).unwrap().is_empty(), "no node on the launchd PATH: no rows");
+        let rows = pi_models_in(&shim, Some(&format!("{}:{minimal}", tools.display()))).unwrap();
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert!(rows[0].model == "zz-model" && rows[0].ready && rows[0].thinking, "{rows:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

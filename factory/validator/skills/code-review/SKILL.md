@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: The Validator's code review procedure. Five-axis review (correctness, readability, architecture, security, performance), tests reviewed first, the verification checked, plus a confidence gate: high-severity findings need proof, and zero findings is a valid result. Use for every code ticket review.
+description: "The Validator's code review procedure. Five-axis review (correctness, readability, architecture, security, performance), tests reviewed first, the verification checked, plus a confidence gate: high-severity findings need proof, and zero findings is a valid result. Use for every code ticket review."
 ---
 
 > Factory skill (2026-10-19), merged from two MIT sources: the procedure is `code-review-and-quality` from addyosmani/agent-skills (commit aeac41d). The confidence gate, the false-positive list, the prompt defense baseline and the AI-generated code addendum come from `code-reviewer` in affaan-m/ecc (commit 76aaa77). Use the procedure first. The confidence gate is below and in `references/confidence-gate.md`. Do not start sub-agents.

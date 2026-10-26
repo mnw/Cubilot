@@ -88,7 +88,6 @@ const dot = document.getElementById('dot');
 const statusText = document.getElementById('status-text');
 const input = document.getElementById('msg-input');
 const sendBtn = document.getElementById('send-btn');
-const legendEl = document.getElementById('legend');
 const targetEl = document.getElementById('target');
 const targetDisplay = document.getElementById('target-display');
 const targetDisplayText = targetDisplay?.querySelector('.target-display-text');

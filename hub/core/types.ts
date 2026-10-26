@@ -152,6 +152,7 @@ export type Entry = {
 export type Scope =
   | { kind: "broadcast" }                    // UI + all non-permanent agents; persisted to chatLog
   | { kind: "to-agents"; agents: string[] }  // UI + specific agents; persisted
+  | { kind: "agents-ambient"; agents: string[] } // Named agents only; NO UI, NO chatLog, NO transcript (a control request)
   | { kind: "ui-only" }                      // UI subscribers only; persisted
   | { kind: "room"; room: string }           // UI + same-room agents; persisted
   | { kind: "ui-only-ambient" }              // UI only; NO chatLog, NO transcript (presence/roster)
@@ -252,4 +253,6 @@ export type KindModule = HubFeature & {
   briefingLines?(agent: AgentCtx, cap: HubCapabilities): string[];
   priority?: number;
   dispose?: () => void;
+  /** Runs once when the hub has started, after migrate, with a capabilities object (e.g. to settle work a restart interrupted). */
+  start?: (cap: HubCapabilities) => void;
 };

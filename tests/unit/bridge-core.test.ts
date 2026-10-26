@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { DeliveryMode, Host } from "../../hub/channel/host";
+import { boundedSleep } from "../helpers/bounded";
 import { authedPost } from "../../hub/channel/hub-client";
 import { NUDGE_TEXT, NUDGE_WINDOW_MS, ReloadTimeout, REPLY_POLICY, modeFor, renderBriefing, renderEnvelope, startBridge, type BridgeEvent } from "../../hub/channel/core";
 
@@ -8,12 +9,14 @@ type Delivery = { id: number | null; text: string; mode: DeliveryMode; onRead: (
 // Fake Host: scripted SSE frames in, recorded deliveries out. deliver() resolves on
 // acceptance; onRead is fired by the test (as the runtime would, much later).
 type Relink = { status: number; body: Record<string, unknown> };
-function setup(opts: { room?: string; now?: () => number; relink?: (body: any, n: number) => Relink; reloadFails?: number; reloadTimeout?: boolean; sleep?: (ms: number) => Promise<void> } = {}) {
+function setup(opts: { room?: string; now?: () => number; relink?: (body: any, n: number) => Relink; reloadFails?: number; reloadTimeout?: boolean; stageId?: string; sleep?: (ms: number) => Promise<void> } = {}) {
   const room = opts.room ?? "r1";
   const delivered: Delivery[] = [];
   const logs: string[] = [];
   const reloads: number[] = [];
   const reloadVersions: string[] = [];
+  const reloadIds: Array<string | null> = [];
+  const reloadAttempts: Array<string | null> = [];
   let gateP: Promise<void> | null = null;
   const requests: Array<{ url: string; body?: string }> = [];
   const pending: string[] = [];
@@ -40,15 +43,18 @@ function setup(opts: { room?: string; now?: () => number; relink?: (body: any, n
     deliver: async (d) => {
       delivered.push(d);
     },
-    reload: async (version) => {
+    reload: async (version, reloadId, attempt) => {
       reloads.push(1);
       reloadVersions.push(version);
+      reloadIds.push(reloadId);
+      reloadAttempts.push(attempt);
       if (gateP) { const g = gateP; gateP = null; await g; }
       if (reloads.length <= (opts.reloadFails ?? 0)) throw opts.reloadTimeout ? new ReloadTimeout() : new Error("boom");
     },
+    stageId: async () => opts.stageId ?? null,
     log: (m) => logs.push(m),
   };
-  const bridge = startBridge(host, { agent: "bob", room, hubEnv: "", sleep: opts.sleep ?? (async () => {}), now: opts.now });
+  const bridge = startBridge(host, { agent: "bob", room, hubEnv: "", sleep: opts.sleep ?? boundedSleep("bridge sleep"), now: opts.now });
   const push = (evt: BridgeEvent) => {
     pending.push(`data: ${JSON.stringify(evt)}\n\n`);
     wake?.();
@@ -57,7 +63,7 @@ function setup(opts: { room?: string; now?: () => number; relink?: (body: any, n
     for (let i = 0; i < 200 && !fn(); i++) await new Promise((r) => setTimeout(r, 5));
     expect(fn()).toBe(true);
   };
-  return { bridge, delivered, logs, reloads, reloadVersions, requests, push, until, reloadGate: (g: Promise<void>) => { gateP = g; return g; } };
+  return { bridge, delivered, logs, reloads, reloadVersions, reloadIds, reloadAttempts, requests, push, until, reloadGate: (g: Promise<void>) => { gateP = g; return g; } };
 }
 
 const chat = (id: number, over: Partial<BridgeEvent> = {}): BridgeEvent => ({
@@ -410,7 +416,7 @@ describe("reconnect", () => {
       },
       log: () => {},
     };
-    const bridge = startBridge(host, { agent: "bob", room: "r1", hubEnv: "", sleep: async (ms) => void slept.push(ms) });
+    const bridge = startBridge(host, { agent: "bob", room: "r1", hubEnv: "", sleep: boundedSleep("bridge sleep", (ms) => void slept.push(ms)) });
     for (let i = 0; i < 200 && delivered.length < 1; i++) await new Promise((r) => setTimeout(r, 5));
     bridge.stop();
     expect(slept[0]).toBe(2000);
@@ -440,7 +446,7 @@ describe("lifecycle", () => {
       },
       log: () => {},
     };
-    bridge = startBridge(host, { agent: "bob", room: "r1", hubEnv: "", sleep: async () => {} });
+    bridge = startBridge(host, { agent: "bob", room: "r1", hubEnv: "", sleep: boundedSleep("bridge sleep") });
     for (let i = 0; i < 100 && delivered.length < 1; i++) await new Promise((r) => setTimeout(r, 5));
     await new Promise((r) => setTimeout(r, 50));
     expect(delivered).toEqual([1]);
@@ -467,6 +473,21 @@ describe("ticket kinds and kind briefing lines", () => {
     }
     expect(modeFor({ kind: "ticket.update", snapshot: { assignee: "alice", creator: "human" } }, "alice")).toBe("context");
     expect(modeFor({ kind: "ticket.claimed", snapshot: { assignee: "alice", creator: "human" } }, "alice")).toBe("context");
+  });
+
+  test("a ticket assigned by the hub (actor system) to a launched session wakes no one, not even that session", () => {
+    const evt = { kind: "ticket.assigned", from: "system", snapshot: { assignee: "worker-1", creator: "human", status: "queued" } };
+    expect(modeFor(evt, "worker-1", true)).toBe("context");
+    expect(modeFor(evt, "alice", true)).toBe("context");
+    // the same event from a person still wakes the assignee
+    expect(modeFor({ ...evt, from: "human" }, "worker-1", true)).toBe("wake");
+  });
+
+  test("a system assignment wakes an ordinary assignee (the lead after a final PASS), not a stage session", () => {
+    const evt = { kind: "ticket.assigned", from: "system", snapshot: { assignee: "lead-1", creator: "human", status: "in_review" } };
+    expect(modeFor(evt, "lead-1")).toBe("wake");
+    expect(modeFor(evt, "lead-1", true)).toBe("context");
+    expect(modeFor(evt, "alice")).toBe("context");
   });
 
   test("a ticket.assigned to the agent that created the ticket wakes it (a later event it has not seen)", () => {
@@ -676,6 +697,241 @@ describe("hot reload", () => {
     expect(t.reloads).toHaveLength(0);
     t.bridge.stop();
   });
+  const reloadReq = (force = false): BridgeEvent => ({ type: "agent.reload", from: "system", to: "bob", room: "r1", force });
+
+  test("a reload request on an idle agent reloads at once, with the force flag, and is not shown to the model", async () => {
+    const t = setup({ relink: (b) => ({ status: 200, body: { ok: true, reload: b.force === true, version: "v-2" } }) });
+    t.push(brief("v-2"));
+    await t.until(() => relinks(t).length === 1);
+    expect(t.reloads).toHaveLength(0); // same version: the hub orders nothing
+    t.push(reloadReq(true));
+    await t.until(() => t.reloads.length === 1);
+    expect(relinks(t)[1]).toEqual({ agent: "bob", force: true });
+    expect(t.delivered).toHaveLength(1); // only the briefing: the request is no message
+    t.bridge.stop();
+  });
+  test("a reload request on a busy agent waits for the end of the run", async () => {
+    const t = setup();
+    t.push(brief("v-2"));
+    await t.until(() => t.reloads.length === 1);
+    t.bridge.onRunStart();
+    t.push(reloadReq(true));
+    await settle();
+    expect(relinks(t)).toHaveLength(1);
+    t.bridge.onRunEnd();
+    await t.until(() => t.reloads.length === 2);
+    expect(relinks(t)[1]).toEqual({ agent: "bob", force: true });
+    t.bridge.stop();
+  });
+  const idReq = (id: string, force = true): BridgeEvent => ({ ...reloadReq(force), reload_id: id });
+  const forced = { relink: (b: Record<string, unknown>) => ({ status: 200, body: { ok: true, reload: b.force === true, version: "v-2" } }) };
+
+  test("the request id goes to relink and to the host; a reload the bridge starts itself carries none", async () => {
+    const t = setup(forced);
+    t.push(brief("v-2"));
+    await t.until(() => relinks(t).length === 1);
+    t.push(idReq("aaaaaaaaaaaaaaaa"));
+    await t.until(() => t.reloads.length === 1);
+    expect(relinks(t)[1]).toEqual({ agent: "bob", force: true, reload_id: "aaaaaaaaaaaaaaaa" });
+    expect(t.reloadIds).toEqual(["aaaaaaaaaaaaaaaa"]);
+    const auto = setup();
+    auto.push(brief("v-2"));
+    await auto.until(() => auto.reloads.length === 1);
+    expect(relinks(auto)).toEqual([{ agent: "bob" }]);
+    expect(auto.reloadIds).toEqual([null]);
+    t.bridge.stop(); auto.bridge.stop();
+  });
+  test("a failed reload reports its own request id", async () => {
+    const t = setup({ ...forced, reloadFails: 1 });
+    t.push(brief("v-2"));
+    await t.until(() => relinks(t).length === 1);
+    t.push(idReq("aaaaaaaaaaaaaaaa"));
+    await t.until(() => posts(t, "/factory/applied").length === 1);
+    expect(posts(t, "/factory/applied")[0]).toEqual({ agent: "bob", failed: true, reload_id: "aaaaaaaaaaaaaaaa" });
+    t.bridge.stop();
+  });
+  test("a request that waits for a run end keeps its id (Validator: A's result never carries B's id)", async () => {
+    const t = setup(forced);
+    t.push(brief("v-2"));
+    await t.until(() => relinks(t).length === 1);
+    let release!: () => void;
+    t.reloadGate(new Promise<void>((r) => (release = r)));
+    t.push(idReq("aaaaaaaaaaaaaaaa")); // reload A starts and hangs in the host
+    await t.until(() => t.reloads.length === 1);
+    t.push(idReq("bbbbbbbbbbbbbbbb")); // the click for B arrives while A runs
+    await settle();
+    expect(t.reloadIds).toEqual(["aaaaaaaaaaaaaaaa"]); // A ends with A's id
+    release();
+    await t.until(() => t.reloads.length === 2);
+    expect(t.reloadIds).toEqual(["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"]);
+    expect(relinks(t)[2]).toEqual({ agent: "bob", force: true, reload_id: "bbbbbbbbbbbbbbbb" });
+    t.bridge.stop();
+  });
+  test("a busy run and a pending answer keep the id of the order", async () => {
+    let n = 0;
+    const t = setup({ relink: (b) => (b.force === true && ++n === 1 ? { status: 200, body: { ok: true, reload: false, pending: true, version: "v-2" } } : { status: 200, body: { ok: true, reload: b.force === true, version: "v-2" } }) });
+    t.push(brief("v-2"));
+    await t.until(() => relinks(t).length === 1);
+    t.push(idReq("aaaaaaaaaaaaaaaa"));
+    await t.until(() => relinks(t).length === 3); // the poll (injected sleep) asked again
+    await t.until(() => t.reloads.length === 1);
+    expect(relinks(t)[2]).toEqual({ agent: "bob", force: true, reload_id: "aaaaaaaaaaaaaaaa" });
+    expect(t.reloadIds).toEqual(["aaaaaaaaaaaaaaaa"]);
+    t.bridge.stop();
+  });
+  test("the id does not depend on force: a request without force keeps its id to relink and to the host", async () => {
+    const t = setup({ relink: (_b, n) => ({ status: 200, body: { reload: n === 2, version: "v-2", attempt: "attempt-2" } }) });
+    t.push(brief("v-2"));
+    await t.until(() => relinks(t).length === 1);
+    t.push(idReq("aaaaaaaaaaaaaaaa", false));
+    await t.until(() => t.reloads.length === 1);
+    expect(relinks(t)[1]).toEqual({ agent: "bob", reload_id: "aaaaaaaaaaaaaaaa" });
+    expect(t.reloadIds).toEqual(["aaaaaaaaaaaaaaaa"]);
+    t.bridge.stop();
+  });
+  test("the attempt id of the order goes to the host, also when the reload waits for a run end; none when the hub gives none", async () => {
+    let n = 0;
+    const t = setup({ relink: () => ({ status: 200, body: { ok: true, reload: true, version: "v-2", attempt: `att-${++n}` } }) });
+    t.push(brief("v-2"));
+    await t.until(() => t.reloads.length === 1);
+    expect(t.reloadAttempts).toEqual(["att-1"]);
+    t.bridge.onRunStart();
+    t.push(idReq("aaaaaaaaaaaaaaaa"));
+    await settle();
+    t.bridge.onRunEnd();
+    await t.until(() => t.reloads.length === 2);
+    expect(t.reloadAttempts).toEqual(["att-1", "att-2"]);
+    const old = setup(); // an older hub: relink answers no attempt
+    old.push(brief("v-2"));
+    await old.until(() => old.reloads.length === 1);
+    expect(old.reloadAttempts).toEqual([null]);
+    t.bridge.stop(); old.bridge.stop();
+  });
+  test("a failed reload reports its attempt id with its request id", async () => {
+    const t = setup({ reloadFails: 1, relink: (b) => ({ status: 200, body: { ok: true, reload: b.force === true, version: "v-2", attempt: "att-1" } }) });
+    t.push(brief("v-2"));
+    await t.until(() => relinks(t).length === 1);
+    t.push(idReq("aaaaaaaaaaaaaaaa"));
+    await t.until(() => posts(t, "/factory/applied").length === 1);
+    expect(posts(t, "/factory/applied")[0]).toEqual({ agent: "bob", failed: true, reload_id: "aaaaaaaaaaaaaaaa", attempt: "att-1" });
+    t.bridge.stop();
+  });
+  test("merged clicks: while a reload runs the latest click replaces the earlier one; B's id never reaches the hub or the host", async () => {
+    const t = setup(forced);
+    t.push(brief("v-2"));
+    await t.until(() => relinks(t).length === 1);
+    let release!: () => void;
+    t.reloadGate(new Promise<void>((r) => (release = r)));
+    t.push(idReq("aaaaaaaaaaaaaaaa"));
+    await t.until(() => t.reloads.length === 1);
+    t.push(idReq("bbbbbbbbbbbbbbbb"));
+    t.push(idReq("cccccccccccccccc"));
+    await settle();
+    release();
+    await t.until(() => t.reloads.length === 2);
+    await settle();
+    expect(t.reloadIds).toEqual(["aaaaaaaaaaaaaaaa", "cccccccccccccccc"]);
+    expect(JSON.stringify(t.requests)).not.toContain("bbbbbbbbbbbbbbbb");
+    expect(t.reloads).toHaveLength(2); // no queue: one reload for the two merged clicks
+    t.bridge.stop();
+  });
+  test("a click that arrives while a pending answer is in flight is not overwritten by the older intent", async () => {
+    let n = 0;
+    let click!: () => void;
+    const t = setup({
+      relink: (b) => {
+        if (b.reload_id === "aaaaaaaaaaaaaaaa" && ++n === 1) { click(); return { status: 200, body: { ok: true, reload: false, pending: true, version: "v-2" } }; }
+        return { status: 200, body: { ok: true, reload: b.force === true, version: "v-2" } };
+      },
+    });
+    click = () => t.push(idReq("bbbbbbbbbbbbbbbb"));
+    t.push(brief("v-2"));
+    await t.until(() => relinks(t).length === 1);
+    t.push(idReq("aaaaaaaaaaaaaaaa"));
+    await t.until(() => t.reloads.length >= 1);
+    expect(t.reloadIds[0]).toBe("bbbbbbbbbbbbbbbb");
+    t.bridge.stop();
+  });
+  test("a request without force sends no force flag", async () => {
+    const t = setup({ relink: () => noReload });
+    t.push(brief("v-2"));
+    await t.until(() => relinks(t).length === 1);
+    t.push(reloadReq(false));
+    await t.until(() => relinks(t).length === 2);
+    expect(relinks(t)[1]).toEqual({ agent: "bob" });
+    t.bridge.stop();
+  });
+  test("a failed reload is reported to the hub and logged after the second failure; a new request tries again", async () => {
+    const t = setup({ reloadFails: 2 });
+    t.push(brief("v-2"));
+    await t.until(() => t.reloads.length === 1);
+    await settle();
+    t.bridge.onRunStart(); t.bridge.onRunEnd();
+    await t.until(() => t.logs.some((l) => l.includes("hot reload failed for v-2")));
+    expect(posts(t, "/factory/applied").every((b) => b.failed === true)).toBe(true);
+    expect(t.reloads).toHaveLength(2);
+    t.bridge.onRunStart(); t.bridge.onRunEnd();
+    await settle();
+    expect(t.reloads).toHaveLength(2); // stopped
+    t.push(reloadReq(true)); // the human's click: two failures stop the retries, not a click
+    await t.until(() => t.reloads.length === 3);
+    t.bridge.stop();
+  });
+  test("a forced reload that fails does not loop: the retry carries no force, so the hub orders nothing for the same version", async () => {
+    const t = setup({ reloadFails: 1, relink: (b) => ({ status: 200, body: { ok: true, reload: b.force === true, version: "v-2" } }) });
+    t.push(brief("v-2"));
+    await t.until(() => relinks(t).length === 1);
+    t.push(reloadReq(true));
+    await t.until(() => t.reloads.length === 1);
+    await settle();
+    t.bridge.onRunStart(); t.bridge.onRunEnd();
+    await settle();
+    expect(relinks(t).slice(2).every((b) => b.force === undefined)).toBe(true);
+    expect(t.reloads).toHaveLength(1);
+    t.bridge.stop();
+  });
+  test("a run that starts while the relink request is in flight defers the reload to the run end, without asking again (Validator)", async () => {
+    let t!: ReturnType<typeof setup>;
+    t = setup({ relink: (_b, n) => { if (n === 2) t.bridge.onRunStart(); return { status: 200, body: { reload: n === 2, version: "v-2" } }; } });
+    t.push(brief("v-2"));
+    await t.until(() => relinks(t).length === 1);
+    t.push(reloadReq(true));
+    await t.until(() => relinks(t).length === 2);
+    await settle();
+    expect(t.reloads).toHaveLength(0); // the run is on: no native reload
+    t.bridge.onRunEnd();
+    await t.until(() => t.reloads.length === 1);
+    expect(t.reloadVersions).toEqual(["v-2"]);
+    expect(relinks(t)).toHaveLength(2); // the order was kept: no third relink
+    t.bridge.stop();
+  });
+  test("force survives a pending same-version reload: the poll asks again with force and the reload happens (Validator)", async () => {
+    let finish!: () => void;
+    let pendingNow = true;
+    const t = setup({
+      sleep: () => new Promise<void>((r) => { finish = r; }),
+      relink: (b) => ({ status: 200, body: b.force ? (pendingNow ? { reload: false, pending: true, version: "v-2" } : { reload: true, version: "v-2" }) : { reload: false, version: "v-2" } }),
+    });
+    t.push(brief("v-2"));
+    await t.until(() => relinks(t).length === 1);
+    t.push(reloadReq(true));
+    await t.until(() => !!finish && relinks(t).length === 2);
+    pendingNow = false;
+    finish();
+    await t.until(() => t.reloads.length === 1);
+    expect(relinks(t)[2]).toEqual({ agent: "bob", force: true });
+    t.bridge.stop();
+  });
+  test("an agent with no factory link only reads its status: the 404 stops the reload", async () => {
+    const t = setup({ relink: () => ({ status: 404, body: { error: "no factory link for bob" } }) });
+    t.push(brief("v-2"));
+    await t.until(() => relinks(t).length === 1);
+    t.push(reloadReq(true));
+    await settle();
+    expect(t.reloads).toHaveLength(0);
+    expect(relinks(t)).toHaveLength(1); // noLink: never asks again
+    t.bridge.stop();
+  });
   test("a briefing without a factory_version asks nothing", async () => {
     const t = setup();
     t.push(brief(null)); t.push(brief(undefined));
@@ -851,7 +1107,7 @@ describe("hot reload", () => {
       handoffGate: async () => null,
       log: () => {},
     };
-    const bridge = startBridge(host, { agent: "bob", room: "r1", hubEnv: "", sleep: async () => {}, alive: async () => alive });
+    const bridge = startBridge(host, { agent: "bob", room: "r1", hubEnv: "", sleep: boundedSleep("bridge sleep"), alive: async () => alive });
     pending.push(`data: ${JSON.stringify(chat(1))}\n\n`); wake?.();
     for (let i = 0; i < 100 && delivered.length < 1; i++) await new Promise((r) => setTimeout(r, 5));
     expect(delivered).toHaveLength(1);
@@ -860,5 +1116,29 @@ describe("hot reload", () => {
     await settle();
     expect(delivered).toHaveLength(1);
     bridge.stop();
+  });
+});
+
+describe("turn-end report (stage-sessions 5.2)", () => {
+  const reports = (t: ReturnType<typeof setup>) => t.requests.filter((r) => r.url.endsWith("/turn-end"));
+
+  test("a stage session reports each answered run end to its stage; an aborted run reports nothing", async () => {
+    const t = setup({ stageId: "s_0123456789abcdef" });
+    t.bridge.onRunEnd();
+    await t.until(() => reports(t).length === 1);
+    expect(reports(t)[0].url).toBe("http://hub.test/stages/s_0123456789abcdef/turn-end");
+    expect(JSON.parse(reports(t)[0].body!)).toEqual({ agent: "bob" });
+    t.bridge.onRunEnd(false);
+    t.bridge.onRunEnd();
+    await t.until(() => reports(t).length === 2);
+    t.bridge.stop();
+  });
+
+  test("a session without CUBILOT_STAGE_ID reports nothing", async () => {
+    const t = setup();
+    t.bridge.onRunEnd();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(reports(t)).toHaveLength(0);
+    t.bridge.stop();
   });
 });

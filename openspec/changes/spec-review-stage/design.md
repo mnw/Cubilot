@@ -8,10 +8,10 @@
 
 ## Decisions
 
-1. **Spec review is a stage of the request.** The handoff `{to_role: "validator", request_id, review: "spec"}` creates one `stage` row with `review = 'spec'`, `request_id`, and `ticket_id = NULL`. Required context: `request_text` (string, at most 20 000 characters) and `spec_paths` (list of paths in the project folder, may be empty). Optional context: `ticket_ids` (list of ticket ids of that request; default: all `draft` tickets of the request in the room) and `commit`.
+1. **Spec review is a stage of the request.** The handoff `{to_role: "validator", request_id, review: "spec"}` creates one `stage` row with `review = 'spec'`, `request_id`, and `ticket_id = NULL`. Required context: `request_text` (string, at most 20 000 characters). Optional context: `spec_paths` (list of paths in the project folder), `ticket_ids` (list of ticket ids of that request; default: all `draft` tickets of the request in the room) and `commit`.
    - The hub stores the scope in `stage_scope (stage_id, ticket_id)`.
    - Every scope ticket must be `draft` and carry that `request_id`. Otherwise the hub returns 400 and records nothing.
-   - A request has at most one live spec stage (`queued`, `launching` or `running`). A later spec handoff while one is live creates a `queued` stage. It keeps its own scope.
+   - At most one spec-review stage of a request is `launching`, `running` or `retrying`. A later spec handoff creates a `queued` stage, which waits. It keeps its own scope.
 
 2. **Schema.** The `stage` columns (`ticket_id` nullable, `request_id`, `review`, `verdict`) and their check come from `stage-sessions` task 1.2. This change creates only `stage_scope` and an index. No rebuild.
 
@@ -29,7 +29,7 @@
 5. **PASS.** One transaction:
    - `stage.passed` with `verdict = 'PASS'` (kind `stage`),
    - `ticket.queued` for each scope ticket that is still `draft` (kind `ticket`), unless the request has a non-terminal `blast_radius: high` ticket. In that case no ticket moves.
-   - The actor of each `ticket.queued` is `system`, as an extension of the `stage-sessions` actor rule (decision 3). The `system` actor stays on hub-internal paths only.
+   - The actor of each `ticket.queued` is `system`, as an extension of the `stage-sessions` actor rule (decision 3). Only hub-internal code writes the `system` actor. Every mutating HTTP route refuses it with 400.
 
    This is the second transaction that writes events of two kinds. CLAUDE.md names both (task 6.2).
 
@@ -54,7 +54,7 @@
 ## Risks and trade-offs
 
 - **Two cross-kind transactions.** The stage launch (`stage-sessions`) and the PASS (decision 5) both write `stage` and `ticket` events together. CLAUDE.md names both. If a later rule forbids it, split the PASS into a stage transaction and a ticket transaction, and add a recovery step for a crash in between.
-- **System actor is wider but still hub-internal.** The `system` actor writes the launch, the retry and the PASS. Every HTTP route refuses it (`stage-sessions` task 2.5 tests every route). A token holder can still reach the hub's internal paths only through the routes that call them, so the risk is the same as the accepted token risk in CLAUDE.md.
+- **System actor is wider but still hub-internal.** Only hub-internal code writes the `system` actor, for example the launch, the retry and the PASS. Every mutating HTTP route refuses it (`stage-sessions` task 2.5 tests every route). A token holder can still reach the hub's internal paths only through the routes that call them, so the risk is the same as the accepted token risk in CLAUDE.md.
 - **Derived states.** "Waiting for approval" and the fail count are derived from `stage` rows. A query that is slow on a large ledger needs the index on `(request_id, review, created_seq)`.
 - **Narrowed PASS.** A ticket added after the scope was set stays `draft` and is not reviewed until the Orchestrator sends it again or the human queues it.
 

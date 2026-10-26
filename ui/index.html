@@ -46,9 +46,6 @@
     </div>
 
     <div class="roster">
-      <span class="roster-label">Room</span>
-      <div class="legend" id="legend"></div>
-      <button type="button" class="add-agent" id="add-agent-btn" title="Launch a new agent">+ agent</button>
       <label class="roster-lead" id="ticket-lead-wrap" for="ticket-lead" hidden>Lead
         <select id="ticket-lead" title="The room lead triages unassigned tickets"><option value="">No lead</option></select></label>
     </div>
@@ -115,6 +112,22 @@
 
 <div class="app-body" id="app-body">
 
+  <nav class="agent-col" id="agent-col" aria-label="Agents">
+    <div class="agent-col-head">
+      <span class="agent-col-title">Agents</span>
+      <span class="agent-col-count" id="agent-col-count" aria-live="polite"></span>
+      <button type="button" class="agent-col-add" id="agent-col-add" title="Launch a new agent" aria-label="Launch a new agent">+</button>
+    </div>
+    <div class="terminal-tabs" id="terminal-tabs">
+      <div class="agent-row-human" id="agent-human-row"><span class="state-dot"></span><span class="tab-label" id="agent-human-name"></span><span class="agent-row-you">you</span></div>
+      <div class="agent-col-rule" aria-hidden="true"></div>
+      <details class="terminal-finished" id="terminal-finished">
+        <summary>Finished <span class="terminal-finished-count" id="terminal-finished-count">0</span></summary>
+        <ul class="terminal-finished-list" id="terminal-finished-list" aria-label="Finished stage sessions"></ul>
+      </details>
+    </div>
+  </nav>
+
   <div class="chat-col" id="chat-col">
     <div id="messages"></div>
 
@@ -152,7 +165,6 @@
   <div class="splitter" id="splitter" aria-hidden="true"></div>
 
   <div class="terminal-col" id="terminal-col">
-    <div class="terminal-tabs" id="terminal-tabs"></div>
     <div class="terminal-body" id="terminal-body"></div>
   </div>
 
@@ -193,6 +205,7 @@
         </div>
       </div>
     </div>
+    <div class="plan-waiting" id="plan-waiting" aria-live="polite" hidden></div>
     <div class="ticket-board-columns" id="ticket-board-columns"></div>
   </div>
 
@@ -484,6 +497,8 @@
 <script src="kinds/interrupt.js"></script>
 <script src="kinds/permission.js"></script>
 <script src="kinds/ticket.js"></script>
+<script src="kinds/stage.js"></script>
+<script src="features/plan-approval.js"></script>
 <script src="terminal/pty.js"></script>
 <script src="terminal/role-memory.js"></script>
 <script src="terminal/model-grid.js"></script>

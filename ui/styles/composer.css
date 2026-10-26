@@ -7,6 +7,7 @@ footer {
 }
 .input-row {
   display: flex;
+  flex-wrap: wrap;   /* a narrow chat column puts the input on its own row instead of hiding it */
   gap: var(--sp-8);
   align-items: center;
   position: relative;
@@ -252,6 +253,8 @@ footer {
 
 
 textarea#msg-input {
+  flex: 1 1 var(--size-160);
+  min-width: 0;
   resize: none;
   line-height: var(--lh-relaxed);
   min-height: var(--size-36);

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cubilot — Agent row states</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#14110f}
+*{box-sizing:border-box}
+:root{color-scheme:dark}
+</style>
+</helmet>
+<div style="width: 440px; height: 620px; display: flex; flex-direction: column; gap: 6px; padding: 20px 18px; background: #14110f; color: #f5ede2; font-family: Inter, -apple-system, 'Segoe UI', sans-serif; font-size: 12.5px">
+<h2 style="margin: 0 0 8px; font-size: 14px; font-weight: 600">Row states</h2>
+
+<!-- 1 -->
+<div style="display: grid; grid-template-columns: 112px 300px; gap: 10px; align-items: center">
+<span style="font-size: 11.5px; color: #978b78">Online, at rest</span>
+<div style="display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 6px 0 4px; border-radius: 6px; background: #1a1714">
+<span aria-hidden="true" style="width: 20px; display: grid; place-items: center; color: #978b78"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"></path></svg></span>
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: #7fb069; flex: none"></span>
+<span style="flex: 1; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; color: #e8a857">Worker2</span>
+<button aria-label="Pause Worker2" style="width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #a69583"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg></button>
+</div>
+</div>
+
+<!-- 2 -->
+<div style="display: grid; grid-template-columns: 112px 300px; gap: 10px; align-items: center">
+<span style="font-size: 11.5px; color: #978b78">Hover, focus or selected</span>
+<div style="display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 6px 0 4px; border-radius: 6px; background: #241e1a; border: 1px solid #352c26">
+<span aria-hidden="true" style="width: 20px; display: grid; place-items: center; color: #f5ede2"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"></path></svg></span>
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: #7fb069; flex: none"></span>
+<span style="flex: 1; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-weight: 600; color: #e8a857">Worker2</span>
+<button aria-label="Pause Worker2" title="Pause" style="width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #a69583"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg></button>
+<button aria-label="Open editor at Worker2's folder" title="Open editor" style="width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #a69583"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 9h18M7 13h4M13 13h4M7 17h7"></path></svg></button>
+<button aria-label="Reload Worker2" title="Reload this agent" style="width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #a69583"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"></path></svg></button>
+<span aria-hidden="true" style="width: 4px"></span>
+<button aria-label="Kill Worker2's session" title="Kill session" style="width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #a69583"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg></button>
+</div>
+</div>
+
+<!-- 3 -->
+<div style="display: grid; grid-template-columns: 112px 300px; gap: 10px; align-items: center">
+<span style="font-size: 11.5px; color: #978b78">Paused</span>
+<div style="display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 6px 0 4px; border-radius: 6px; background: #1a1714">
+<span aria-hidden="true" style="width: 20px; display: grid; place-items: center; color: #978b78"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"></path></svg></span>
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px #e8a857; flex: none"></span>
+<span style="flex: 1; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; color: #6ab5a3">Tester1 <span style="font-family: Inter, sans-serif; font-size: 11px; color: #e8a857">paused</span></span>
+<button aria-label="Resume Tester1" title="Resume" style="width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #e8a857"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg></button>
+</div>
+</div>
+
+<!-- 4 -->
+<div style="display: grid; grid-template-columns: 112px 300px; gap: 10px; align-items: center">
+<span style="font-size: 11.5px; color: #978b78">Needs attention (pulses)</span>
+<div style="display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 6px 0 4px; border-radius: 6px; background: #2a1b17">
+<span aria-hidden="true" style="width: 20px; display: grid; place-items: center; color: #978b78"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"></path></svg></span>
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: #d4604a; box-shadow: 0 0 6px #d4604a; flex: none"></span>
+<span style="flex: 1; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; color: #6ab5a3">Tester2 <span style="font-family: Inter, sans-serif; font-size: 11px; color: #e38f7a">needs you</span></span>
+<button aria-label="Pause Tester2" style="width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #a69583"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg></button>
+</div>
+</div>
+
+<!-- 5 -->
+<div style="display: grid; grid-template-columns: 112px 300px; gap: 10px; align-items: center">
+<span style="font-size: 11.5px; color: #978b78">Offline</span>
+<div style="display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 6px 0 4px; border-radius: 6px; background: #1a1714">
+<span aria-hidden="true" style="width: 20px; display: grid; place-items: center; color: #6b5d51"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"></path></svg></span>
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px #6b5d51; flex: none"></span>
+<span style="flex: 1; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; color: #978b78">Worker3 <span style="font-family: Inter, sans-serif; font-size: 11px">offline</span></span>
+<button aria-label="Remove Worker3 from the room" title="Remove" style="width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #a69583"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg></button>
+</div>
+</div>
+
+<div aria-hidden="true" style="height: 1px; margin: 8px 0; background: #2a231e"></div>
+<h3 style="margin: 0 0 4px; font-size: 12.5px; font-weight: 600">Reload button</h3>
+
+<!-- 6 -->
+<div style="display: grid; grid-template-columns: 112px 300px; gap: 10px; align-items: center">
+<span style="font-size: 11.5px; color: #978b78">Ready</span>
+<div style="display: flex; align-items: center; gap: 10px; height: 34px">
+<button aria-label="Reload Worker1" style="width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #a69583"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"></path></svg></button>
+<span style="font-size: 11.5px; color: #a69583">Status and skills match what is loaded.</span>
+</div>
+</div>
+
+<!-- 7 -->
+<div style="display: grid; grid-template-columns: 112px 300px; gap: 10px; align-items: center">
+<span style="font-size: 11.5px; color: #978b78">Change waits</span>
+<div style="display: flex; align-items: center; gap: 10px; height: 34px">
+<button aria-label="Reload Worker1. 1 change waits." style="position: relative; width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid #6b5326; border-radius: 5px; background: #33281a; color: #e8a857"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"></path></svg><span aria-hidden="true" style="position: absolute; top: -3px; right: -3px; width: 7px; height: 7px; border-radius: 50%; background: #e8a857; border: 1.5px solid #14110f"></span></button>
+<span style="font-size: 11.5px; color: #e8a857">A skill was turned on or off.</span>
+</div>
+</div>
+
+<!-- 8 -->
+<div style="display: grid; grid-template-columns: 112px 300px; gap: 10px; align-items: center">
+<span style="font-size: 11.5px; color: #978b78">Reloading</span>
+<div style="display: flex; align-items: center; gap: 10px; height: 34px">
+<button disabled aria-label="Reloading Worker1" style="width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #e8a857; opacity: 0.8"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"></path></svg></button>
+<span style="font-size: 11.5px; color: #a69583">Reloading… (waits for the end of a run)</span>
+</div>
+</div>
+
+<!-- 9 -->
+<div style="display: grid; grid-template-columns: 112px 300px; gap: 10px; align-items: center">
+<span style="font-size: 11.5px; color: #978b78">Failed</span>
+<div style="display: flex; align-items: center; gap: 10px; height: 34px">
+<button aria-label="Reload Worker1 again. The last reload failed." style="width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid #5a2e25; border-radius: 5px; background: #2a1b17; color: #e38f7a"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"></path></svg></button>
+<span style="font-size: 11.5px; color: #e38f7a">Reload failed. Click to try again.</span>
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":440,"height":620}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

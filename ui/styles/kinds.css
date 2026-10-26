@@ -392,7 +392,7 @@ body.board-open .terminal-col { display: none; }
 body.board-open .splitter,
 body.board-open.no-terminal .splitter { display: block; }
 body.board-open .chat-col,
-body.board-open.no-terminal .chat-col { flex: 0 0 calc(var(--split, 50%)); min-width: 0; }
+body.board-open.no-terminal .chat-col { flex: 0 1 calc((100% - var(--size-300)) * var(--split-frac, 0.5)); min-width: 0; }
 /* The pane does not scroll: the filter row stays on top, and only the columns scroll beneath it,
    so the filter row and the sticky column headers (below) are both always visible. */
 body.board-open .board-col {
@@ -869,3 +869,26 @@ label[for="ticket-filter-request"] { color: var(--text); }
 .ticket-view-panel .ticket-view-fields:first-of-type { grid-template-columns: minmax(0, 1fr); gap: var(--sp-4) 0; }
 .ticket-view-panel .ticket-view-fields:first-of-type dd { margin-bottom: var(--sp-8); }
 .ticket-view-panel dd { overflow-wrap: anywhere; }
+
+/* Plan waits for your approval: one row per request above the board columns. */
+.plan-waiting { flex: none; display: flex; flex-direction: column; gap: var(--sp-6); }
+.plan-waiting[hidden] { display: none; }
+.plan-row { display: flex; align-items: center; gap: var(--sp-10); padding: var(--sp-8) var(--sp-10); border: 1px solid var(--orange); border-radius: var(--radius-md); background: var(--bg-raised); }
+.plan-text { flex: 1; min-width: 0; }
+.plan-title { font-size: var(--fs-sm); color: var(--text); font-weight: 600; }
+.plan-why { margin-top: var(--sp-2); font-size: var(--fs-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-approve { flex: none; background: var(--orange); color: var(--bg-inset); border: none; font-weight: 600; padding: var(--sp-4) var(--sp-12); border-radius: var(--radius-md); }
+.plan-approve:hover:not(:disabled) { background: var(--orange-hover); }
+.plan-approve:disabled { opacity: 0.5; cursor: default; }
+[data-theme="rose-pine-dawn"] .plan-approve, [data-theme="rose-pine-dawn"] .plan-approve:hover:not(:disabled) { background: var(--text); color: var(--bg-inset); }
+
+/* Needs you: the open findings of a request whose spec review failed twice or more, above the approvals. */
+.needs-row { padding: var(--sp-8) var(--sp-10); border: 1px solid var(--red); border-radius: var(--radius-md); background: var(--bg-raised); }
+.needs-findings { margin: var(--sp-4) 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--sp-3); }
+.needs-finding { display: flex; gap: var(--sp-8); font-size: var(--fs-xs); color: var(--text); }
+.needs-sev { flex: none; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+/* The severity is a coloured dot (3:1 is enough for a mark); the words stay in text colours that pass 4.5:1. */
+.needs-sev::before { content: "●"; margin-right: var(--sp-3); }
+.needs-finding.blocking .needs-sev::before { color: var(--red-strong); }
+.needs-finding.suggestion .needs-sev::before { color: var(--text-muted); }
+.needs-text { min-width: 0; overflow-wrap: anywhere; }

@@ -38,8 +38,57 @@
 - [ ] 6.1 Hub-launched Claude session blocks `Task` and `Agent`; `ack_permission` blocked (reuses `factory-roles` launch) → verify: brief test 7: the launch command of a hub-started `worker` contains both blocks; a live check in the app with a launched worker
 - [ ] 6.2 Orchestrator and chatbridge tools cannot start a session; `factory/orchestrator/orchestrator.md` says so → verify: brief test 8: a tool list check shows no launch tool; the Orchestrator's launch attempt via any tool fails
 - [ ] 6.3 Rebuild bridges and sidecars: `./scripts/build-sidecars.sh` and `./scripts/check-mod.sh` → verify: both pass
-- [ ] 6.4 Checks: `bun test`, `cargo test --manifest-path src-tauri/Cargo.toml`, `bun x tsc --noEmit` → verify: all pass; record the output in this file
-- [ ] 6.5 Live check in the app: a Worker and a Tester stage on one ticket with a handoff; back up the ledger first; install with `./scripts/install.sh` → verify: record the result in this file
+- [x] 6.4 Checks: `bun test`, `cargo test --manifest-path src-tauri/Cargo.toml`, `bun x tsc --noEmit` → verify: all pass; record the output in this file
+  - Result (Tester1, run started 2026-10-23 23:14:39, after Orchestrator's git-stash notice): `bun test`: 1322 pass, 0 fail, 5872 expect() calls, 106 files, exit 0. `cargo test --manifest-path src-tauri/Cargo.toml`: 137 passed, 0 failed, 1 ignored, exit 0. `bun x tsc --noEmit`: no output, exit 0.
+- [x] 6.5 Live check in the app: a Worker and a Tester stage on one ticket with a handoff; back up the ledger first; install with `./scripts/install.sh` → verify: record the result in this file
+  - Partial record (Tester1, 2026-10-24, in progress). Check ticket `t_05dd39e796a34d9a` (request `r-2026-10-24-live-6.5`, role `worker`, low radius, created by Tester1).
+  - Worker stage: session `worker-1` (assigned by `system`, `ticket.assigned` version 2014). Status: queued, claimed, in_progress, in_review (versions 2016 to 2018). Worktree `worktrees/cubilot/t_05dd39e796a34d9a/worker-1`, branch `ticket/t_05dd39e796a34d9a`. File `live-check-6.5.txt` holds `live check 6.5`, not committed. Launch flags (Orchestrator check): `Task`, `Agent` and `ack_permission` blocked.
+  - Tester stage: session `tester-1` (assigned by `system`, `ticket.assigned` version 2023). `CUBILOT_STAGE_ID=s_a75ab85d57c0caab` (Orchestrator check). Launch flags: `Task`, `Agent` and `ack_permission` blocked (Orchestrator check). Open point: no `tester-1` worktree found under the ticket folder or in `git worktree list` at 2026-10-24 (Tester1 check). Orchestrator asked to confirm.
+  - Stage statuses (Orchestrator check): worker stage `s_057d78a6727b8896` passed, verdict empty. Tester stage `s_a75ab85d57c0caab` passed, verdict empty.
+  - Tester handoff: `tester-1` sent handoff `h_b94d51783efba7e1` with result FAIL. Its worktree started detached at `c9c060f`. `worker-1` had not committed `live-check-6.5.txt`, so the tester could not see it.
+  - Tester handoff went to the agent `Validator`, not to the role `validator`.
+  - Worktree `worktrees/cubilot/t_05dd39e796a34d9a/tester-1` was removed while session `tester-1` still ran.
+  - Result: FAIL, design gap. Cause: the worktree of a Tester stage does not include the uncommitted Worker output, and the hub removed a worktree of a live session. Decision on the commit rule: human.
+  - `tester-1` closed later. The hub removed it as stale after its connection dropped. No tmux session for `worker-1` or `tester-1` remains.
+  - Re-run after install 14 (Tester1, 2026-10-24). Check ticket `t_f03e8bebfcffa1f3` (request `r-2026-10-24-live-6.5b`, role `worker`, low radius). Worker session `worker-1`.
+    1. PASS: `worker-1` committed `live-check-6.5b.txt` on `ticket/t_f03e8bebfcffa1f3` as commit `f2b5831`. Main stayed at `c9c060f`. Nothing was pushed.
+    2. PASS: the worker handoff used `to_role: tester` and named the commit `f2b5831`.
+    3. PASS: the tester worktree was detached at `f2b5831` and held the check file.
+    4. PASS: the tester result used `to_role: validator` with `verdict` PASS and `report` in the context.
+    5. PASS: the tester stage shows verdict PASS.
+    6. PASS: the tester worktree was removed after the close.
+    7. Open: no stale `worker-N` or `tester-N` tab check yet. The human looks at the tab rail.
+    - Validator stage `s_333fe1491432d2d6` ran in a read-only worktree. It sent FAIL: the first message had no tester verdict or report. Design gap A.
+    - The new `tester-1` session saw old ticket `t_05dd39e796a34d9a` in its briefing, because the old assignee is `tester-1`. Design gap B. Orchestrator asked the human to cancel `t_05dd39e796a34d9a`. Do not change that ticket here.
+  - Third run after install 15 (Tester1, 2026-10-24). Check ticket `t_22a1daded732cdc9` (request `r-2026-10-24-live-6.5c`, role `worker`, low radius).
+    1. PASS: `worker-1` committed on `ticket/t_22a1daded732cdc9` as commit `776f715`. Main stayed at `c9c060f`.
+    2. PASS: the tester worktree was detached at `776f715`.
+    3. PASS: `tester-1` sent its result to role `validator` with verdict PASS and report (handoff `h_3325ade965df3075`). Two earlier sends got 400 for a wrong stage id. The session corrected them.
+    4. PASS: the tester stage shows verdict PASS.
+    5. PASS: the first message of `validator-1` has the `## Handoff` section with the tester verdict and report.
+    6. PASS: `validator-1` sent PASS (handoff `h_8bc3890bfd3404c6`).
+    7. FAIL: after its stage passed, `tester-1` saw the old ticket `t_05dd39e796a34d9a` in its briefing. Fix ticket `t_fbc17efda6820109` (gap B follow-up).
+    8. PASS: the tester and validator worktrees were removed after the close. The worker worktree stays.
+    9. Visual check not done by the human (2026-10-24). Hub data: the stage sessions opened and closed in the roster, and `t_09af79d42ef7a531` moved to done.
+  - Fourth run after install 16 (Tester1, 2026-10-24). Check ticket `t_117bd2ff361dfc17` (request `r-2026-10-24-live-6.5d`, role `worker`, low radius). Reported by Orchestrator; Tester1 did not read the session output.
+    1. PASS: `worker-1` committed on `ticket/t_117bd2ff361dfc17` as commit `f210e8d`. Main stayed at `c9c060f`.
+    2. PASS: the tester worktree was detached at `f210e8d`.
+    3. PASS with a note: `tester-1` sent its result to role `validator` with verdict PASS and report (handoff `h_64e4e0d63eba976f`). Two earlier sends used the worker's stage id from the handoff section and got 400. Fix ticket `t_585bca05171bdcd0`.
+    4. PASS: the tester stage shows verdict PASS.
+    5. PASS: the first message of `validator-1` has the `## Handoff` section.
+    6. PASS: `validator-1` sent PASS (handoff `h_81e531823fea86a8`). No duplicate result.
+    7. No symptom seen: `tester-1` and `validator-1` did not ask about the old ticket `t_05dd39e796a34d9a` after their stages passed. The briefing text was not read directly. Unit tests in `tests/unit/stage-briefing.test.ts` cover the rule.
+    8. PASS: the tester and validator worktrees were removed after the close.
+    9. Visual check not done by the human (2026-10-24). Hub data: the stage sessions opened and closed in the roster, and `t_09af79d42ef7a531` moved to done.
+  - On 2026-10-24 the human closed the four live-check tickets: `t_05dd39e796a34d9a` cancelled, and `t_f03e8bebfcffa1f3`, `t_22a1daded732cdc9`, `t_117bd2ff361dfc17` done.
+  - Fifth run on install 18 (Tester1, 2026-10-24). Check ticket `t_09af79d42ef7a531` (request `r-2026-10-24-live-6.5e`, role `worker`, low radius). Reported by Orchestrator and checked in the worktree folder; Tester1 did not read the session terminals.
+    1. PASS (ledger, checked by Orchestrator): `worker-1` sent `h_ba6f17e07526fb07` with `s_a946bd4c7874af76` (worker stage). `tester-1` sent `h_071fbb5e160c191e` with `s_b0dae6d0ad5a3888` (tester stage). `validator-1` sent `h_0268a1883014c25b` with `s_d36ab2929674de48` (validator stage). Each one names its own stage. A 400 is not recorded in the ledger, so a refused attempt is not checked.
+    2. PASS: `validator-1` sent PASS (handoff `h_0268a1883014c25b`, per Orchestrator). Ticket `t_09af79d42ef7a531` moved to `done` with `from="system"` (version 2304). No human action.
+    3. PASS (ledger, checked by Orchestrator): each session sent exactly one handoff for this ticket. None came after Orchestrator's accept.
+    4. Not verified by Tester1: the stage briefings. The sessions `worker-1`, `tester-1` and `validator-1` were offline when checked, so their terminals could not be read.
+    5. PASS: the tester and validator worktrees are gone (`worktrees/cubilot/t_09af79d42ef7a531/` holds only `worker-1`). The worker worktree stays, as designed. Worker commit on `ticket/t_09af79d42ef7a531`: `59ebbae`. `main` stays at `c9c060f`.
+  - Still open: point 4 of the fifth run and point 7 of the fourth run (stage session briefings: not verified; read them during 7.2 while each session is online).
+  - Closed fixes: `t_585bca05171bdcd0` (stage id wording) is done. Design gaps A and B are fixed: `t_50e9d158b282e0ef`, `t_0ed6e0e890de11f8` and `t_fbc17efda6820109` are done.
 
 ## 7. Docs
 

@@ -102,12 +102,19 @@ fn tmux_pane(name: &str) -> String {
     format!("={name}:")
 }
 
+/// A tmux client on the Cubilot socket. It gets the UTF-8 locale the sessions get: a tmux client without one prints a
+/// tab (or any control character) of a -F / -p format as "_", which left pty_roles with no fields when the app was
+/// started from the Dock (launchd sets no LANG). Every direct tmux Command that reads output starts here.
+fn tmux_cmd(tmux: impl AsRef<std::ffi::OsStr>) -> Command {
+    let lang = resolve_utf8_locale();
+    let mut c = Command::new(tmux);
+    c.arg("-S").arg(tmux_socket_path()).env("LANG", &lang).env("LC_ALL", &lang);
+    c
+}
+
 fn tmux_run(args: &[&str]) -> Result<String, String> {
     let tmux = resolve_tmux_bin()?;
-    let sock = tmux_socket_path();
-    let out = Command::new(&tmux)
-        .arg("-S")
-        .arg(&sock)
+    let out = tmux_cmd(&tmux)
         .args(args)
         .output()
         .map_err(|e| format!("tmux spawn: {e}"))?;
@@ -127,10 +134,7 @@ fn session_exists(agent: &str) -> bool {
     let Ok(tmux) = resolve_tmux_bin() else {
         return false;
     };
-    let sock = tmux_socket_path();
-    Command::new(tmux)
-        .arg("-S")
-        .arg(sock)
+    tmux_cmd(tmux)
         .args(["has-session", "-t"])
         .arg(tmux_session(agent))
         .status()
@@ -494,6 +498,16 @@ fn parse_role_pills(out: &str) -> std::collections::HashMap<String, PillInfo> {
         );
     }
     map
+}
+
+// The role and the start command of a running agent's pane, for the skills commands. None: no session or no role.
+pub(crate) fn agent_role_and_command(agent: &str) -> (Option<String>, Option<String>) {
+    if !valid_agent_name(agent) {
+        return (None, None);
+    }
+    let role = pty_roles().get(agent).map(|p| p.role.clone()).filter(|r| !r.is_empty());
+    let command = tmux_run(&["list-panes", "-t", &tmux_pane(agent), "-F", "#{pane_start_command}"]).ok();
+    (role, command)
 }
 
 #[tauri::command]
@@ -1079,6 +1093,7 @@ fn build_spawn_argv(
     lang: &str,
     api_key: Option<&str>,
     spawn_cmd: &str,
+    stage_id: Option<&str>,
 ) -> Vec<String> {
     let mut argv: Vec<String> = Vec::with_capacity(20);
     argv.push("new-session".to_string());
@@ -1100,6 +1115,11 @@ fn build_spawn_argv(
         argv.push("-e".to_string());
         argv.push(format!("ANTHROPIC_API_KEY={key}"));
     }
+    // A hub-launched session: the bridge reports the end of each turn for this stage.
+    if let Some(id) = stage_id {
+        argv.push("-e".to_string());
+        argv.push(format!("CUBILOT_STAGE_ID={id}"));
+    }
     // -x 80 -y 24 load-bearing: without dims tmux probes TIOCGWINSZ and we have no controlling TTY.
     argv.push("-x".to_string());
     argv.push("80".to_string());
@@ -1109,6 +1129,15 @@ fn build_spawn_argv(
     argv.push(cwd.to_string());
     argv.push(spawn_cmd.to_string());
     argv
+}
+
+/// Puts `PATH='<path>'` in front of a Pi spawn command, the same way pi_command puts CHATBRIDGE_AGENT there: the app's
+/// own PATH (launchd's) lacks the tools a Pi shim needs. It is NOT `new-session -e PATH=...`: tmux 3.5a keeps the
+/// session value for FOO but starts the pane command with the server's PATH (tests/integration/pty-plumbing.test.ts
+/// shows it). A Claude launch, or no resolved PATH, returns the command unchanged.
+fn with_pi_path(cmd: String, harness: Harness, path: Option<&str>) -> String {
+    let (Harness::Pi, Some(path)) = (harness, path) else { return cmd };
+    format!("PATH='{}' {cmd}", path.replace('\'', r"'\''"))
 }
 
 // launchd inherits "C" locale; claude downgrades capability detection to ASCII without UTF-8.
@@ -1195,12 +1224,19 @@ fn auth_check_result(provider: &str, exit_ok: bool, stdout: &str) -> Result<(), 
 
 // Runs the check with a time limit (a bad network may hang it). Blocking: call from spawn_blocking.
 pub(crate) fn pi_auth_check(pi: &std::path::Path, provider: &str) -> Result<(), String> {
-    pi_auth_check_with(pi, provider, std::time::Duration::from_secs(PI_AUTH_CHECK_SECS))
+    pi_auth_check_in(pi, provider, crate::login_path::login_path())
 }
 
-fn pi_auth_check_with(pi: &std::path::Path, provider: &str, limit: std::time::Duration) -> Result<(), String> {
+// `path` is the PATH of the pi child (None keeps the inherited one).
+pub(crate) fn pi_auth_check_in(pi: &std::path::Path, provider: &str, path: Option<&str>) -> Result<(), String> {
+    pi_auth_check_with(pi, provider, std::time::Duration::from_secs(PI_AUTH_CHECK_SECS), path)
+}
+
+fn pi_auth_check_with(pi: &std::path::Path, provider: &str, limit: std::time::Duration, path: Option<&str>) -> Result<(), String> {
     use std::io::Read as _;
-    let mut child = Command::new(pi)
+    let mut cmd = Command::new(pi);
+    crate::login_path::apply(&mut cmd, path);
+    let mut child = cmd
         .args(["auth", "check", "--provider", provider, "--json"])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -1312,7 +1348,14 @@ pub async fn pty_spawn(
     effort: Option<String>,
     provider: Option<String>,
     attach_only: Option<bool>,
+    stage_id: Option<String>,
+    first_message: Option<String>,
 ) -> Result<(), String> {
+    if let Some(id) = stage_id.as_deref() {
+        if !valid_stage_id(id) {
+            return Err(format!("invalid stage id: {id}"));
+        }
+    }
     // An unknown or council role fails here, before any tmux session exists. No role: nothing changes.
     let role = spawn_role(role)?;
     if !valid_agent_name(&agent) {
@@ -1378,12 +1421,33 @@ pub async fn pty_spawn(
             role.as_deref(),
             &choice,
         )?;
-        let argv = build_spawn_argv(&agent, &cwd, &lang, api_key.as_deref(), &spawn_cmd);
+        let spawn_cmd = if harness == Harness::Pi {
+            // Blocking on the first call (up to 5 s): off the async runtime. None keeps the inherited PATH.
+            let login = tauri::async_runtime::spawn_blocking(crate::login_path::login_path)
+                .await
+                .map_err(|e| format!("login PATH worker failed: {e}"))?;
+            with_pi_path(spawn_cmd, harness, login)
+        } else {
+            spawn_cmd
+        };
+        // A hub launch carries the ticket part of the first message: written to a file, read by the command.
+        let spawn_cmd = match first_message.as_deref().filter(|m| !m.is_empty()) {
+            Some(text) => with_first_message(&spawn_cmd, &write_first_message(&sessions_dir(), &agent, text)?),
+            None => spawn_cmd,
+        };
+        let argv = build_spawn_argv(&agent, &cwd, &lang, api_key.as_deref(), &spawn_cmd, stage_id.as_deref());
         let argv_refs: Vec<&str> = argv.iter().map(String::as_str).collect();
         tmux_run(&argv_refs)?;
         // Authoritative harness record; pane_harness falls back to the command only without it.
         if let Err(e) = tmux_run(&["set-option", "-t", &tmux_pane(&agent), "@cubilot_harness", harness.as_str()]) {
             eprintln!("[pty] pty_spawn/@cubilot_harness (falls back to command inspection): {e}");
+        }
+        // The skills mode of a role launch (a record only: skills::mode_from_command reads the real flags).
+        if role.is_some() {
+            let mode = if spawn_cmd.contains(".view/") { "view" } else { "plain" };
+            if let Err(e) = tmux_run(&["set-option", "-t", &tmux_pane(&agent), "@cubilot_skills", mode]) {
+                eprintln!("[pty] pty_spawn/@cubilot_skills (record only): {e}");
+            }
         }
         // Best effort, like the harness record: a missing pill must not fail a launch that already runs.
         // A role launch records the role's details, a launch without a role records its chosen ones.
@@ -1450,6 +1514,88 @@ pub fn pty_resize(
         })
         .map_err(|e| format!("resize: {e}"))?;
     Ok(())
+}
+
+// The hub's stage ids: `s_` and 16 lower-case hex digits (hub/kinds/stage.ts STAGE_ID_RE).
+pub fn valid_stage_id(id: &str) -> bool {
+    id.len() == 18 && id.starts_with("s_") && id[2..].bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// Closes one session by its exact name (`=name`), never by prefix and never any other session. `Ok(true)`: it was
+/// killed. `Ok(false)`: no such session, so there is nothing to close. The hub's `close` request uses this.
+/// Where the first message of a hub-launched session is kept: `<app data>/sessions/<session>/first-message.md`.
+fn sessions_dir() -> PathBuf {
+    app_data_dir().join("sessions")
+}
+
+/// Writes the first message (stage-sessions 4.3) to `<dir>/<session>/first-message.md`, mode 0600, through a temp file
+/// and a rename. The launch command reads it back with `$(cat ...)`, so the text is never part of the command line.
+fn write_first_message(dir: &std::path::Path, session: &str, text: &str) -> Result<PathBuf, String> {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    if !valid_agent_name(session) || session.contains('.') {
+        return Err(format!("invalid session name: {session}"));
+    }
+    let folder = dir.join(session);
+    std::fs::create_dir_all(&folder).map_err(|e| format!("create {}: {e}", folder.display()))?;
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).map_err(|e| format!("chmod {}: {e}", folder.display()))?;
+    let target = folder.join("first-message.md");
+    let tmp = folder.join(format!(".first-message.{}.tmp", std::process::id()));
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&tmp)
+        .map_err(|e| format!("open {}: {e}", tmp.display()))?;
+    f.write_all(text.as_bytes()).map_err(|e| format!("write {}: {e}", tmp.display()))?;
+    f.sync_all().map_err(|e| format!("sync {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, &target).map_err(|e| format!("rename {}: {e}", target.display()))?;
+    Ok(target)
+}
+
+/// The launch command plus the first message as ONE quoted argument, read by the shell from the file. `--` ends the
+/// options first: a variadic option such as `--allowed-tools` would otherwise take the message as one more value.
+fn with_first_message(cmd: &str, file: &std::path::Path) -> String {
+    format!("{cmd} -- \"$(cat '{}')\"", file.to_string_lossy().replace('\'', r"'\''"))
+}
+
+/// What tmux says about one session: `Ok(true)` it exists, `Ok(false)` tmux answered that it does not (no such session,
+/// no server, no socket), `Err` tmux could not answer (cannot start, other failure). A failure is not absence.
+fn session_state(name: &str) -> Result<bool, String> {
+    let tmux = resolve_tmux_bin()?;
+    let out = tmux_cmd(tmux)
+        .args(["has-session", "-t"])
+        .arg(tmux_session(name))
+        .output()
+        .map_err(|e| format!("tmux spawn: {e}"))?;
+    if out.status.success() {
+        return Ok(true);
+    }
+    let err = String::from_utf8_lossy(&out.stderr);
+    if err.contains("can't find session") || err.contains("no server running") || (err.contains("error connecting to") && err.contains("No such file")) {
+        return Ok(false);
+    }
+    Err(format!("tmux has-session failed: {}", err.trim()))
+}
+
+/// Closes one session by its exact name (`=name`), never by prefix and never any other session. `Ok(true)`: it was
+/// killed. `Ok(false)`: tmux says there is no such session, so there is nothing to close. `Err`: tmux failed, so the
+/// session may still live and the hub must keep the name reserved. The hub's `close` request uses this.
+pub fn close_session(name: &str) -> Result<bool, String> {
+    if !valid_agent_name(name) {
+        return Err(format!("invalid session name: {name}"));
+    }
+    if !session_state(name)? {
+        return Ok(false);
+    }
+    match tmux_run(&["kill-session", "-t", &tmux_session(name)]) {
+        Ok(_) => Ok(true),
+        // It may have ended between the check and the kill: ask again, and trust only a clear answer.
+        Err(e) => match session_state(name) {
+            Ok(false) => Ok(false),
+            _ => Err(e),
+        },
+    }
 }
 
 #[tauri::command]
@@ -1533,10 +1679,7 @@ pub(crate) fn live_tmux_state() -> Result<(Vec<String>, String), String> {
 #[tauri::command]
 pub fn pty_list() -> Result<Vec<String>, String> {
     let tmux = resolve_tmux_bin()?;
-    let sock = tmux_socket_path();
-    let out = Command::new(tmux)
-        .arg("-S")
-        .arg(sock)
+    let out = tmux_cmd(tmux)
         .args(["list-sessions", "-F", "#S"])
         .output()
         .map_err(|e| format!("tmux list-sessions spawn: {e}"))?;
@@ -2192,13 +2335,13 @@ mod spawn_argv_tests {
 
     #[test]
     fn argv_starts_with_new_session_form() {
-        let argv = build_spawn_argv("alice", "/tmp", "en_US.UTF-8", None, "claude --resume");
+        let argv = build_spawn_argv("alice", "/tmp", "en_US.UTF-8", None, "claude --resume", None);
         assert_eq!(&argv[0..4], &["new-session", "-d", "-s", "alice"]);
     }
 
     #[test]
     fn argv_includes_terminal_env_vars() {
-        let argv = build_spawn_argv("alice", "/tmp", "en_US.UTF-8", None, "claude");
+        let argv = build_spawn_argv("alice", "/tmp", "en_US.UTF-8", None, "claude", None);
         let joined = argv.join(" ");
         assert!(joined.contains("TERM=xterm-256color"), "missing TERM env: {joined}");
         assert!(joined.contains("COLORTERM=truecolor"), "missing COLORTERM env: {joined}");
@@ -2208,22 +2351,36 @@ mod spawn_argv_tests {
     }
 
     #[test]
+    fn pi_path_is_an_env_prefix_on_the_command_for_pi_only() {
+        let cmd = "CHATBRIDGE_AGENT='a' 'pi' --no-approve".to_string();
+        let got = super::with_pi_path(cmd.clone(), Harness::Pi, Some("/opt/a:/usr/bin"));
+        assert_eq!(got, "PATH='/opt/a:/usr/bin' CHATBRIDGE_AGENT='a' 'pi' --no-approve");
+        assert_eq!(super::with_pi_path(cmd.clone(), Harness::Pi, Some("/o'x")), "PATH='/o'\\''x' CHATBRIDGE_AGENT='a' 'pi' --no-approve");
+        // the Claude launch and a Pi launch with no resolved PATH do not change, and the argv still has no PATH pair
+        assert_eq!(super::with_pi_path(cmd.clone(), Harness::Claude, Some("/opt/a")), cmd);
+        assert_eq!(super::with_pi_path(cmd.clone(), Harness::Pi, None), cmd);
+        let argv = build_spawn_argv("alice", "/tmp", "en_US.UTF-8", None, &got, None);
+        assert!(!argv[..argv.len() - 1].iter().any(|a| a.starts_with("PATH=")), "no -e PATH pair: {argv:?}");
+        assert_eq!(argv.last(), Some(&got), "the command stays one last argv element");
+    }
+
+    #[test]
     fn argv_includes_anthropic_api_key_when_provided() {
-        let argv = build_spawn_argv("alice", "/tmp", "en_US.UTF-8", Some("sk-test-123"), "claude");
+        let argv = build_spawn_argv("alice", "/tmp", "en_US.UTF-8", Some("sk-test-123"), "claude", None);
         let joined = argv.join(" ");
         assert!(joined.contains("ANTHROPIC_API_KEY=sk-test-123"), "missing API key env: {joined}");
     }
 
     #[test]
     fn argv_omits_anthropic_api_key_when_none() {
-        let argv = build_spawn_argv("alice", "/tmp", "en_US.UTF-8", None, "claude");
+        let argv = build_spawn_argv("alice", "/tmp", "en_US.UTF-8", None, "claude", None);
         let joined = argv.join(" ");
         assert!(!joined.contains("ANTHROPIC_API_KEY"), "should omit API key env when None: {joined}");
     }
 
     #[test]
     fn argv_includes_xy_dimensions_and_cwd() {
-        let argv = build_spawn_argv("alice", "/some/cwd", "en_US.UTF-8", None, "claude");
+        let argv = build_spawn_argv("alice", "/some/cwd", "en_US.UTF-8", None, "claude", None);
         // -x 80 -y 24 is load-bearing: tmux probes TIOCGWINSZ without these dims.
         assert!(argv.iter().any(|s| s == "-x"));
         assert!(argv.iter().any(|s| s == "80"));
@@ -2238,7 +2395,7 @@ mod spawn_argv_tests {
         // tokenized by /bin/sh's argv-join. The fix is to pass spawn_cmd as a SINGLE
         // tmux argv element so tmux sees it as one shell-quoted command-string argument.
         let spawn_cmd = "CHATBRIDGE_AGENT='alice' CHATBRIDGE_ROOM='EU Space' '/Users/me/bin/claude' --plugin-dir '/Users/me/Application Support/Cubilot/chatbridge-mod' --allowed-tools 'mcp__chatbridge__post'";
-        let argv = build_spawn_argv("alice", "/tmp", "en_US.UTF-8", None, spawn_cmd);
+        let argv = build_spawn_argv("alice", "/tmp", "en_US.UTF-8", None, spawn_cmd, None);
         let last = argv.last().unwrap();
         // The spawn_cmd appears verbatim as a SINGLE argv element — quotes, spaces, and all.
         assert_eq!(last, spawn_cmd);
@@ -2264,7 +2421,7 @@ mod spawn_argv_tests {
         assert!(!cmd.contains(concat!("dangerously", "-load-development-channels")), "{cmd}");
         assert!(!cmd.contains("CHATBRIDGE_HUB"), "{cmd}");
         // Still one tmux argv element.
-        let argv = build_spawn_argv("Dev 1", "/tmp", "en_US.UTF-8", None, &cmd);
+        let argv = build_spawn_argv("Dev 1", "/tmp", "en_US.UTF-8", None, &cmd, None);
         assert_eq!(argv.last().unwrap(), &cmd);
     }
 
@@ -2282,7 +2439,7 @@ mod spawn_argv_tests {
             cmd.contains(&format!("--plugin-dir '/m' {flag} '/Users/me/Application Support/Cubilot/mcp-configs/global.json' --allowed-tools")),
             "{cmd}"
         );
-        let argv = build_spawn_argv("alice", "/tmp", "en_US.UTF-8", None, &cmd);
+        let argv = build_spawn_argv("alice", "/tmp", "en_US.UTF-8", None, &cmd, None);
         assert_eq!(argv.last().unwrap(), &cmd);
         assert_eq!(argv.iter().filter(|s| s.contains(flag)).count(), 1, "{argv:?}");
     }
@@ -2392,7 +2549,7 @@ mod spawn_argv_tests {
         assert!(cmd.contains("--plugin-dir '/m' --plugin-dir '"), "{cmd}");
         assert!(cmd.contains("--allowed-tools 'mcp__chatbridge__post,mcp__chatbridge__post_file,mcp__chatbridge__send_handoff,"), "{cmd}");
         // still one tmux argv element
-        let argv = build_spawn_argv("worker-1", "/tmp", "en_US.UTF-8", None, &cmd);
+        let argv = build_spawn_argv("worker-1", "/tmp", "en_US.UTF-8", None, &cmd, None);
         assert_eq!(argv.last().unwrap(), &cmd);
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -2405,6 +2562,30 @@ mod spawn_argv_tests {
         assert!(cmd.contains("--model 'sonnet'"), "test 3: {cmd}");
         assert!(cmd.contains("--disallowed-tools 'Task,Agent,mcp__chatbridge__ack_permission'"), "test 3 and 4.1: {cmd}");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // 6.1, brief test 7: a session the hub starts is a role launch (launches.rs passes the role to pty_spawn), so its
+    // command carries the role's blocks: no sub-agents (Task, Agent) and no ack_permission, with the first message
+    // appended after them.
+    #[test]
+    fn a_hub_started_session_command_blocks_task_agent_and_ack_permission_for_every_stage_role() {
+        use std::path::Path;
+        for role in ["worker", "tester", "validator", "writer", "editor", "reviewer"] {
+            let (root, launch) = staged_role(role, &format!("{role}-1"));
+            if launch.harness != "claude" {
+                let _ = std::fs::remove_dir_all(&root);
+                continue; // the Pi side of a role is checked by its own tests
+            }
+            let base = format_claude_command(&format!("{role}-1"), "r", None, Path::new("/c"), Path::new("/m"), None, Some(&launch)).unwrap();
+            let cmd = super::with_first_message(&base, &super::write_first_message(&root, &format!("{role}-1"), "TICKET").unwrap());
+            let blocked = cmd.split("--disallowed-tools '").nth(1).unwrap().split('\'').next().unwrap();
+            let list: Vec<&str> = blocked.split(',').collect();
+            assert!(list.contains(&"Task") && list.contains(&"Agent"), "{role}: sub-agents blocked: {blocked}");
+            assert!(list.contains(&"mcp__chatbridge__ack_permission"), "{role}: {blocked}");
+            // the blocks come before the `--` that starts the message
+            assert!(cmd.find("--disallowed-tools").unwrap() < cmd.find(" -- \"$(cat").unwrap(), "{role}: {cmd}");
+            let _ = std::fs::remove_dir_all(&root);
+        }
     }
 
     #[test]
@@ -2555,6 +2736,50 @@ mod spawn_argv_tests {
             assert!(text.contains(&format!("{a}/worker")) && text.contains(&format!("{a}/shared")), "{name}: {text}");
             assert!(!text.contains("/v-"), "{name} names a version folder: {text}");
         }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // C6b: a launch with one skill off names `<key>.view/...` on both harnesses and the view lacks the skill; a launch
+    // with no skill off names the agent link as before (the pinned tests above), and the parser reads both back.
+    #[test]
+    fn a_role_launch_with_one_skill_off_names_the_view_on_both_harnesses_and_an_empty_choice_names_the_link() {
+        use crate::factory::*;
+        use std::path::Path;
+        let root = std::env::temp_dir().join(format!("cubilot-view-cmd-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
+        let dest = root.join("factory");
+        let version = dest.join(stage_factory(&src, &dest, &root.join("user")).unwrap());
+        let v = version.file_name().unwrap().to_string_lossy().into_owned();
+        let active = link_agent(&dest, "w one", &v).unwrap();
+        let key = agent_key("w one");
+        let a = active.display().to_string();
+        let spec = load_role_spec("worker", &src, &version).unwrap();
+        let first = std::fs::read_dir(version.join("worker/skills")).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).min().unwrap();
+        let build = |off: &[String]| {
+            crate::skills::set_off_in(&dest, &version, "w one", "worker", off).unwrap();
+            let root_dir = crate::skills::launch_in(&dest, &version, "w one", "worker", &v).unwrap().unwrap_or_else(|| active.clone());
+            let claude = role_launch_on(&spec, "claude", &root_dir, Some(root.join("s.json")));
+            let c = super::format_claude_command("a", "r", None, Path::new("/c"), Path::new("/m"), None, Some(&claude)).unwrap();
+            let (e, f) = super::pi_role_flags(&role_launch_on(&spec, "pi", &root_dir, None)).unwrap();
+            (root_dir, c, format!("{e}{f}"))
+        };
+        // empty choice: the link, byte for byte the old flags
+        let (r0, c0, p0) = build(&[]);
+        assert_eq!(r0, active);
+        assert!(c0.contains(&format!("--plugin-dir '{a}/worker' --plugin-dir '{a}/shared'")) && p0.contains(&format!("--skill '{a}/worker/skills' --skill '{a}/shared/skills'")), "{c0} {p0}");
+        assert_eq!(crate::skills::mode_from_command(&c0, &dest, "w one"), "plain");
+        assert_eq!(crate::skills::mode_from_command(&p0, &dest, "w one"), "plain");
+        // one skill off: both harnesses name the view, and the view lacks the skill
+        let (r1, c1, p1) = build(&[format!("worker/{first}")]);
+        let view = format!("{}/agents/{key}.view", dest.display());
+        assert_eq!(r1.display().to_string(), view);
+        assert!(c1.contains(&format!("--plugin-dir '{view}/worker' --plugin-dir '{view}/shared'")), "{c1}");
+        assert!(c1.contains(&format!("--append-system-prompt-file '{view}/worker/role.md'")), "{c1}");
+        assert!(p1.contains(&format!("--skill '{view}/worker/skills' --skill '{view}/shared/skills'")), "{p1}");
+        assert!(!r1.join("worker/skills").join(&first).exists() && version.join("worker/skills").join(&first).is_dir());
+        assert_eq!(crate::skills::mode_from_command(&c1, &dest, "w one"), "view");
+        assert_eq!(crate::skills::mode_from_command(&p1, &dest, "w one"), "view");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -2954,16 +3179,27 @@ mod spawn_argv_tests {
             "pi-ready",
             r#"[ "$*" = "auth check --provider openai-codex --json" ] && echo '{"status":"ready"}' && exit 0; exit 3"#,
         );
-        assert_eq!(super::pi_auth_check(&ready, "openai-codex"), Ok(()));
+        assert_eq!(super::pi_auth_check_in(&ready, "openai-codex", None), Ok(()));
         let out = fake("pi-out", r#"echo '{"status":"not_ready","reason":"credentials_not_configured"}'; exit 1"#);
-        assert!(super::pi_auth_check(&out, "openai-codex").unwrap_err().contains("is not signed in to openai-codex"));
-        assert!(super::pi_auth_check(&dir.join("missing"), "p").unwrap_err().contains("Could not run"));
+        assert!(super::pi_auth_check_in(&out, "openai-codex", None).unwrap_err().contains("is not signed in to openai-codex"));
+        assert!(super::pi_auth_check_in(&dir.join("missing"), "p", None).unwrap_err().contains("Could not run"));
         // a check that hangs is killed at the limit, and the message says so
         let hang = fake("pi-hang", "sleep 30");
         let t0 = std::time::Instant::now();
-        let e = super::pi_auth_check_with(&hang, "p", std::time::Duration::from_millis(300)).unwrap_err();
+        let e = super::pi_auth_check_with(&hang, "p", std::time::Duration::from_millis(300), None).unwrap_err();
         assert!(t0.elapsed() < std::time::Duration::from_secs(5), "killed at the limit, not after 30 s");
         assert!(e.contains("took more than") && e.contains("Nothing was started"), "{e}");
+        // The shim needs a tool that only the resolved PATH has: without it exit 127, with it ready (the Dock case).
+        let tools = dir.join("tools");
+        std::fs::create_dir_all(&tools).unwrap();
+        let tool = tools.join("cubilot-fake-node");
+        std::fs::write(&tool, "#!/bin/sh\necho '{\"status\":\"ready\"}'\n").unwrap();
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let shim = fake("pi-shim", "exec cubilot-fake-node");
+        let minimal = "/usr/bin:/bin";
+        let resolved = format!("{}:{minimal}", tools.display());
+        assert!(super::pi_auth_check_in(&shim, "p", Some(minimal)).is_err(), "tool missing: not ready");
+        assert_eq!(super::pi_auth_check_in(&shim, "p", Some(&resolved)), Ok(()));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -3142,7 +3378,7 @@ mod spawn_argv_tests {
         // quoted paths (extension, binary) AND env prefixes, so it must reach
         // tmux as ONE argv element or /bin/sh's argv-join splits it.
         let spawn_cmd = "CHATBRIDGE_AGENT='alice' CHATBRIDGE_ROOM='EU Space' '/Users/me/bin/pi' --no-approve -e '/Users/me/Some Path/pi-extension.js'";
-        let argv = build_spawn_argv("alice", "/tmp", "en_US.UTF-8", None, spawn_cmd);
+        let argv = build_spawn_argv("alice", "/tmp", "en_US.UTF-8", None, spawn_cmd, None);
         assert_eq!(argv.last().unwrap(), spawn_cmd);
         let occurrences = argv.iter().filter(|s| s.contains("--no-approve")).count();
         assert_eq!(occurrences, 1, "spawn_cmd got split: {argv:?}");
@@ -3150,7 +3386,7 @@ mod spawn_argv_tests {
 
     #[test]
     fn argv_cwd_with_spaces_preserved_as_single_element() {
-        let argv = build_spawn_argv("alice", "/Users/me/Path With Spaces", "en_US.UTF-8", None, "claude");
+        let argv = build_spawn_argv("alice", "/Users/me/Path With Spaces", "en_US.UTF-8", None, "claude", None);
         // The -c flag's value MUST be one element; -c then its arg.
         let cwd_idx = argv.iter().position(|s| s == "-c").expect("missing -c");
         assert_eq!(argv[cwd_idx + 1], "/Users/me/Path With Spaces");
@@ -3253,6 +3489,137 @@ mod existing_session_tests {
         assert!(live_tmux_state().is_err());
     }
 
+    // The child environment of `c` and nothing else: what a tmux client sees when the app has no locale (launchd).
+    fn bare_env(c: &Command) -> Command {
+        let mut b = Command::new(c.get_program());
+        b.env_clear().args(c.get_args());
+        for (k, v) in c.get_envs() {
+            if let Some(v) = v {
+                b.env(k, v);
+            }
+        }
+        b
+    }
+
+    fn pill_session(t: &Isolated) {
+        t.session("worker-1", Some("worker"));
+        for (k, v) in [("@cubilot_model", "opus"), ("@cubilot_provider", "anthropic"), ("@cubilot_effort", "high"), ("@cubilot_harness", "claude")] {
+            assert!(t.raw(&["set-option", "-t", &tmux_pane("worker-1"), k, v]), "set {k}");
+        }
+    }
+
+    // C6b: the mode of an agent is proven from the start command tmux prints for the pane. tmux prints a one-argument
+    // command as ONE double-quoted word; a parser tested on the raw spawn text missed it (live check a, install 23).
+    // This spawns through build_spawn_argv on an isolated tmux, reads the command back through agent_role_and_command
+    // (the production reader) and checks the mode for both harnesses.
+    #[test]
+    fn the_mode_is_read_back_from_a_real_pane_for_both_harnesses() {
+        use crate::factory::*;
+        use std::os::unix::fs::PermissionsExt;
+        use std::path::Path;
+        let t = Isolated::new();
+        let root = std::env::temp_dir().join(format!("cubilot-mode-pane-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
+        let dest = root.join("factory");
+        let version = dest.join(stage_factory(&src, &dest, &root.join("user")).unwrap());
+        let v = version.file_name().unwrap().to_string_lossy().into_owned();
+        let stub = root.join("stub.sh");
+        std::fs::write(&stub, "#!/bin/sh\nsleep 300\n").unwrap();
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let first = std::fs::read_dir(version.join("worker/skills")).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).min().unwrap();
+        let spec = load_role_spec("worker", &src, &version).unwrap();
+        let mut seen = vec![];
+        for harness in ["claude", "pi"] {
+            for (case, off) in [("plain", vec![]), ("view", vec![format!("worker/{first}")])] {
+                let agent = format!("mode-{harness}-{case}");
+                let active = link_agent(&dest, &agent, &v).unwrap();
+                crate::skills::set_off_in(&dest, &version, &agent, "worker", &off).unwrap();
+                let launch_root = crate::skills::launch_in(&dest, &version, &agent, "worker", &v).unwrap().unwrap_or(active);
+                let cmd = if harness == "claude" {
+                    let r = role_launch_on(&spec, "claude", &launch_root, Some(root.join("s.json")));
+                    format_claude_command(&agent, "r", None, &stub, Path::new("/m"), None, Some(&r)).unwrap()
+                } else {
+                    let (e, f) = pi_role_flags(&role_launch_on(&spec, "pi", &launch_root, None)).unwrap();
+                    let cmd = format!("CHATBRIDGE_AGENT='{agent}' CHATBRIDGE_ROOM='r' {e}'{}' --no-approve {f}-e '/x.js'", stub.display());
+                    with_pi_path(cmd, Harness::Pi, Some("/usr/bin:/bin"))
+                };
+                let argv = build_spawn_argv(&agent, "/tmp", LANG, None, &cmd, None);
+                assert!(t.raw(&argv.iter().map(String::as_str).collect::<Vec<_>>()), "{harness} {case}: new-session");
+                let read = agent_role_and_command(&agent).1.expect("the pane start command");
+                let read = read.trim().to_string();
+                assert!(read.starts_with('"') && read.ends_with('"'), "{harness} {case}: tmux form changed: {read}");
+                assert_eq!(crate::skills::mode_from_command(&read, &dest, &agent), case, "{harness}: {read}");
+                assert_eq!(crate::skills::mode_from_command(&read, &dest, "someone-else"), "legacy", "{harness} {case}: the path of another agent");
+                seen.push(read);
+            }
+        }
+        assert_eq!(seen.len(), 4);
+        // Misleading text in a real pane stays legacy: the agent's own view path inside one quoted argument, and as the
+        // value of another flag.
+        let agent = "mode-misleading";
+        let active = link_agent(&dest, agent, &v).unwrap();
+        let view = active.display().to_string() + ".view";
+        for (i, cmd) in [
+            format!("'{}' 'a --skill {view}/worker/skills'", stub.display()),
+            format!("'{}' --append-system-prompt-file '{view}/worker/role.md' --model x", stub.display()),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let name = format!("{agent}-{i}");
+            let argv = build_spawn_argv(&name, "/tmp", LANG, None, cmd, None);
+            assert!(t.raw(&argv.iter().map(String::as_str).collect::<Vec<_>>()), "new-session");
+            let read = agent_role_and_command(&name).1.expect("the pane start command");
+            assert_eq!(crate::skills::mode_from_command(&read, &dest, agent), "legacy", "{read}");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_tmux_client_without_a_locale_prints_a_tab_as_an_underscore() {
+        // The cause of the empty agent rows (documents it): no LANG / LC_ALL, no tab in the -F output.
+        let t = Isolated::new();
+        pill_session(&t);
+        let out = Command::new(&t.bin).env_clear().arg("-S").arg(&t.sock).args(["list-sessions", "-F", PILL_FORMAT]).output().unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        let version = String::from_utf8_lossy(&Command::new(&t.bin).arg("-V").output().unwrap().stdout).trim().to_string();
+        assert!(text.starts_with("worker-1_worker_"), "{version}: {text:?}");
+        assert!(!text.contains('\t'), "{version}");
+        assert!(parse_role_pills(&text).is_empty(), "{version}: no fields, no pills");
+        // The same server, read by the production client (tmux_cmd): the tab bytes are there and the fields parse.
+        let mut fixed = tmux_cmd(&t.bin);
+        let fixed_out = bare_env(fixed.args(["list-sessions", "-F", PILL_FORMAT])).output().unwrap();
+        let fixed_text = String::from_utf8_lossy(&fixed_out.stdout);
+        assert!(fixed_text.starts_with("worker-1\tworker\topus\t"), "{version}: {fixed_text:?}");
+        assert_eq!(parse_role_pills(&fixed_text)["worker-1"].harness, "claude", "{version}");
+    }
+
+    #[test]
+    fn tmux_cmd_gives_the_client_the_session_locale_so_the_pill_fields_parse() {
+        let t = Isolated::new();
+        pill_session(&t);
+        let mut c = tmux_cmd(&t.bin);
+        c.args(["list-sessions", "-F", PILL_FORMAT]);
+        let env: std::collections::HashMap<_, _> = c.get_envs().filter_map(|(k, v)| Some((k.to_str()?.to_string(), v?.to_str()?.to_string()))).collect();
+        assert_eq!(env.get("LANG"), Some(&resolve_utf8_locale()));
+        assert_eq!(env.get("LC_ALL"), Some(&resolve_utf8_locale()));
+        // Run it with no other environment at all, as the app started from the Dock does.
+        let out = bare_env(&c).output().unwrap();
+        let pills = parse_role_pills(&String::from_utf8_lossy(&out.stdout));
+        assert_eq!(
+            pills["worker-1"],
+            PillInfo { role: "worker".into(), model: "opus".into(), provider: "anthropic".into(), effort: "high".into(), harness: "claude".into() }
+        );
+    }
+
+    #[test]
+    fn pty_roles_reads_the_pills_from_the_isolated_server() {
+        let t = Isolated::new();
+        pill_session(&t);
+        assert_eq!(pty_roles()["worker-1"].harness, "claude");
+    }
+
     #[test]
     fn the_same_role_attaches() {
         let t = Isolated::new();
@@ -3312,5 +3679,150 @@ mod existing_session_tests {
         fn raw_kill(name: &str) -> bool {
             tmux_run(&["kill-session", "-t", &tmux_session(name)]).is_ok()
         }
+    }
+
+    // 4.2: a close names one session exactly. It never touches another session, not even one whose name starts the same.
+    #[test]
+    fn close_kills_only_the_named_session() {
+        let t = Isolated::new();
+        t.session("worker-1", None);
+        t.session("worker-10", None);
+        t.session("tester-1", None);
+        assert_eq!(close_session("worker-1"), Ok(true));
+        assert!(!session_exists("worker-1"));
+        assert!(session_exists("worker-10"), "prefix match must not kill worker-10");
+        assert!(session_exists("tester-1"));
+    }
+
+    #[test]
+    fn close_of_a_missing_session_is_absent_and_a_repeat_is_accepted() {
+        let t = Isolated::new();
+        t.session("keep", None);
+        assert_eq!(close_session("gone"), Ok(false));
+        t.session("worker-1", None);
+        assert_eq!(close_session("worker-1"), Ok(true));
+        assert_eq!(close_session("worker-1"), Ok(false));
+        assert!(session_exists("keep"));
+    }
+
+    // A tmux that cannot answer is a failure, not "no such session": the hub must not free the name.
+    #[test]
+    fn close_reports_a_tmux_failure_as_an_error_not_as_absent() {
+        let _t = Isolated::new();
+        // A socket path that is a regular file makes has-session fail with an error that is not "no such session".
+        let sock = tmux_socket_path();
+        let _ = std::fs::remove_file(&sock);
+        std::fs::write(&sock, "regular file").unwrap();
+        assert!(close_session("worker-1").is_err());
+        // A tmux binary that cannot start.
+        TEST_TMUX.with(|c| *c.borrow_mut() = Some((PathBuf::from("/nonexistent/tmux"), sock)));
+        assert!(close_session("worker-1").is_err());
+    }
+
+    #[test]
+    fn close_refuses_an_invalid_name() {
+        assert!(close_session("a;b").is_err());
+        assert!(close_session("shell").is_err());
+    }
+
+    #[test]
+    fn stage_ids_and_the_session_env() {
+        assert!(valid_stage_id("s_0123456789abcdef"));
+        assert!(!valid_stage_id("s_0123456789abcdeg"));
+        assert!(!valid_stage_id("s_0123"));
+        let argv = build_spawn_argv("worker-1", "/tmp", "en_US.UTF-8", None, "claude", Some("s_0123456789abcdef"));
+        assert!(argv.windows(2).any(|w| w[0] == "-e" && w[1] == "CUBILOT_STAGE_ID=s_0123456789abcdef"));
+        let plain = build_spawn_argv("worker-1", "/tmp", "en_US.UTF-8", None, "claude", None);
+        assert!(!plain.iter().any(|a| a.starts_with("CUBILOT_STAGE_ID")));
+    }
+}
+
+// 4.3: the first message reaches the session through a file, as one quoted argument.
+#[cfg(test)]
+mod first_message_tests {
+    use super::*;
+
+    fn dir() -> PathBuf {
+        let d = std::env::temp_dir().join(format!("cubilot-fm-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    // Quotes, a command substitution, backticks and newlines must come through as text, never be run.
+    const NASTY: &str = "it's \"quoted\" $(touch /tmp/cubilot-fm-pwned) `touch /tmp/cubilot-fm-pwned2`\nline two \\ end";
+
+    #[test]
+    fn the_file_is_private_and_holds_the_text() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = dir();
+        let f = write_first_message(&d, "worker-1", NASTY).unwrap();
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), NASTY);
+        assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(std::fs::metadata(f.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(f, d.join("worker-1").join("first-message.md"));
+        // a second write replaces it
+        write_first_message(&d, "worker-1", "second").unwrap();
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "second");
+        assert!(write_first_message(&d, "..", "x").is_err());
+        assert!(write_first_message(&d, "a/b", "x").is_err());
+    }
+
+    // The shell expands $(cat file) into ONE argument; the text is not parsed again.
+    fn run_through_sh(prompt_bytes: &str) -> Vec<u8> {
+        let d = dir();
+        let f = write_first_message(&d, "worker-1", prompt_bytes).unwrap();
+        let cmd = with_first_message("sh -c 'printf \"%s\" \"$2\"' _", &f);
+        let out = Command::new("sh").arg("-c").arg(&cmd).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        out.stdout
+    }
+
+    #[test]
+    fn the_command_passes_the_text_as_one_argument_without_running_it() {
+        let _ = std::fs::remove_file("/tmp/cubilot-fm-pwned");
+        let _ = std::fs::remove_file("/tmp/cubilot-fm-pwned2");
+        assert_eq!(String::from_utf8(run_through_sh(NASTY)).unwrap(), NASTY);
+        assert!(!std::path::Path::new("/tmp/cubilot-fm-pwned").exists() && !std::path::Path::new("/tmp/cubilot-fm-pwned2").exists(), "the text was run");
+    }
+
+    // The largest ticket part: the hub reads a ticket body of up to 256 KiB; macOS allows 1 MiB for the whole exec.
+    #[test]
+    fn a_100_kb_and_a_600_kb_message_launch() {
+        for n in [100_000usize, 600_000] {
+            let text = "x'\"$a\n".repeat(n / 6);
+            // $(cat) drops trailing newlines; nothing else changes.
+            assert_eq!(run_through_sh(&text), text.trim_end_matches('\n').as_bytes(), "{n} bytes");
+        }
+    }
+
+    #[test]
+    fn a_worker_command_has_the_role_prompt_file_and_the_message_argument_but_no_role_text() {
+        let tmp = dir();
+        let role_prompt = tmp.join("worker.md");
+        std::fs::write(&role_prompt, "ROLE-PROMPT-TEXT-MUST-NOT-APPEAR").unwrap();
+        let launch = crate::factory::RoleLaunch {
+            name: "worker".into(),
+            harness: "claude".into(),
+            plugin_dir: tmp.join("plugin"),
+            shared_dir: tmp.join("shared"),
+            prompt_file: role_prompt.clone(),
+            settings: Some(tmp.join("settings.json")),
+            disallowed_tools: vec![],
+            exclude_tools: vec![],
+            model: None,
+            effort: None,
+            provider: None,
+            thinking: None,
+        };
+        let base = format_claude_command("worker-1", "r", None, std::path::Path::new("/bin/claude"), std::path::Path::new("/mod"), None, Some(&launch)).unwrap();
+        let first = with_first_message(&base, &write_first_message(&tmp, "worker-1", "TICKET ONE").unwrap());
+        let second = with_first_message(&base.replace("worker-1", "worker-2"), &write_first_message(&tmp, "worker-2", "TICKET TWO").unwrap());
+        let flag = format!("--append-system-prompt-file '{}'", role_prompt.display());
+        assert!(first.contains(&flag) && second.contains(&flag), "both sessions share the role prompt file");
+        assert!(first.contains(" -- \"$(cat '") && first.ends_with("first-message.md')\""));
+        assert!(!first.contains("TICKET ONE") && !first.contains("ROLE-PROMPT-TEXT"), "no text in the command line");
+        // they differ only in the session name and the message file
+        let strip = |c: &str, n: &str| c.replace(n, "SESSION");
+        assert_eq!(strip(&first, "worker-1"), strip(&second, "worker-2"));
     }
 }

@@ -16,6 +16,8 @@ import { createLedgerEntity, ledgerConflictResponse, withLedgerRequired } from "
 import { insertEvent } from "../core/events";
 import { mintHandoffId, ts, validName, validRoomLabel } from "../core/ids";
 import { pausedRefusal } from "../core/auth";
+import { getRoomSettings, STAGE_ROLES } from "../core/ledger";
+import { ROLE_RECIPIENT_PREFIX, type StageHooks } from "./stage";
 import {
   writeNutshellInTx,
   nutshellEntry,
@@ -353,7 +355,21 @@ export function findExpirable(db: Database, nowMs: number): string[] {
 
 // ---------- Factory ----------
 
-export function createHandoffKind(db: Database): KindModule {
+const TICKET_ID_RE = /^t_[0-9a-f]{16}$/;
+const SPEC_REQUEST_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
+const SPEC_REQUEST_TEXT_MAX = 20_000;
+
+/**
+ * A handoff from the hub itself (actor `system`), for the stage kind: the Orchestrator hears that a stage failed for good
+ * (stage-sessions 5.3). No route calls it. One event and one row, like every handoff.
+ */
+export function createSystemHandoff(db: Database, cap: HubCapabilities, h: { to: string; task: string; context: unknown; room: string }): HandoffSnapshot {
+  const entity = createLedgerEntity({ decl: handoffDecl, db });
+  const id = mintHandoffId();
+  return entity.apply(id, createHandoffVerb, { id, from: "system", to: h.to, task: h.task, context: h.context, ttl_seconds: HANDOFF_TTL_DEFAULT_SECONDS, room: h.room }, "system", cap).snapshot;
+}
+
+export function createHandoffKind(db: Database, stage?: StageHooks): KindModule {
   const entity = createLedgerEntity({ decl: handoffDecl, db });
 
   const routes: RouteDef[] = [
@@ -366,17 +382,31 @@ export function createHandoffKind(db: Database): KindModule {
         const body = (await req.json().catch(() => ({}))) as {
           from?: string;
           to?: string;
+          to_role?: unknown;
+          review?: unknown;
+          request_id?: unknown;
           task?: string;
           context?: unknown;
           ttl_seconds?: number;
         };
         const from = (body.from ?? "").trim();
-        const to = (body.to ?? "").trim();
         const task = (body.task ?? "").trim();
+        // Exactly one target: an agent (`to`) or a role (`to_role`, stage-sessions).
+        const toRole = body.to_role === undefined || body.to_role === null ? "" : typeof body.to_role === "string" ? body.to_role.trim() : null;
+        if (toRole === null) return Response.json({ error: "to_role must be a string" }, { status: 400 });
+        const toNamed = (body.to ?? "").trim() !== "";
+        if (toRole !== "" && toNamed) {
+          return Response.json({ error: "name either to or to_role, not both" }, { status: 400 });
+        }
+        const to = toRole !== "" ? `${ROLE_RECIPIENT_PREFIX}${toRole}` : (body.to ?? "").trim();
 
         if (!validName(from)) return Response.json({ error: "invalid from" }, { status: 400 });
         if (cap.agents.isPaused(from)) return pausedRefusal();
-        if (!validName(to)) return Response.json({ error: "invalid to" }, { status: 400 });
+        if (toRole !== "") {
+          if (!(STAGE_ROLES as readonly string[]).includes(toRole)) {
+            return Response.json({ error: `invalid to_role (one of ${STAGE_ROLES.join(", ")})` }, { status: 400 });
+          }
+        } else if (!validName(to)) return Response.json({ error: "invalid to" }, { status: 400 });
         if (!task) return Response.json({ error: "task required" }, { status: 400 });
         if (task.length > HANDOFF_TASK_MAX_CHARS) {
           return Response.json({ error: `task too long (max ${HANDOFF_TASK_MAX_CHARS})` }, { status: 400 });
@@ -404,20 +434,106 @@ export function createHandoffKind(db: Database): KindModule {
         if (!cap.agents.get(from)) {
           return Response.json({ error: `unknown sender ${from}: connect /agent-stream first` }, { status: 409 });
         }
-        const toAgent = cap.agents.get(to);
-        if (!toAgent) {
-          return Response.json(
-            {
-              error: `unknown recipient: ${to} (must be a currently-registered agent or "${cap.config.humanName}")`,
-            },
-            { status: 400 },
-          );
-        }
         const fromAgent = cap.agents.get(from)!;
-        if (fromAgent.room !== null && toAgent.room !== null && fromAgent.room !== toAgent.room) {
-          return Response.json({ error: "cross-room handoff not permitted" }, { status: 403 });
+        let handoffRoom: string;
+        let ticketId: string | null = null;
+        // A spec review (spec-review-stage 2.1): to_role validator + review "spec" + request_id; it names a request, not a ticket.
+        const isSpec = body.review !== undefined && body.review !== null;
+        let specRequestId = "";
+        let specScope: string[] = [];
+        if (isSpec) {
+          if (body.review !== "spec" || toRole !== "validator") {
+            return Response.json({ error: 'review "spec" goes with to_role "validator"' }, { status: 400 });
+          }
+          if (typeof body.request_id !== "string" || !SPEC_REQUEST_ID_RE.test(body.request_id)) {
+            return Response.json({ error: "a spec review needs request_id" }, { status: 400 });
+          }
+          specRequestId = body.request_id;
+          const c = body.context as Record<string, unknown> | null | undefined;
+          if (!c || typeof c !== "object" || Array.isArray(c) || typeof c.request_text !== "string" || !c.request_text.trim()) {
+            return Response.json({ error: "a spec review needs context.request_text" }, { status: 400 });
+          }
+          if (c.request_text.length > SPEC_REQUEST_TEXT_MAX) {
+            return Response.json({ error: `context.request_text too long (max ${SPEC_REQUEST_TEXT_MAX})` }, { status: 400 });
+          }
+          const strList = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === "string" && x);
+          if (c.spec_paths !== undefined && !strList(c.spec_paths)) {
+            return Response.json({ error: "context.spec_paths must be a list of paths" }, { status: 400 });
+          }
+          if (c.ticket_ids !== undefined && !(strList(c.ticket_ids) && (c.ticket_ids as string[]).every((t) => TICKET_ID_RE.test(t)))) {
+            return Response.json({ error: "context.ticket_ids must be a list of ticket ids" }, { status: 400 });
+          }
+          if (c.commit !== undefined && (typeof c.commit !== "string" || !/^[0-9a-f]{7,64}$/i.test(c.commit))) {
+            return Response.json({ error: "context.commit must be a commit hash" }, { status: 400 });
+          }
+          handoffRoom = fromAgent.room ?? cap.config.defaultRoom;
+          // The stored context names the request, so the launch finds the commit of this review (spec-review 2.4).
+          // No commit named: pin HEAD of the room's project as it is now, so a later commit does not move this review (2.4b).
+          let commit = c.commit;
+          if (commit === undefined) {
+            const project = getRoomSettings(db, handoffRoom)?.project_folder;
+            const head = project ? Bun.spawnSync(["git", "-C", project, "rev-parse", "HEAD"], { stdout: "pipe", stderr: "pipe" }) : null;
+            if (head?.exitCode === 0) commit = head.stdout.toString().trim();
+          }
+          body.context = { ...c, request_id: specRequestId, ...(commit !== undefined ? { commit } : {}) };
+          // Scope (spec-review-stage 2.2): the named tickets, else every draft ticket of the request in the room.
+          // Every one must be a draft of this request in this room; nothing is recorded otherwise.
+          const named = c.ticket_ids as string[] | undefined;
+          if (named) {
+            for (const id of new Set(named)) {
+              const t = db.query<{ status: string; request_id: string | null; room: string }, [string]>("SELECT status, request_id, room FROM tickets WHERE id = ?").get(id);
+              if (!t || t.room !== handoffRoom) return Response.json({ error: `unknown ticket ${id} in room ${handoffRoom}` }, { status: 400 });
+              if (t.status !== "draft") return Response.json({ error: `ticket ${id} is ${t.status}, not draft` }, { status: 400 });
+              if (t.request_id !== specRequestId) return Response.json({ error: `ticket ${id} is not in request ${specRequestId}` }, { status: 400 });
+            }
+            specScope = [...new Set(named)];
+          } else {
+            specScope = db
+              .query<{ id: string }, [string, string]>("SELECT id FROM tickets WHERE request_id = ? AND room = ? AND status = 'draft' ORDER BY created_at_ms, id")
+              .all(specRequestId, handoffRoom)
+              .map((r) => r.id);
+          }
+          if (specScope.length === 0) return Response.json({ error: `no draft ticket to review in request ${specRequestId}` }, { status: 400 });
+        } else if (toRole !== "") {
+          // A role handoff names its ticket in context.ticket_id; it does not name a session.
+          const ctx = body.context as { ticket_id?: unknown; commit?: unknown } | null | undefined;
+          if (!ctx || typeof ctx !== "object" || typeof ctx.ticket_id !== "string" || !TICKET_ID_RE.test(ctx.ticket_id)) {
+            return Response.json({ error: "a to_role handoff needs context.ticket_id" }, { status: 400 });
+          }
+          // The commit a Tester, Validator, Editor or Reviewer worktree is detached at (stage-sessions 4.5).
+          if (ctx.commit !== undefined && (typeof ctx.commit !== "string" || !/^[0-9a-f]{7,64}$/i.test(ctx.commit))) {
+            return Response.json({ error: "context.commit must be a commit hash" }, { status: 400 });
+          }
+          const t = db.query<{ room: string }, [string]>("SELECT room FROM tickets WHERE id = ?").get(ctx.ticket_id);
+          if (!t) return Response.json({ error: `unknown ticket ${ctx.ticket_id}` }, { status: 404 });
+          if (fromAgent.room !== null && fromAgent.room !== t.room) {
+            return Response.json({ error: "cross-room handoff not permitted" }, { status: 403 });
+          }
+          ticketId = ctx.ticket_id;
+          handoffRoom = t.room;
+        } else {
+          const toAgent = cap.agents.get(to);
+          if (!toAgent) {
+            return Response.json(
+              {
+                error: `unknown recipient: ${to} (must be a currently-registered agent or "${cap.config.humanName}")`,
+              },
+              { status: 400 },
+            );
+          }
+          if (fromAgent.room !== null && toAgent.room !== null && fromAgent.room !== toAgent.room) {
+            return Response.json({ error: "cross-room handoff not permitted" }, { status: 403 });
+          }
+          handoffRoom = fromAgent.room ?? toAgent.room ?? cap.config.defaultRoom;
         }
-        const handoffRoom = fromAgent.room ?? toAgent.room ?? cap.config.defaultRoom;
+
+        // A result for a stage that is already passed or failed is refused: its result is recorded (stage-sessions, 6.5 run 3).
+        const done = stage?.completedStage(from, body.context);
+        if (done) return Response.json({ error: done }, { status: 409 });
+
+        // A result handoff of a stage session must pass the schema check; a failing one records nothing (stage-sessions 5.1).
+        const resultErrors = stage?.checkResult(from, body.context, cap, to) ?? null;
+        if (resultErrors?.length) return Response.json({ error: "result rejected", errors: resultErrors }, { status: 400 });
 
         const id = mintHandoffId();
         try {
@@ -428,6 +544,13 @@ export function createHandoffKind(db: Database): KindModule {
             from,
             cap,
           );
+          // A valid result passes the stage of the sender (stage-sessions 5.2); the session closes at its next end of turn.
+          if (resultErrors) stage?.onResult(from, body.context, cap);
+          // The evaluator runs in the same request, after the handoff is recorded (stage.ts logs its own failure).
+          if (isSpec) stage?.onSpecHandoff({ request_id: specRequestId, scope: specScope }, cap);
+          else if (toRole !== "" && ticketId && stage) {
+            stage.onRoleHandoff({ ticket_id: ticketId, role: toRole, seq: r.snapshot.version }, cap);
+          }
           return Response.json({ id: r.snapshot.id }, { status: 201 });
         } catch (e) {
           if (e instanceof LedgerConflict) return ledgerConflictResponse(e);

@@ -30,7 +30,7 @@ test('a replacement bridge applies the newest desired version after the earlier 
     return { status: r.status, text: await r.text() };
   };
   const applied = () => { try { return readFileSync(join(dir, 'agents', `${agentKey('bob')}.applied`), 'utf8').trim(); } catch { return null; } };
-  const record = (version: string) => request('http://hub.test/factory/applied', { method: 'POST', headers: {}, body: JSON.stringify({ agent: 'bob', version }) });
+  const record = (version: string, attempt: string | null) => request('http://hub.test/factory/applied', { method: 'POST', headers: {}, body: JSON.stringify({ agent: 'bob', version, attempt }) });
   const bridges: Bridge[] = [];
   const sleepers: Array<() => void> = [];
   const sleep = (_ms: number) => new Promise<void>((r) => sleepers.push(r));
@@ -52,11 +52,11 @@ test('a replacement bridge applies the newest desired version after the earlier 
   const gate = new Promise<void>(resolve => finish = resolve);
   const calls: string[] = [];
   try {
-    const old = bridge(async version => { calls.push(version); await gate; await record(version); });
+    const old = bridge(async (version, _id, attempt) => { calls.push(version); await gate; await record(version, attempt); });
     await until(() => calls.length === 1);
     // The hub now wants V3. The replacement bridge starts before V2 finishes.
     deps.version = V3;
-    bridge(async version => { calls.push(version); await record(version); });
+    bridge(async (version, _id, attempt) => { calls.push(version); await record(version, attempt); });
     await until(() => relinks === 2);
     expect(calls).toEqual([V2]); // no overlap while V2 runs
     old.stop(); // the runtime replacement removes the old bridge

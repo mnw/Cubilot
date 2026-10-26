@@ -47,6 +47,20 @@ export type DispatcherOptions = {
   buildCap: () => HubCapabilities;
 };
 
+// `system` is the actor of the hub's own writes (a stage launch, a retry). No HTTP caller may use it: validName() refuses
+// the reserved name on the routes that read an actor, and this guard covers all the others, now and later. It looks at the
+// JSON body fields that name a person or agent. It reads the body as JSON whatever the Content-Type header says, because a
+// route parses it as JSON whatever the header says (Bun's req.json() ignores it); a header check would be a bypass.
+// A request that is not a JSON object is left to its route.
+const ACTOR_FIELDS = ["by", "from", "actor", "voter", "requester", "agent", "creator"] as const;
+
+async function namesSystemActor(req: Request): Promise<boolean> {
+  const body: unknown = await req.clone().json().catch(() => null);
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return false;
+  const o = body as Record<string, unknown>;
+  return ACTOR_FIELDS.some((f) => typeof o[f] === "string" && (o[f] as string).trim().toLowerCase() === "system");
+}
+
 export function createDispatcher(opts: DispatcherOptions): Dispatcher {
   const compiled: CompiledRoute[] = opts.features.flatMap((f) => f.routes).map((r) => {
     let matcher: CompiledRoute["matcher"];
@@ -84,6 +98,9 @@ export function createDispatcher(opts: DispatcherOptions): Dispatcher {
         if (authFail) return withCors(authFail);
         const size = opts.auth.requireJsonBody(req, r.bodyMax);
         if (size) return withCors(size);
+        if (await namesSystemActor(req)) {
+          return withCors(Response.json({ error: "the actor 'system' is reserved for the hub" }, { status: 400 }));
+        }
       } else {
         const authFail = opts.auth.requireReadAuth(req, url);
         if (authFail) return withCors(authFail);

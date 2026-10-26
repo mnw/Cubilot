@@ -511,3 +511,60 @@ describe("ticket grouping tool fields", () => {
     ]);
   });
 });
+
+describe("send_handoff takes to or to_role", () => {
+  const send = (f: ReturnType<typeof fake>, args: Record<string, unknown>) => run("send_handoff", f.host, args);
+  const ok = () => fake({ "POST /handoffs": { status: 201, body: { id: "h_0123456789abcdef" } } });
+
+  test("to_role with context.ticket_id posts a role handoff and no to", async () => {
+    const f = ok();
+    expect(await send(f, { to_role: "tester", task: "run the checks", context: { ticket_id: TID } })).toBe("handoff_id=h_0123456789abcdef");
+    expect(f.calls).toHaveLength(1);
+    expect(f.calls[0].body).toEqual({ from: "alice", to_role: "tester", task: "run the checks", context: { ticket_id: TID } });
+  });
+
+  test("to alone posts as before, with no to_role", async () => {
+    const f = ok();
+    await send(f, { to: "bob", task: "t" });
+    expect(f.calls[0].body).toEqual({ from: "alice", to: "bob", task: "t" });
+  });
+
+  test("both fields, or neither, are refused before any request", async () => {
+    for (const args of [{ to: "bob", to_role: "tester", task: "t" }, { task: "t" }, { to: "", task: "t" }, { to_role: "", task: "t" }, { to: "", to_role: "", task: "t" }]) {
+      const f = ok();
+      await expect(send(f, args)).rejects.toThrow("exactly one of to and to_role");
+      expect(f.calls).toHaveLength(0);
+    }
+  });
+
+  test("an empty to_role next to a real to is sent as to", async () => {
+    const f = ok();
+    await send(f, { to: "bob", to_role: "", task: "t" });
+    expect(f.calls[0].body).toEqual({ from: "alice", to: "bob", task: "t" });
+  });
+
+  test("the schema offers the six roles and requires only task", () => {
+    const schema = findTool("send_handoff")!.inputSchema as { required: string[]; properties: Record<string, { enum?: string[] }> };
+    expect(schema.required).toEqual(["task"]);
+    expect(schema.properties.to_role.enum).toEqual(["worker", "tester", "validator", "writer", "editor", "reviewer"]);
+  });
+
+  test("review and request_id go at the top level of the body, next to context", async () => {
+    const f = ok();
+    const context = { request_text: "Build X" };
+    await send(f, { to_role: "validator", task: "review", review: "spec", request_id: "req-1", context });
+    expect(f.calls[0].body).toEqual({ from: "alice", to_role: "validator", task: "review", review: "spec", request_id: "req-1", context });
+  });
+
+  test("the schema offers review (spec only) and request_id, both optional", () => {
+    const schema = findTool("send_handoff")!.inputSchema as { required: string[]; properties: Record<string, { enum?: string[] }> };
+    expect(schema.properties.review.enum).toEqual(["spec"]);
+    expect(schema.properties.request_id).toBeDefined();
+    expect(schema.required).toEqual(["task"]);
+  });
+
+  test("a hub refusal of the role handoff reaches the agent", async () => {
+    const f = fake({ "POST /handoffs": { status: 400, body: { error: "a to_role handoff needs context.ticket_id" } } });
+    await expect(send(f, { to_role: "tester", task: "t" })).rejects.toThrow("context.ticket_id");
+  });
+});

@@ -134,16 +134,16 @@ export function fitPreview(
 }
 
 // Records a good reload for this agent. Throws when the hub refuses.
-async function recordApplied(version: string): Promise<void> {
+async function recordApplied(version: string, reloadId: string | null, attempt: string | null): Promise<void> {
   if (!identity || !host) throw new Error("chatbridge not started");
-  const r = await authedPost(host, identity.hubEnv, "/factory/applied", { agent: identity.agent, version });
+  const r = await authedPost(host, identity.hubEnv, "/factory/applied", { agent: identity.agent, version, ...(reloadId ? { reload_id: reloadId } : {}), ...(attempt ? { attempt } : {}) });
   if (r.status < 200 || r.status >= 300) throw new Error(`factory applied not recorded: HTTP ${r.status}`);
 }
 
 // Tells the hub a reload failed, so it forgets the order and the next relink asks again.
-async function reportFailed(): Promise<void> {
+async function reportFailed(reloadId: string | null, attempt: string | null): Promise<void> {
   if (!identity || !host) throw new Error("chatbridge not started");
-  const r = await authedPost(host, identity.hubEnv, "/factory/applied", { agent: identity.agent, failed: true });
+  const r = await authedPost(host, identity.hubEnv, "/factory/applied", { agent: identity.agent, failed: true, ...(reloadId ? { reload_id: reloadId } : {}), ...(attempt ? { attempt } : {}) });
   if (r.status < 200 || r.status >= 300) throw new Error(`factory failure not reported: HTTP ${r.status}`);
 }
 
@@ -244,6 +244,9 @@ function makeHost($: any, home: string, dataDir: string): Host {
     async handoffGate() {
       return ((await $.env.get("CHATBRIDGE_HANDOFF_GATE")) ?? "").trim() || null;
     },
+    async stageId() {
+      return ((await $.env.get("CUBILOT_STAGE_ID")) ?? "").trim() || null;
+    },
     // $.process.run rejects when the command cannot start or still runs at the timeout: the core logs it and goes on.
     async exec(command, stdin, timeoutMs) {
       const r = await $.process.run(["/bin/sh", "-c", command], { stdin, timeoutMs });
@@ -254,18 +257,18 @@ function makeHost($: any, home: string, dataDir: string): Host {
     // Bounded to RELOAD_MS, but success and failure stay attached to the REAL command promise: a command that
     // ends after the bound still records applied (or reports failed). APPLYING stays set until then, so a replaced
     // module also records the version. The hub's pending window blocks a second reload meanwhile.
-    async reload(version) {
-      await $.state.set(APPLYING, version);
+    async reload(version, reloadId, attempt) {
+      await $.state.set(APPLYING, reloadId || attempt ? `${version}\n${reloadId ?? ""}\n${attempt ?? ""}` : version); // a replaced module reads both back
       let timedOut = false;
       const finished: Promise<void> = Promise.resolve($.command.run({ command: "reload-plugins" })).then(
         async () => {
-          await recordApplied(version);
+          await recordApplied(version, reloadId, attempt);
           await $.state.set(APPLYING, "");
         },
         async (e) => {
           await $.state.set(APPLYING, "");
           // Before the bound the core sees the rejection and reports failed; after it, nobody else would.
-          if (timedOut) await reportFailed().catch(() => {});
+          if (timedOut) await reportFailed(reloadId, attempt).catch(() => {});
           throw e;
         },
       );
@@ -386,7 +389,8 @@ export function register(on: On): void {
     const applying = (((await $.state.get(APPLYING)).value as string | undefined) ?? "");
     if (applying) {
       await $.state.set(APPLYING, "");
-      await recordApplied(applying).catch((e) => host?.log(`[chatbridge] ${(e as Error).message ?? e}`));
+      const [version, reloadId, attempt] = applying.split("\n");
+      await recordApplied(version, reloadId || null, attempt || null).catch((e) => host?.log(`[chatbridge] ${(e as Error).message ?? e}`));
     }
     return started;
   });

@@ -1,6 +1,6 @@
 ---
 name: usability-review
-description: Usability review of screens, flows and prototypes: Nielsen's ten heuristics, a cognitive walkthrough of the main user tasks, and cognitive accessibility. Use for an [a11y] usability ticket, or with a design review.
+description: "Usability review of screens, flows and prototypes: Nielsen's ten heuristics, a cognitive walkthrough of the main user tasks, and cognitive accessibility. Use for an [a11y] usability ticket, or with a design review."
 ---
 
 > Factory skill (2026-10-19). It routes to skills that stay unchanged in `a11y/suite/`. These are "Accessibility Agents" by Taylor Arndt (https://github.com/community-access/accessibility-agents, commit decf6ba, MIT) and usability skills by mastepanoski (https://github.com/mastepanoski/claude-skills, commit b6457af, MIT). Licenses: `factory/licenses/`.

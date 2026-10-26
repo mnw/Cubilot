@@ -103,7 +103,7 @@ export default function (pi: any): void {
       console.error(`[channel] sendUserMessage failed: ${e?.message ?? e}`);
       d.onFail?.();
     });
-  }, (version: string) => {
+  }, (version: string, reloadId: string | null, attempt: string | null) => {
     // Spike 7.1: a followUp command with expandPromptTemplates runs after the run and calls ctx.reload().
     // sendUserMessage returns no completion, so the command handler settles this promise. It resolves only after
     // ctx.reload() resolves and rejects when it throws, also after session_shutdown (a reload fires that first).
@@ -111,7 +111,7 @@ export default function (pi: any): void {
     // records applied (the handler), and the hub's pending window blocks a second reload meanwhile.
     return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new ReloadTimeout()), RELOAD_MS);
-      reloadDone = { version, started: () => {}, resolve: () => { clearTimeout(timer); resolve(); }, reject: (e) => { clearTimeout(timer); reject(e); } };
+      reloadDone = { version, reloadId, attempt, started: () => {}, resolve: () => { clearTimeout(timer); resolve(); }, reject: (e) => { clearTimeout(timer); reject(e); } };
       Promise.resolve(pi.sendUserMessage("/cubilot-reload", { deliverAs: "followUp", expandPromptTemplates: true }))
         .catch((e: Error) => { clearTimeout(timer); reloadDone = null; reject(e); });
     });
@@ -120,7 +120,7 @@ export default function (pi: any): void {
   let bridge: Bridge | null = null;
 
   // The pending reload() of the core. Never settled by session_shutdown.
-  let reloadDone: { version: string; started(): void; resolve(): void; reject(e: Error): void } | null = null;
+  let reloadDone: { version: string; reloadId: string | null; attempt: string | null; started(): void; resolve(): void; reject(e: Error): void } | null = null;
   pi.registerCommand("cubilot-reload", {
     description: "Reload skills and prompt files (sent by the chatbridge when the factory files change)",
     handler: async (_args: string, ctx: { reload(): Promise<void> }) => {
@@ -136,13 +136,13 @@ export default function (pi: any): void {
           // through the hub (pi.sendMessage is invalid now), and log. The agent needs a restart.
           const msg = (e as Error)?.message ?? String(e);
           host.log(`[channel] hot reload failed: ${msg}`);
-          await authedPost(host, HUB_ENV, "/factory/applied", { agent: AGENT, failed: true }).catch(() => {});
+          await authedPost(host, HUB_ENV, "/factory/applied", { agent: AGENT, failed: true, ...(done?.reloadId ? { reload_id: done.reloadId } : {}), ...(done?.attempt ? { attempt: done.attempt } : {}) }).catch(() => {});
           await authedPost(host, HUB_ENV, "/post", { from: AGENT, to: "you", text: `${AGENT}: hot reload failed, restart this agent` }).catch(() => {});
           throw e;
         }
         // Success is recorded here, after ctx.reload() resolved. session_shutdown is not success.
         if (done) {
-          const r = await authedPost(host, HUB_ENV, "/factory/applied", { agent: AGENT, version: done.version });
+          const r = await authedPost(host, HUB_ENV, "/factory/applied", { agent: AGENT, version: done.version, ...(done.reloadId ? { reload_id: done.reloadId } : {}), ...(done.attempt ? { attempt: done.attempt } : {}) });
           if (r.status < 200 || r.status >= 300) throw new Error(`factory applied not recorded: HTTP ${r.status}`);
         }
         done?.resolve();

@@ -1,16 +1,33 @@
 // ledger.ts — SQLite ledger + versioned migrations. Frozen append-only history; never edit prior.
 
 import { Database } from "bun:sqlite";
-import { chmodSync } from "node:fs";
+import { chmodSync, mkdirSync, renameSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { randomId } from "./ids";
 
-export const LEDGER_SCHEMA_VERSION = 13;
+export const LEDGER_SCHEMA_VERSION = 16;
 
 export type LedgerOpenResult =
   | { db: Database; enabled: true }
   | { db: null; enabled: false };
 
-export function openLedger(path: string): LedgerOpenResult {
+/**
+ * Copies the ledger to `<snapshotDir>/ledger-<utc>-<from>to<to>.db` (mode 0600) before a
+ * schema migration. Throws on any failure: the caller must not migrate without the copy.
+ */
+export function snapshotLedger(db: Database, path: string, from: number, to: number, snapshotDir: string): string {
+  mkdirSync(snapshotDir, { recursive: true, mode: 0o700 });
+  const utc = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+  const dest = join(snapshotDir, `ledger-${utc}-${from}to${to}.db`);
+  const tmp = `${dest}.tmp`;
+  // VACUUM INTO reads one consistent snapshot, WAL rows included, even with open readers.
+  db.run("VACUUM INTO ?", [tmp]);
+  chmodSync(tmp, 0o600);
+  renameSync(tmp, dest);
+  return dest;
+}
+
+export function openLedger(path: string, snapshotDir: string = join(dirname(path), "snapshots")): LedgerOpenResult {
   if (!path) return { db: null, enabled: false };
   try {
     const db = new Database(path, { create: true });
@@ -23,6 +40,12 @@ export function openLedger(path: string): LedgerOpenResult {
       chmodSync(path, 0o600);
     } catch (e) {
       console.error(`[ledger] chmod 0600 on ${path} failed:`, e);
+    }
+    // A new ledger (no schema_version yet) has nothing to lose; an existing one is copied first.
+    const from = storedSchemaVersion(db);
+    if (from > 0 && from < LEDGER_SCHEMA_VERSION) {
+      const dest = snapshotLedger(db, path, from, LEDGER_SCHEMA_VERSION, snapshotDir);
+      console.log(`[ledger] snapshot ${dest}`);
     }
     migrateLedger(db);
     // -wal/-shm are created with umask default; tighten to 0600.
@@ -43,6 +66,13 @@ export function openLedger(path: string): LedgerOpenResult {
     console.error(`[ledger] open failed, protocol routes disabled:`, e);
     return { db: null, enabled: false };
   }
+}
+
+function storedSchemaVersion(db: Database): number {
+  const hasMeta = db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'").get();
+  if (!hasMeta) return 0;
+  const row = db.query<{ value: string }, []>("SELECT value FROM meta WHERE key = 'schema_version'").get();
+  return row ? Number(row.value) : 0;
 }
 
 export function migrateLedger(db: Database): void {
@@ -345,7 +375,73 @@ export function migrateLedger(db: Database): void {
     })();
     console.log(`[ledger] applied migration v13`);
   }
+  if (current < 14) {
+    // v14: stage-sessions. Per-room role limits (JSON, role -> 0..10) and stage time-out on room_settings,
+    // and the `stage` table. Each step is guarded so a second run changes nothing. NULL role_limits /
+    // stage_timeout_min mean "defaults"; the stage kind (not this migration) applies them.
+    db.transaction(() => {
+      const names = new Set(
+        db.query<{ name: string }, []>("PRAGMA table_info(room_settings)").all().map((c) => c.name),
+      );
+      if (!names.has("role_limits")) db.exec("ALTER TABLE room_settings ADD COLUMN role_limits TEXT");
+      if (!names.has("stage_timeout_min")) db.exec("ALTER TABLE room_settings ADD COLUMN stage_timeout_min INTEGER");
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS stage (
+          id          TEXT    PRIMARY KEY,
+          ticket_id   TEXT,                       -- NULL for a spec-review stage
+          request_id  TEXT,                       -- set for a spec-review stage
+          review      TEXT,                       -- NULL for a ticket stage, 'spec' for a spec-review stage
+          verdict     TEXT,                       -- NULL until a result is recorded
+          role        TEXT    NOT NULL,
+          attempt     INTEGER NOT NULL DEFAULT 1,
+          status      TEXT    NOT NULL,
+          session     TEXT,
+          slot_seq    INTEGER,
+          created_seq INTEGER NOT NULL DEFAULT 0,
+          updated_seq INTEGER NOT NULL DEFAULT 0,
+          version     INTEGER NOT NULL DEFAULT 0,   -- managed by the Store (= events.seq of the last transition)
+          CHECK (review IS NOT NULL OR ticket_id IS NOT NULL),
+          CHECK (review IS NOT 'spec' OR request_id IS NOT NULL)
+        );
+      `);
+      db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '14')");
+    })();
+    console.log(`[ledger] applied migration v14`);
+  }
+  if (current < 15) {
+    // v15: spec-review-stage. The tickets a spec-review stage covers, and the index its per-request lookups use
+    // (latest spec stage of a request, waiting-for-approval). Guarded so a second run changes nothing.
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS stage_scope (
+          stage_id  TEXT NOT NULL,
+          ticket_id TEXT NOT NULL,
+          PRIMARY KEY (stage_id, ticket_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_stage_request_review ON stage(request_id, review, created_seq);
+      `);
+      db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '15')");
+    })();
+    console.log(`[ledger] applied migration v15`);
+  }
+  if (current < 16) {
+    // v16: stage-sessions 4.5. The room's project folder (the git repository its stage worktrees come from).
+    // NULL = the room has none. Guarded so a second run changes nothing.
+    db.transaction(() => {
+      const names = new Set(db.query<{ name: string }, []>("PRAGMA table_info(room_settings)").all().map((c) => c.name));
+      if (!names.has("project_folder")) db.exec("ALTER TABLE room_settings ADD COLUMN project_folder TEXT");
+      db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '16')");
+    })();
+    console.log(`[ledger] applied migration v16`);
+  }
 }
+
+export const STAGE_ROLES = ["worker", "tester", "validator", "writer", "editor", "reviewer"] as const;
+export type StageRole = (typeof STAGE_ROLES)[number];
+export type RoleLimits = Record<StageRole, number>;
+/** Applied while room_settings.role_limits / stage_timeout_min are NULL: the columns store only what the human set. */
+export const DEFAULT_ROLE_LIMITS: Readonly<RoleLimits> = { worker: 2, tester: 2, validator: 1, writer: 1, editor: 1, reviewer: 1 };
+export const DEFAULT_STAGE_TIMEOUT_MIN = 30;
 
 export type RoomSettings = {
   room: string;
@@ -353,8 +449,21 @@ export type RoomSettings = {
   room_summary_enabled: boolean;
   worker_limit: number | null;
   tester_limit: number | null;
+  role_limits: RoleLimits;
+  stage_timeout_min: number;
+  project_folder: string | null;
   updated_at: number;
 };
+
+function resolveRoleLimits(raw: string | null): RoleLimits {
+  let stored: Partial<RoleLimits> = {};
+  try {
+    if (raw) stored = JSON.parse(raw) as Partial<RoleLimits>;
+  } catch { /* a corrupt value falls back to the defaults */ }
+  const out = { ...DEFAULT_ROLE_LIMITS };
+  for (const r of STAGE_ROLES) if (Number.isInteger(stored[r])) out[r] = stored[r] as number;
+  return out;
+}
 
 export function getRoomSettings(db: Database, room: string): RoomSettings | null {
   const row = db
@@ -365,11 +474,14 @@ export function getRoomSettings(db: Database, room: string): RoomSettings | null
         room_summary_enabled: number;
         worker_limit: number | null;
         tester_limit: number | null;
+        role_limits: string | null;
+        stage_timeout_min: number | null;
+        project_folder: string | null;
         updated_at: number;
       },
       [string]
     >(
-      "SELECT room, persist_transcript, room_summary_enabled, worker_limit, tester_limit, updated_at FROM room_settings WHERE room = ?",
+      "SELECT room, persist_transcript, room_summary_enabled, worker_limit, tester_limit, role_limits, stage_timeout_min, project_folder, updated_at FROM room_settings WHERE room = ?",
     )
     .get(room);
   if (!row) return null;
@@ -379,6 +491,9 @@ export function getRoomSettings(db: Database, room: string): RoomSettings | null
     room_summary_enabled: !!row.room_summary_enabled,
     worker_limit: row.worker_limit,
     tester_limit: row.tester_limit,
+    role_limits: resolveRoleLimits(row.role_limits),
+    stage_timeout_min: row.stage_timeout_min ?? DEFAULT_STAGE_TIMEOUT_MIN,
+    project_folder: row.project_folder,
     updated_at: row.updated_at,
   };
 }
@@ -391,6 +506,9 @@ export function setRoomSettings(
     room_summary_enabled?: boolean;
     worker_limit?: number | null;
     tester_limit?: number | null;
+    role_limits?: Partial<RoleLimits> | null;
+    stage_timeout_min?: number | null;
+    project_folder?: string | null;
   },
 ): void {
   const current = getRoomSettings(db, room);
@@ -399,16 +517,34 @@ export function setRoomSettings(
   // `in`, not `??`: an explicit null clears a limit, an absent key keeps it.
   const workers = "worker_limit" in partial ? partial.worker_limit ?? null : current?.worker_limit ?? null;
   const testers = "tester_limit" in partial ? partial.tester_limit ?? null : current?.tester_limit ?? null;
+  // The columns hold only what was set (NULL = defaults), so read them raw. null clears; an object
+  // overrides the listed roles on top of the current limits.
+  const raw = db
+    .query<{ role_limits: string | null; stage_timeout_min: number | null }, [string]>(
+      "SELECT role_limits, stage_timeout_min FROM room_settings WHERE room = ?",
+    )
+    .get(room);
+  const roleLimits =
+    "role_limits" in partial
+      ? partial.role_limits == null
+        ? null
+        : JSON.stringify({ ...(current?.role_limits ?? DEFAULT_ROLE_LIMITS), ...partial.role_limits })
+      : raw?.role_limits ?? null;
+  const timeout = "stage_timeout_min" in partial ? partial.stage_timeout_min ?? null : raw?.stage_timeout_min ?? null;
+  const folder = "project_folder" in partial ? partial.project_folder ?? null : current?.project_folder ?? null;
   db.run(
-    `INSERT INTO room_settings (room, persist_transcript, room_summary_enabled, worker_limit, tester_limit, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO room_settings (room, persist_transcript, room_summary_enabled, worker_limit, tester_limit, role_limits, stage_timeout_min, project_folder, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(room) DO UPDATE SET
        persist_transcript = excluded.persist_transcript,
        room_summary_enabled = excluded.room_summary_enabled,
        worker_limit = excluded.worker_limit,
        tester_limit = excluded.tester_limit,
+       role_limits = excluded.role_limits,
+       stage_timeout_min = excluded.stage_timeout_min,
+       project_folder = excluded.project_folder,
        updated_at = excluded.updated_at`,
-    [room, persist ? 1 : 0, summary ? 1 : 0, workers, testers, Date.now()],
+    [room, persist ? 1 : 0, summary ? 1 : 0, workers, testers, roleLimits, timeout, folder, Date.now()],
   );
 }
 

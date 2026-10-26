@@ -44,7 +44,7 @@ describe("autoAttach and reconcile", () => {
     const ctx: any = vm.createContext({
       tabs, ROSTER: [], HUMAN_NAME: "human", cwdCache: {}, console, String, Array, Set, window: {}, activeAgent: "a", focusTab: () => {},
       tabsEl: { querySelector: () => ({}) },
-      isShell: () => false, removeTab: () => {}, ensureTab: () => tab,
+      isShell: () => false, removeTab: () => {}, ensureTab: () => tab, ensureShellTab: () => ({}),
       setTabState: (_a: string, s: string) => { tab.state = s; states.push(s); },
       ptyList: async () => { onList?.(n, tab); return lists[Math.min(n++, lists.length - 1)]; },
       ptySpawn: async (...a: any[]) => { spawned.push(a); if (spawnError) throw new Error(spawnError); },

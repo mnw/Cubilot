@@ -1,4 +1,7 @@
 mod factory;
+mod launches;
+mod login_path;
+mod skills;
 mod models;
 mod pty;
 
@@ -1404,6 +1407,9 @@ pub fn run() {
             open_skills_folder,
             list_roles,
             models::list_models,
+            skills::agent_skills,
+            skills::agent_skills_set,
+            skills::agent_skills_apply,
             open_global_mcp_config,
             open_in_editor,
             reload_settings,
@@ -1507,6 +1513,8 @@ pub fn run() {
                     .lock()
                     .unwrap_or_else(|e| e.into_inner()) = Some(human_name);
             }
+            // The hub queues session launches and closes; the shell carries them out (stage-sessions 4.2).
+            launches::start(handle.clone());
 
             tauri::async_runtime::spawn(async move {
                 stream_to_log(rx, log_path).await;

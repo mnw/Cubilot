@@ -2,9 +2,18 @@
 // Carved out of hub.ts inline routes in architecture-cycle-2a §4.
 
 import type { Database } from "bun:sqlite";
+import { existsSync, statSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import type { HubFeature, Entry } from "../core/types";
 import { validRoomLabel } from "../core/ids";
-import { getRoomSettings, setRoomSettings } from "../core/ledger";
+import {
+  DEFAULT_ROLE_LIMITS,
+  DEFAULT_STAGE_TIMEOUT_MIN,
+  STAGE_ROLES,
+  getRoomSettings,
+  setRoomSettings,
+  type RoleLimits,
+} from "../core/ledger";
 import * as transcriptStore from "../core/transcript";
 import type { RoomSummariser } from "../core/room-summariser";
 
@@ -23,6 +32,13 @@ function decodeRoom(raw: string): string | null {
   return validRoomLabel(decoded) ? decoded : null;
 }
 
+function projectFolderError(p: string): string | null {
+  if (!isAbsolute(p)) return "project_folder must be an absolute path";
+  if (!existsSync(p) || !statSync(p).isDirectory()) return "project_folder does not exist";
+  const r = Bun.spawnSync(["git", "-C", p, "rev-parse", "--is-inside-work-tree"], { stdout: "pipe", stderr: "pipe" });
+  return r.exitCode === 0 && r.stdout.toString().trim() === "true" ? null : "project_folder is not a git work tree";
+}
+
 function getRoomSettingsResponse(deps: TranscriptDeps, room: string): Response {
   const settings = getRoomSettings(deps.db, room) ?? {
     room,
@@ -30,6 +46,9 @@ function getRoomSettingsResponse(deps: TranscriptDeps, room: string): Response {
     room_summary_enabled: false,
     worker_limit: null,
     tester_limit: null,
+    role_limits: { ...DEFAULT_ROLE_LIMITS },
+    stage_timeout_min: DEFAULT_STAGE_TIMEOUT_MIN,
+    project_folder: null,
     updated_at: 0,
   };
   const stats = settings.persist_transcript ? transcriptStore.activeStats(room) : null;
@@ -82,6 +101,9 @@ export function createTranscriptFeature(deps: TranscriptDeps): HubFeature {
             room_summary_enabled?: unknown;
             worker_limit?: unknown;
             tester_limit?: unknown;
+            role_limits?: unknown;
+            stage_timeout_min?: unknown;
+            project_folder?: unknown;
           };
           let body: Body;
           try {
@@ -98,7 +120,44 @@ export function createTranscriptFeature(deps: TranscriptDeps): HubFeature {
             room_summary_enabled?: boolean;
             worker_limit?: number | null;
             tester_limit?: number | null;
+            role_limits?: Partial<RoleLimits> | null;
+            stage_timeout_min?: number | null;
+            project_folder?: string | null;
           } = {};
+          // Stage-session limits: an object of role -> whole number 0..10 (listed roles only), or null for the defaults.
+          if ("role_limits" in body) {
+            const v = body.role_limits;
+            if (v !== null) {
+              if (typeof v !== "object" || Array.isArray(v)) {
+                return Response.json({ error: "role_limits must be an object or null" }, { status: 400 });
+              }
+              for (const [role, n] of Object.entries(v)) {
+                if (!(STAGE_ROLES as readonly string[]).includes(role)) {
+                  return Response.json({ error: `role_limits: unknown role ${role}` }, { status: 400 });
+                }
+                if (!(typeof n === "number" && Number.isInteger(n) && n >= 0 && n <= 10)) {
+                  return Response.json({ error: `role_limits.${role} must be a whole number 0 to 10` }, { status: 400 });
+                }
+              }
+            }
+            partial.role_limits = v as Partial<RoleLimits> | null;
+          }
+          if ("stage_timeout_min" in body) {
+            const v = body.stage_timeout_min;
+            if (v !== null && !(typeof v === "number" && Number.isInteger(v) && v >= 1)) {
+              return Response.json({ error: "stage_timeout_min must be a whole number of 1 or more, or null" }, { status: 400 });
+            }
+            partial.stage_timeout_min = v as number | null;
+          }
+          // The project folder: an absolute path to an existing git work tree, or null to clear.
+          if ("project_folder" in body) {
+            const v = body.project_folder;
+            if (v !== null) {
+              const err = typeof v === "string" ? projectFolderError(v) : "project_folder must be a string or null";
+              if (err) return Response.json({ error: err }, { status: 400 });
+            }
+            partial.project_folder = v as string | null;
+          }
           // Factory-room limits: a whole number 1..20, or null to clear. Anything else is a 400, nothing is written.
           for (const key of ["worker_limit", "tester_limit"] as const) {
             if (!(key in body)) continue;

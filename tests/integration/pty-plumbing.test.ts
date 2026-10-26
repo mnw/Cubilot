@@ -9,6 +9,9 @@
 // kill-server on teardown.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { tmuxSocket, type TmuxHarness } from "../helpers/tmux";
 
 let h: TmuxHarness;
@@ -211,4 +214,156 @@ describe("pty plumbing — tmux session contract", () => {
       expect((await h.run(["has-session", "-t", "=Dev1"])).exitCode).toBe(0);
     });
   });
+});
+
+// The Dock case (pi-path): the app has launchd's minimal PATH, so a Pi shim that needs `node` fails there. pty.rs puts
+// `PATH='<login-shell PATH>'` in front of a Pi spawn command (with_pi_path), the way it does CHATBRIDGE_AGENT. Not
+// `new-session -e PATH=...`: tmux keeps that value in the session but starts the pane command with the server's PATH.
+// Here a cold tmux server with a minimal PATH stands for the app, and a fake tool found only on the resolved PATH
+// stands for node. The Rust unit test pins the command text; this one pins what tmux and the shell do with it.
+describe("pty plumbing — Pi session PATH", () => {
+  const MINIMAL = "/usr/bin:/bin";
+
+  test("a Pi command with a PATH prefix sees the resolved PATH and its tool; a Claude command keeps the server PATH", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cubilot-pi-path-"));
+    try {
+      const tools = join(dir, "tools");
+      mkdirSync(tools);
+      const tool = join(tools, "cubilot-fake-node");
+      writeFileSync(tool, "#!/bin/sh\necho ok\n");
+      chmodSync(tool, 0o755);
+      const probe = join(dir, "probe.sh");
+      writeFileSync(probe, `command -v cubilot-fake-node >/dev/null 2>&1; echo $? > "${dir}/$1.rc"; printf '%s' "$PATH" > "${dir}/$1.path"\n`);
+      const tmuxBin = Bun.which(h.tmux) ?? h.tmux;
+      // Cold server: the first new-session starts it, with the minimal PATH in its environment (the app's case).
+      const env = { HOME: process.env.HOME ?? dir, SHELL: "/bin/sh", PATH: MINIMAL, TERM: "xterm-256color" };
+      const start = async (name: string, prefix: string, envPairs: string[] = []) => {
+        const cmd = `${prefix}/bin/sh '${probe}' ${name}`;
+        const argv = [tmuxBin, "-S", h.sock, "new-session", "-d", "-s", name, ...envPairs.flatMap((e) => ["-e", e]), "-x", "80", "-y", "24", "-c", "/tmp", cmd];
+        const p = Bun.spawn(argv, { env, stdout: "pipe", stderr: "pipe" });
+        const [, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
+        expect(await p.exited, err).toBe(0);
+        const deadline = Date.now() + 5000;
+        while (!existsSync(`${dir}/${name}.path`) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+        return { rc: readFileSync(`${dir}/${name}.rc`, "utf8").trim(), path: readFileSync(`${dir}/${name}.path`, "utf8") };
+      };
+      const resolved = `${tools}:${MINIMAL}`;
+      const pi = await start("pi-probe", `PATH='${resolved}' `);
+      expect(pi.path).toBe(resolved);
+      expect(pi.rc).toBe("0"); // the shim dependency is found
+      const claude = await start("claude-probe", "");
+      expect(claude.path).toBe(MINIMAL); // no PATH change
+      expect(claude.rc).not.toBe("0");
+      // why it is a prefix: `-e PATH=` reaches the session environment but not the pane command (tmux 3.5a)
+      const viaE = await start("e-probe", "", [`PATH=${resolved}`]);
+      expect(viaE.path).toBe(MINIMAL);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// C6b: a role launch with a skill off names `<key>.view/...` in BOTH of its --skill flags (Pi) or BOTH of its --plugin-dir
+// flags (Claude); a launch with an empty off-list names the agent link and no view (the pinned command). The Rust tests pin the
+// command text (pty.rs) and the view build and mode parser (skills.rs). These scenarios pin what tmux and the kernel do with
+// it: the pane start command keeps every path, a process that names the paths sees only the skills that are on, and a symlink
+// swap changes what the same paths list (the reload boundary).
+describe("pty plumbing — skill view", () => {
+  const KEY = "6162"; // hex of "ab"
+
+  // <agents>/<KEY>.view-<gen>/{worker,shared}/skills/<skill>, the published link <KEY>.view, and the agent link <KEY> -> v
+  // with every skill (the empty off-list case names the link).
+  async function layout(dir: string) {
+    const { symlinkSync } = await import("node:fs");
+    const agents = join(dir, "agents");
+    const full = { worker: ["a", "b"], shared: ["s"] };
+    const filtered = { worker: ["b"], shared: ["s"] };
+    const swapped = { worker: ["a", "b"], shared: [] as string[] };
+    for (const [gen, sel] of [[1, filtered], [2, swapped]] as const) {
+      for (const [g, skills] of Object.entries(sel)) {
+        mkdirSync(join(agents, `${KEY}.view-${gen}`, g, "skills"), { recursive: true });
+        for (const k of skills) mkdirSync(join(agents, `${KEY}.view-${gen}`, g, "skills", k));
+      }
+    }
+    for (const [g, skills] of Object.entries(full)) {
+      for (const k of skills) mkdirSync(join(dir, "v", g, "skills", k), { recursive: true });
+    }
+    symlinkSync(join(dir, "v"), join(agents, KEY));
+    symlinkSync(`${KEY}.view-1`, join(agents, `${KEY}.view`));
+    return { agents };
+  }
+
+  // A probe that lists each path it is given, waits for `go`, lists them again.
+  function probe(dir: string) {
+    const f = join(dir, "probe.sh");
+    writeFileSync(
+      f,
+      `i=0; for p in "$@"; do i=$((i+1)); ls "$p" > "${dir}/before-$i.txt"; done\nwhile [ ! -e "${dir}/go" ]; do sleep 0.1; done\n` +
+        `i=0; for p in "$@"; do i=$((i+1)); ls "$p" > "${dir}/after-$i.txt"; done\nsleep 30\n`
+    );
+    return f;
+  }
+  const lines = (f: string) => readFileSync(f, "utf8").trim().split("\n").filter(Boolean);
+  const waitFor = async (f: string) => {
+    const deadline = Date.now() + 5000;
+    while (!existsSync(f) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+  };
+
+  // flags: each element is "<flag> '<path>'" in the shape pty.rs writes
+  for (const harness of ["pi", "claude"] as const) {
+    test(`${harness}: the start command keeps both view paths, both list only what is on, and a symlink swap changes what they list`, async () => {
+      const dir = mkdtempSync(join(tmpdir(), "cubilot-skill-view-"));
+      try {
+        const { agents } = await layout(dir);
+        const { symlinkSync, renameSync } = await import("node:fs");
+        const view = join(agents, `${KEY}.view`);
+        // Pi: --skill <view>/<role>/skills and <view>/shared/skills. Claude: --plugin-dir <view>/<role> and <view>/shared.
+        const [flag, a, b] =
+          harness === "pi" ? ["--skill", `${view}/worker/skills`, `${view}/shared/skills`] : ["--plugin-dir", `${view}/worker`, `${view}/shared`];
+        const listed = harness === "pi" ? [a, b] : [`${a}/skills`, `${b}/skills`];
+        const cmd = `CHATBRIDGE_ROLE='worker' /bin/sh '${probe(dir)}' ${listed.map((p) => `'${p}'`).join(" ")} ${flag} '${a}' ${flag} '${b}'`;
+        const r = await h.run(["new-session", "-d", "-s", "ab-view", "-x", "80", "-y", "24", "-c", "/tmp", cmd]);
+        expect(r.exitCode, r.stderr).toBe(0);
+        await waitFor(`${dir}/before-2.txt`);
+        expect(lines(`${dir}/before-1.txt`)).toEqual(["b"]);
+        expect(lines(`${dir}/before-2.txt`)).toEqual(["s"]);
+        const start = await h.run(["list-panes", "-t", "ab-view", "-F", "#{pane_start_command}"]);
+        expect(start.stdout).toContain(`${flag} '${a}' ${flag} '${b}'`);
+        // tmux prints the one-argument command as ONE double-quoted word: skills::mode_from_command splits it twice for this
+        // (pinned on a real pane by the Rust test the_mode_is_read_back_from_a_real_pane_for_both_harnesses)
+        expect(start.stdout.trim()).toMatch(/^".*"$/);
+        // the hub's swap: a temp link, then a rename over the published link
+        symlinkSync(`${KEY}.view-2`, join(agents, `${KEY}.view.tmp`));
+        renameSync(join(agents, `${KEY}.view.tmp`), view);
+        writeFileSync(`${dir}/go`, "");
+        await waitFor(`${dir}/after-2.txt`);
+        expect(lines(`${dir}/after-1.txt`)).toEqual(["a", "b"]);
+        expect(lines(`${dir}/after-2.txt`)).toEqual([]);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    test(`${harness}: an empty off-list names the agent link and no view; both paths list every skill`, async () => {
+      const dir = mkdtempSync(join(tmpdir(), "cubilot-skill-link-"));
+      try {
+        const { agents } = await layout(dir);
+        const link = join(agents, KEY);
+        const [flag, a, b] =
+          harness === "pi" ? ["--skill", `${link}/worker/skills`, `${link}/shared/skills`] : ["--plugin-dir", `${link}/worker`, `${link}/shared`];
+        const listed = harness === "pi" ? [a, b] : [`${a}/skills`, `${b}/skills`];
+        const cmd = `CHATBRIDGE_ROLE='worker' /bin/sh '${probe(dir)}' ${listed.map((p) => `'${p}'`).join(" ")} ${flag} '${a}' ${flag} '${b}'`;
+        const r = await h.run(["new-session", "-d", "-s", "ab-link", "-x", "80", "-y", "24", "-c", "/tmp", cmd]);
+        expect(r.exitCode, r.stderr).toBe(0);
+        await waitFor(`${dir}/before-2.txt`);
+        expect(lines(`${dir}/before-1.txt`)).toEqual(["a", "b"]);
+        expect(lines(`${dir}/before-2.txt`)).toEqual(["s"]);
+        const start = await h.run(["list-panes", "-t", "ab-link", "-F", "#{pane_start_command}"]);
+        expect(start.stdout).toContain(`${flag} '${a}' ${flag} '${b}'`);
+        expect(start.stdout).not.toContain(".view");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
 });

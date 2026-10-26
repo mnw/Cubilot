@@ -32,7 +32,7 @@ The scope of a spec review SHALL be the `ticket_ids` of the handoff. Without `ti
 
 ### Requirement: One live spec review per request
 
-A request SHALL have at most one spec-review stage in `queued`, `launching` or `running`. A later spec handoff for the same request while one is live SHALL create a stage in `queued` with its own scope.
+At most one spec-review stage of a request SHALL be `launching`, `running` or `retrying`. A later spec handoff for the same request SHALL create a stage in `queued` with its own scope. That stage SHALL wait until the live one ends.
 
 #### Scenario: Second handoff waits
 
@@ -118,9 +118,9 @@ When the request has two spec verdicts of FAIL since its last PASS, the hub SHAL
 - **THEN** the human sees a system entry with the open findings of the second FAIL
 - **AND** the "Needs you" area lists the same findings
 
-### Requirement: The system actor is refused on every HTTP route
+### Requirement: The system actor is refused on every mutating HTTP route
 
-The `system` actor SHALL be accepted only on hub-internal paths: the launch, the retry, and the spec-review PASS. Every HTTP route SHALL refuse `by: "system"` with HTTP 400 and record nothing, including the approval route.
+Only hub-internal code SHALL write the `system` actor. Every mutating HTTP route SHALL refuse `by: "system"` with HTTP 400 and record nothing, including the approval route.
 
 #### Scenario: Approval route refuses system
 

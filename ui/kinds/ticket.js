@@ -721,13 +721,38 @@ const TicketBoard = (() => {
     return `<button type="button" class="ticket-archive" data-ticket="${escAttr(t.id)}" data-archive="${archived ? 'false' : 'true'}">${archived ? 'Unarchive' : 'Archive'}</button>`;
   }
 
+  // Cases where only the human can act (the human's rule 2026-10-24: "when a ticket needs my action the status light must be red").
+  // Gone assignee: an open ticket whose assignee is not in the roster of the board's room; only the human can cancel it or assign it
+  // again. Before the roster is known (empty: the human is always in a loaded one) nothing is called gone.
+  // Known and accepted: after a hub restart the roster is empty or partial for a few seconds, so a card can show "gone" until its
+  // agent reconnects (a short false red).
+  function assigneeGone(t) {
+    if (!t.assignee || t.assignee === HUMAN_NAME) return false;
+    if (!(typeof ROSTER !== 'undefined' && Array.isArray(ROSTER) && ROSTER.length > 0)) return false;
+    return !roomAgents().includes(t.assignee);
+  }
+  // Only the human can queue a draft that the hub refuses the room lead (the intake rule in hub/kinds/ticket.ts): a ticket with no
+  // request label is checked alone (it is itself high radius); with a label, the request in the same room holds a non-terminal
+  // high-radius ticket, this one included. The human is never refused. The board holds the tickets of its room.
+  function onlyHumanCanQueue(t) {
+    if (t.status !== 'draft') return false;
+    if (!t.request_id) return t.blast_radius === 'high';
+    for (const o of tickets.values()) {
+      if (o.request_id === t.request_id && o.blast_radius === 'high' && o.status !== 'done' && o.status !== 'cancelled') return true;
+    }
+    return false;
+  }
+
   // Status light, macOS window-button style (the human's rules, id=233). Red: the ticket cannot advance without the
-  // human: a pending approval, or the human is the assignee. Orange: an agent works on it now (claimed, in_progress).
-  // Green: nobody works on it now: queued, and in_review, which waits for a check; it is green because no "check
-  // started" state exists on the hub. Done and cancelled: no light. Only the active dot is lit.
+  // human: a pending approval, the human is the assignee, the assignee is gone, or only the human may queue it. Orange: an
+  // agent works on it now (claimed, in_progress). Green: nobody works on it now: queued, and in_review, which waits for a check;
+  // it is green because no "check started" state exists on the hub. Done and cancelled: no light. Only the active dot is lit.
+  // statusLine() follows the same order, so the light and the line never disagree.
   function lightOf(t) {
     if (t.status === 'done' || t.status === 'cancelled') return null;
     if (t.approval?.status === 'pending' || t.assignee === HUMAN_NAME) return ['red', 'waiting for the human'];
+    if (assigneeGone(t)) return ['red', 'the assignee is gone: only the human can act'];
+    if (onlyHumanCanQueue(t)) return ['red', 'only the human can queue it'];
     if (t.status === 'claimed' || t.status === 'in_progress') return ['orange', 'an agent is busy with it'];
     return ['green', 'no one is working on it'];
   }
@@ -767,12 +792,14 @@ const TicketBoard = (() => {
     return { done, total };
   }
   const priorityBars = (t) => PRIORITIES[priorityKey(t)][0] - 1;
-  // The one line under a card title. Same order as lightOf(): the approval and the human lines are the red light. A finished
-  // ticket has no light and no line.
+  // The one line under a card title. Same order as lightOf(): the approval, the human, the gone assignee and the only-you lines are
+  // the red light. A finished ticket has no light and no line.
   function statusLine(t) {
     if (t.status === 'done' || t.status === 'cancelled') return null;
     if (t.approval?.status === 'pending') return 'Waiting for your approval';
     if (t.assignee === HUMAN_NAME) return 'Assigned to you';
+    if (assigneeGone(t)) return `Assignee ${t.assignee} is gone: cancel or assign it`;
+    if (onlyHumanCanQueue(t)) return 'Only you can queue this';
     const n = openBlockers(t).length;
     return n > 0 ? `Blocked by ${n} open ${n === 1 ? 'ticket' : 'tickets'}` : null;
   }
@@ -890,10 +917,18 @@ const TicketBoard = (() => {
     if (renderAfterDrag) { renderAfterDrag = false; render(); }
   }
 
+  // A pointer within SPLITTER_GUARD_PX of the splitter belongs to the splitter: a drag that starts there resizes the
+  // panes and never picks up a card (the Draft column sits 4 px from the splitter).
+  const SPLITTER_GUARD_PX = 8;
+  function nearSplitter(e) {
+    const r = document.getElementById('splitter')?.getBoundingClientRect?.();
+    return !!r && typeof e.clientX === 'number' && e.clientX >= r.left - SPLITTER_GUARD_PX && e.clientX <= r.right + SPLITTER_GUARD_PX;
+  }
+
   function wireDrag(el) {
     el.querySelectorAll('.ticket-card[draggable="true"]').forEach((card) => {
       card.addEventListener('dragstart', (e) => {
-        if (e.target?.closest?.(INTERACTIVE) || moving.has(card.dataset.ticket)) { e.preventDefault(); return; }   // a control is not a drag handle
+        if (e.target?.closest?.(INTERACTIVE) || moving.has(card.dataset.ticket) || nearSplitter(e)) { e.preventDefault(); return; }   // a control is not a drag handle
         dragId = card.dataset.ticket;
         card.classList.add('dragging');
         if (e.dataTransfer) { e.dataTransfer.setData('text/plain', dragId); e.dataTransfer.effectAllowed = 'move'; }
@@ -1943,8 +1978,9 @@ const TicketBoard = (() => {
     loadLead();   // the top bar shows the lead whether or not the board is open
     if (document.body?.classList.contains('board-open')) load();
   };
-  // roster.js calls this when the roster changes: the lead select lists the room's agents.
-  globalThis.refreshRoomLead = renderLead;
+  // roster.js calls this when the roster changes: the lead select lists the room's agents, and a card whose assignee came or
+  // went changes its light (red when the assignee is gone), so the cards are drawn again too.
+  globalThis.refreshRoomLead = () => { renderLead(); if (room) render(); };
 
   KindCardRenderer.observe('ticket', onTicket);
   KindCardRenderer.observe('permission', onPermission);

@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cubilot — Agent column</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#1a1714}
+*{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:#352c26 transparent}
+:root{color-scheme:dark}
+</style>
+</helmet>
+<nav aria-label="Agents" style="width: 300px; height: 1040px; display: flex; flex-direction: column; background: #1a1714; color: #f5ede2; font-family: Inter, -apple-system, 'Segoe UI', sans-serif; font-size: 12.5px; border-right: 1px solid #2a231e">
+
+<div style="flex: none; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 10px 0 14px; border-bottom: 1px solid #2a231e">
+<h2 style="margin: 0; font-size: 12.5px; font-weight: 600">Agents</h2>
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: #978b78">6/6 online</span>
+<button aria-label="Launch a new agent" title="Launch a new agent" style="margin-left: auto; width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: #a69583; cursor: pointer"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
+</div>
+
+<div style="flex: 1; min-height: 0; overflow: auto; padding: 8px 6px 12px; display: flex; flex-direction: column; gap: 2px">
+
+<button style="display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 8px 0 28px; border: 0; border-radius: 6px; background: transparent; color: #a69583; font: inherit; font-size: 12.5px; text-align: left; cursor: pointer" title="Your scratch shell, across rooms and projects"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 7 5 5-5 5M12 17h7"></path></svg>Shell</button>
+
+<div style="display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 8px 0 28px; color: #f5ede2">
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: #7fb069; flex: none"></span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace">human</span>
+<span style="font-size: 11.5px; color: #978b78">you</span>
+</div>
+
+<div aria-hidden="true" style="height: 1px; margin: 4px 8px; background: #2a231e"></div>
+
+<!-- Orchestrator -->
+<div style="display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 6px 0 4px; border-radius: 6px">
+<button aria-expanded="false" aria-label="Show details of Orchestrator" style="width: 20px; height: 20px; display: grid; place-items: center; border: 0; border-radius: 4px; background: transparent; color: #978b78; cursor: pointer"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg></button>
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: #7fb069; flex: none"></span>
+<button style="flex: 1; min-width: 0; border: 0; padding: 0; background: none; text-align: left; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12.5px; color: #ee9a6b; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Orchestrator</button>
+<button aria-label="Pause Orchestrator" title="Pause" style="width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #a69583; cursor: pointer"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg></button>
+</div>
+
+<!-- Worker1: selected and expanded -->
+<div style="display: flex; flex-direction: column; border-radius: 7px; background: #241e1a; border: 1px solid #352c26">
+<div style="display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 6px 0 4px">
+<button aria-expanded="true" aria-label="Hide details of Worker1" style="width: 20px; height: 20px; display: grid; place-items: center; border: 0; border-radius: 4px; background: transparent; color: #f5ede2; cursor: pointer"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button>
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: #7fb069; flex: none"></span>
+<button aria-current="true" style="flex: 1; min-width: 0; border: 0; padding: 0; background: none; text-align: left; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12.5px; font-weight: 600; color: #e8a857; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Worker1</button>
+<div role="group" aria-label="Actions for Worker1" style="display: flex; align-items: center; gap: 1px">
+<button aria-label="Pause Worker1" title="Pause" style="width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #a69583; cursor: pointer"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg></button>
+<button aria-label="Open editor at Worker1's working folder" title="Open editor at this agent's folder" style="width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #a69583; cursor: pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 9h18M7 13h4M13 13h4M7 17h7"></path></svg></button>
+<button aria-label="Reload Worker1: status and skills. 1 change waits." title="Reload this agent: status and skills (1 change waits)" style="position: relative; width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid #6b5326; border-radius: 5px; background: #33281a; color: #e8a857; cursor: pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"></path></svg><span aria-hidden="true" style="position: absolute; top: -3px; right: -3px; width: 7px; height: 7px; border-radius: 50%; background: #e8a857; border: 1.5px solid #241e1a"></span></button>
+<span aria-hidden="true" style="width: 4px"></span>
+<button aria-label="Kill Worker1's session" title="Kill session" style="width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #a69583; cursor: pointer"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg></button>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 12px; padding: 4px 10px 12px 34px">
+<dl style="margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 12px; font-size: 12px">
+<dt style="color: #978b78">Harness</dt>
+<dd style="margin: 0; color: #f5ede2">claude <span style="color: #978b78">· Claude Code</span></dd>
+<dt style="color: #978b78">Model × effort</dt>
+<dd style="margin: 0; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11.5px; color: #f5ede2">opus × high</dd>
+</dl>
+
+<fieldset style="min-width: 0; margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 6px">
+<legend style="width: 100%; padding: 0; margin-bottom: 6px">
+<span style="display: flex; align-items: center; gap: 8px">
+<span style="font-size: 12px; font-weight: 600; color: #f5ede2">Skills</span>
+<span style="font-size: 11.5px; color: #978b78">18 of 19 on</span>
+<button style="margin-left: auto; border: 0; padding: 0; background: none; color: #e08265; font: inherit; font-size: 11.5px; cursor: pointer">Turn all on</button>
+</span>
+</legend>
+
+<div style="font-size: 11px; color: #978b78">Role · worker</div>
+<div style="display: flex; flex-direction: column; gap: 1px; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11.5px">
+<label style="display: flex; align-items: center; gap: 8px; min-width: 0; height: 22px; color: #e3d6c6; cursor: pointer"><input type="checkbox" checked style="accent-color: #d97757; margin: 0"><span style="flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">agency-engineering-cms-developer</span></label>
+<label style="display: flex; align-items: center; gap: 8px; min-width: 0; height: 22px; color: #978b78; cursor: pointer"><input type="checkbox" style="accent-color: #d97757; margin: 0"><span style="flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-decoration: none">agency-engineering-drupal-performance</span><span style="margin-left: auto; flex: none; font-family: Inter, sans-serif; font-size: 10.5px; color: #e8a857">off on reload</span></label>
+<label style="display: flex; align-items: center; gap: 8px; min-width: 0; height: 22px; color: #e3d6c6; cursor: pointer"><input type="checkbox" checked style="accent-color: #d97757; margin: 0"><span style="flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">agency-engineering-minimal-change-engineer</span></label>
+<label style="display: flex; align-items: center; gap: 8px; min-width: 0; height: 22px; color: #e3d6c6; cursor: pointer"><input type="checkbox" checked style="accent-color: #d97757; margin: 0"><span>api-design</span></label>
+<label style="display: flex; align-items: center; gap: 8px; min-width: 0; height: 22px; color: #e3d6c6; cursor: pointer"><input type="checkbox" checked style="accent-color: #d97757; margin: 0"><span>build-error-resolver</span></label>
+<label style="display: flex; align-items: center; gap: 8px; min-width: 0; height: 22px; color: #e3d6c6; cursor: pointer"><input type="checkbox" checked style="accent-color: #d97757; margin: 0"><span>code-simplification</span></label>
+<label style="display: flex; align-items: center; gap: 8px; min-width: 0; height: 22px; color: #e3d6c6; cursor: pointer"><input type="checkbox" checked style="accent-color: #d97757; margin: 0"><span>coding-standards</span></label>
+<label style="display: flex; align-items: center; gap: 8px; min-width: 0; height: 22px; color: #e3d6c6; cursor: pointer"><input type="checkbox" checked style="accent-color: #d97757; margin: 0"><span>database-migrations</span></label>
+<label style="display: flex; align-items: center; gap: 8px; min-width: 0; height: 22px; color: #e3d6c6; cursor: pointer"><input type="checkbox" checked style="accent-color: #d97757; margin: 0"><span>debugging-and-error-recovery</span></label>
+<label style="display: flex; align-items: center; gap: 8px; min-width: 0; height: 22px; color: #e3d6c6; cursor: pointer"><input type="checkbox" checked style="accent-color: #d97757; margin: 0"><span>deprecation-and-migration</span></label>
+<label style="display: flex; align-items: center; gap: 8px; min-width: 0; height: 22px; color: #e3d6c6; cursor: pointer"><input type="checkbox" checked style="accent-color: #d97757; margin: 0"><span>documentation-lookup</span></label>
+<label style="display: flex; align-items: center; gap: 8px; min-width: 0; height: 22px; color: #e3d6c6; cursor: pointer"><input type="checkbox" checked style="accent-color: #d97757; margin: 0"><span>error-handling</span></label>
+<label style="display: flex; align-items: center; gap: 8px; min-width: 0; height: 22px; color: #e3d6c6; cursor: pointer"><input type="checkbox" checked style="accent-color: #d97757; margin: 0"><span>frontend-ui-engineering</span></label>
+<label style="display: flex; align-items: center; gap: 8px; min-width: 0; height: 22px; color: #e3d6c6; cursor: pointer"><input type="checkbox" checked style="accent-color: #d97757; margin: 0"><span>git-workflow-and-versioning</span></label>
+<label style="display: flex; align-items: center; gap: 8px; min-width: 0; height: 22px; color: #e3d6c6; cursor: pointer"><input type="checkbox" checked style="accent-color: #d97757; margin: 0"><span>incremental-implementation</span></label>
+<label style="display: flex; align-items: center; gap: 8px; min-width: 0; height: 22px; color: #e3d6c6; cursor: pointer"><input type="checkbox" checked style="accent-color: #d97757; margin: 0"><span>search-first</span></label>
+<label style="display: flex; align-items: center; gap: 8px; min-width: 0; height: 22px; color: #e3d6c6; cursor: pointer"><input type="checkbox" checked style="accent-color: #d97757; margin: 0"><span>source-driven-development</span></label>
+<label style="display: flex; align-items: center; gap: 8px; min-width: 0; height: 22px; color: #e3d6c6; cursor: pointer"><input type="checkbox" checked style="accent-color: #d97757; margin: 0"><span>test-driven-development</span></label>
+</div>
+
+<div style="margin-top: 4px; font-size: 11px; color: #978b78">Shared</div>
+<div style="display: flex; flex-direction: column; gap: 1px; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11.5px">
+<label style="display: flex; align-items: center; gap: 8px; min-width: 0; height: 22px; color: #e3d6c6; cursor: pointer"><input type="checkbox" checked style="accent-color: #d97757; margin: 0"><span>asd-ste100</span></label>
+</div>
+</fieldset>
+
+<div role="status" style="display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid #4d3d22; border-radius: 7px; background: #2a2216; font-size: 11.5px; color: #ead9bd">
+<span style="flex: 1; min-width: 0">1 change waits for Reload</span>
+<button style="display: flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px; border: 1px solid #6b5326; border-radius: 5px; background: transparent; color: #e8a857; font: inherit; font-size: 11.5px; font-weight: 500; cursor: pointer"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"></path></svg>Reload Worker1</button>
+</div>
+</div>
+</div>
+
+<!-- Worker2 -->
+<div style="display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 6px 0 4px; border-radius: 6px">
+<button aria-expanded="false" aria-label="Show details of Worker2" style="width: 20px; height: 20px; display: grid; place-items: center; border: 0; border-radius: 4px; background: transparent; color: #978b78; cursor: pointer"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg></button>
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: #7fb069; flex: none"></span>
+<button style="flex: 1; min-width: 0; border: 0; padding: 0; background: none; text-align: left; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12.5px; color: #e8a857; cursor: pointer">Worker2</button>
+<button aria-label="Pause Worker2" title="Pause" style="width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #a69583; cursor: pointer"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg></button>
+</div>
+
+<!-- Tester1: paused -->
+<div style="display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 6px 0 4px; border-radius: 6px">
+<button aria-expanded="false" aria-label="Show details of Tester1" style="width: 20px; height: 20px; display: grid; place-items: center; border: 0; border-radius: 4px; background: transparent; color: #978b78; cursor: pointer"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg></button>
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px #e8a857; flex: none"></span>
+<button style="flex: 1; min-width: 0; border: 0; padding: 0; background: none; text-align: left; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12.5px; color: #6ab5a3; cursor: pointer">Tester1 <span style="font-family: Inter, sans-serif; font-size: 11px; color: #e8a857">paused</span></button>
+<button aria-label="Resume Tester1" title="Resume" style="width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #e8a857; cursor: pointer"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg></button>
+</div>
+
+<!-- Tester2: needs attention -->
+<div style="display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 6px 0 4px; border-radius: 6px; background: #2a1b17">
+<button aria-expanded="false" aria-label="Show details of Tester2" style="width: 20px; height: 20px; display: grid; place-items: center; border: 0; border-radius: 4px; background: transparent; color: #978b78; cursor: pointer"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg></button>
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: #d4604a; box-shadow: 0 0 6px #d4604a; flex: none"></span>
+<button style="flex: 1; min-width: 0; border: 0; padding: 0; background: none; text-align: left; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12.5px; color: #6ab5a3; cursor: pointer">Tester2 <span style="font-family: Inter, sans-serif; font-size: 11px; color: #e38f7a">needs you</span></button>
+<button aria-label="Pause Tester2" title="Pause" style="width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #a69583; cursor: pointer"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg></button>
+</div>
+
+<!-- Validator -->
+<div style="display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 6px 0 4px; border-radius: 6px">
+<button aria-expanded="false" aria-label="Show details of Validator" style="width: 20px; height: 20px; display: grid; place-items: center; border: 0; border-radius: 4px; background: transparent; color: #978b78; cursor: pointer"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg></button>
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: #7fb069; flex: none"></span>
+<button style="flex: 1; min-width: 0; border: 0; padding: 0; background: none; text-align: left; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12.5px; color: #a788c4; cursor: pointer">Validator</button>
+<button aria-label="Pause Validator" title="Pause" style="width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #a69583; cursor: pointer"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg></button>
+</div>
+
+</div>
+</nav>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":300,"height":1040}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

@@ -21,6 +21,8 @@ const RETRY_MS = 2000;
 export type BridgeEvent = {
   id?: number;
   type?: string;
+  force?: boolean; // agent.reload: reload the version the agent already has
+  reload_id?: string; // agent.reload: the id of the request, echoed back with the result
   from?: string;
   to?: string;
   text?: string;
@@ -115,7 +117,7 @@ export const REPLY_POLICY =
 // `from === agent` rule: handoff.update carries the creator in `from` and must wake.
 const CONTEXT_KINDS = new Set(["permission.resolved", "permission.dismissed", "interrupt.ack"]);
 
-export function modeFor(evt: BridgeEvent, agent: string): DeliveryMode {
+export function modeFor(evt: BridgeEvent, agent: string, stageSession = false): DeliveryMode {
   if (evt.type === "briefing" || evt.type === "nutshell.updated") return "context";
   // A ticket:done approval: the human's answer wakes the requester (it waits for it),
   // and nobody else is woken for the request (only the human votes on it).
@@ -132,6 +134,9 @@ export function modeFor(evt: BridgeEvent, agent: string): DeliveryMode {
   // ticket.assigned is a later event the creator has not seen, so it always wakes the assignee.
   if (evt.kind === "ticket.assigned" || evt.kind === "ticket.new") {
     const s = evt.snapshot;
+    // The hub assigned a launched session its ticket (actor `system`): the session's first message already carries the
+    // ticket, so the assignment wakes no one. An ordinary agent (the room lead after a final PASS) is woken as usual.
+    if (evt.kind === "ticket.assigned" && evt.from === "system" && (stageSession || s?.assignee !== agent)) return "context";
     // A draft wakes no one, the lead included: it wakes on ticket.promoted when the draft is queued.
     if (s?.status === "draft") return "context";
     if (evt.kind === "ticket.new" && s?.creator === agent) return "context";
@@ -149,6 +154,9 @@ export function modeFor(evt: BridgeEvent, agent: string): DeliveryMode {
     return "context";
   }
   if (evt.kind?.startsWith("ticket.")) return "context";
+  // A refused result: the session must read the errors and send the result again, so the entry wakes it (human decision
+  // 2026-10-24). The hub does not count the turn end that follows the refusal as a stop (hub/kinds/stage.ts turnEnd).
+  if (evt.kind === "stage.rejected") return "wake";
   if (evt.kind === "permission.new" && evt.from === agent) return "context";
   if (evt.kind === "interrupt.new") return "steer";
   return "wake";
@@ -230,6 +238,13 @@ export function startBridge(host: Host, opts: BridgeOpts): Bridge {
   let retryWait = false;
   let stuckLogged = false;
   let noLink = false; // 404: no role, or a legacy launch. Never reloads.
+  let forceNext = false; // the next relink asks for a reload of the version the agent already has
+  let reloadIdNext: string | null = null; // the id of that request: it lives and dies with forceNext
+  // The hub ordered a reload (relink answered reload:true) but a run started while the request was in flight: the reload
+  // waits for the run end and does not ask again (a second relink would answer "pending" for the order we hold).
+  let orderedVersion: string | null = null;
+  let orderedReloadId: string | null = null;
+  let orderedAttempt: string | null = null;
   let busy = false;
   const failures = new Map<string, number>();
 
@@ -259,35 +274,53 @@ export function startBridge(host: Host, opts: BridgeOpts): Bridge {
   }
 
   async function maybeReload(): Promise<"pending" | "other"> {
-    if (reloading || !checkNeeded || busy || noLink || sawVersion === null) return "other";
-    if ((failures.get(sawVersion) ?? 0) >= 2) return "other";
-    checkNeeded = false;
+    if (reloading || busy || noLink || sawVersion === null) return "other";
+    if (orderedVersion === null && !checkNeeded) return "other";
+    if (orderedVersion === null && (failures.get(sawVersion) ?? 0) >= 2) return "other";
     reloading = true;
     try {
-      const r = await post("/factory/relink", {});
-      if (r.status === 404) { noLink = true; return "other"; }
-      const j = (r.json ?? {}) as { reload?: boolean; pending?: boolean; version?: string };
-      if (r.status < 200 || r.status >= 300) {
-        host.log(`[channel] factory relink refused: HTTP ${r.status}`);
-        return "other";
-      }
-      if (!j.reload) {
-        // The hub holds a reload with no completion: it never clears by time. Say so once per process.
-        if (j.pending && !stuckLogged) {
-          stuckLogged = true;
-          host.log("[channel] hot reload still pending: restart the agent");
+      let version = orderedVersion;
+      let reloadId = orderedReloadId;
+      let attempt = orderedAttempt;
+      if (version === null) {
+        checkNeeded = false;
+        const force = forceNext;
+        reloadId = reloadIdNext;
+        forceNext = false;
+        reloadIdNext = null;
+        const r = await post("/factory/relink", { ...(force ? { force: true } : {}), ...(reloadId ? { reload_id: reloadId } : {}) });
+        if (r.status === 404) { noLink = true; return "other"; }
+        const j = (r.json ?? {}) as { reload?: boolean; pending?: boolean; version?: string; attempt?: string };
+        if (r.status < 200 || r.status >= 300) {
+          host.log(`[channel] factory relink refused: HTTP ${r.status}`);
+          return "other";
         }
-        if (j.pending) { void pollWhilePending(); return "pending"; }
-        return "other";
+        if (!j.reload) {
+          // The hub holds a reload with no completion: it never clears by time. Say so once per process.
+          if (j.pending && !stuckLogged) {
+            stuckLogged = true;
+            host.log("[channel] hot reload still pending: restart the agent");
+          }
+          // The force intent lives until a reload is ordered or the hub refuses: the poll asks again with it.
+          // A click that arrived during the request is newer: it keeps its place, the latest click wins.
+          if (j.pending) { if (!forceNext && reloadIdNext === null) { forceNext = force; reloadIdNext = reloadId; } void pollWhilePending(); return "pending"; }
+          return "other";
+        }
+        version = j.version ?? sawVersion;
+        attempt = j.attempt ?? null;
+        // A run may have started during the request: the order stays, the reload waits for the run end.
+        if (busy) { orderedVersion = version; orderedReloadId = reloadId; orderedAttempt = attempt; return "other"; }
       }
-      const version = j.version ?? sawVersion;
+      orderedVersion = null;
+      orderedReloadId = null;
+      orderedAttempt = null;
       try {
-        await host.reload(version);
+        await host.reload(version, reloadId, attempt);
       } catch (e) {
         // No rollback and no applied record. A real failure tells the hub, which forgets the order, so the next
         // relink asks for the reload again. A timeout does not: the reload may still run, the window blocks a second.
         if (!(e instanceof ReloadTimeout)) {
-          await post("/factory/applied", { failed: true }).catch((err) => host.log(`[channel] failure not reported: ${(err as Error).message ?? err}`));
+          await post("/factory/applied", { failed: true, ...(reloadId ? { reload_id: reloadId } : {}), ...(attempt ? { attempt } : {}) }).catch((err) => host.log(`[channel] failure not reported: ${(err as Error).message ?? err}`));
         }
         const n = (failures.get(version) ?? 0) + 1;
         failures.set(version, n);
@@ -320,13 +353,14 @@ export function startBridge(host: Host, opts: BridgeOpts): Bridge {
       !evt.type &&
       !evt.kind &&
       (evt.to ?? "").split(",").some((n) => n.trim() === agent);
+    const system = evt.kind === "ticket.assigned" && evt.from === "system"; // only this event reads the stage id
     const check = qualifies ? { armed: false, from: evt.from } : null;
     if (check) checks.add(check);
     try {
       await host.deliver({
         id,
         text: renderEvent(evt, agent, room),
-        mode: modeFor(evt, agent),
+        mode: modeFor(evt, agent, system && (await currentStageId()) !== null),
         onRead: () => {
           if (check) check.armed = true;
         },
@@ -347,6 +381,15 @@ export function startBridge(host: Host, opts: BridgeOpts): Bridge {
       host.log(
         `[channel] dropped cross-room event: mine=${room} theirs=${evt.room} kind=${evt.kind ?? evt.type ?? "?"}`,
       );
+      return;
+    }
+    // The human's Reload (hub: POST /agents/:name/reload): a control request, never shown to the model. Two failures
+    // for one version stop the automatic retries, not this click.
+    if (evt.type === "agent.reload") {
+      if (sawVersion !== null) failures.delete(sawVersion);
+      forceNext = evt.force === true;
+      reloadIdNext = typeof evt.reload_id === "string" ? evt.reload_id : null;
+      trigger();
       return;
     }
     await deliver(evt);
@@ -421,6 +464,24 @@ export function startBridge(host: Host, opts: BridgeOpts): Bridge {
     }
   }
 
+  // A session the hub started for a stage reports each end of a turn (stage-sessions 5.2). The hub answers with the
+  // reminder or the close; a failure here is only logged: the hub's time-out (5.3) covers a lost report.
+  let stageIdRead = false;
+  let stageId: string | null = null;
+  async function currentStageId(): Promise<string | null> {
+    if (!stageIdRead) { stageId = await host.stageId(); stageIdRead = true; }
+    return stageId;
+  }
+  async function reportTurnEnd(): Promise<void> {
+    try {
+      if (!(await currentStageId()) || !stageId) return;
+      const r = await post(`/stages/${encodeURIComponent(stageId)}/turn-end`, {});
+      if (r.status < 200 || r.status >= 300) host.log(`[channel] turn-end report refused: HTTP ${r.status}`);
+    } catch (e) {
+      host.log(`[channel] turn-end report failed: ${(e as Error).message ?? e}`);
+    }
+  }
+
   void tail();
 
   return {
@@ -434,6 +495,7 @@ export function startBridge(host: Host, opts: BridgeOpts): Bridge {
     },
     onRunEnd(answered = true) {
       busy = false;
+      if (answered) void reportTurnEnd();
       if (sawVersion !== null) trigger();
       // The limit is checked here, when the nudge would go out, so messages queued before the first nudge
       // share one nudge per peer.

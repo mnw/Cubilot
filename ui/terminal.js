@@ -26,6 +26,7 @@
   const splitter      = document.getElementById('splitter');
   const appBody       = document.getElementById('app-body');
   const tabsEl        = document.getElementById('terminal-tabs');
+  const agentCol      = document.getElementById('agent-col');
   const bodyEl        = document.getElementById('terminal-body');
   const spawnModal    = document.getElementById('spawn-modal');
   const spawnAgentEl  = document.getElementById('spawn-agent-input');
@@ -111,11 +112,18 @@
     applyPaneClass();
     document.dispatchEvent(new CustomEvent('cubilot:right-pane', { detail: { pane: on ? 'terminal' : null } }));
   }
+  // The chat takes this share (25-75 %) of the width that is left after the agent column, not of the whole window.
+  function splitPercent(clientX, bodyLeft, bodyWidth, colWidth) {
+    const avail = bodyWidth - colWidth;
+    if (!(avail > 0)) return 50;
+    const pct = ((clientX - bodyLeft - colWidth) / avail) * 100;
+    return Math.max(25, Math.min(75, pct));
+  }
   function applySplit() {
     const raw = localStorage.getItem(SPLIT_KEY);
     const pct = raw ? Number(raw) : 50;
     const clamped = Math.max(25, Math.min(75, Number.isFinite(pct) ? pct : 50));
-    appBody.style.setProperty('--split', clamped + '%');
+    appBody.style.setProperty('--split-frac', String(clamped / 100));
   }
   applyPaneClass();
   applySplit();
@@ -150,10 +158,8 @@
   splitter?.addEventListener('pointermove', (e) => {
     if (!dragStart) return;
     const rect = appBody.getBoundingClientRect();
-    const chatWidth = e.clientX - rect.left;
-    const rawPct = (chatWidth / rect.width) * 100;
-    const clamped = Math.max(25, Math.min(75, rawPct));
-    appBody.style.setProperty('--split', clamped + '%');
+    const clamped = splitPercent(e.clientX, rect.left, rect.width, agentCol?.getBoundingClientRect().width || 0);
+    appBody.style.setProperty('--split-frac', String(clamped / 100));
     localStorage.setItem(SPLIT_KEY, String(Math.round(clamped)));
     for (const t of tabs.values()) if (t.term) t.fitAddon?.fit();
   });
@@ -214,36 +220,20 @@
   const SHELL_NAME = 'shell';
   function isShell(agent) { return agent === SHELL_NAME; }
 
-  function ensureAgentsHeading() {
-    if (tabsEl.querySelector('.terminal-tabs-heading')) return;
-    const h = document.createElement('div');
-    h.className = 'terminal-tabs-heading';
-    h.setAttribute('aria-hidden', 'true');
-    h.innerHTML = '<span>agents</span>';
-    h.title = 'Agent tabs below. Launch a new one with the + button — don\'t start claude from the shell tab.';
-    const shellEl = tabsEl.querySelector('.terminal-tab-shell');
-    if (shellEl && shellEl.nextSibling) {
-      tabsEl.insertBefore(h, shellEl.nextSibling);
-    } else {
-      tabsEl.appendChild(h);
-    }
-  }
-
   function ensureShellTab() {
     let t = tabs.get(SHELL_NAME);
-    if (t) { ensureAgentsHeading(); return t; }
+    if (t) return t;
     const tabEl = document.createElement('div');
     tabEl.className = 'terminal-tab terminal-tab-shell';
     tabEl.dataset.agent = SHELL_NAME;
     tabEl.dataset.state = 'external';
     // No data-room: shell is cross-room and survives every filter.
     tabEl.innerHTML =
-      '<span class="state-dot"></span>' +
       '<svg viewBox="0 0 24 24" class="tab-icon" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>' +
-      '<span class="tab-label"></span>';
-    tabEl.querySelector('.tab-label').textContent = 'shell';
+      '<button type="button" class="tab-label"></button>';
+    tabEl.querySelector('.tab-label').textContent = 'Shell';
     tabEl.title = 'Your scratch shell — cross-room, cross-project';
-    tabEl.addEventListener('click', () => focusTab(SHELL_NAME));
+    tabEl.addEventListener('click', () => openAgentSession(SHELL_NAME));
     tabsEl.insertBefore(tabEl, tabsEl.firstChild);
 
     const paneEl = document.createElement('div');
@@ -254,7 +244,6 @@
     t = { state: 'external', tabEl, paneEl, term: null, fitAddon: null,
           outputUnlisten: null, exitUnlisten: null, cwd: null, external: true };
     tabs.set(SHELL_NAME, t);
-    ensureAgentsHeading();
     return t;
   }
 
@@ -414,26 +403,51 @@
     if (typeof ROSTER !== 'undefined' && Array.isArray(ROSTER)) {
       const ra = ROSTER.find((x) => x && x.name === agent);
       if (ra && typeof ra.room === 'string' && ra.room) tabEl.dataset.room = ra.room;
+      if (ra?.color) tabEl.style.setProperty('--agent-color', ra.color);
     }
+    tabEl.dataset.presence = (typeof presenceState !== 'undefined' && presenceState[agent]) ? 'online' : 'offline';
+    const icon = (paths) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths + '</svg>';
     tabEl.innerHTML =
+      '<div class="row-main">' +
+      '<button type="button" class="row-chevron" aria-expanded="false">' + icon('<polyline points="9 6 15 12 9 18"/>') + '</button>' +
       '<span class="state-dot"></span>' +
-      '<span class="tab-label"></span>' +
-      '<button type="button" class="pause-toggle"></button>' +
-      '<span class="open-editor" title="Open editor at this agent\'s cwd">' +
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-          '<rect x="3" y="4" width="18" height="16" rx="2"/>' +
-          '<line x1="3" y1="9" x2="21" y2="9"/>' +
-          '<line x1="7" y1="13" x2="11" y2="13"/>' +
-          '<line x1="13" y1="13" x2="17" y2="13"/>' +
-          '<line x1="7" y1="17" x2="14" y2="17"/>' +
-        '</svg>' +
+      '<button type="button" class="tab-label"></button>' +
+      '<span class="row-state lbl-offline">offline</span><span class="row-state lbl-paused">paused</span><span class="row-state lbl-needs">needs you</span>' +
+      '<span class="row-actions">' +
+        '<button type="button" class="pause-toggle"></button>' +
+        '<button type="button" class="open-editor" title="Open editor at this agent\'s cwd">' +
+          icon('<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="7" y1="13" x2="11" y2="13"/><line x1="13" y1="13" x2="17" y2="13"/><line x1="7" y1="17" x2="14" y2="17"/>') +
+        '</button>' +
+        '<button type="button" class="reload-btn" title="Reload: read the status of this agent again">' + icon('<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>') + '</button>' +
+        '<span class="row-gap"></span>' +
+        '<button type="button" class="close-x" title="Kill session">×</button>' +
+        '<button type="button" class="remove-agent" title="Remove agent">×</button>' +
       '</span>' +
-      '<span class="close-x" title="Kill session">×</span>';
+      '</div>' +
+      '<div class="reload-msg" role="status" hidden></div>' +
+      // The announcement of the skills strip (C6c). It lives here, outside .row-details: renderRowDetails replaces that
+      // subtree at every rebuild, and a live region that is removed and inserted again is not announced reliably.
+      '<div class="skills-live visually-hidden" role="status" aria-live="polite"></div>' +
+      '<div class="row-details" hidden></div>';
     tabEl.querySelector('.tab-label').textContent = agent;
+    tabEl.querySelector('.tab-label').title = agent;
+    const chevron = tabEl.querySelector('.row-chevron');
+    chevron.setAttribute('aria-label', 'Show details of ' + agent);
+    tabEl.querySelector('.open-editor').setAttribute('aria-label', 'Open editor for ' + agent);
+    tabEl.querySelector('.reload-btn').setAttribute('aria-label', 'Reload ' + agent);
+    tabEl.querySelector('.close-x').setAttribute('aria-label', 'Kill session of ' + agent);
+    tabEl.querySelector('.remove-agent').setAttribute('aria-label', 'Remove ' + agent);
     tabEl.addEventListener('click', (e) => {
-      if (e.target.closest('.close-x') || e.target.closest('.open-editor')
-          || e.target.closest('.pause-toggle')) return;
-      focusTab(agent);
+      if (e.target.closest('.row-actions') || e.target.closest('.row-chevron') || e.target.closest('.row-details')) return;
+      openAgentSession(agent);
+    });
+    chevron.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = chevron.getAttribute('aria-expanded') !== 'true';
+      chevron.setAttribute('aria-expanded', String(open));
+      tabEl.querySelector('.row-details').hidden = !open;
+      writeOpenRow(agent, open);
+      if (open) refreshSkills(agent);   // the states are read again each time the row opens
     });
     tabEl.querySelector('.pause-toggle').addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -447,7 +461,19 @@
       e.stopPropagation();
       await handleOpenEditor(agent);
     });
-    tabsEl.insertBefore(tabEl, tabsEl.querySelector('.terminal-tab-new'));
+    tabEl.querySelector('.reload-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      reloadAgent(agent);
+    });
+    tabEl.querySelector('.remove-agent').addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeAgentFromHub(agent, e.currentTarget);
+    });
+    tabsEl.appendChild(tabEl);
+    if (readOpenRows()[agent]) {
+      chevron.setAttribute('aria-expanded', 'true');
+      tabEl.querySelector('.row-details').hidden = false;
+    }
 
     const paneEl = document.createElement('div');
     paneEl.className = 'terminal-pane';
@@ -457,6 +483,8 @@
     t = { state: 'external', tabEl, paneEl, term: null, fitAddon: null,
           outputUnlisten: null, exitUnlisten: null, cwd: cwdCache[agent] || null, external: true };
     tabs.set(agent, t);
+    setReloadState(agent, 'ready');
+    renderRowDetails(agent);
     renderPauseToggle(agent);
     syncPauseState(agent);
     return t;
@@ -474,6 +502,424 @@
     PAUSED_AGENTS.delete(agent);
     if (activeAgent === agent) activeAgent = null;
   }
+
+  // Which rows are open is kept per agent in localStorage; a storage error (private mode, quota) only loses that.
+  const ROWS_OPEN_KEY = 'cubilot_open_rows';
+  function readOpenRows() {
+    try { return JSON.parse(localStorage.getItem(ROWS_OPEN_KEY) || '{}') || {}; } catch { return {}; }
+  }
+  function writeOpenRow(agent, open) {
+    try {
+      const rows = readOpenRows();
+      if (open) rows[agent] = true; else delete rows[agent];
+      localStorage.setItem(ROWS_OPEN_KEY, JSON.stringify(rows));
+    } catch {}
+  }
+
+  // The details of an open row: the same recorded values the old pill card showed (pillCardFields over pty_roles).
+  const HARNESS_LABEL = { claude: 'claude \u00b7 Claude Code', pi: 'pi \u00b7 pi.dev' };
+  function renderRowDetails(agent) {
+    const el = tabs.get(agent)?.tabEl?.querySelector('.row-details');
+    if (!el) return;
+    const info = typeof pillRoles !== 'undefined' ? pillRoles[agent] : undefined;
+    const f = Object.fromEntries(window.pillCardFields(info));
+    const kv = (k, v) => {
+      const row = document.createElement('div');
+      row.className = 'row-kv';
+      const ke = document.createElement('span'); ke.className = 'row-k'; ke.textContent = k;
+      const ve = document.createElement('span'); ve.className = 'row-v'; ve.textContent = v;
+      row.append(ke, ve);
+      return row;
+    };
+    const fac = tabs.get(agent)?.factory;
+    // A rebuild must not take the keyboard focus from a checkbox or a button of the skills area.
+    const keep = el.contains?.(document.activeElement) ? document.activeElement?.dataset?.focusKey : undefined;
+    el.replaceChildren(kv('Harness', HARNESS_LABEL[f.Harness] || '-'), kv('Model \u00d7 effort', `${f.Model} \u00d7 ${f.Effort}`));
+    if (fac) el.append(kv('Factory', fac.linked ? `${fac.applied || '-'}${fac.pending ? ' \u2192 ' + fac.pending : ''}` : 'no link'));
+    // The skills area. A role agent gets its checkboxes there (ticket C6c); an agent with no role loads its own skills.
+    const skills = document.createElement('div');
+    if (info?.role) {
+      skills.className = 'row-skills';
+      skills.dataset.role = info.role;
+      fillSkills(agent, skills);
+      if (!el.hidden && !tabs.get(agent)?.skills && !tabs.get(agent)?.skillsLoading) refreshSkills(agent);
+    } else {
+      skills.className = 'row-noskills';
+      skills.textContent = 'No role: the agent loads your own Claude or Pi skills.';
+    }
+    el.append(skills);
+    if (keep !== undefined) [...el.querySelectorAll('[data-focus-key]')].find((n) => n.dataset.focusKey === keep)?.focus();
+  }
+
+  // ---- C6c: skill switches of the open row. The backend (skills.rs) owns the choice and the states; the row only shows
+  // them (design note factory/brief/04a-c6-design.md, section 2a point 8) and saves a change at once: agent_skills_set
+  // (the intent), then agent_skills_apply (prepares the build; "Relaunch <agent> to apply" when the agent has no view).
+  // A reload is a separate click: the strip button calls reloadAgent. The box always shows the SAVED value (t.skills.data),
+  // except while its own save runs (t.skillsPending).
+  const errText = (e) => (typeof e === 'string' ? e : e?.message || String(e));
+  const skillName = (id) => id.slice(id.indexOf('/') + 1);
+  const skillChanged = (s) => s.on !== (s.state === 'loaded');   // the box differs from what the agent loaded
+  // The label of one skill: loaded and off-and-loaded show none; "not loaded" only after a reload applied it.
+  function skillNote(s) {
+    if (s.state === 'new') return s.on ? 'new, loads on Reload' : 'new, stays off on Reload';
+    if (s.state === 'not_loaded') return 'not loaded';
+    return '';
+  }
+  const skillsOf = (d) => d.groups.flatMap((g) => g.skills);
+  const changesOf = (d) => skillsOf(d).filter(skillChanged).length;
+
+  async function refreshSkills(agent) {
+    const t = tabs.get(agent);
+    if (!t) return;
+    const seq = (t.skillsSeq = (t.skillsSeq || 0) + 1);   // a save started later makes this answer stale
+    t.skillsLoading = true;
+    try {
+      const data = await invoke('agent_skills', { agent });
+      if (tabs.get(agent) !== t || t.skillsSeq !== seq) return;
+      t.skills = { data, error: t.skills?.error || '', readError: '' };   // a good read clears an old read error, never a save error
+    } catch (e) {
+      if (tabs.get(agent) !== t || t.skillsSeq !== seq) return;
+      console.warn('[terminal] agent_skills', agent, e);
+      t.skills = { data: t.skills?.data || null, error: t.skills?.error || '', readError: `Skills not available: ${errText(e)}` };
+    } finally {
+      if (tabs.get(agent) === t) t.skillsLoading = false;
+    }
+    renderRowDetails(agent);
+    syncChangeState(agent);
+  }
+
+  // The button of the row follows the strip: "change waits" while a box differs from what is loaded. Ready, failed and
+  // stale keep their own text; only ready and change are switched here.
+  function syncChangeState(agent) {
+    const t = tabs.get(agent);
+    const d = t?.skills?.data;
+    if (!d || (t.reloadState !== 'ready' && t.reloadState !== 'change')) return;
+    const want = changesOf(d) > 0 ? 'change' : 'ready';
+    if (t.reloadState !== want) setReloadState(agent, want);
+  }
+
+  // One save at a time for one agent: a second click waits for the first, then reads the saved list again.
+  function changeSkills(agent, mutate, touched) {
+    const t = tabs.get(agent);
+    if (!t?.skills?.data) return;
+    t.skillsPending = t.skillsPending || new Map();
+    for (const [id, on] of touched) t.skillsPending.set(id, on);
+    t.skillsChain = (t.skillsChain || Promise.resolve()).then(() => saveSkills(agent, mutate, touched));
+    return t.skillsChain;
+  }
+  async function saveSkills(agent, mutate, touched) {
+    const t = tabs.get(agent);
+    if (!t?.skills?.data) return;
+    const d = t.skills.data;
+    const off = new Set(skillsOf(d).filter((s) => !s.on).map((s) => s.id));
+    mutate(off);
+    t.skillsSeq = (t.skillsSeq || 0) + 1;
+    const done = () => { for (const [id] of touched) t.skillsPending?.delete(id); };
+    try {
+      await invoke('agent_skills_set', { agent, off: [...off].sort() });
+    } catch (e) {
+      done();
+      t.skills.error = `Could not save the skill choice: ${errText(e)}`;
+      renderRowDetails(agent);   // the boxes return to the saved values
+      return;
+    }
+    t.skills.error = '';
+    for (const s of skillsOf(d)) s.on = !off.has(s.id);
+    done();
+    try {
+      await invoke('agent_skills_apply', { agent });
+    } catch (e) {
+      const m = errText(e);
+      // "Relaunch <agent> to apply" is not a failure: the strip says it (relaunch_needed comes back from agent_skills).
+      if (!/^Relaunch /.test(m)) t.skills.error = `The choice is saved, but it could not be prepared: ${m}`;
+    }
+    await refreshSkills(agent);   // states, relaunch_needed and the count as the backend sees them
+  }
+
+  function skillBox(agent, t, s) {
+    const on = t.skillsPending?.has(s.id) ? t.skillsPending.get(s.id) : s.on;
+    const note = skillNote({ ...s, on });
+    const name = skillName(s.id);
+    const item = document.createElement('div');
+    item.className = 'skill-item';
+    item.dataset.state = s.state;
+    if (!on && s.state === 'not_loaded') item.classList.add('is-grey');
+    const label = document.createElement('label');
+    label.title = name;
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = on;
+    box.dataset.focusKey = s.id;
+    const text = document.createElement('span');
+    text.className = 'skill-name';
+    text.textContent = name;
+    label.append(box, text);
+    item.append(label);
+    if (note) {
+      const n = document.createElement('span');
+      n.className = 'skill-note';
+      n.textContent = note;
+      n.id = `skill-note-${agent}-${s.id}`.replace(/[^A-Za-z0-9_-]/g, '_');
+      box.setAttribute('aria-describedby', n.id);
+      item.append(n);
+    }
+    box.addEventListener('change', () => changeSkills(agent, (off) => { if (box.checked) off.delete(s.id); else off.add(s.id); }, [[s.id, box.checked]]));
+    return item;
+  }
+
+  // The strip is created once per agent and moved into each rebuild. A screen reader hears the change through the
+  // persistent .skills-live region of the row, which skillsStrip updates.
+  function skillsStrip(agent, t, d) {
+    if (!t.skillsStrip) {
+      const strip = document.createElement('div');
+      strip.className = 'skills-strip';
+      const text = document.createElement('span');
+      text.className = 'skills-strip-text';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'skills-reload';
+      btn.dataset.focusKey = 'reload';
+      btn.addEventListener('click', () => reloadAgent(agent));
+      strip.append(text, btn);
+      t.skillsStrip = strip;
+    }
+    const strip = t.skillsStrip;
+    const n = changesOf(d);
+    const text = strip.querySelector('.skills-strip-text');
+    const btn = strip.querySelector('.skills-reload');
+    if (d.relaunch_needed) {
+      text.textContent = `Relaunch ${agent} to apply`;   // a reload cannot apply it: the agent was started without a skill view
+      btn.hidden = true;
+    } else if (n > 0) {
+      text.textContent = `${n} change${n === 1 ? ' waits' : 's wait'} for Reload`;
+      btn.hidden = false;
+      btn.textContent = `Reload ${agent}`;
+      btn.setAttribute('aria-disabled', String(t.reloadState === 'reloading'));
+    } else {
+      text.textContent = '';
+      btn.hidden = true;
+    }
+    strip.hidden = !text.textContent;
+    // The same status, spoken with the agent name: the live region of the row stays mounted and only its text changes.
+    // An unchanged text is not set again, so a rebuild with the same strip does not repeat the announcement.
+    const live = t.tabEl.querySelector('.skills-live');
+    const spoken = text.textContent ? `${agent}: ${text.textContent}` : '';
+    if (live && live.textContent !== spoken) live.textContent = spoken;
+    return strip;
+  }
+
+  function fillSkills(agent, host) {
+    const t = tabs.get(agent);
+    const d = t?.skills?.data;
+    if (!d) {
+      const m = document.createElement('div');
+      const failed = t?.skills?.readError || t?.skills?.error;
+      m.className = failed ? 'skills-error' : 'skills-loading';
+      m.textContent = failed || 'Loading skills\u2026';
+      host.append(m);
+      return;
+    }
+    if (!d.role) {
+      const m = document.createElement('div');
+      m.className = 'row-noskills';
+      m.textContent = 'No role: the agent loads your own Claude or Pi skills.';
+      host.append(m);
+      return;
+    }
+    const all = skillsOf(d);
+    const nOn = all.filter((s) => (t.skillsPending?.has(s.id) ? t.skillsPending.get(s.id) : s.on)).length;
+    const head = document.createElement('div');
+    head.className = 'skills-head';
+    const title = document.createElement('span');
+    title.className = 'skills-title';
+    title.textContent = 'Skills';
+    const count = document.createElement('span');
+    count.className = 'skills-count';
+    count.textContent = `${nOn} of ${all.length} on`;
+    const allOn = document.createElement('button');
+    allOn.type = 'button';
+    allOn.className = 'skills-all';
+    allOn.dataset.focusKey = 'turn-all-on';
+    allOn.textContent = 'Turn all on';
+    // aria-disabled, not disabled: a disabled button would drop the keyboard focus that the press just gave it.
+    allOn.setAttribute('aria-disabled', String(nOn === all.length));
+    allOn.addEventListener('click', () => {
+      if (allOn.getAttribute('aria-disabled') === 'true') return;
+      changeSkills(agent, (off) => off.clear(), all.filter((s) => !s.on).map((s) => [s.id, true]));
+    });
+    head.append(title, count, allOn);
+    host.append(head);
+    for (const message of [t.skills.readError, t.skills.error]) {
+      if (!message) continue;
+      const err = document.createElement('div');
+      err.className = 'skills-error';
+      err.setAttribute('role', 'alert');
+      err.textContent = message;
+      host.append(err);
+    }
+    for (const g of d.groups) {
+      const group = document.createElement('div');
+      group.className = 'skills-group';
+      const gn = document.createElement('div');
+      gn.className = 'skills-group-name';
+      gn.textContent = g.name;
+      group.append(gn);
+      for (const s of g.skills) group.append(skillBox(agent, t, s));
+      host.append(group);
+    }
+    host.append(skillsStrip(agent, t, d));
+  }
+  window.renderRowDetails = () => { for (const agent of tabs.keys()) if (!isShell(agent)) renderRowDetails(agent); };
+
+  // The Reload button of a row (C5b): ready, change (a skill switch waits, C6c), reloading, failed. It asks the hub to
+  // reload this one agent (POST /agents/:name/reload, answered with the status) and shows the status again.
+  const RELOAD_MSG = {
+    reloading: 'Reloading\u2026 (waits for the end of a run)',
+    failed: 'Reload failed. Click to try again.',
+    stale: 'Still waiting for the end of a run. Click to send again.',
+  };
+  // note: a text for the state (the reason when the click only read the status, or "no answer" after the time limit).
+  function setReloadState(agent, state, note = '') {
+    const t = tabs.get(agent);
+    if (!t) return;
+    t.reloadState = state;
+    t.tabEl.dataset.reload = state;
+    const btn = t.tabEl.querySelector('.reload-btn');
+    const msg = t.tabEl.querySelector('.reload-msg');
+    btn.disabled = state === 'reloading';
+    t.skillsStrip?.querySelector('.skills-reload')?.setAttribute('aria-disabled', String(state === 'reloading'));
+    btn.setAttribute('aria-label', state === 'failed' ? 'Reload failed. Click to reload ' + agent + ' again.' : 'Reload ' + agent);
+    msg.textContent = note || RELOAD_MSG[state] || '';
+    msg.hidden = !msg.textContent;
+  }
+
+  // The status the hub answers with: presence, pause, room and the factory record. The row shows it again.
+  function applyReloadStatus(agent, s) {
+    const t = tabs.get(agent);
+    if (!t) return;
+    if (typeof s.online === 'boolean') window.setAgentPresence(agent, s.online);
+    if (typeof s.paused === 'boolean') {
+      if (s.paused) PAUSED_AGENTS.add(agent); else PAUSED_AGENTS.delete(agent);
+      renderPauseToggle(agent);
+    }
+    t.factory = s.factory || null;
+    renderRowDetails(agent);
+    if (!t.tabEl.querySelector('.row-details')?.hidden) refreshSkills(agent);   // a reload may have loaded or dropped skills
+    if (typeof refreshRolePills === 'function') refreshRolePills();   // pty_roles: role, model and effort again
+  }
+
+  // The result of THIS click: factory.last (written by the hub when the agent reports) with the reload_id that the
+  // POST answered. A time cannot tell which reload finished, so an older or newer result with another id does not count.
+  function reloadOutcome(factory, reloadId) {
+    const last = factory?.last;
+    if (!reloadId || !last || last.reload_id !== reloadId) return null;
+    return last.result === 'applied' || last.result === 'failed' ? last.result : null;
+  }
+
+  const RELOAD_POLL_MS = 1000;
+  // A busy agent starts the reload at the end of its run, which can take minutes, so a missing start is not a failure.
+  // After RELOAD_LIMIT_MS without a start the row shows "stale": the button is enabled again and the poll goes on (a late
+  // start shows "reloading" again). After RELOAD_GIVE_UP_MS without a start the poll stops and the row stays stale.
+  // Once the bridge has started the reload (factory.pending_reload_id is this click's id) its own bound is 30 s, and
+  // RELOAD_LIMIT_MS is also the time to wait for the result.
+  const RELOAD_LIMIT_MS = 45000;
+  const RELOAD_GIVE_UP_MS = 600000;
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  async function reloadAgent(agent) {
+    const t = tabs.get(agent);
+    if (!t || t.reloadState === 'reloading') return;
+    const mySeq = (t.reloadSeq = (t.reloadSeq || 0) + 1);   // a click after Failed or ready starts a new poll: the old one stops
+    const current = () => tabs.get(agent) === t && t.reloadSeq === mySeq;
+    const clickAt = Date.now();
+    setReloadState(agent, 'reloading');
+    const path = `/agents/${encodeURIComponent(agent)}`;
+    try {
+      const r = await authedFetch(`${path}/reload`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // A click of the human means "reload now", also for the version the agent already has.
+        body: JSON.stringify({ by: HUMAN_NAME, force: true }),
+      });
+      if (!r.ok) throw new Error(`reload: ${r.status}`);
+      const s = await r.json();
+      applyReloadStatus(agent, s);
+      const reloadId = s.reload_id;
+      // No request went out: the agent is offline, or it has no factory link. The click only read the status.
+      if (!s.requested) {
+        setReloadState(agent, 'ready', s.online === false ? 'The agent is offline: nothing was reloaded.' : 'This agent has no factory link: only its status was read again.');
+        return;
+      }
+      let startedAt = null;
+      for (;;) {
+        await wait(RELOAD_POLL_MS);
+        if (!current()) return;   // a newer click, or the row went away: this poll stops
+        let status = null;
+        try {
+          const p = await authedFetch(`${path}/reload-status`);
+          if (p.ok) status = await p.json();
+        } catch { /* a missed poll: the next one asks again */ }
+        if (!status) continue;
+        if (status.online === false) {
+          applyReloadStatus(agent, status);
+          setReloadState(agent, 'failed', 'Reload failed: agent offline. Click to try again.');
+          return;
+        }
+        const outcome = reloadOutcome(status.factory, reloadId);
+        if (outcome) {
+          applyReloadStatus(agent, status);
+          setReloadState(agent, outcome === 'applied' ? 'ready' : 'failed');
+          return;
+        }
+        if (startedAt === null && reloadId && status.factory?.pending_reload_id === reloadId) {
+          startedAt = Date.now();
+          if (t.reloadState === 'stale') setReloadState(agent, 'reloading');   // a late start
+        }
+        if (startedAt !== null && Date.now() >= startedAt + RELOAD_LIMIT_MS) {
+          setReloadState(agent, 'failed', 'Reload failed: no answer. Click to try again.');
+          return;
+        }
+        if (startedAt === null) {
+          const waited = Date.now() - clickAt;
+          if (waited >= RELOAD_GIVE_UP_MS) {
+            setReloadState(agent, 'stale');
+            return;
+          }
+          if (waited >= RELOAD_LIMIT_MS && t.reloadState !== 'stale') setReloadState(agent, 'stale');
+        }
+      }
+    } catch (e) {
+      if (!current()) return;
+      console.warn('[terminal] reload', agent, e);
+      setReloadState(agent, 'failed');
+    }
+  }
+
+  // C6c: a skill switch that is not loaded yet puts the button in "change waits"; the next reload clears it.
+  window.markReloadChange = function markReloadChange(agent, waiting) {
+    const t = tabs.get(agent);
+    if (!t || t.reloadState === 'reloading') return;
+    setReloadState(agent, waiting ? 'change' : 'ready');
+  };
+
+  // A click on a row (or Enter on its name) shows that session in the right pane: it opens the terminal pane when
+  // it is closed, and replaces the board when the board shows (setPaneEnabled sends cubilot:right-pane).
+  function openAgentSession(agent) {
+    if (!_paneEnabled) {
+      setPaneEnabled(true);
+      reconcile();
+      ensureShellAttached();
+    }
+    focusTab(agent);
+    for (const t of tabs.values()) if (t.term) t.fitAddon?.fit();
+  }
+
+  // roster.js reports each agent's presence; the row dot and the "offline" label follow it.
+  window.setAgentPresence = function setAgentPresence(agent, online) {
+    const t = tabs.get(agent);
+    if (t) t.tabEl.dataset.presence = online ? 'online' : 'offline';
+  };
+  window.reconcileAgentColumn = () => reconcile();
 
   function setTabState(agent, state) {
     const t = tabs.get(agent);
@@ -1263,11 +1709,15 @@
     try {
       const res = await authedFetch(`/rooms/${encodeURIComponent(l.room)}/settings`, {
         method: 'PUT',
-        body: JSON.stringify({ worker_limit: r.limits.workers, tester_limit: r.limits.testers }),
+        // The project folder is where the hub makes the worktrees of the stage sessions (stage-sessions 4.5).
+        body: JSON.stringify({ worker_limit: r.limits.workers, tester_limit: r.limits.testers, project_folder: l.cwd }),
       });
-      if (!res.ok) throw new Error(`hub answered ${res.status}`);
+      if (!res.ok) {
+        const detail = await res.json().then((j) => j.error, () => null);
+        throw new Error(detail || `hub answered ${res.status}`);
+      }
     } catch (e) {
-      alert(`Could not store the worker and tester limits: ${e?.message ?? e}`);
+      alert(`Could not store the room settings: ${e?.message ?? e}`);
       return;
     }
     closeFactoryRoom();
@@ -1280,6 +1730,7 @@
   });
 
   async function reconcile() {
+    ensureShellTab();   // the Shell row shows in the column in every view
     const rosterNames = (typeof ROSTER !== 'undefined' && Array.isArray(ROSTER))
       ? ROSTER.map(a => a.name).filter(n => n !== (typeof HUMAN_NAME !== 'undefined' ? HUMAN_NAME : 'you'))
       : [];
@@ -1305,6 +1756,7 @@
         if (ra && typeof ra.room === 'string' && ra.room) {
           tab.tabEl.dataset.room = ra.room;
         }
+        if (ra?.color) tab.tabEl.style.setProperty('--agent-color', ra.color);
       }
     }
 
@@ -1315,17 +1767,6 @@
       const cwd = cwdCache[name] || (window.__TAURI__ ? '' : '');
       autoAttach(name, cwd).catch((e) =>
         console.warn('[terminal] auto-attach failed for', name, e));
-    }
-
-    let addBtn = tabsEl.querySelector('.terminal-tab-new');
-    if (!addBtn) {
-      addBtn = document.createElement('button');
-      addBtn.type = 'button';
-      addBtn.className = 'terminal-tab-new';
-      addBtn.title = 'Launch a new agent session';
-      addBtn.textContent = '+';
-      addBtn.addEventListener('click', () => openSpawnModal());
-      tabsEl.appendChild(addBtn);
     }
 
     if (!activeAgent && tabs.size) {
@@ -1349,7 +1790,19 @@
     } catch (e) {
       const msg = String(e?.message ?? e);
       if (msg.includes('already attached')) {
-        setTabState(agent, 'live');
+        // The shell already attached this session (a hub stage launch). Mark it live AND listen: without the exit and
+        // output listeners the tab never learns that the session ended, and reconcile() keeps live tabs for ever.
+        // A tab that already listens (a normal agent after a window reload, say) must not get a second listener pair.
+        if (t.outputUnlisten && t.exitUnlisten) {
+          setTabState(agent, 'live');
+        } else {
+          try {
+            await _connectLiveTab(agent);
+          } catch (e2) {
+            console.warn('[terminal] autoAttach (already attached)', agent, e2);
+            setTabState(agent, 'live');
+          }
+        }
       } else if (msg.includes('session not found')) {
         setTabState(agent, 'external');   // the session ended while we attached: nothing was created
       } else {
@@ -1376,12 +1829,6 @@
       if (_paneEnabled) ensureShellAttached();
     } catch (e) {}
   })();
-
-  const legend = document.getElementById('legend');
-  if (legend) {
-    new MutationObserver(() => { if (paneEnabled()) reconcile(); })
-      .observe(legend, { childList: true });
-  }
 
   // Read-only accessor for slash-send's response capture: returns Terminal or null.
   window.__CUBILOT_TERM__.getTerm = (agent) => {

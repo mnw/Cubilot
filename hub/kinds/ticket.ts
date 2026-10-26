@@ -22,7 +22,9 @@ import { IMAGE_URL_RE, imageUrlToPath } from "../core/attachments";
 import { insertEvent } from "../core/events";
 import { ts, validName, validRoomLabel } from "../core/ids";
 import { validateBlockedBy } from "./ticket-blockers";
+import { STAGE_ROLES, type StageRole } from "../core/ledger";
 import { createPermissionWithSideEffect, dismissPendingPermission } from "./permission";
+import type { StageHooks } from "./stage";
 
 // ---------- Types ----------
 
@@ -58,6 +60,8 @@ export type TicketSnapshot = {
   external_ref: string | null;
   /** Groups the tickets of one request; null when ungrouped. */
   request_id: string | null;
+  /** The stage role that picks this ticket's first stage; null when no session is launched for it. */
+  role: StageRole | null;
   status: TicketStatus;
   created_at_ms: number;
   updated_at_ms: number;
@@ -71,6 +75,7 @@ const TICKET_TITLE_MAX_CHARS = 200;
 const TICKET_CRITERIA_MAX_CHARS = 4_000;
 const TICKET_REF_MAX_CHARS = 200;
 const REQUEST_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
+const isStageRole = (v: unknown): v is StageRole => typeof v === "string" && (STAGE_ROLES as readonly string[]).includes(v);
 const TICKET_BODY_MAX = 16_384;
 const TICKET_NOTE_MAX_BYTES = 4_096;
 // A 4 KiB note whose every byte is JSON-escaped (control characters) is 24 KiB: leave room.
@@ -117,6 +122,7 @@ const ticketDecl: StateMachineDecl<TicketSnapshot> = {
     approval_request_id: "TEXT_NULL",
     external_ref: "TEXT_NULL",
     request_id: "TEXT_NULL",
+    role: "TEXT_NULL",
     status: "TEXT",
     created_at_ms: "INTEGER",
     updated_at_ms: "INTEGER",
@@ -136,6 +142,7 @@ const ticketDecl: StateMachineDecl<TicketSnapshot> = {
     approval_request_id: row.approval_request_id == null ? null : (row.approval_request_id as string),
     external_ref: row.external_ref == null ? null : (row.external_ref as string),
     request_id: row.request_id == null ? null : (row.request_id as string),
+    role: isStageRole(row.role) ? row.role : null,
     status: row.status as TicketStatus,
     created_at_ms: Number(row.created_at_ms),
     updated_at_ms: Number(row.updated_at_ms),
@@ -262,6 +269,7 @@ type CreateInput = {
   priority: TicketPriority;
   external_ref: string | null;
   request_id: string | null;
+  role: StageRole | null;
   /** Raw `blocked_by` from the body: undefined = none, null or [] = none, validated in decide(). */
   blocked_by?: unknown;
   assignee: string | null;
@@ -288,6 +296,7 @@ const createTicketVerb: VerbDecl<TicketSnapshot, CreateInput> = {
       approval_request_id: null,
       external_ref: payload.external_ref,
       request_id: payload.request_id,
+      role: payload.role,
       status: payload.status,
       created_at_ms: now,
       updated_at_ms: now,
@@ -305,6 +314,7 @@ const createTicketVerb: VerbDecl<TicketSnapshot, CreateInput> = {
         priority: post.priority,
         external_ref: post.external_ref,
         request_id: post.request_id,
+        role: post.role,
         assignee: post.assignee,
         status: post.status,
       }),
@@ -380,7 +390,99 @@ const assignTicketVerb: VerbDecl<TicketSnapshot, AssignInput> = {
   scope: (post) => ({ kind: "room", room: post.room }),
 };
 
-type EditInput = { title?: string; acceptance_criteria?: string; blast_radius?: BlastRadius; blocked_by?: unknown; request_id?: string | null; priority?: TicketPriority; external_ref?: string | null };
+// ---------- Ownership by the hub (stage-sessions 2.5) ----------
+
+/** The actor the hub uses for its own writes. validName() refuses it (reserved), so no HTTP route can claim it. */
+export const SYSTEM_ACTOR = "system";
+
+export type SystemAssign = { snapshot: TicketSnapshot; entry: Entry } | null;
+
+/**
+ * Sets a ticket's assignee to a session name with actor `system`: one `ticket.assigned` event and one row update.
+ * It does NOT open a transaction: the stage launch calls it inside its own (`stage.launching` + `ticket.assigned` are the
+ * one transaction that writes two kinds), so both commit or roll back together. A ticket that does not exist, or one that
+ * is finished, throws and rolls the launch back. An unchanged assignee writes nothing (returns null).
+ * The returned entry must be emitted by the caller after the commit. It is context for everyone: the bridge never wakes
+ * on an entry from `system` (the new session's first message already carries the ticket).
+ */
+export function assignBySystemInTx(db: Database, ticketId: string, assignee: string): SystemAssign {
+  const row = db.query<Record<string, unknown>, [string]>("SELECT * FROM tickets WHERE id = ?").get(ticketId);
+  if (!row) throw new Error(`launch: no such ticket ${ticketId}`);
+  const prior = ticketDecl.rowToSnapshot(row);
+  if (TICKET_TERMINAL.has(prior.status)) throw new Error(`launch: ticket ${ticketId} is already ${prior.status}`);
+  if (prior.assignee === assignee) return null;
+  const now = Date.now();
+  const seq = insertEvent(db, ticketId, "ticket.assigned", SYSTEM_ACTOR, { from: prior.assignee, to: assignee }, now);
+  // An approval was asked by the previous assignee: it does not carry over (same rule as the assign verb).
+  db.run(
+    "UPDATE tickets SET assignee = ?, updated_at_ms = ?, version = ?, approval_request_id = NULL WHERE id = ?",
+    [assignee, now, seq, ticketId],
+  );
+  const snapshot: TicketSnapshot = { ...prior, assignee, updated_at_ms: now, approval_request_id: null, version: seq };
+  return { snapshot, entry: ticketEntry(db, snapshot, "ticket.assigned", SYSTEM_ACTOR, false, null) };
+}
+
+export type SystemQueue = { snapshot: TicketSnapshot; entry: Entry } | null;
+
+/**
+ * Moves a `draft` ticket to `queued` with actor `system`: one `ticket.queued` event and one row update, like the verb
+ * does for the human or the room lead. It does NOT open a transaction: the spec-review PASS calls it inside its own
+ * (`stage.passed` + one `ticket.queued` per scope ticket commit together). A ticket that is not `draft` is left alone
+ * (returns null), and so is one whose request is not `requestId` (when given); a ticket that does not exist throws and rolls the PASS back. The caller emits the entry after the commit.
+ */
+export function queueBySystemInTx(db: Database, cap: HubCapabilities, ticketId: string, requestId?: string | null): SystemQueue {
+  return queueDraftInTx(db, cap, ticketId, SYSTEM_ACTOR, requestId);
+}
+
+/** The body of queueBySystemInTx for any actor (the human's request approval uses it with the human name). Same rules. */
+export function queueDraftInTx(db: Database, cap: HubCapabilities, ticketId: string, actor: string, requestId?: string | null): SystemQueue {
+  const row = db.query<Record<string, unknown>, [string]>("SELECT * FROM tickets WHERE id = ?").get(ticketId);
+  if (!row) throw new Error(`queue: no such ticket ${ticketId}`);
+  const prior = ticketDecl.rowToSnapshot(row);
+  if (prior.status !== "draft") return null;
+  // A ticket that left the request after the scope was set was not reviewed with it: leave it alone.
+  if (requestId !== undefined && prior.request_id !== requestId) return null;
+  const now = Date.now();
+  const seq = insertEvent(db, ticketId, "ticket.queued", actor, { from: "draft", to: "queued" }, now);
+  db.run("UPDATE tickets SET status = 'queued', updated_at_ms = ?, version = ? WHERE id = ?", [now, seq, ticketId]);
+  const snapshot: TicketSnapshot = { ...prior, status: "queued", updated_at_ms: now, version: seq };
+  // The same entry kind as the human's promotion: the bridge wakes the assignee, or the room lead for an unassigned ticket.
+  return { snapshot, entry: ticketEntry(db, snapshot, "ticket.promoted", actor, false, roomLead(cap, snapshot.room), { by: actor }) };
+}
+
+export type SystemClose = { snapshot: TicketSnapshot; entry: Entry } | null;
+
+/**
+ * The hub's move after the final PASS of a validator or reviewer stage, with actor `system`. Only an `in_review` ticket moves.
+ * Low radius: `ticket.done`. High radius: `ticket.assigned` to the room lead (the hub never writes `done` on a high ticket);
+ * no lead means no change. Like assignBySystemInTx it opens no transaction: it runs inside the transaction of `stage.passed`.
+ * The caller emits the entry after the commit.
+ */
+export function closeReviewedBySystemInTx(db: Database, cap: HubCapabilities, ticketId: string): SystemClose {
+  const row = db.query<Record<string, unknown>, [string]>("SELECT * FROM tickets WHERE id = ?").get(ticketId);
+  if (!row) throw new Error(`final pass: no such ticket ${ticketId}`);
+  const prior = ticketDecl.rowToSnapshot(row);
+  if (prior.status !== "in_review") return null;
+  const now = Date.now();
+  if (prior.blast_radius === "low") {
+    const seq = insertEvent(db, ticketId, "ticket.done", SYSTEM_ACTOR, { from: "in_review", to: "done" }, now);
+    db.run("UPDATE tickets SET status = 'done', updated_at_ms = ?, version = ? WHERE id = ?", [now, seq, ticketId]);
+    const snapshot: TicketSnapshot = { ...prior, status: "done", updated_at_ms: now, version: seq };
+    return { snapshot, entry: ticketEntry(db, snapshot, "ticket.update", SYSTEM_ACTOR) };
+  }
+  const lead = roomLead(cap, prior.room);
+  if (!lead) {
+    console.error(`[ticket] ${ticketId} is high radius and room ${prior.room} has no lead: it stays with ${prior.assignee} after the final PASS`);
+    return null;
+  }
+  if (prior.assignee === lead) return null;
+  const seq = insertEvent(db, ticketId, "ticket.assigned", SYSTEM_ACTOR, { from: prior.assignee, to: lead }, now);
+  db.run("UPDATE tickets SET assignee = ?, updated_at_ms = ?, version = ?, approval_request_id = NULL WHERE id = ?", [lead, now, seq, ticketId]);
+  const snapshot: TicketSnapshot = { ...prior, assignee: lead, updated_at_ms: now, approval_request_id: null, version: seq };
+  return { snapshot, entry: ticketEntry(db, snapshot, "ticket.assigned", SYSTEM_ACTOR, false, null) };
+}
+
+type EditInput = { title?: string; acceptance_criteria?: string; blast_radius?: BlastRadius; blocked_by?: unknown; request_id?: string | null; role?: StageRole | null; priority?: TicketPriority; external_ref?: string | null };
 
 // An open ticket's title and acceptance criteria: the human, the creator and the assignee. The blast radius is the
 // human's alone, because it gates the done approval. New criteria or a lower radius void the approval that was asked.
@@ -390,21 +492,21 @@ const editTicketVerb: VerbDecl<TicketSnapshot, EditInput> = {
     if (!inRoom(actor, prior.room, cap)) return forbidden("ticket is in another room");
     const human = isHuman(actor, cap);
     if (payload.blast_radius !== undefined && !human) return forbidden("only the human may change blast_radius");
-    // The grouping fields (request_id, blocked_by) are edited by the human, the creator or the room lead, not the assignee.
+    // The grouping fields (request_id, blocked_by, role) are edited by the human, the creator or the room lead, not the assignee.
     // The other fields keep their rule: the human, the creator or the assignee.
-    const grouping = payload.request_id !== undefined || payload.blocked_by !== undefined;
+    const grouping = payload.request_id !== undefined || payload.blocked_by !== undefined || payload.role !== undefined;
     const other = payload.title !== undefined || payload.acceptance_criteria !== undefined || payload.blast_radius !== undefined
       || payload.priority !== undefined || payload.external_ref !== undefined;
     if (other && !human && actor !== prior.creator && actor !== prior.assignee) {
       return forbidden("only the human, the creator or the assignee may edit a ticket");
     }
     if (grouping && !human && actor !== prior.creator && actor !== roomLead(cap, prior.room)) {
-      return forbidden("only the human, the creator or the room lead may edit request_id or blocked_by");
+      return forbidden("only the human, the creator or the room lead may edit request_id, blocked_by or role");
     }
     if (TICKET_TERMINAL.has(prior.status)) return conflict(`ticket already ${prior.status}`);
     // After the claim the grouping is frozen for agents: the human alone changes it.
     if (grouping && !human && prior.status !== "draft" && prior.status !== "queued") {
-      return conflict(`request_id and blocked_by are frozen once a ticket is ${prior.status}`);
+      return conflict(`request_id, blocked_by and role are frozen once a ticket is ${prior.status}`);
     }
     const changes: Partial<TicketSnapshot> = {};
     if (payload.title !== undefined && payload.title !== prior.title) changes.title = payload.title;
@@ -415,6 +517,7 @@ const editTicketVerb: VerbDecl<TicketSnapshot, EditInput> = {
     if (payload.priority !== undefined && payload.priority !== prior.priority) changes.priority = payload.priority;
     if (payload.external_ref !== undefined && payload.external_ref !== prior.external_ref) changes.external_ref = payload.external_ref;
     if (payload.request_id !== undefined && payload.request_id !== prior.request_id) changes.request_id = payload.request_id;
+    if (payload.role !== undefined && payload.role !== prior.role) changes.role = payload.role;
     // The blocker list is replaced whole. It is not a snapshot field: it changes only when the set differs.
     let blockersChanged = false;
     if (payload.blocked_by !== undefined) {
@@ -425,6 +528,11 @@ const editTicketVerb: VerbDecl<TicketSnapshot, EditInput> = {
     }
     if (Object.keys(changes).length === 0 && !blockersChanged) return { kind: "idempotent" };
     const next: Partial<TicketSnapshot> = { ...changes, updated_at_ms: Date.now() };
+    // Spec review passed a queued ticket as written: new criteria, role or blockers send it back to draft, in this same
+    // transaction. A claimed, in_progress or in_review ticket keeps its status.
+    const backToDraft = prior.status === "queued"
+      && (changes.acceptance_criteria !== undefined || changes.role !== undefined || blockersChanged);
+    if (backToDraft) next.status = "draft";
     // The human allowed the work as it was written: new criteria, or a lower radius, void that approval.
     if ((changes.acceptance_criteria !== undefined || changes.blast_radius === "low") && prior.approval_request_id) {
       next.approval_request_id = null;
@@ -436,6 +544,7 @@ const editTicketVerb: VerbDecl<TicketSnapshot, EditInput> = {
       payload: () => ({
         fields: [...Object.keys(changes), ...(blockersChanged ? ["blocked_by"] : [])],
         ...(changes.blast_radius ? { blast_radius: { from: prior.blast_radius, to: changes.blast_radius } } : {}),
+        ...(backToDraft ? { status: { from: prior.status, to: "draft" } } : {}),
       }),
       entry: (post) => ticketEntry(cap.db, post, "ticket.update", actor),
     };
@@ -569,7 +678,7 @@ function conflictResponse(e: LedgerConflict): Response {
   return Response.json(body, { status: e.httpStatus });
 }
 
-export function createTicketKind(db: Database): KindModule {
+export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicketChanged">): KindModule {
   const entity = createLedgerEntity({ decl: ticketDecl, db });
 
   // A paused agent's writes are refused (423) unless the route is one a running tool call may need
@@ -634,6 +743,11 @@ export function createTicketKind(db: Database): KindModule {
           }
           requestId = body.request_id;
         }
+        let role: StageRole | null = null;
+        if (body.role !== undefined && body.role !== null) {
+          if (!isStageRole(body.role)) return Response.json({ error: "invalid role" }, { status: 400 });
+          role = body.role;
+        }
 
         let room: string;
         if (isHuman(by, cap)) {
@@ -678,6 +792,7 @@ export function createTicketKind(db: Database): KindModule {
               priority,
               external_ref: externalRef,
               request_id: requestId,
+              role,
               blocked_by: body.blocked_by,
               assignee,
               status,
@@ -688,6 +803,8 @@ export function createTicketKind(db: Database): KindModule {
           );
           // An assignee's lines change, and so does the lead's list of unassigned tickets.
           if (assignee || roomLead(cap, room)) cap.briefing.refresh();
+          // A ticket created as queued may be ready for a stage at once (a draft waits for its move to queued).
+          if (r.snapshot.status === "queued") stage?.onTicketChanged(id, cap);
           return Response.json({ snapshot: r.snapshot }, { status: 201 });
         } catch (e) {
           if (e instanceof LedgerConflict) return conflictResponse(e);
@@ -771,6 +888,43 @@ export function createTicketKind(db: Database): KindModule {
           );
         }
         return Response.json({ room, lead: next, ...(before === next ? { idempotent: true } : {}) });
+      },
+    },
+
+    {
+      // Human approval of a request (spec-review-stage 3.3): queues every draft ticket of the request in the room.
+      method: "POST",
+      path: /^\/requests\/([^/]+)\/([^/]+)\/approve$/,
+      auth: "mutating",
+      bodyMax: TICKET_BODY_MAX,
+      handler: async (req, cap, params) => {
+        // The dispatcher passes only the first capture group (the room); the request id comes from the path.
+        const room = decodeURIComponent(params.id);
+        const requestId = decodeURIComponent(new URL(req.url).pathname.split("/")[3] ?? "");
+        if (!validRoomLabel(room)) return Response.json({ error: "invalid room" }, { status: 400 });
+        if (!REQUEST_ID_RE.test(requestId)) return Response.json({ error: "invalid request id" }, { status: 400 });
+        const body = await readBody(req);
+        const a = actorOr400(body.by, cap, true);
+        if (a instanceof Response) return a;
+        if (!isHuman(a.name, cap)) return Response.json({ error: "only the human may approve a request" }, { status: 403 });
+        const known = db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM tickets WHERE request_id = ? AND room = ?").get(requestId, room)!.n;
+        if (known === 0) return Response.json({ error: `no ticket in request ${requestId} in room ${room}` }, { status: 404 });
+        const queuedNow: Array<NonNullable<SystemQueue>> = [];
+        // One transaction: every draft ticket of the request gets its ticket.queued event and its row update, or none does.
+        db.transaction(() => {
+          const drafts = db
+            .query<{ id: string }, [string, string]>("SELECT id FROM tickets WHERE request_id = ? AND room = ? AND status = 'draft' ORDER BY created_at_ms, id")
+            .all(requestId, room);
+          for (const { id } of drafts) {
+            const q = queueDraftInTx(db, cap, id, a.name, requestId);
+            if (q) queuedNow.push(q);
+          }
+        })();
+        for (const q of queuedNow) cap.sse.emit(q.entry, { kind: "room", room });
+        if (queuedNow.length) cap.briefing.refresh();
+        // The evaluator runs after the commit, as for a draft the human queues by hand.
+        for (const q of queuedNow) stage?.onTicketChanged(q.snapshot.id, cap);
+        return Response.json({ room, request_id: requestId, queued: queuedNow.map((q) => q.snapshot.id), ...(queuedNow.length === 0 ? { idempotent: true } : {}) });
       },
     },
 
@@ -1055,9 +1209,14 @@ export function createTicketKind(db: Database): KindModule {
           }
           input.request_id = body.request_id;
         }
+        if (body.role !== undefined) {
+          // One of the six roles sets it, an explicit null clears it.
+          if (body.role !== null && !isStageRole(body.role)) return Response.json({ error: "invalid role" }, { status: 400 });
+          input.role = body.role;
+        }
         if (body.blocked_by !== undefined) input.blocked_by = body.blocked_by;
         if (Object.keys(input).length === 0) {
-          return Response.json({ error: "nothing to edit (title, acceptance_criteria, blast_radius, priority, external_ref, request_id or blocked_by)" }, { status: 400 });
+          return Response.json({ error: "nothing to edit (title, acceptance_criteria, blast_radius, priority, external_ref, request_id, role or blocked_by)" }, { status: 400 });
         }
         try {
           const before = entity.load(params.id);
@@ -1101,6 +1260,17 @@ export function createTicketKind(db: Database): KindModule {
           if (r.emitted) {
             cap.briefing.refresh();
             retireStaleApproval(before, r.snapshot, a.name, cap);
+            if (stage) {
+              // Run the stage evaluator after the commit: a draft that became queued, and every ticket that was
+              // waiting for this one when it became done. A cancelled ticket does not unblock anything.
+              if (before?.status === "draft" && r.snapshot.status === "queued") stage.onTicketChanged(params.id, cap);
+              if (r.snapshot.status === "done") {
+                const waiting = db
+                  .query<{ ticket_id: string }, [string]>("SELECT ticket_id FROM ticket_blockers WHERE blocker_id = ? ORDER BY rowid")
+                  .all(params.id);
+                for (const w of waiting) stage.onTicketChanged(w.ticket_id, cap);
+              }
+            }
           }
           return Response.json({ snapshot: r.snapshot, ...(r.emitted ? {} : { idempotent: true }) });
         } catch (e) {
@@ -1223,14 +1393,41 @@ export function createTicketKind(db: Database): KindModule {
     },
   ];
 
+  /**
+   * The newest stage (any status) this agent is the session of, if any. A passed stage keeps its session on its own ticket until the close. Session names are used again (`tester-1`),
+   * so an old ticket may still name the name as its assignee; the stage table says which ticket the session is for now.
+   * No stage table (a ledger without the stage kind) or no stage row: null, the agent is an ordinary one.
+   */
+  function liveStageOf(cap: HubCapabilities, session: string): { ticket_id: string | null; review: string | null } | null {
+    try {
+      return (
+        cap.db
+          .query<{ ticket_id: string | null; review: string | null }, [string]>(
+            "SELECT ticket_id, review FROM stage WHERE session = ? ORDER BY rowid DESC LIMIT 1",
+          )
+          .get(session) ?? null
+      );
+    } catch {
+      return null;
+    }
+  }
+
   function briefingLines(agent: AgentCtx, cap: HubCapabilities): string[] {
     if (agent.room === null) return [];
-    const rows = cap.db
-      .query<Record<string, unknown>, [string, string, number]>(
-        `SELECT * FROM tickets WHERE assignee = ? AND room = ? AND status NOT IN ('done','cancelled')
-          ORDER BY ${rankSql("priority")} DESC, created_at_ms ASC LIMIT ?`,
-      )
-      .all(agent.name, agent.room, BRIEFING_TICKET_LIMIT);
+    // A stage session works on one ticket: its briefing lists only that one (ss 6.5 gap B). A spec-review session has no
+    // ticket and gets no list. The assignee of other tickets stays as a record; it is only not shown here.
+    const live = liveStageOf(cap, agent.name);
+    if (live && !live.ticket_id) return [];
+    const rows = live
+      ? cap.db
+          .query<Record<string, unknown>, [string, string]>(`SELECT * FROM tickets WHERE id = ? AND room = ? AND status NOT IN ('done','cancelled')`)
+          .all(live.ticket_id!, agent.room)
+      : cap.db
+          .query<Record<string, unknown>, [string, string, number]>(
+            `SELECT * FROM tickets WHERE assignee = ? AND room = ? AND status NOT IN ('done','cancelled')
+              ORDER BY ${rankSql("priority")} DESC, created_at_ms ASC LIMIT ?`,
+          )
+          .all(agent.name, agent.room, BRIEFING_TICKET_LIMIT);
     const describe = (heading: string, list: Record<string, unknown>[]): string[] => {
       const out = [heading];
       for (const row of list) {
@@ -1250,7 +1447,7 @@ export function createTicketKind(db: Database): KindModule {
     };
     const lines = rows.length ? describe("Your open tickets:", rows) : [];
     // The room lead also sees the open tickets nobody owns yet: triaging them is its job.
-    if (roomLead(cap, agent.room) === agent.name) {
+    if (!live && roomLead(cap, agent.room) === agent.name) {
       const unassigned = cap.db
         .query<Record<string, unknown>, [string, number]>(
           `SELECT * FROM tickets WHERE room = ? AND assignee IS NULL AND status NOT IN ('done','cancelled')
@@ -1276,6 +1473,10 @@ export function createTicketKind(db: Database): KindModule {
       }
       if (!d.query<{ name: string }, []>("PRAGMA table_info(tickets)").all().some((c) => c.name === "request_id")) {
         d.exec(`ALTER TABLE "tickets" ADD COLUMN "request_id" TEXT`);
+      }
+      // stage-sessions: the role that picks a ticket's first stage. Existing tickets keep NULL.
+      if (!d.query<{ name: string }, []>("PRAGMA table_info(tickets)").all().some((c) => c.name === "role")) {
+        d.exec(`ALTER TABLE "tickets" ADD COLUMN "role" TEXT`);
       }
       d.exec(`CREATE INDEX IF NOT EXISTS "idx_tickets_room_status" ON "tickets" ("room", "status")`);
       // Blocker links: a ticket cannot be claimed while a blocker is not done.

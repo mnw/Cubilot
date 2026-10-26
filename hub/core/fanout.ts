@@ -23,7 +23,7 @@ export type Fanout = {
 };
 
 function isAmbientScope(scope: Scope): boolean {
-  return scope.kind === "ui-only-ambient" || scope.kind === "room-ambient";
+  return scope.kind === "ui-only-ambient" || scope.kind === "room-ambient" || scope.kind === "agents-ambient";
 }
 
 export function createFanout(deps: FanoutDeps): Fanout {
@@ -64,6 +64,7 @@ export function createFanout(deps: FanoutDeps): Fanout {
         for (const [name] of agents.entries()) pushToAgent(name, entry);
         return;
       case "to-agents":
+      case "agents-ambient":
         for (const name of new Set(scope.agents)) pushToAgent(name, entry);
         return;
       case "room":
@@ -80,7 +81,7 @@ export function createFanout(deps: FanoutDeps): Fanout {
     if (!isAmbientScope(scope)) {
       persist(entry);
     }
-    for (const q of uiSubscribers) q.push(entry);
+    if (scope.kind !== "agents-ambient") for (const q of uiSubscribers) q.push(entry);
     fanOutToAgents(entry, scope);
   }
 

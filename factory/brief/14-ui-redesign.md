@@ -153,6 +153,8 @@ Acceptance criteria:
 
 ### T03. Left rail: agent list
 
+Replaced by Part 4a ([04a-agent-column.md](04a-agent-column.md)). Build Part 4a instead. T09 no longer has to ship with it.
+
 Stickies: m01, m02. Priority: High. Radius: high (replaces two navigation surfaces).
 Files: `ui/index.html`, `ui/features/roster.js`, `ui/terminal.js`, `ui/styles/layout.css`, new `ui/styles/rail.css`, new pure module for grouping.
 Ship T03 and T09 together. Without T09, the user has no way to open a session.

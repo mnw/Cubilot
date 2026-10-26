@@ -143,7 +143,7 @@ describe("pause display after the hub drops an agent", () => {
         // applyRoster's own dependencies, stubbed
         "var ROSTER = []; const NAMES = {}; const COLORS = {}; const BODY_COLORS = {};" +
         "const cap = (s) => s; const shade = (c) => c;" +
-        "const renderLegend = () => {}; const renderTargetDropdown = () => {}; const renderRoomSwitcher = () => {};" +
+        "const renderAgentColumn = () => {}; const renderTargetDropdown = () => {}; const renderRoomSwitcher = () => {};" +
         "const refreshRolePills = () => {};" +
         applyRosterSrc,
       ctx,

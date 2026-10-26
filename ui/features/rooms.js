@@ -123,7 +123,6 @@ function applyRoomFilter() {
     styleEl.textContent = `
       body.room-filtered .msg[data-room]:not([data-room="${r}"]),
       body.room-filtered [data-kind][data-room]:not([data-room="${r}"]),
-      body.room-filtered .legend-item[data-room]:not([data-room="${r}"]),
       body.room-filtered .terminal-tab[data-room]:not([data-room="${r}"]) {
         display: none;
       }

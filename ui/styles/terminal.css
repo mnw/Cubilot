@@ -1,243 +1,249 @@
-/* ── Terminal column (right) — body on left, vertical tabs on right ─ */
+/* ── Terminal column (right) — the terminal body only; the agent rows live in .agent-col ─ */
 .terminal-col {
   flex: 1 1 auto;
   background: var(--bg-inset);
   display: flex;
-  flex-direction: row;       /* vertical tabs on the right edge */
+  flex-direction: row;
   min-height: 0;
   min-width: var(--size-240);
   overflow: hidden;
 }
-/* Vertical tab rail — pinned to the right edge of the terminal column.
-   DOM order is still tabs-then-body (from v0.7.0); `order: 2` flips visual
-   placement to the right without touching terminal.js. */
-.terminal-tabs {
-  order: 2;
-  width: var(--size-150);
-  flex-shrink: 0;
-  background: var(--bg-raised);
-  border-left: var(--border-1) solid var(--line);
+
+/* ── Agent column (left of #app-body, every view) ───────────── */
+.agent-col {
+  flex: 0 0 var(--size-300);
+  width: var(--size-300);
   display: flex;
   flex-direction: column;
-  /* Tightened: was 10/8 padding + 3 gap. */
+  min-height: 0;
+  background: var(--bg-raised);
+  border-right: var(--border-1) solid var(--line);
+}
+.agent-col-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-8);
+  padding: var(--sp-10) var(--sp-12);
+  border-bottom: var(--border-1) solid var(--line);
+}
+.agent-col-title { font-size: var(--fs-3xl); font-weight: 600; color: var(--text); }
+.agent-col-count { flex: 1; font-family: var(--mono); font-size: var(--fs-sm); color: var(--text-muted); }
+.agent-col-add {
+  align-self: center;
+  width: var(--size-22);
+  height: var(--size-22);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: var(--border-1) solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font-size: var(--fs-4xl);
+  line-height: 1;
+  cursor: pointer;
+}
+.agent-col-add:hover, .agent-col-add:focus-visible { color: var(--orange); border-color: var(--line-hover); }
+.agent-col-rule { height: var(--size-1); margin: var(--sp-6) var(--sp-8); background: var(--line); flex-shrink: 0; }
+
+.terminal-tabs {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
   gap: var(--sp-2);
-  padding: var(--sp-5) var(--sp-6);
+  padding: var(--sp-6) var(--sp-6);
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
 }
-.terminal-tab {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-7);
-  /* Tightened: was 8/10. */
-  padding: var(--sp-5) var(--sp-8);
+
+/* One row: chevron, dot, name, state label, actions (.row-main). The details area (C4) sits under it. */
+.terminal-tab { padding: var(--sp-5) var(--sp-8);
   font-family: var(--mono);
-  font-size: calc(var(--fs-base) * 1.15);
+  font-size: var(--fs-3xl);
   color: var(--text-muted);
   cursor: pointer;
   border-radius: var(--radius-lg);
   border: var(--border-1) solid transparent;
   background: transparent;
   position: relative;
-  white-space: nowrap;
-  overflow: hidden;
 }
-.terminal-tab:hover { color: var(--text); background: var(--hover-overlay-soft); }
-.terminal-tab.active {
-  background: var(--bg-inset);
+.row-main, .terminal-tab-shell { display: flex; align-items: center; gap: var(--sp-6); min-width: 0; }
+.terminal-tab:hover { background: var(--hover-overlay-soft); }
+.terminal-tab.active, .terminal-tab:focus-within {
+  background: var(--bg-elev);
   border-color: var(--line);
-  color: var(--text);
 }
-/* Orange flag on active tab, flush to the right rail's inside edge */
-.terminal-tab.active::before {
-  content: '';
-  position: absolute;
-  right: calc(-1 * var(--sp-9));
-  top: 50%;
-  transform: translateY(-50%);
-  width: var(--size-3);
+.terminal-tab[data-presence="offline"] { color: var(--text-muted); }
+
+.row-chevron {
+  flex: 0 0 auto;
+  width: var(--size-18);
   height: var(--size-18);
-  background: var(--orange);
-  border-radius: var(--radius-xs) 0 0 var(--radius-xs);
-}
-.terminal-tab[data-state="dead"] { opacity: 0.6; font-style: italic; }
-.terminal-tab[data-state="external"] { opacity: 0.75; }
-
-/* Shell tab — pinned, cross-room, no close-x. Visually distinct from agent
-   tabs: warm background fill + thicker bottom divider + shell-y icon + muted
-   uppercase label. Opacity full (not tied to agent-state external) because
-   the shell is always present. */
-.terminal-tab-shell {
-  background: color-mix(in oklab, var(--orange) 6%, transparent);
-  border-left: var(--border-2) solid transparent;
-  border-bottom: var(--border-2) solid var(--line);
-  margin-bottom: var(--sp-6);
-  padding-bottom: var(--sp-10);
-  position: relative;
-  opacity: 1 !important;
-  font-style: normal !important;
-}
-.terminal-tab-shell:hover {
-  background: color-mix(in oklab, var(--orange) 10%, transparent);
-}
-.terminal-tab-shell.active {
-  background: color-mix(in oklab, var(--orange) 14%, transparent);
-}
-.terminal-tab-shell.active::before { display: none; }  /* neutralize the agent-tab flag */
-
-.terminal-tab-shell .tab-icon {
-  opacity: 0.75;
-  flex-shrink: 0;
-  margin-right: var(--sp-2);
-  color: var(--orange);
-}
-.terminal-tab-shell:hover .tab-icon,
-.terminal-tab-shell.active .tab-icon { opacity: 1; }
-.terminal-tab-shell .tab-label {
-  font-family: var(--mono);
-  font-size: var(--fs-base);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
   color: var(--text-muted);
+  cursor: pointer;
 }
-.terminal-tab-shell.active .tab-label,
-.terminal-tab-shell:hover .tab-label { color: var(--text); }
-.terminal-tab-shell .state-dot { display: none; }  /* not an agent — no dot */
+.row-chevron svg { width: var(--size-12); height: var(--size-12); transition: transform var(--motion-fast); }
+.row-chevron[aria-expanded="true"] svg { transform: rotate(90deg); }
+.row-chevron:hover, .row-chevron:focus-visible { color: var(--text); }
 
-/* Heading between the shell tab and the agent tabs — signals "this is where
-   agents live" and discourages users from starting claude inside the shell tab. */
-.terminal-tabs-heading {
+.terminal-tab .state-dot, .agent-row-human .state-dot {
+  flex: 0 0 auto;
+  width: var(--size-8);
+  height: var(--size-8);
+  box-sizing: border-box;
+  border-radius: var(--radius-circle);
+  background: var(--green-strong);
+}
+.terminal-tab[data-presence="offline"] .state-dot { background: transparent; border: var(--border-2) solid var(--text-muted); }
+.terminal-tab.paused .state-dot { background: transparent; border: var(--border-2) solid var(--amber-mark); }
+.terminal-tab.needs-attention .state-dot { background: var(--red); border: 0; box-shadow: 0 0 var(--glow-md) color-mix(in oklab, var(--red) 70%, transparent); }
+
+/* State labels stay --text or --text-muted (4.5:1 in all three themes); the coloured dot and the row tint carry the state. */
+/* The name is a button (Enter opens the session) that looks like text, in the agent's colour. */
+.terminal-tab .tab-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  font-weight: 500;
+  color: var(--agent-color, inherit);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.terminal-tab .tab-label:focus-visible { outline: var(--border-1) solid var(--line-hover); outline-offset: 1px; }
+/* The agent colour is a hash HSL made for dark themes. A name keeps its hue and saturation and takes the theme's
+   lightness (--agent-name-l, tokens.css) so that it reaches 4.5:1 on the column in all three themes. */
+@supports (color: hsl(from red h s l)) {
+  .terminal-tab .tab-label, .agent-row-human .tab-label { color: hsl(from var(--agent-color, var(--text)) h s var(--agent-name-l)); }
+  .terminal-tab-shell .tab-label { color: inherit; }
+}
+.row-state { display: none; flex: 0 0 auto; font-size: var(--fs-md); }
+.terminal-tab[data-presence="offline"] .lbl-offline { display: inline; color: var(--text-muted); }
+.terminal-tab.paused:not([data-presence="offline"]):not(.needs-attention) .lbl-paused { display: inline; color: var(--text); }
+.terminal-tab.needs-attention .lbl-needs { display: inline; color: var(--text); }
+.terminal-tab.needs-attention { background: color-mix(in oklab, var(--red) 12%, transparent); animation: agent-attention var(--motion-attention) ease-in-out infinite; }
+.terminal-tab.needs-attention.active { border-color: color-mix(in oklab, var(--red) 40%, transparent); }
+
+.row-actions { margin-left: auto; flex: 0 0 auto; display: inline-flex; align-items: center; gap: var(--sp-2); }
+.row-actions button {
+  width: var(--size-22);
+  height: var(--size-22);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: var(--border-1) solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--fs-xl);
+  line-height: 1;
+  cursor: pointer;
+}
+.row-actions button svg { width: var(--size-14); height: var(--size-14); }
+.row-actions button:hover, .row-actions button:focus-visible { color: var(--text); border-color: var(--line-hover); }
+.row-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+.terminal-tab.paused .pause-toggle { color: var(--amber-mark); }
+.row-actions .close-x:hover, .row-actions .close-x:focus-visible,
+.row-actions .remove-agent:hover, .row-actions .remove-agent:focus-visible { color: var(--red-strong); }
+/* Pause shows on every row. The other actions show on hover, keyboard focus and the selected row. They are hidden
+   with visibility, not display, so every button keeps its place: a pointer that moves onto Pause never lands on Kill.
+   A row the keyboard reached has focus-within (its name button), so the hidden actions appear and take the Tab order. */
+.row-actions .open-editor, .row-actions .reload-btn, .row-actions .close-x { visibility: hidden; }
+.terminal-tab:hover .row-actions button, .terminal-tab:focus-within .row-actions button, .terminal-tab.active .row-actions button { visibility: visible; }
+.row-actions .row-gap { width: var(--sp-4); }
+/* Reload button states (C5b): ready is the plain icon. A state other than ready stays visible without hover. */
+.terminal-tab[data-reload] .row-actions .reload-btn { visibility: visible; }
+.terminal-tab[data-reload="ready"] .row-actions .reload-btn { visibility: hidden; }
+.terminal-tab[data-reload="ready"]:hover .row-actions .reload-btn,
+.terminal-tab[data-reload="ready"]:focus-within .row-actions .reload-btn,
+.terminal-tab[data-reload="ready"].active .row-actions .reload-btn { visibility: visible; }
+.reload-btn { position: relative; }
+.terminal-tab[data-reload="change"] .reload-btn, .terminal-tab[data-reload="stale"] .reload-btn { color: var(--amber-mark); border-color: var(--amber-mark); }
+.terminal-tab[data-reload="change"] .reload-btn::after {
+  content: ''; position: absolute; top: calc(-1 * var(--sp-2)); right: calc(-1 * var(--sp-2));
+  width: var(--size-6); height: var(--size-6); border-radius: var(--radius-circle); background: var(--amber-mark);
+}
+.terminal-tab[data-reload="reloading"] .reload-btn { color: var(--amber-mark); opacity: 1; }
+.terminal-tab[data-reload="reloading"] .reload-btn svg { animation: reload-spin var(--motion-attention) linear infinite; }
+.terminal-tab[data-reload="failed"] .reload-btn { color: var(--red); border-color: var(--red); background: color-mix(in oklab, var(--red) 14%, transparent); }
+.reload-msg { padding: var(--sp-2) var(--sp-8) var(--sp-4) var(--sp-24); font-size: var(--fs-md); color: var(--text); }
+.reload-msg[hidden] { display: none; }
+.row-actions .remove-agent { display: none; }
+.terminal-tab[data-presence="offline"] .row-actions .pause-toggle,
+.terminal-tab[data-presence="offline"] .row-actions .open-editor,
+.terminal-tab[data-presence="offline"] .row-actions .reload-btn,
+.terminal-tab[data-presence="offline"] .row-actions .row-gap,
+.terminal-tab[data-presence="offline"] .row-actions .close-x { display: none; }
+.terminal-tab[data-presence="offline"] .row-actions .remove-agent { display: inline-flex; visibility: visible; }
+
+.row-details { flex: 1 0 100%; padding: var(--sp-4) var(--sp-8) var(--sp-6) var(--sp-24); font-size: var(--fs-md); color: var(--text-muted); cursor: default; }
+.row-details[hidden] { display: none; }
+.row-kv { display: flex; gap: var(--sp-12); padding: var(--sp-2) 0; }
+.row-k { flex: 0 0 8.5em; color: var(--text-muted); }
+.row-v { color: var(--text); font-family: var(--mono); overflow-wrap: anywhere; }
+.row-noskills { margin-top: var(--sp-6); color: var(--text-muted); }
+
+/* Skill switches (C6c). Text colours are --text and --text-muted only: 4.5:1 or more on --bg-raised and --bg-elev in all three themes. */
+.row-skills { margin-top: var(--sp-8); }
+.skills-head { display: flex; align-items: baseline; gap: var(--sp-8); }
+.skills-title { color: var(--text); font-weight: 600; }
+.skills-count { color: var(--text-muted); flex: 1 1 auto; white-space: nowrap; }
+.skills-all, .skills-reload {
+  flex: 0 0 auto; padding: var(--sp-2) var(--sp-8); font: inherit; color: var(--text); background: transparent; white-space: nowrap;
+  border: var(--border-1) solid var(--text-muted); border-radius: var(--radius-md); cursor: pointer;
+}
+.skills-all:hover, .skills-all:focus-visible, .skills-reload:hover, .skills-reload:focus-visible { border-color: var(--orange); }
+.skills-all[aria-disabled="true"], .skills-reload[aria-disabled="true"] { color: var(--text-muted); cursor: not-allowed; }
+.skills-loading { color: var(--text-muted); }
+.skills-error { margin-top: var(--sp-4); color: var(--text); border-left: var(--border-2) solid var(--red); padding-left: var(--sp-6); }
+.skills-group-name { margin-top: var(--sp-8); color: var(--text-muted); }
+.skill-item { display: flex; align-items: center; gap: var(--sp-8); min-width: 0; padding: var(--sp-2) 0; }
+.skill-item label { display: flex; align-items: center; gap: var(--sp-8); flex: 1 1 auto; min-width: 0; color: var(--text); font-family: var(--mono); cursor: pointer; }
+.skill-item input[type="checkbox"] { flex: 0 0 auto; margin: 0; accent-color: var(--orange); cursor: pointer; }
+.skill-item input[type="checkbox"]:focus-visible { outline: var(--border-2) solid var(--orange); outline-offset: var(--sp-2); }
+.skill-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skill-note { flex: 0 0 auto; color: var(--text-muted); }
+.skill-item.is-grey label { color: var(--text-muted); }
+/* The strip is a live region: it stays in the DOM and only its text changes. */
+.skills-strip { display: flex; align-items: center; gap: var(--sp-8); margin-top: var(--sp-8); padding: var(--sp-6) var(--sp-8); color: var(--text); border: var(--border-1) solid var(--amber-mark); border-radius: var(--radius-lg); }
+.skills-strip[hidden] { display: none; }
+.skills-strip-text { flex: 1 1 auto; }
+.skills-reload[hidden] { display: none; }
+
+/* Shell row: an icon and "Shell", no dot. */
+.terminal-tab-shell { cursor: pointer; }
+.terminal-tab-shell .tab-icon { width: var(--size-14); height: var(--size-14); flex: 0 0 auto; margin: 0 var(--sp-4) 0 var(--sp-4); }
+.terminal-tab-shell .tab-label { font-weight: 400; }
+.terminal-tab-shell.active .tab-label, .terminal-tab-shell:hover .tab-label { color: var(--text); }
+
+.agent-row-human {
   display: flex;
   align-items: center;
   gap: var(--sp-6);
-  /* Tightened: was 4/8. */
-  margin: var(--sp-2) 0 var(--sp-4);
-  padding: 0 var(--sp-4);
-  font-family: var(--mono);
-  font-size: var(--fs-3xs);
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  opacity: 0.7;
-  cursor: default;
-  user-select: none;
-}
-.terminal-tabs-heading::before,
-.terminal-tabs-heading::after {
-  content: "";
-  flex: 1;
-  height: var(--size-1);
-  background: var(--line);
-  opacity: 0.5;
-}
-
-/* Agent needs your attention (permission prompt waiting). Pulses until
-   the user focuses the tab. Clears when `.active` is set or the user
-   clicks the tab. */
-.terminal-tab.needs-attention {
-  animation: tab-attention var(--motion-attention) ease-in-out infinite;
-}
-.terminal-tab.needs-attention .state-dot {
-  background: var(--orange);
-  box-shadow: 0 0 var(--glow-md) color-mix(in oklab, var(--orange) 70%, transparent);
-}
-.terminal-tab.needs-attention .tab-label {
-  color: var(--orange);
-  font-weight: 600;
-}
-.terminal-tab .state-dot {
-  width: var(--size-6); height: var(--size-6);
-  border-radius: var(--radius-circle);
-  background: var(--text-dim);
-  flex-shrink: 0;
-}
-.terminal-tab[data-state="live"] .state-dot     { background: var(--green); box-shadow: 0 0 var(--glow-sm) color-mix(in oklab, var(--green) 45%, transparent); }
-.terminal-tab[data-state="launching"] .state-dot { background: var(--amber); box-shadow: 0 0 var(--glow-sm) color-mix(in oklab, var(--amber) 45%, transparent); }
-.terminal-tab[data-state="dead"] .state-dot      { background: var(--red); }
-.terminal-tab[data-state="external"] .state-dot  {
-  background: transparent;
-  border: var(--border-1) solid var(--text-dim);
-}
-.terminal-tab .tab-label {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-weight: 500;
-}
-/* Action icons (close-x + open-editor) only render in the layout when the
-   tab is hovered or active. The label gets the full rail width at rest;
-   icons appear on hover. */
-/* Pause toggle is ALWAYS visible, unlike close-x/open-editor which are hover
-   affordances: it is a primary control and doubles as the paused indicator, so
-   hiding it at rest makes a silenced agent indistinguishable from an idle one. */
-.terminal-tab .pause-toggle {
-  background: none;
-  border: 0;
-  padding: 0;
-  font: inherit;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  color: var(--text-muted);
-}
-.terminal-tab .pause-toggle svg { width: var(--size-12); height: var(--size-12); }
-.terminal-tab .pause-toggle:hover,
-.terminal-tab .pause-toggle:focus-visible { color: var(--text); }
-.terminal-tab.paused .pause-toggle { color: #d9822b; }
-.terminal-tab.paused .tab-label { opacity: 0.55; font-style: italic; }
-
-.terminal-tab .close-x,
-.terminal-tab .open-editor { display: none; }
-.terminal-tab:hover .close-x,
-.terminal-tab.active .close-x,
-.terminal-tab:hover .open-editor,
-.terminal-tab.active .open-editor {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  cursor: pointer;
-  padding: 0 var(--sp-2);
-  transition: color var(--motion-fast);
-}
-.terminal-tab .close-x {
-  color: var(--text-muted);
-  font-size: var(--fs-xl);
-  line-height: 1;
-}
-.terminal-tab .close-x:hover { color: var(--red); }
-.terminal-tab .open-editor { color: var(--text-muted); }
-.terminal-tab .open-editor:hover { color: var(--orange); }
-.terminal-tab .open-editor svg { width: var(--size-12); height: var(--size-12); }
-
-.terminal-tab-new {
-  /* Pushed to the bottom of the vertical rail by margin-top: auto — the
-     flex column consumes all remaining space above it. */
-  margin-top: auto;
-  background: var(--bg-elev);
-  border: var(--border-1) solid var(--line);
-  color: var(--text-muted);
+  padding: var(--sp-5) var(--sp-8) var(--sp-5) var(--sp-32);
   font-family: var(--mono);
   font-size: var(--fs-3xl);
-  padding: 0;
-  cursor: pointer;
-  width: 100%;
-  height: var(--size-30);
-  border-radius: var(--radius-lg);
-  line-height: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  transition: color var(--motion-fast), border-color var(--motion-fast), background var(--motion-fast);
+  color: var(--text);
 }
-.terminal-tab-new:hover {
-  color: var(--orange);
-  border-color: color-mix(in oklab, var(--orange) 40%, transparent);
-  background: var(--bg-hover);
-}
+.agent-row-human .tab-label { font-weight: 500; }
+.agent-row-you { font-size: var(--fs-md); color: var(--text-muted); }
 
 .terminal-body {
   order: 1;                  /* visually first, even though DOM has it second */
@@ -281,3 +287,68 @@
   transition: opacity var(--motion-slow) ease;
 }
 
+
+/* Finished stage sessions: a collapsible list above the "+" at the foot of the tab rail. */
+.terminal-finished {
+  order: 1;
+  margin-top: auto;
+  flex-shrink: 0;
+  border-top: var(--border-1) solid var(--line);
+  padding-top: var(--sp-4);
+}
+.terminal-finished > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-3) var(--sp-4);
+  font-family: var(--mono);
+  font-size: var(--fs-3xs);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-meta);
+  cursor: pointer;
+  user-select: none;
+}
+.terminal-finished > summary:hover { color: var(--text); }
+.terminal-finished-count { font-variant-numeric: tabular-nums; }
+.terminal-finished-list {
+  list-style: none;
+  margin: var(--sp-4) 0 0;
+  padding: 0;
+  max-height: 40vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.finished-item {
+  padding: var(--sp-4);
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+  border: var(--border-1) solid var(--line-soft);
+}
+.finished-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+}
+.finished-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.finished-state { flex-shrink: 0; text-transform: uppercase; letter-spacing: 0.08em; }
+/* The label stays --text (readable in all three themes); the outcome is a coloured dot, which needs 3:1 only. */
+.finished-state { color: var(--text); }
+.finished-state::before { content: "●"; margin-right: var(--sp-3); }
+.finished-state.ok::before { color: var(--green-strong); }
+.finished-state.bad::before { color: var(--red-strong); }
+.finished-title {
+  margin-top: var(--sp-3);
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.finished-empty { padding: var(--sp-3) var(--sp-4); font-size: var(--fs-2xs); color: var(--text-meta); }

@@ -44,7 +44,7 @@ fn strip_frontmatter(text: &str) -> &str {
     }
 }
 
-fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
+pub(crate) fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
     fs::create_dir_all(to).map_err(|e| format!("create {}: {e}", to.display()))?;
     let mut entries: Vec<_> = fs::read_dir(from).map_err(|e| format!("read {}: {e}", from.display()))?.flatten().collect();
     entries.sort_by_key(|e| e.file_name());
@@ -84,6 +84,15 @@ fn stage_role(src: &Path, role: &str, tmp: &Path) -> Result<(), String> {
     let md = src.join(format!("{role}.md"));
     let text = fs::read_to_string(&md).map_err(|e| format!("read {}: {e}", md.display()))?;
     fs::write(dst.join("role.md"), strip_frontmatter(&text)).map_err(|e| e.to_string())?;
+    // The staged role has no frontmatter, so the harness the role runs on is kept in its own file. The hub reads it
+    // to launch a stage session on the role's harness (stage-sessions 4.6b). Anything but `pi` means claude.
+    let harness = if frontmatter_value(&text, "harness").as_deref() == Some("pi") { "pi" } else { "claude" };
+    fs::write(dst.join("harness"), format!("{harness}\n")).map_err(|e| e.to_string())?;
+    // The template of the first message of a stage session (stage-sessions 4.3). The hub reads it from here; it is
+    // part of the staged tree, so a change to it is a new version.
+    if src.join("first-message.md").is_file() {
+        fs::copy(src.join("first-message.md"), dst.join("first-message.md")).map_err(|e| e.to_string())?;
+    }
     // hooks/hooks.json only; no `agents/` (the role plugin has skills and hooks only).
     if src.join("hooks/hooks.json").is_file() {
         fs::create_dir_all(dst.join("hooks")).map_err(|e| e.to_string())?;
@@ -226,7 +235,7 @@ fn sweep_stale_seed_tmp(skills: &Path) {
 
 // FNV-1a 64 over every file's relative path and bytes, in sorted order. Stable across Rust versions (unlike
 // DefaultHasher), so one input set gives one `v-<hash>` across builds. Not a security hash; it names a folder.
-fn hash_tree(root: &Path) -> Result<String, String> {
+pub(crate) fn hash_tree(root: &Path) -> Result<String, String> {
     fn walk(dir: &Path, rel: &Path, h: &mut u64) -> Result<(), String> {
         let mut entries: Vec<_> = fs::read_dir(dir).map_err(|e| e.to_string())?.flatten().collect();
         entries.sort_by_key(|e| e.file_name());
@@ -404,7 +413,8 @@ pub(crate) fn cleanup_versions(dest: &Path, live: Result<(Vec<String>, String), 
         };
         for e in entries.flatten() {
             let name = e.file_name().to_string_lossy().into_owned();
-            if name.contains(".tmp-") || AGENT_RECORD_SUFFIXES.iter().any(|x| name.ends_with(x)) {
+            // The skill records, the view symlink, its builds and the lock (skills.rs) are not agent links.
+            if name.contains(".tmp-") || name.contains(".skills-") || name.contains(".view") || AGENT_RECORD_SUFFIXES.iter().any(|x| name.ends_with(x)) {
                 continue;
             }
             match fs::read_link(e.path()) {
@@ -664,7 +674,7 @@ pub(crate) fn agent_key(agent: &str) -> String {
 }
 
 // Records beside an agent link, named `<key><suffix>`: plain files, never read as links.
-const AGENT_RECORD_SUFFIXES: [&str; 2] = [".applied", ".pending"];
+const AGENT_RECORD_SUFFIXES: [&str; 3] = [".applied", ".pending", ".last"];
 
 // A new session starts with no record of an earlier agent of the same name: the link, `<key>.applied` and
 // `<key>.pending` go (a pending record left by a crashed reload would otherwise block every later reload).
@@ -726,6 +736,9 @@ pub(crate) fn resolve_role_launch(agent: &str, role: &str, cwd: &Path, harness: 
     let version = fs::read_to_string(dest.join("current")).map_err(|e| format!("factory/current: {e}"))?;
     let active = link_agent(&dest, agent, version.trim())?;
     check_active_role(&active, role)?;
+    // An empty skill choice keeps the flags naming the agent link; a choice with a skill off names the view (skills.rs).
+    let launch_root = crate::skills::launch_in(&dest, &version_dir, agent, role, version.trim())?.unwrap_or_else(|| active.clone());
+    check_active_role(&launch_root, role)?;
     check_role_harness(&spec, harness, choice)?;
     let settings = if harness == "claude" {
         let user_claude = dirs::home_dir().ok_or_else(|| "no home dir".to_string())?.join(".claude");
@@ -733,7 +746,7 @@ pub(crate) fn resolve_role_launch(agent: &str, role: &str, cwd: &Path, harness: 
     } else {
         None
     };
-    Ok(with_choice(role_launch_on(&spec, harness, &active, settings), choice))
+    Ok(with_choice(role_launch_on(&spec, harness, &launch_root, settings), choice))
 }
 
 // ---- Model override for one launch (task 5.2) ----
@@ -1073,12 +1086,44 @@ mod tests {
         let agents = dest.join("agents");
         link_agent(&dest, "bob", &v).unwrap();
         fs::write(agents.join(format!("{key}.pending")), &v).unwrap();
+        fs::write(agents.join(format!("{key}.last")), r#"{"result":"failed","version":"x","at":1}"#).unwrap();
         let all = || (agents.join(&key).symlink_metadata().is_ok(), agents.join(format!("{key}.applied")).exists(), agents.join(format!("{key}.pending")).exists());
-        // Re-attach never calls clear_agent_records (see agent_command): the three stay.
+        let last = || agents.join(format!("{key}.last")).exists();
+        // Re-attach never calls clear_agent_records (see agent_command): the four stay.
         assert_eq!(all(), (true, true, true));
+        assert!(last());
         // A new same-name session (role-less, so nothing recreates them): none is left.
         clear_agent_records(&dest, "bob").unwrap();
         assert_eq!(all(), (false, false, false));
+        assert!(!last(), "the last reload result of an earlier session goes too");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // C6b: the skill records, the view link, its builds and the lock sit in agents/ too. They are not agent links, so
+    // they must not stop the cleanup (a "read link" error deletes nothing) and a live agent's view keeps working.
+    #[test]
+    fn cleanup_is_not_stopped_by_skill_records_view_builds_and_a_lock() {
+        use std::time::{Duration, SystemTime};
+        let root = tmp_root("cleanup-skills");
+        let src = make_src(&root);
+        let dest = root.join("out");
+        let v = stage_factory(&src, &dest, &root.join("user")).unwrap();
+        let old = format!("v-{}", "3".repeat(16));
+        fs::create_dir_all(dest.join(&old)).unwrap();
+        let agents = dest.join("agents");
+        link_agent(&dest, "bob", &v).unwrap();
+        let key = agent_key("bob");
+        for suffix in [".skills-off", ".skills-prepared", ".skills-published", ".skills-pending", ".skills-applied"] {
+            fs::write(agents.join(format!("{key}{suffix}")), "{}").unwrap();
+        }
+        fs::create_dir_all(agents.join(format!("{key}.skills-lock"))).unwrap();
+        fs::create_dir_all(agents.join(format!("{key}.view-1/worker"))).unwrap();
+        std::os::unix::fs::symlink(format!("{key}.view-1"), agents.join(format!("{key}.view"))).unwrap();
+        let later = SystemTime::now() + Duration::from_secs(11 * 60);
+        let log = cleanup_versions(&dest, Ok((vec!["bob".into()], String::new())), later);
+        assert!(!dest.join(&old).exists(), "skill records blocked the cleanup: {log:?}");
+        assert!(agents.join(format!("{key}.view-1")).exists() && agents.join(format!("{key}.skills-off")).exists());
+        assert!(dest.join(&v).exists(), "the live agent's version stays");
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1558,6 +1603,17 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    // Not a check by itself: tests/unit/role-harness.test.ts runs it with CUBILOT_TEST_STAGE_OUT set to get a tree staged by
+    // the real stage_factory, and reads it with the hub's roleHarness. Without the variable it does nothing.
+    #[test]
+    fn stage_for_hub_test() {
+        let Ok(out) = std::env::var("CUBILOT_TEST_STAGE_OUT") else { return };
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
+        let root = tmp_root("hub-stage");
+        stage_factory(&src, Path::new(&out), &root.join("user")).unwrap();
+        let _ = fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn stages_the_real_factory_tree() {
         let root = tmp_root("real");
@@ -1570,6 +1626,15 @@ mod tests {
         }
         assert!(dest.join(&v).join("shared/skills/asd-ste100/scripts/ste-lint.py").is_file());
         assert!(!dest.join(&v).join("editor/skills/asd-ste100").exists());
+        // 4.6b: the harness of each role is kept in the staged layout (the role.md has no frontmatter)
+        for (r, h) in [("worker", "claude"), ("tester", "claude"), ("writer", "claude"), ("editor", "claude"), ("validator", "pi"), ("reviewer", "pi")] {
+            assert_eq!(fs::read_to_string(dest.join(&v).join(r).join("harness")).unwrap().trim(), h, "{r}");
+        }
+        // 4.3: the template of the first message of a stage session is staged with each stage role
+        for r in ["editor", "reviewer", "tester", "validator", "worker", "writer"] {
+            let t = fs::read_to_string(dest.join(&v).join(r).join("first-message.md")).unwrap_or_else(|e| panic!("{r}: {e}"));
+            assert!(t.contains("{{ticket_id}}") && t.contains("{{acceptance_criteria}}"), "{r}");
+        }
         let _ = fs::remove_dir_all(&root);
     }
 }

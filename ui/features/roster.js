@@ -1,4 +1,4 @@
-// roster.js — legend, presence, composer target dropdown/menu.
+// roster.js — roster state, presence, composer target dropdown/menu. The agent rows are drawn by terminal.js.
 
 function applyRoster(agents) {
   ROSTER = Array.isArray(agents) ? agents : [];
@@ -14,7 +14,7 @@ function applyRoster(agents) {
     BODY_COLORS[a.name] = shade(a.color, 0.25);
   }
 
-  renderLegend();
+  renderAgentColumn();
   refreshRolePills();
   renderTargetDropdown();
   renderRoomSwitcher();
@@ -23,11 +23,8 @@ function applyRoster(agents) {
   window.refreshRoomLead?.();
 }
 
-legendEl.addEventListener('click', async (e) => {
-  const btn = e.target.closest?.('.legend-remove');
-  if (!btn) return;
-  const item = btn.closest('.legend-item');
-  const name = item?.dataset?.agent;
+// Remove an offline agent from the roster (the × of its row).
+async function removeAgentFromHub(name, btn) {
   if (!name || name === 'you') return;
   btn.disabled = true;
   try {
@@ -45,88 +42,31 @@ legendEl.addEventListener('click', async (e) => {
     addMessage({ from: 'system', to: 'you', text: `Remove failed: ${err?.message ?? err}`, ts: '' });
     btn.disabled = false;
   }
-});
-
-function renderLegend() {
-  hidePillCard();   // every pill is replaced: a card for a removed pill must not stay
-  legendEl.innerHTML = '';
-
-  for (const a of ROSTER) {
-    const isHuman = a.name === HUMAN_NAME;
-    const legItem = document.createElement('div');
-    legItem.className = 'legend-item offline';
-    legItem.dataset.agent = a.name;
-    legItem.tabIndex = 0;   // keyboard focus opens the details card, like hover
-    // Human visible in every room (no data-room attr).
-    if (!isHuman && typeof a.room === 'string' && a.room) legItem.dataset.room = a.room;
-    const removeBtn = isHuman
-      ? ''
-      : `<button type="button" class="legend-remove" title="Remove agent" aria-label="Remove ${a.name}">×</button>`;
-    legItem.innerHTML =
-      `<div class="legend-dot" style="background:${a.color}"></div>` +
-      `<span class="legend-label">${a.name}</span>` +
-      `<span class="presence-dot" title="offline"></span>` +
-      `<span class="legend-state">off</span>` +
-      removeBtn;
-    legendEl.appendChild(legItem);
-  }
-
-  if (!ROSTER.length) {
-    const empty = document.createElement('div');
-    empty.className = 'legend-item offline';
-    empty.style.fontStyle = 'italic';
-    empty.innerHTML = '<span class="legend-label">waiting for agents…</span>';
-    legendEl.appendChild(empty);
-  }
 }
 
-// The pill shows only the dot, the name and the presence. Role, harness, model, provider and effort are in a card
-// on hover or keyboard focus (pillCardFields, pill-card.js), the same five fields for every agent. The data comes
-// from the tmux session (pty_roles); outside the desktop app there is none.
+// "6/6 online" in the header of the agent column: the agents of the selected room (the human is not counted).
+function updateAgentCount() {
+  const el = document.getElementById('agent-col-count');
+  if (!el) return;
+  const agents = ROSTER.filter((a) => a.name !== HUMAN_NAME && (SELECTED_ROOM === ROOM_ALL || a.room === SELECTED_ROOM));
+  el.textContent = `${agents.filter((a) => presenceState[a.name]).length}/${agents.length} online`;
+}
+document.addEventListener('cubilot:room-filter', updateAgentCount);
+
+function renderAgentColumn() {
+  const human = document.getElementById('agent-human-name');
+  if (human) {
+    human.textContent = HUMAN_NAME;
+    const me = ROSTER.find((a) => a.name === HUMAN_NAME);
+    if (me?.color) human.style.setProperty('--agent-color', me.color);
+  }
+  updateAgentCount();
+  window.reconcileAgentColumn?.();
+}
+
+// Role, harness, model, provider and effort of each agent come from the tmux session (pty_roles); outside the
+// desktop app there is none.
 let pillRoles = {};
-let pillCardEl = null;
-let pillCardFor = null;
-
-function hidePillCard() {
-  pillCardFor = null;
-  if (pillCardEl) pillCardEl.hidden = true;
-}
-
-function showPillCard(item) {
-  const name = item.dataset.agent;
-  if (!name || pillCardFor === name) return;
-  pillCardFor = name;
-  if (!pillCardEl) {
-    pillCardEl = document.createElement('div');
-    pillCardEl.className = 'pill-card';
-    pillCardEl.setAttribute('role', 'tooltip');
-    document.body.appendChild(pillCardEl);
-  }
-  const info = pillRoles[name];
-  pillCardEl.innerHTML = pillCardFields(info).map(([k, v]) =>
-    `<div class="pill-card-row"><span class="pill-card-k">${escAttr(k)}</span><span class="pill-card-v">${escAttr(v)}</span></div>`).join('');
-  // Fixed position under the pill: the card floats, so the pills do not move or wrap.
-  const r = item.getBoundingClientRect();
-  pillCardEl.hidden = false;   // shown first: a hidden card has no width to measure
-  const vw = document.documentElement.clientWidth || window.innerWidth;
-  const left = Math.max(8, Math.min(r.left, vw - pillCardEl.getBoundingClientRect().width - 8));
-  Object.assign(pillCardEl.style, { top: `${r.bottom + 6}px`, left: `${left}px` });
-}
-
-legendEl.addEventListener('mouseover', (e) => {
-  const item = e.target.closest?.('.legend-item[data-agent]');
-  if (item) showPillCard(item);
-});
-legendEl.addEventListener('mouseout', (e) => {
-  const item = e.target.closest?.('.legend-item[data-agent]');
-  if (item && !item.contains(e.relatedTarget)) hidePillCard();
-});
-legendEl.addEventListener('focusin', (e) => {
-  const item = e.target.closest?.('.legend-item[data-agent]');
-  if (item) showPillCard(item);
-});
-legendEl.addEventListener('focusout', hidePillCard);
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hidePillCard(); });
 
 // Task 6.2: an online agent with role `orchestrator` becomes the lead of its room, once, and only when the room has
 // no lead yet (the human's choice is never overridden). The hub route is human-only, so the call is made as the human.
@@ -159,8 +99,8 @@ function refreshRolePills() {
     let roles = {};
     try { roles = (await tauriInvoke('pty_roles')) || {}; } catch { return; }
     pillRoles = roles;
+    window.renderRowDetails?.();
     ensureOrchestratorLead(roles);
-    for (const el of legendEl.querySelectorAll('.legend-role')) el.remove();   // old inline text, if any
   }, 300);
 }
 
@@ -286,17 +226,8 @@ if (targetDisplay) {
 function applyPresence(agents) {
   presenceState = { ...agents };
   window.noteJoinPresence?.(presenceState);
-  for (const a of ROSTER) {
-    const item = legendEl.querySelector(`[data-agent="${a.name}"]`);
-    if (!item) continue;
-    const online = !!agents[a.name];
-    item.classList.toggle('online', online);
-    item.classList.toggle('offline', !online);
-    const state = item.querySelector('.legend-state');
-    if (state) state.textContent = online ? 'on' : 'off';
-    const pd = item.querySelector('.presence-dot');
-    if (pd) pd.title = online ? 'connected' : 'offline';
-  }
+  for (const a of ROSTER) window.setAgentPresence?.(a.name, !!agents[a.name]);
+  updateAgentCount();
   refreshRolePills();
   const names = ROSTER.map(a => a.name);
   const onCount = names.filter(n => agents[n]).length;

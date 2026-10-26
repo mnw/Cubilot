@@ -99,6 +99,8 @@ async function connect() {
     dot.className = 'dot live'; statusText.textContent = 'live';
     window.syncAllPauseStates?.();
     window.syncTicketBoard?.();
+    window.syncFinishedSessions?.();
+    window.syncPlanApproval?.();
   };
   es.onmessage = (e) => {
     try { handleEvent(JSON.parse(e.data)); }
@@ -293,7 +295,7 @@ if (reloadBtn) {
     }
   });
 }
-const addAgentBtn = document.getElementById('add-agent-btn');
+const addAgentBtn = document.getElementById('agent-col-add');
 if (addAgentBtn) {
   addAgentBtn.addEventListener('click', () => {
     document.dispatchEvent(new CustomEvent('cubilot:open-spawn'));

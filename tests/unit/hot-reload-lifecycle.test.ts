@@ -56,10 +56,10 @@ describe.each(["Pi (ctx.reload still running)", "Claude (module replaced, old re
     const gate = new Promise<void>((r) => (finish = r));
     const oldReloads: string[] = [];
     // The old bridge: its reload waits for the gate, then records applied (what the adapter does).
-    const old = bridgeOn(h.request, async (version) => {
+    const old = bridgeOn(h.request, async (version, _id, attempt) => {
       oldReloads.push(version);
       await gate;
-      await h.request("http://hub.test/factory/applied", { method: "POST", headers: {}, body: JSON.stringify({ agent: "bob", version }) });
+      await h.request("http://hub.test/factory/applied", { method: "POST", headers: {}, body: JSON.stringify({ agent: "bob", version, attempt }) });
     });
     await until(() => oldReloads.length === 1);
     // The replacement bridge starts now, before the old reload completed.

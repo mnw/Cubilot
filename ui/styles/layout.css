@@ -72,7 +72,7 @@ body.no-terminal .splitter,
 body.no-terminal .terminal-col { display: none; }
 body.no-terminal .chat-col { flex: 1 1 auto; }
 body:not(.no-terminal) .chat-col {
-  flex: 0 0 calc(var(--split, 50%));
+  flex: 0 1 calc((100% - var(--size-300)) * var(--split-frac, 0.5));
   min-width: 0;
 }
 
@@ -83,7 +83,17 @@ body:not(.no-terminal) .chat-col {
   background: var(--line-soft);
   cursor: col-resize;
   position: relative;
+  z-index: 2;   /* above the board: a drag that starts near the splitter never reaches a ticket card */
   transition: background var(--motion-fast);
+}
+/* Hit area: 8 px beyond each edge, so the splitter is 22 px wide to the pointer. */
+.splitter::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(-1 * var(--size-8));
+  right: calc(-1 * var(--size-8));
 }
 /* Vertical grip dots in the middle of the splitter so the drag
    affordance is discoverable without making the strip thicker. */
