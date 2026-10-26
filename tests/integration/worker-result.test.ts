@@ -56,10 +56,13 @@ describe("worker result needs a new commit", () => {
     const seen: any[] = [];
     void (async () => { try { for await (const e of sse.events) seen.push(e); } catch { /* closed */ } })();
     await new Promise((r) => setTimeout(r, 150));
-    for (const r of [await send({ to: "alice" }), await send({ to_role: "tester" }), await send({ to_role: "tester" }, "abc123")]) {
+    for (const r of [await send({ to: "alice" }), await send({ to_role: "tester" })]) {
       expect(r.status).toBe(400);
       expect(JSON.stringify(r.json)).toContain("A worker result needs to_role tester and a new commit");
     }
+    // A malformed hash is refused earlier by the shared commit-hash check, before any git call.
+    const bad = await send({ to_role: "tester" }, "abc123");
+    expect(bad.status).toBe(400);
     await new Promise((r) => setTimeout(r, 300));
     sse.close();
     expect(seen.some((e) => e.kind === "stage.rejected")).toBe(true);
