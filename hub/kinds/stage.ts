@@ -329,6 +329,8 @@ export type StageHooks = {
    * that is running, the text names it: the sender probably copied a stage id from a handoff.
    */
   completedStage(from: string, context: unknown): string | null;
+  /** True when `context.stage_id` is the running worker stage of `from`: its commit is checked by checkResult (G2), not by the shared hash check. */
+  isWorkerResult?(from: string, context: unknown): boolean;
   /** `to` is the recipient of the handoff: a spec result must go to the room lead (spec-review 4.1b). */
   checkResult(from: string, context: unknown, cap: HubCapabilities, to?: string): string[] | null;
   /**
@@ -1425,6 +1427,11 @@ export function createStageRuntime(
       return own
         ? `stage ${row.id} is already ${row.status}. Your running stage is ${own.id}. Send your result with that stage_id.`
         : `stage ${row.id} is already ${row.status}; it takes no more results`;
+    },
+    isWorkerResult(from, context) {
+      const id = context && typeof context === "object" && !Array.isArray(context) ? (context as Record<string, unknown>).stage_id : undefined;
+      if (typeof id !== "string") return false;
+      return !!db.query("SELECT 1 FROM stage WHERE id = ? AND session = ? AND role = 'worker' AND status = 'running'").get(id, from);
     },
     checkResult(from, context, cap, to) {
       const stage = db

@@ -60,9 +60,12 @@ describe("worker result needs a new commit", () => {
       expect(r.status).toBe(400);
       expect(JSON.stringify(r.json)).toContain("A worker result needs to_role tester and a new commit");
     }
-    // A malformed hash is refused earlier by the shared commit-hash check, before any git call.
-    const bad = await send({ to_role: "tester" }, "abc123");
-    expect(bad.status).toBe(400);
+    // A malformed hash gets the same worker refusal, before any git call.
+    for (const h of ["abc123", "A".repeat(40), "g".repeat(40), "ticket/" + ticketId]) {
+      const bad = await send({ to_role: "tester" }, h);
+      expect(bad.status).toBe(400);
+      expect((bad.json as { errors: string[] }).errors[0]).toContain("A worker result needs to_role tester and a new commit on ticket/");
+    }
     await new Promise((r) => setTimeout(r, 300));
     sse.close();
     expect(seen.some((e) => e.kind === "stage.rejected")).toBe(true);

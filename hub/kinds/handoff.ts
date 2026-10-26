@@ -501,7 +501,8 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
             return Response.json({ error: "a to_role handoff needs context.ticket_id" }, { status: 400 });
           }
           // The commit a Tester, Validator, Editor or Reviewer worktree is detached at (stage-sessions 4.5).
-          if (ctx.commit !== undefined && (typeof ctx.commit !== "string" || !/^[0-9a-f]{7,64}$/i.test(ctx.commit))) {
+          // A worker result with a bad hash goes to the worker check below, which gives the worker refusal and stage.rejected (G2).
+          if (ctx.commit !== undefined && !stage?.isWorkerResult?.(from, body.context) && (typeof ctx.commit !== "string" || !/^[0-9a-f]{7,64}$/i.test(ctx.commit))) {
             return Response.json({ error: "context.commit must be a commit hash" }, { status: 400 });
           }
           const t = db.query<{ room: string }, [string]>("SELECT room FROM tickets WHERE id = ?").get(ctx.ticket_id);
