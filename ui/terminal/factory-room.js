@@ -98,7 +98,10 @@
   }
 
   // The Launch click. Nothing runs (no settings PUT, no Nutshell write, no launch) unless the form allows it for this
-  // opening. io: { putSettings(l, limits), seedNutshell(room, cwd), launch(l), close(), alert(text) }. → whether it launched.
+  // opening. io: { putSettings(l, limits), seedNutshell(room, cwd), launch(l), close(), alert(text), current() }.
+  // current() is true while this submission still belongs to the opening it started in. It is checked after each await:
+  // after a close or a reopen of the form, no later effect of the old submission runs. io.close() is the submission's own
+  // close: current() must stay true after it. → whether it launched.
   async function submitFactoryRoom(io, loader, values, existingAgents) {
     const st = formState(loader, values);
     if (st.disabled) return false;
@@ -108,11 +111,13 @@
     try {
       await io.putSettings(r.launch, r.limits);
     } catch (e) {
-      io.alert(`Could not store the room settings: ${e?.message ?? e}`);
+      if (io.current()) io.alert(`Could not store the room settings: ${e?.message ?? e}`);
       return false;
     }
+    if (!io.current()) return false;
     io.close();
     await io.seedNutshell(r.launch.room, r.launch.cwd);
+    if (!io.current()) return false;
     await io.launch(r.launch);
     return true;
   }

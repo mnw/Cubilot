@@ -1624,7 +1624,8 @@
   const frCwd     = document.getElementById('factory-room-cwd');
   const frWorkers = document.getElementById('factory-room-workers');
   const frTesters = document.getElementById('factory-room-testers');
-  const closeFactoryRoom = () => { frModal?.classList.remove('open'); frLoader.close(); };
+  let frGen = 0;   // bumped at each opening and each close: a submission only continues while its number is current
+  const closeFactoryRoom = () => { frGen++; frModal?.classList.remove('open'); frLoader.close(); frSet(frLineEl, ''); };
 
   // The orchestrator's model and effort are read-only: they come from the `orchestrator` role, read again at each
   // opening. Launch is off while the role loads or when it fails (factory-room.js formState, spawn-form.js loader).
@@ -1676,6 +1677,7 @@
     if (frName) frName.value = '';
     if (frCwd) frCwd.value = '';
     frTouched.clear();
+    frGen++;
     frModal?.classList.add('open');
     setTimeout(() => frName?.focus(), 0);
     const loading = frLoader.open();   // the role is read again at each opening
@@ -1693,7 +1695,9 @@
   });
   frSubmit?.addEventListener('click', async () => {
     const names = (typeof ROSTER !== 'undefined' && Array.isArray(ROSTER)) ? ROSTER.map(a => a.name) : [];
+    let mine = frGen;
     await factoryRoom.submitFactoryRoom({
+      current: () => mine === frGen,
       alert: (text) => alert(text),
       // The project folder is where the hub makes the worktrees of the stage sessions (stage-sessions 4.5).
       putSettings: async (l, limits) => {
@@ -1706,7 +1710,7 @@
           throw new Error(detail || `hub answered ${res.status}`);
         }
       },
-      close: closeFactoryRoom,
+      close: () => { closeFactoryRoom(); mine = frGen; },   // the submission's own close keeps it current
       seedNutshell: seedFactoryNutshell,
       // Same call as the spawn modal makes: the role's own harness, model and effort.
       launch: (l) => handleLaunch(l.agent, l.cwd, null, l.room, l.harness, l.role, l.model, l.effort, l.provider),

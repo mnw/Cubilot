@@ -84,6 +84,7 @@ describe("buildFactoryRoom", () => {
 describe("submitFactoryRoom: stale state across openings", () => {
   const calls: string[] = [];
   const io = () => ({
+    current: () => true,
     alert: (t: string) => calls.push(`alert:${t}`),
     putSettings: async () => { calls.push("put"); },
     close: () => calls.push("close"),
@@ -113,6 +114,57 @@ describe("submitFactoryRoom: stale state across openings", () => {
     expect(formState(loader.state(), base)).toMatchObject({ disabled: true, line: "Could not load the orchestrator role: boom." });
     expect(await submitFactoryRoom(io(), loader.state(), base, [])).toBe(false);
     expect(calls).toEqual([]);   // no settings PUT, no Nutshell write, no launch
+  });
+  test("old submission: PUT paused, close, reopen, listRoles rejects: no PUT result effect, close, seed or launch", async () => {
+    calls.length = 0;
+    let gen = 0;
+    let releasePut: () => void = () => {};
+    let n = 0;
+    let rejectSecond: (e: Error) => void = () => {};
+    const loader = createRolesLoader(() => (n++ === 0 ? Promise.resolve([orch]) : new Promise((_, rej) => { rejectSecond = rej; })));
+    gen++; await loader.open();
+    const mine = gen;
+    const paused = {
+      ...io(), current: () => mine === gen,
+      putSettings: () => new Promise<void>((res) => { releasePut = res; }),
+    };
+    const sub = submitFactoryRoom(paused, loader.state(), base, []);
+    gen++; loader.close();            // the form is closed
+    gen++; const pending = loader.open();   // reopened
+    rejectSecond(new Error("boom"));
+    await pending;
+    releasePut();
+    expect(await sub).toBe(false);
+    expect(calls).toEqual([]);
+  });
+  test("reopen after the submission's own close, during the Nutshell write: no launch", async () => {
+    calls.length = 0;
+    let gen = 0;
+    let mine = 0;
+    let releaseSeed: () => void = () => {};
+    const loader = createRolesLoader(async () => [orch]);
+    gen++; await loader.open(); mine = gen;
+    const sub = submitFactoryRoom({
+      ...io(), current: () => mine === gen,
+      close: () => { calls.push("close"); gen++; mine = gen; },
+      seedNutshell: () => new Promise<void>((res) => { releaseSeed = res; }),
+    }, loader.state(), base, []);
+    await Promise.resolve(); await Promise.resolve();
+    gen++;   // reopen
+    releaseSeed();
+    expect(await sub).toBe(false);
+    expect(calls).toEqual(["put", "close"]);
+  });
+  test("live-region text: close clears it, so a reopen during loading is announced again", () => {
+    // terminal.js frSet writes the line only when it changes; closeFactoryRoom writes '' first.
+    let shown = "";
+    const writes: string[] = [];
+    const set = (t: string) => { if (shown !== t) { shown = t; writes.push(t); } };
+    const loader = createRolesLoader(() => new Promise(() => {}));
+    loader.open(); set(formState(loader.state(), base).line);
+    loader.close(); set("");   // closeFactoryRoom
+    loader.open(); set(formState(loader.state(), base).line);
+    expect(writes).toEqual(["Loading the orchestrator role…", "", "Loading the orchestrator role…"]);
   });
   test("a missing field: nothing is called", async () => {
     calls.length = 0;
