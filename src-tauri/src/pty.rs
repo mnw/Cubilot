@@ -1293,6 +1293,8 @@ fn role_default_pi_provider(spec: &crate::factory::RoleSpec) -> Option<String> {
 const SESSION_NOT_FOUND: &str = "session not found";
 
 // attach_only with no tmux session of that name: refuse, create nothing.
+const ROLE_REQUIRED: &str = "a role is required";
+
 fn attach_only_error(attach_only: bool, session_exists: bool) -> Option<&'static str> {
     (attach_only && !session_exists).then_some(SESSION_NOT_FOUND)
 }
@@ -1310,14 +1312,21 @@ fn role_mismatch_error(agent: &str, requested: Option<&str>, session_role: Optio
 
 // Everything pty_spawn decides about a session that may already exist, before anything is created:
 // - attach_only and no session: refused;
+// - no role and no session: refused ("a role is required"), after read-only queries only;
 // - a role was requested and the session runs another one (or none): refused;
 // - attach_only and the session is gone by the time it is configured (it can exit after the first checks):
 //   refused too, so the caller's "create" branch is never reached.
 // Ok(true): the session exists and is configured. Ok(false): none exists and the caller may create it.
 // `between` runs after the role check and before the configuration (the test kills the session there).
 fn existing_session_state(agent: &str, role: Option<&str>, attach_only: bool, lang: &str, between: impl FnOnce()) -> Result<bool, String> {
-    if let Some(e) = attach_only_error(attach_only, session_exists(agent)) {
+    let exists = session_exists(agent);
+    if let Some(e) = attach_only_error(attach_only, exists) {
         return Err(e.to_string());
+    }
+    // A new launch needs a role. Only read-only tmux queries (has-session above) ran so far; a running session is
+    // reattached without a role check (a roleless session from before keeps working).
+    if role.is_none() && !exists {
+        return Err(ROLE_REQUIRED.to_string());
     }
     // An existing session keeps the role it was launched with: a launch that asks for another one is refused.
     if role.is_some() && session_exists(agent) {
@@ -1330,6 +1339,10 @@ fn existing_session_state(agent: &str, role: Option<&str>, attach_only: bool, la
     let existed = ensure_session_configured(agent, lang)?;
     if !existed && attach_only {
         return Err(SESSION_NOT_FOUND.to_string());
+    }
+    // The session exited after the first check: a roleless launch must not create it.
+    if !existed && role.is_none() {
+        return Err(ROLE_REQUIRED.to_string());
     }
     Ok(existed)
 }
@@ -2710,6 +2723,10 @@ mod spawn_argv_tests {
         assert!(super::spawn_role_with(Some("nope".into()), &check).unwrap_err().contains("unknown role"));
         assert!(super::spawn_role_with(Some("a11y".into()), &check).unwrap_err().contains("council"));
         assert!(super::spawn_role_with(Some("../worker".into()), &check).is_err());
+        // every factory role with a launch command is accepted; the councils are not
+        for r in ["orchestrator", "worker", "tester", "validator", "writer", "editor", "reviewer"] {
+            assert_eq!(super::spawn_role_with(Some(r.into()), &check), Ok(Some(r.into())), "{r}");
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -3627,6 +3644,71 @@ mod existing_session_tests {
         assert_eq!(existing_session_state("a", Some("worker"), false, LANG, || {}), Ok(true));
         assert_eq!(existing_session_state("a", Some("worker"), true, LANG, || {}), Ok(true));
         assert_eq!(existing_session_state("a", None, true, LANG, || {}), Ok(true));
+    }
+
+    // A recording tmux: a wrapper script that appends its argv to a log, then runs the real tmux.
+    fn recording(t: &Isolated) -> PathBuf {
+        let log = t.sock.with_extension("log");
+        let wrapper = t.sock.with_extension("sh");
+        let script = format!("#!/bin/sh\necho \"$@\" >> '{}'\nexec '{}' \"$@\"\n", log.display(), t.bin.display());
+        std::fs::write(&wrapper, script).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+        TEST_TMUX.with(|c| *c.borrow_mut() = Some((wrapper, t.sock.clone())));
+        let _ = std::fs::remove_file(&log);
+        log
+    }
+    fn calls(log: &PathBuf) -> Vec<String> {
+        std::fs::read_to_string(log).unwrap_or_default().lines().map(|l| l.split_whitespace().skip(2).next().unwrap_or("").to_string()).collect()
+    }
+    const CHANGING: [&str; 7] = ["new-session", "set-option", "set-environment", "resize-window", "kill-session", "refresh-client", "send-keys"];
+
+    #[test]
+    fn a_new_launch_without_a_role_is_refused_after_read_only_queries_only() {
+        let t = Isolated::new();
+        t.session("other", None); // a live server, but no session "a"
+        let log = recording(&t);
+        for attach_only in [false] {
+            assert_eq!(existing_session_state("a", None, attach_only, LANG, || {}), Err("a role is required".to_string()));
+        }
+        let c = calls(&log);
+        assert!(!c.is_empty(), "the has-session query ran");
+        assert!(c.iter().all(|a| a == "has-session" || a == "show-options"), "only read-only queries: {c:?}");
+        assert!(c.iter().all(|a| !CHANGING.contains(&a.as_str())));
+        assert!(!session_exists("a"));
+    }
+
+    #[test]
+    fn a_launch_without_a_role_on_an_empty_server_creates_nothing() {
+        let t = Isolated::new();
+        let log = recording(&t);
+        assert_eq!(existing_session_state("a", None, false, LANG, || {}), Err("a role is required".to_string()));
+        assert!(calls(&log).iter().all(|a| a == "has-session"));
+    }
+
+    #[test]
+    fn a_roleless_session_is_reattached_without_a_role_check_or_a_role_change() {
+        let t = Isolated::new();
+        t.session("a", None);
+        let log = recording(&t);
+        for attach_only in [false, true] {
+            assert_eq!(existing_session_state("a", None, attach_only, LANG, || {}), Ok(true));
+        }
+        let c = calls(&log);
+        assert!(c.iter().any(|a| a == "resize-window"), "ensure_session_configured ran: {c:?}");
+        assert!(c.iter().all(|a| a != "kill-session" && a != "new-session"), "{c:?}");
+        let raw = std::fs::read_to_string(&log).unwrap();
+        assert!(!raw.contains("@cubilot_role"), "the role option is not touched: {raw}");
+        assert!(session_exists("a"));
+    }
+
+    #[test]
+    fn a_roleless_launch_is_not_created_when_the_session_exits_between_the_checks() {
+        let t = Isolated::new();
+        t.session("keep", None);
+        t.session("b", None);
+        assert_eq!(existing_session_state("b", None, false, LANG, || assert!(Isolated::raw_kill("b"))), Err("a role is required".to_string()));
+        assert!(!session_exists("b"));
     }
 
     #[test]

@@ -6,6 +6,7 @@
   function attach({ select, button, menu, doc }) {
     const label = button.querySelector('.role-label');
     let active = -1;
+    let optIdx = [];   // menu position -> select option index; the empty placeholder option is not a choice
 
     const items = () => [...menu.children];
     const isOpen = () => menu.classList.contains('open');
@@ -21,7 +22,7 @@
       sync();
       menu.classList.add('open');
       button.setAttribute('aria-expanded', 'true');
-      setActive(select.selectedIndex);
+      setActive(Math.max(0, optIdx.indexOf(select.selectedIndex)));
     }
     function close() {
       menu.classList.remove('open');
@@ -40,7 +41,10 @@
     // Rebuild the list from the select's options and show the current one on the button.
     function sync() {
       menu.textContent = '';
+      optIdx = [];
       [...select.options].forEach((opt, i) => {
+        if (opt.value === '') return;   // "Pick a role": a prompt, not a role
+        optIdx.push(i);
         const el = doc.createElement('div');
         el.className = 'role-option' + (opt.value === select.value ? ' selected' : '');
         el.setAttribute('role', 'option');
@@ -67,7 +71,7 @@
       }
       if (k === 'ArrowDown') { e.preventDefault(); setActive(active + 1); }
       else if (k === 'ArrowUp') { e.preventDefault(); setActive(active - 1); }
-      else if (k === 'Enter' || k === ' ') { e.preventDefault(); choose(active); }
+      else if (k === 'Enter' || k === ' ') { e.preventDefault(); choose(optIdx[active]); }
       else if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
       else if (k === 'Tab') close();
     });

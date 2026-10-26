@@ -22,8 +22,24 @@ describe("grid model", () => {
     const c = g.gridModel({ harness: "claude", models: claude, role });
     expect(g.launchReady(c, null, role)).toBe(false);
     expect(g.launchReady(c, { rowKey: "/opus", effort: "high" }, role)).toBe(true);
-    expect(g.launchReady(c, null, null)).toBe(true);
+    expect(g.launchReady(c, null, null)).toBe(false);   // a launch needs a role
     expect(g.launchReady(g.gridModel({ harness: "pi", models: pi, role }), null, role)).toBe(true);
+  });
+
+  test("no role: not ready, with the exact text; each staged single-agent role on its default harness is ready", () => {
+    expect(g.ROLE_REQUIRED).toBe("Pick a role. An agent without a role cannot be spawned.");
+    for (const h of ["claude", "pi"]) {
+      const grid = g.gridModel({ harness: h, models: h === "pi" ? pi : claude });
+      expect(g.launchReady(grid, null, null)).toBe(false);
+      expect(g.launchReady(grid, { rowKey: h === "pi" ? "openai-codex/gpt-5.6-sol" : "/opus", effort: "high" }, null)).toBe(false);
+    }
+    const staged = ["orchestrator", "worker", "tester", "validator", "writer", "editor", "reviewer"];
+    for (const name of staged) {
+      for (const harness of ["claude", "pi"]) {
+        const role = { name, harness, model: "x", provider: null, thinking: null };
+        expect(g.launchReady(g.gridModel({ harness, models: harness === "pi" ? pi : claude, role }), null, role)).toBe(true);
+      }
+    }
   });
 
   test("Claude, no role: four rows, five columns, nothing selected, nothing sent", () => {
@@ -253,7 +269,7 @@ describe("spawn modal grid glue", () => {
     els.spawnRoleEl.value = "editor";
     release(roles);   // the answer lists worker and validator only
     await pending;
-    expect(els.spawnRoleEl.value).toBe("editor");   // not None
+    expect(els.spawnRoleEl.value).toBe("editor");   // not cleared
     expect(els.spawnRoleErrEl.hidden).toBe(false);
     expect(els.spawnRoleErrEl.textContent).toContain('"editor" is not in the staged role list');
   });
@@ -263,8 +279,15 @@ describe("spawn modal grid glue", () => {
     await api.refreshSpawnRoles();
     expect(els.spawnRoleErrEl.hidden).toBe(false);
     await api.refreshSpawnRoles();
+    // the failure text is gone; with no role picked the field says why Launch is off
+    expect(els.spawnRoleErrEl.hidden).toBe(false);
+    expect(els.spawnRoleErrEl.textContent).toBe(g.ROLE_REQUIRED);
+    expect(els.spawnSubmit.disabled).toBe(true);
+    els.spawnRoleEl.value = "worker";
+    await api.onSpawnRoleChange();
     expect(els.spawnRoleErrEl.hidden).toBe(true);
     expect(els.spawnRoleErrEl.textContent).toBe("");
+    expect(els.spawnSubmit.disabled).toBe(false);
   });
   test("pty.listRoles rejects when the command fails (it no longer answers [])", async () => {
     const win: any = { __TAURI__: { core: { invoke: async () => { throw new Error("nope"); } } } };

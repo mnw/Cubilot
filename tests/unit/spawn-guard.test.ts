@@ -12,6 +12,7 @@ describe("spawnRoleMismatch", () => {
     const ctx: any = vm.createContext({
       spawnRoleEl: { value }, spawnRoles: new Map(staged.map((n) => [n, {}])),
       roleList: shown === null ? null : { shown: () => shown },
+      modelGrid: { ROLE_PROMPT: "Pick a role" },
     });
     vm.runInContext(block + ";this.r = spawnRoleMismatch();", ctx);
     return ctx.r;
@@ -19,13 +20,13 @@ describe("spawnRoleMismatch", () => {
 
   test("window and value agree: no mismatch", () => {
     expect(run("reviewer", "reviewer", ["reviewer"])).toBe("");
-    expect(run("", "None", ["reviewer"])).toBe("");
+    expect(run("", "Pick a role", ["reviewer"])).toBe("");
   });
-  test("the window shows a role but the value is None: refused", () => {
-    expect(run("", "reviewer", ["reviewer"])).toContain('shows "reviewer" but the role is "None"');
+  test("the window shows a role but the value is empty: refused", () => {
+    expect(run("", "reviewer", ["reviewer"])).toContain('shows "reviewer" but the role is "Pick a role"');
   });
-  test("the window shows None but the value is a role: refused", () => {
-    expect(run("worker", "None", ["worker"])).toContain('role is "worker"');
+  test("the window shows the prompt but the value is a role: refused", () => {
+    expect(run("worker", "Pick a role", ["worker"])).toContain('role is "worker"');
   });
   test("a value that is not a staged role is refused", () => {
     expect(run("ghost", "ghost", ["worker"])).toContain("not in the role list");

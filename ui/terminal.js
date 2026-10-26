@@ -1270,14 +1270,14 @@
     gridSelected = null;
     if (spawnGridFilterEl) spawnGridFilterEl.value = '';
     if (spawnRoleErrEl) { spawnRoleErrEl.textContent = ''; spawnRoleErrEl.hidden = true; }
-    if (spawnRoleEl) spawnRoleEl.value = '';   // every opening starts at None; refreshSpawnRoles keeps only a pick made during its wait
+    if (spawnRoleEl) spawnRoleEl.value = '';   // every opening starts at "Pick a role"; refreshSpawnRoles keeps only a pick made during its wait
     roleList?.sync();
     refreshSpawnRoles();
     spawnModal.classList.add('open');
     setTimeout(() => spawnAgentEl.focus(), 0);
   }
 
-  // Roles come from the staged version; "None" stays first and is the default, so a launch without a role is unchanged.
+  // Roles come from the staged version; "Pick a role" is a prompt, not a choice: a launch needs a role.
   let spawnOpening = 0;   // counts openings of the modal: a list_roles answer of an earlier opening is dropped
   async function refreshSpawnRoles() {
     if (!spawnRoleEl) return;
@@ -1298,7 +1298,7 @@
     console.info('[terminal] refreshSpawnRoles', { opening, keep, roles: roles.length });   // t_41e14dde706805e3 trace
     spawnRoles = new Map(roles.map((r) => [r.name, r]));
     spawnRoleEl.innerHTML = '';
-    spawnRoleEl.add(new Option('None', ''));
+    spawnRoleEl.add(new Option(modelGrid.ROLE_PROMPT, ''));
     for (const r of roles) {
       spawnRoleEl.add(new Option(r.name, r.name));
     }
@@ -1338,8 +1338,9 @@
   // sent role must be a staged one. Else the launch is refused: a launch must never differ from what the human sees.
   function spawnRoleMismatch() {
     const value = spawnRoleEl?.value || '';
-    const shown = roleList ? roleList.shown() : (value || 'None');
-    if (shown !== (value || 'None')) return `the window shows "${shown}" but the role is "${value || 'None'}"`;
+    const none = modelGrid.ROLE_PROMPT;
+    const shown = roleList ? roleList.shown() : (value || none);
+    if (shown !== (value || none)) return `the window shows "${shown}" but the role is "${value || none}"`;
     if (value && !spawnRoles.has(value)) return `role "${value}" is not in the role list`;
     return '';
   }
@@ -1374,6 +1375,13 @@
     if (!spawnGridEl) return;
     const grid = buildSpawnGrid();
     if (spawnSubmit) spawnSubmit.disabled = !modelGrid.launchReady(grid, gridSelected, spawnRole());
+    // The reason sits next to the role field. Another message of that field (role list unreadable, role not staged)
+    // is not replaced.
+    if (spawnRoleErrEl && (!spawnRoleErrEl.textContent || spawnRoleErrEl.textContent === modelGrid.ROLE_REQUIRED)) {
+      const need = !spawnRoleEl?.value;
+      spawnRoleErrEl.textContent = need ? modelGrid.ROLE_REQUIRED : '';
+      spawnRoleErrEl.hidden = !need;
+    }
     const isPi = grid.harness === 'pi';
     if (spawnGridFilterEl) spawnGridFilterEl.hidden = !isPi;
     if (spawnGridCountEl) spawnGridCountEl.textContent = isPi ? `${grid.count.shown}/${grid.count.total}` : '';
@@ -1581,9 +1589,10 @@
     console.info('[terminal] launch click', { agent, value: spawnRoleEl?.value || '', shown: roleList?.shown?.() });
     const mismatch = spawnRoleMismatch();
     if (mismatch) { alert(`Launch refused: ${mismatch}. Pick the role again.`); return; }
+    if (!spawnRoleEl?.value) return;   // Launch is disabled without a role; this guards a click that still arrives
     closeSpawnModal();
     const choice = spawnGridChoice();
-    await handleLaunch(agent, cwd, sessionMode, room || null, harness, spawnRoleEl?.value || null, choice?.model || null, choice?.effort || null, choice?.provider || null);
+    await handleLaunch(agent, cwd, sessionMode, room || null, harness, spawnRoleEl.value, choice?.model || null, choice?.effort || null, choice?.provider || null);
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && spawnModal.classList.contains('open')) closeSpawnModal();

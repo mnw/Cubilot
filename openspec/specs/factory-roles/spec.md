@@ -7,12 +7,20 @@ TBD - created by archiving change factory-roles. Update Purpose after archive.
 
 ### Requirement: An agent can be launched with a factory role
 
-The app SHALL accept an optional role when it launches an agent. With a role, the launch command SHALL use the harness chosen at launch, and the role's instructions, skills and the tool limits for that harness from the role file. The role's harness SHALL be the default choice only. The role's model SHALL apply only on the role's harness; on the other harness the launch SHALL need a chosen model. Without a role, the launch command SHALL be the same as before this change. An unknown role SHALL be an error, and the app SHALL launch nothing.
+The app SHALL require a role when it launches a new agent. With a role, the launch command SHALL use the harness chosen at launch, and the role's instructions, skills and the tool limits for that harness from the role file. The role's harness SHALL be the default choice only. The role's model SHALL apply only on the role's harness; on the other harness the launch SHALL need a chosen model. A new launch without a role SHALL be an error ("a role is required"), and the app SHALL create nothing: before that error only read-only tmux queries run. The role check SHALL NOT apply when the session already exists: the app SHALL re-attach it, configure it as before, and neither stop it nor set or change its role. An unknown role SHALL be an error, and the app SHALL launch nothing.
 
-#### Scenario: Launch without a role is unchanged
+#### Scenario: Launch without a role is refused
 
-- **WHEN** the human launches an agent with the role "None"
-- **THEN** the launch command is the same as before this change
+- **WHEN** the human or the hub launches an agent without a role and no session of that name exists
+- **THEN** the app returns the error "a role is required"
+- **AND** no tmux session is created and no tmux option is set
+- **AND** the spawn modal keeps Launch off and shows "Pick a role. An agent without a role cannot be spawned."
+
+#### Scenario: Re-attach of a running session without a role
+
+- **WHEN** the session of that name already runs, with or without a role, and the app attaches to it without a role
+- **THEN** the app attaches, and the session keeps running with its own role (if any)
+- **AND** the app does not stop the session and does not set `@cubilot_role`
 
 #### Scenario: Claude role
 
