@@ -310,21 +310,23 @@
   <div class="modal">
     <h2>New factory room</h2>
     <p>Starts one <code>orchestrator</code> agent in a new room. It asks for the workers and testers it needs.</p>
-    <label>Room name</label>
-    <input id="factory-room-name" spellcheck="false" autocomplete="off" placeholder="my-product" style="width:100%;" />
-    <label>Project folder</label>
+    <label for="factory-room-name">Room name (required)</label>
+    <input id="factory-room-name" spellcheck="false" autocomplete="off" placeholder="my-product" aria-required="true" style="width:100%;" />
+    <label for="factory-room-cwd">Project folder (required)</label>
     <div style="display:flex; gap:6px; align-items:center;">
-      <input id="factory-room-cwd" spellcheck="false" autocomplete="off" placeholder="/Users/you/project" style="flex:1;" readonly />
+      <input id="factory-room-cwd" spellcheck="false" autocomplete="off" placeholder="/Users/you/project" aria-required="true" style="flex:1;" readonly />
       <button type="button" id="factory-room-pick">Pick…</button>
     </div>
-    <label>Worker limit</label>
-    <input id="factory-room-workers" type="number" min="1" max="20" value="2" style="width:100%;" />
-    <label>Tester limit</label>
-    <input id="factory-room-testers" type="number" min="1" max="20" value="2" style="width:100%;" />
+    <label for="factory-room-workers">Worker limit (required)</label>
+    <input id="factory-room-workers" type="number" min="1" max="20" value="2" aria-required="true" style="width:100%;" />
+    <label for="factory-room-testers">Tester limit (required)</label>
+    <input id="factory-room-testers" type="number" min="1" max="20" value="2" aria-required="true" style="width:100%;" />
+    <p id="factory-room-orchestrator" class="factory-room-orchestrator">Orchestrator: not loaded</p>
     <div class="modal-actions">
       <button type="button" id="factory-room-cancel">Cancel</button>
-      <button type="button" id="factory-room-submit">Launch</button>
+      <button type="button" id="factory-room-submit" aria-describedby="factory-room-line" disabled>Launch</button>
     </div>
+    <div id="factory-room-line" class="spawn-launch-line" aria-live="polite"></div>
   </div>
 </div>
 

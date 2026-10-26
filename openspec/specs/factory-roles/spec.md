@@ -258,16 +258,33 @@ A role file MAY have an optional `effort` frontmatter line. The value SHALL be o
 - **WHEN** a role file has `effort: huge`, or `effort` on a Pi role
 - **THEN** the role fails to parse and nothing launches
 
-### Requirement: The human picks the orchestrator's harness and model for a new factory room
+### Requirement: The New factory room window shows the orchestrator role values and blocks Launch until they load
 
-The New factory room window SHALL show the harness choice and the model × effort grid of the spawn modal, with the same rules. The default SHALL be the `orchestrator` role default.
+The New factory room window SHALL NOT show a harness choice or a model × effort grid. It SHALL show one read-only plain-text line, "Orchestrator: <model>, effort <effort> (from role)", with the values of the role `orchestrator` from `list_roles`. The window SHALL read the role again at each opening and SHALL NOT use the role of an earlier opening. The launch SHALL use the harness, model and effort of the role. The window SHALL have one status line under Launch, the only live region (`aria-live="polite"`), named by `aria-describedby` on Launch. The status line SHALL show, first match wins: the loading text, the failure text, the "Fill in: …" text of the missing required fields, else nothing. The required fields, in form order, are "Room name", "Project folder", "Worker limit" and "Tester limit" (whole number 1 to 20).
 
-#### Scenario: Factory room on Pi
+#### Scenario: Factory room with the role values
 
-- **WHEN** the human creates a factory room with the harness Pi and the cell gpt-5.6-sol [openai-codex] × high
-- **THEN** the orchestrator launches on Pi with `--provider openai-codex --model gpt-5.6-sol --thinking high`
+- **WHEN** the human creates a factory room and the role `orchestrator` has the model opus and the effort medium
+- **THEN** the window shows "Orchestrator: opus, effort medium (from role)"
+- **AND** the orchestrator launches on Claude Code with `--model opus --effort 'medium'`
 
-#### Scenario: Factory room with the defaults
+#### Scenario: The role loads
 
-- **WHEN** the human creates a factory room with no change to the harness or the grid
-- **THEN** the orchestrator launches on Claude Code with `--model opus`
+- **WHEN** the window opens and `list_roles` has not answered
+- **THEN** the window shows "Orchestrator: not loaded", Launch is off and the status line shows "Loading the orchestrator role…"
+
+#### Scenario: The role fails to load
+
+- **WHEN** `list_roles` rejects, or it has no `orchestrator` role, or the role has no model or no effort
+- **THEN** the window shows "Orchestrator: not loaded", Launch is off and the status line shows "Could not load the orchestrator role: <error>."
+- **AND** no room setting is stored, no Nutshell is written and no agent launches
+
+#### Scenario: A required field is missing
+
+- **WHEN** the role is loaded and a required field is empty or not valid, for example a Worker limit of 0, 21 or 1.5
+- **THEN** Launch is off and the status line shows "Fill in: " and the names of the missing fields in form order
+
+#### Scenario: A reopened window keeps nothing
+
+- **WHEN** the window opens with a loaded role, closes, and opens again while `list_roles` is pending or rejects
+- **THEN** Launch is off and nothing of the first opening launches

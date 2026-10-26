@@ -1624,62 +1624,32 @@
   const frCwd     = document.getElementById('factory-room-cwd');
   const frWorkers = document.getElementById('factory-room-workers');
   const frTesters = document.getElementById('factory-room-testers');
-  const closeFactoryRoom = () => frModal?.classList.remove('open');
+  const closeFactoryRoom = () => { frModal?.classList.remove('open'); frLoader.close(); };
 
-  // The harness radios and the model x effort grid (task 9.6): the same rules as the spawn modal, for the one role
-  // this window launches. The default is the orchestrator role's own harness and model.
-  const frHarnessClaude = document.getElementById('factory-room-harness-claude');
-  const frHarnessPi     = document.getElementById('factory-room-harness-pi');
-  const frGridEl        = document.getElementById('factory-room-grid');
-  const frFilterEl      = document.getElementById('factory-room-grid-filter');
-  const frCountEl       = document.getElementById('factory-room-grid-count');
-  const frNoteEl        = document.getElementById('factory-room-grid-note');
-  const frSubmit        = document.getElementById('factory-room-submit');
-  let frRole = null;       // the orchestrator role from list_roles, or null when none is staged
-  let frModels = {};       // harness -> rows from list_models, for this opening of the window
-  let frSelected = null;   // { rowKey, effort }
-  const frHarness = () => (frHarnessPi?.checked ? 'pi' : 'claude');
-  const frBuildGrid = () => modelGrid.gridModel({
-    harness: frHarness(), models: frModels[frHarness()] || [], filter: frFilterEl?.value || '', role: frRole,
-  });
-  function frRender() {
-    if (!frGridEl) return;
-    const grid = frBuildGrid();
-    gridView.renderGrid({ doc: document, gridEl: frGridEl, filterEl: frFilterEl, countEl: frCountEl, grid, selected: frSelected });
-    if (frSubmit) frSubmit.disabled = !modelGrid.launchReady(grid, frSelected, frRole);
-    const sel = frSelected && grid.all.find((r) => r.key === frSelected.rowKey);
-    if (frNoteEl && frModels[grid.harness] && sel && !sel.ready) {
-      frNoteEl.textContent = `${sel.provider} is not signed in: this launch will stop with a sign-in message.`;
-    } else if (frNoteEl && frModels[grid.harness]) {
-      frNoteEl.textContent = '';
+  // The orchestrator's model and effort are read-only: they come from the `orchestrator` role, read again at each
+  // opening. Launch is off while the role loads or when it fails (factory-room.js formState, spawn-form.js loader).
+  const frSubmit  = document.getElementById('factory-room-submit');
+  const frLineEl  = document.getElementById('factory-room-line');
+  const frOrchEl  = document.getElementById('factory-room-orchestrator');
+  const frLoader  = spawnForm.createRolesLoader(listRoles);
+  const frTouched = new Set();   // fields the human changed: only those get aria-invalid
+  const frSet = (el, text) => { if (el && el.textContent !== text) el.textContent = text; };   // same text: no new announcement
+  function frUpdate() {
+    const values = { room: frName?.value, cwd: frCwd?.value, workers: frWorkers?.value, testers: frTesters?.value };
+    const st = factoryRoom.formState(frLoader.state(), values);
+    if (frSubmit) frSubmit.disabled = st.disabled;
+    frSet(frLineEl, st.line);
+    frSet(frOrchEl, st.orchestrator);
+    const bad = new Set(factoryRoom.invalidFields(values).map((f) => f.key));
+    for (const [key, el] of Object.entries({ room: frName, cwd: frCwd, workers: frWorkers, testers: frTesters })) {
+      if (!el) continue;
+      if (frTouched.has(key) && bad.has(key)) el.setAttribute('aria-invalid', 'true');
+      else el.removeAttribute('aria-invalid');
     }
   }
-  async function frRefresh() {
-    const harness = frHarness();
-    frRender();
-    if (!frModels[harness]) {
-      if (frNoteEl) frNoteEl.textContent = harness === 'pi' ? 'Loading Pi models and sign-in state…' : '';
-      try {
-        frModels[harness] = await listModels(harness);
-      } catch (e) {
-        console.warn('[terminal] list_models failed:', e);
-        frModels[harness] = [];
-        if (frNoteEl) frNoteEl.textContent = `Could not list ${harness} models: ${e?.message ?? e}`;
-      }
-    }
-    if (frHarness() !== harness) return;   // changed again while loading
-    frSelected = modelGrid.initialSelection(frBuildGrid());
-    frRender();
+  for (const [key, el] of Object.entries({ room: frName, workers: frWorkers, testers: frTesters })) {
+    el?.addEventListener('input', () => { frTouched.add(key); frUpdate(); });
   }
-  frGridEl?.addEventListener('click', (e) => {
-    const b = e.target.closest?.('.cell');
-    if (!b) return;
-    const same = frSelected && frSelected.rowKey === b.dataset.row && frSelected.effort === b.dataset.effort;
-    frSelected = same ? null : { rowKey: b.dataset.row, effort: b.dataset.effort };   // a second click clears it
-    frRender();
-  });
-  frFilterEl?.addEventListener('input', frRender);
-  for (const el of [frHarnessClaude, frHarnessPi]) el?.addEventListener('change', () => { frSelected = null; frRefresh(); });
   // Task 6.3: seed the room's Nutshell BEFORE the orchestrator starts, so its first briefing has it. Only when the
   // room has none. A failure is shown and does not stop the launch (the Nutshell can be written later).
   async function seedFactoryNutshell(room, cwd) {
@@ -1705,54 +1675,44 @@
   document.getElementById('factory-room-btn')?.addEventListener('click', () => {
     if (frName) frName.value = '';
     if (frCwd) frCwd.value = '';
+    frTouched.clear();
     frModal?.classList.add('open');
     setTimeout(() => frName?.focus(), 0);
-    frModels = {};   // the model lists (and Pi sign-in marks) are read again each time the window opens
-    frSelected = null;
-    if (frFilterEl) frFilterEl.value = '';
-    listRoles().then((roles) => {
-      frRole = roles.find((r) => r.name === 'orchestrator') || null;
-      if (frHarnessClaude) frHarnessClaude.checked = frRole?.harness !== 'pi';
-      if (frHarnessPi) frHarnessPi.checked = frRole?.harness === 'pi';
-      return frRefresh();
-    }).catch((e) => console.warn('[terminal] list_roles failed:', e));
+    const loading = frLoader.open();   // the role is read again at each opening
+    frUpdate();   // "Loading the orchestrator role…"
+    loading.then(() => {
+      if (frLoader.state().status === 'failed') console.warn('[terminal] list_roles failed:', frLoader.state().error);
+      frUpdate();
+    });
   });
   document.getElementById('factory-room-cancel')?.addEventListener('click', closeFactoryRoom);
   frModal?.addEventListener('click', (e) => { if (e.target === frModal) closeFactoryRoom(); });
   document.getElementById('factory-room-pick')?.addEventListener('click', async () => {
     const dir = await pickDirectory();
-    if (dir && frCwd) frCwd.value = dir;
+    if (dir && frCwd) { frCwd.value = dir; frTouched.add('cwd'); frUpdate(); }
   });
-  document.getElementById('factory-room-submit')?.addEventListener('click', async () => {
+  frSubmit?.addEventListener('click', async () => {
     const names = (typeof ROSTER !== 'undefined' && Array.isArray(ROSTER)) ? ROSTER.map(a => a.name) : [];
-    const r = factoryRoom.buildFactoryRoom(
-      {
-        room: frName?.value, cwd: frCwd?.value, workers: frWorkers?.value, testers: frTesters?.value,
-        harness: frHarness(), choice: modelGrid.choiceFromSelection(frBuildGrid(), frSelected), roleHarness: frRole?.harness,
+    await factoryRoom.submitFactoryRoom({
+      alert: (text) => alert(text),
+      // The project folder is where the hub makes the worktrees of the stage sessions (stage-sessions 4.5).
+      putSettings: async (l, limits) => {
+        const res = await authedFetch(`/rooms/${encodeURIComponent(l.room)}/settings`, {
+          method: 'PUT',
+          body: JSON.stringify({ worker_limit: limits.workers, tester_limit: limits.testers, project_folder: l.cwd }),
+        });
+        if (!res.ok) {
+          const detail = await res.json().then((j) => j.error, () => null);
+          throw new Error(detail || `hub answered ${res.status}`);
+        }
       },
-      names,
-    );
-    if (r.error) { alert(r.error); return; }
-    const l = r.launch;
-    // Store the limits in the room settings first (6.4); if that fails nothing is launched and the form stays open.
-    try {
-      const res = await authedFetch(`/rooms/${encodeURIComponent(l.room)}/settings`, {
-        method: 'PUT',
-        // The project folder is where the hub makes the worktrees of the stage sessions (stage-sessions 4.5).
-        body: JSON.stringify({ worker_limit: r.limits.workers, tester_limit: r.limits.testers, project_folder: l.cwd }),
-      });
-      if (!res.ok) {
-        const detail = await res.json().then((j) => j.error, () => null);
-        throw new Error(detail || `hub answered ${res.status}`);
-      }
-    } catch (e) {
-      alert(`Could not store the room settings: ${e?.message ?? e}`);
-      return;
-    }
-    closeFactoryRoom();
-    await seedFactoryNutshell(l.room, l.cwd);
-    // Same call as the spawn modal makes: the chosen harness, and only the parts of the grid cell that differ from the role.
-    await handleLaunch(l.agent, l.cwd, null, l.room, l.harness, l.role, l.model, l.effort, l.provider);
+      close: closeFactoryRoom,
+      seedNutshell: seedFactoryNutshell,
+      // Same call as the spawn modal makes: the role's own harness, model and effort.
+      launch: (l) => handleLaunch(l.agent, l.cwd, null, l.room, l.harness, l.role, l.model, l.effort, l.provider),
+    }, frLoader.state(), {
+      room: frName?.value, cwd: frCwd?.value, workers: frWorkers?.value, testers: frTesters?.value,
+    }, names);
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && frModal?.classList.contains('open')) closeFactoryRoom();

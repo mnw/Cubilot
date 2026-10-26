@@ -218,4 +218,5 @@
 
 /* The one live line under Launch: what is missing, or why Launch is off (spawn-form.js). */
 .spawn-launch-line { min-height: 16px; margin-top: var(--sp-8); text-align: right; font-family: var(--sans); font-size: 11px; color: var(--error-text); }
-#spawn-modal [aria-invalid="true"] { border-color: var(--error-text); }
+#spawn-modal [aria-invalid="true"], #factory-room-modal [aria-invalid="true"] { border-color: var(--error-text); }
+.factory-room-orchestrator { margin: var(--sp-8) 0 0; font-family: var(--mono); font-size: 11px; color: var(--text-muted); }
