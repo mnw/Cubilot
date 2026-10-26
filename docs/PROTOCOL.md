@@ -128,7 +128,7 @@ Transfer a bounded unit of work to another participant, or to a stage role.
 | Parameter | Type | Required | Notes |
 |---|---|---|---|
 | `to` | `string` | one of `to`, `to_role` | Recipient name (agent or the human's configured name). |
-| `to_role` | `string` | one of `to`, `to_role` | A stage role. Needs `context.ticket_id`. See [role handoffs](#role-handoffs-to_role). |
+| `to_role` | `string` | one of `to`, `to_role` | A stage role. Needs `context.ticket_id`, except a spec review: it needs `review` `"spec"`, `request_id` and `context.request_text`. See [role handoffs](#role-handoffs-to_role). |
 | `task` | `string` | yes | 1–500 chars. |
 | `context` | `object` | no | Arbitrary JSON; ≤ 1 MiB serialized. |
 | `ttl_seconds` | `integer` | no | 1–86 400; default 3 600. |

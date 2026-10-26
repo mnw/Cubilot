@@ -893,8 +893,8 @@ const TicketBoard = (() => {
       notes > 0 ? `<span class="ticket-count" title="Notes">${icon('note')}${notes}</span>` : '',
     ].join('');
     return `
-      <div class="ticket-card status-${escAttr(t.status)}${t.archived_at_ms ? ' archived' : ''}" role="button" tabindex="0"${movable(t) ? ' draggable="true"' : ''} data-ticket="${escAttr(t.id)}" aria-label="Open ticket: ${escAttr(t.title)}">
-        <div class="ticket-card-top">${p.tag ? `<span class="ticket-tag${p.tag === 'code' ? ' tag-code' : ''}">${escHtml(p.tag)}</span>` : ''}${p.code ? `<span class="ticket-code">${escHtml(p.code)}</span>` : ''}<span class="ticket-prio" title="Priority ${escAttr(prioLabel)}"><span class="ticket-bars" aria-hidden="true">${[1, 2, 3, 4].map((n) => `<i${n <= bars ? ' class="on"' : ''}></i>`).join('')}</span>${escHtml(prioLabel)}</span></div>
+      <div class="ticket-card status-${escAttr(t.status)}${t.archived_at_ms ? ' archived' : ''}" role="button" tabindex="0"${movable(t) ? ' draggable="true"' : ''} data-ticket="${escAttr(t.id)}" aria-label="Open ticket ${escAttr(t.id)}: ${escAttr(t.title)}">
+        <div class="ticket-card-top">${p.tag ? `<span class="ticket-tag${p.tag === 'code' ? ' tag-code' : ''}">${escHtml(p.tag)}</span>` : ''}${p.code ? `<span class="ticket-code">${escHtml(p.code)}</span>` : ''}<span class="ticket-id" title="${escAttr(t.id)}">${escHtml(t.id)}</span><span class="ticket-prio" title="Priority ${escAttr(prioLabel)}"><span class="ticket-bars" aria-hidden="true">${[1, 2, 3, 4].map((n) => `<i${n <= bars ? ' class="on"' : ''}></i>`).join('')}</span>${escHtml(prioLabel)}</span></div>
         <div class="ticket-title">${escHtml(p.main)}</div>
         ${p.sub ? `<div class="ticket-sub">${escHtml(p.sub)}</div>` : ''}
         ${chips ? `<div class="ticket-chips">${chips}</div>` : ''}

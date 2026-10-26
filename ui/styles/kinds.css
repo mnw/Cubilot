@@ -707,6 +707,9 @@ label[for="ticket-filter-request"] { color: var(--text); }
 .ticket-tag { text-transform: uppercase; letter-spacing: 0.04em; padding: 1px var(--sp-6); border-radius: var(--radius-sm, 4px); background: var(--bg-inset); color: var(--text); }
 .ticket-tag.tag-code { background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--text); }
 .ticket-code { color: var(--text-meta); }
+.ticket-card-top .ticket-id { font-family: var(--mono); color: var(--text-meta); white-space: nowrap; }
+.ticket-card-top .ticket-id { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ticket-card-top .ticket-tag, .ticket-card-top .ticket-prio { flex-shrink: 0; }
 .ticket-prio { margin-left: auto; display: inline-flex; align-items: center; gap: var(--sp-4); color: var(--text); white-space: nowrap; }
 .ticket-bars { display: inline-flex; align-items: flex-end; gap: 1px; height: 10px; }
 .ticket-bars i { width: 2px; background: var(--text-meta); opacity: 0.45; }

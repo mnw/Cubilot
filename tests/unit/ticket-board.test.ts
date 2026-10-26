@@ -1420,7 +1420,7 @@ describe("ticket view dialog", () => {
 
   test("a card is focusable, has a role and an accessible name", async () => {
     await board(T());
-    expect(cols.innerHTML).toContain('role="button" tabindex="0" draggable="true" data-ticket="t_9" aria-label="Open ticket: Fix <it>"');
+    expect(cols.innerHTML).toContain('role="button" tabindex="0" draggable="true" data-ticket="t_9" aria-label="Open ticket t_9: Fix <it>"');
   });
 
   test("a click on the card opens the dialog with the whole ticket", async () => {
@@ -3445,11 +3445,45 @@ describe("request label and blockers (6.2, 6.3)", () => {
     for (const t of ["Criteria checked", "Attachments", 'title="Notes"']) expect(b).not.toContain(t);
   });
 
+  test("the card top row shows the ticket id after the tag and code, before the priority; no tag puts it first", async () => {
+    await show(cardOf({ title: "[code] 8.3a Hot reload", priority: "high" }, "t_<x>"));
+    const top = card("t_<x>").match(/<div class="ticket-card-top">(.*?)<\/div>/s)![1];
+    expect(top).toMatch(/^<span class="ticket-tag tag-code">code<\/span><span class="ticket-code">8\.3a<\/span><span class="ticket-id" title="t_<x>">t_<x><\/span><span class="ticket-prio"/);
+    await show(cardOf({ title: "plain title" }, "t_plain"));
+    expect(card("t_plain")).toMatch(/<div class="ticket-card-top"><span class="ticket-id"[^>]*>t_plain<\/span><span class="ticket-prio"/);
+  });
+
+  test("the card aria-label is \"Open ticket <id>: <title>\" and escapes both", async () => {
+    const esc = (x: unknown) => String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    ctx.escHtml = esc; ctx.escAttr = esc;
+    await show(cardOf({ title: "Fix <it>" }, 't_"q"'));
+    expect(cols.innerHTML).toContain('aria-label="Open ticket t_&quot;q&quot;: Fix &lt;it&gt;"');
+  });
+
+  test("the card id is HTML-escaped in its text and its title", async () => {
+    const esc = (x: unknown) => String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    ctx.escHtml = esc; ctx.escAttr = esc;
+    await show(cardOf({ title: "x" }, "t_<b>&"));
+    const c = cols.innerHTML;
+    expect(c).not.toContain("<b>");
+    expect(c).toContain('<span class="ticket-id" title="t_&lt;b&gt;&amp;">t_&lt;b&gt;&amp;</span>');
+  });
+
+  test("the card id truncates with an ellipsis; the tag and priority do not shrink; the view header does not show it twice", async () => {
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toContain(".ticket-card-top .ticket-id { font-family: var(--mono); color: var(--text-meta); white-space: nowrap; }");
+    expect(css).toContain(".ticket-card-top .ticket-id { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }");
+    expect(css).toContain(".ticket-card-top .ticket-tag, .ticket-card-top .ticket-prio { flex-shrink: 0; }");
+    await show(mk("a", "in_review", { title: "[code] 8.3b Hot reload", assignee: "alice" }));
+    ctx.TicketBoard.openView("a");
+    expect(headMeta()).not.toContain("ticket-id");
+  });
+
   test("15.3 the card has no details, no always-visible controls and no orange border; the hooks stay", async () => {
     await show(cardOf({ acceptance_criteria: "c", notes_count: 3 }));
     const c = card("a");
     expect(c).not.toContain("<details");
-    expect(c).toContain('role="button" tabindex="0" draggable="true" data-ticket="a" aria-label="Open ticket: title-a"');
+    expect(c).toContain('role="button" tabindex="0" draggable="true" data-ticket="a" aria-label="Open ticket a: title-a"');
     expect(c).toMatch(/<div class="ticket-card-controls">.*class="ticket-move".*data-to="cancelled"/s);
     const css = readFileSync("ui/styles/kinds.css", "utf8");
     expect(css).toMatch(/\.ticket-card-controls \{ visibility: hidden; height: 0;/);            // hidden until hover or focus, not display: none
