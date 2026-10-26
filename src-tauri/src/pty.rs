@@ -1131,12 +1131,20 @@ fn build_spawn_argv(
     argv
 }
 
-/// Puts `PATH='<path>'` in front of a Pi spawn command, the same way pi_command puts CHATBRIDGE_AGENT there: the app's
-/// own PATH (launchd's) lacks the tools a Pi shim needs. It is NOT `new-session -e PATH=...`: tmux 3.5a keeps the
-/// session value for FOO but starts the pane command with the server's PATH (tests/integration/pty-plumbing.test.ts
-/// shows it). A Claude launch, or no resolved PATH, returns the command unchanged.
-fn with_pi_path(cmd: String, harness: Harness, path: Option<&str>) -> String {
-    let (Harness::Pi, Some(path)) = (harness, path) else { return cmd };
+/// Whether a launch gets the login PATH: Pi always, Claude only when the hub starts it as a stage session (stage id).
+/// A manual Claude spawn (no stage id) keeps its command as is.
+fn wants_login_path(harness: Harness, stage_id: Option<&str>) -> bool {
+    harness == Harness::Pi || stage_id.is_some()
+}
+
+/// Puts `PATH='<path>'` in front of a spawn command, the same way pi_command puts CHATBRIDGE_AGENT there: the app's
+/// own PATH (launchd's) lacks the tools a Pi shim needs, and the tools (gpg) a Claude stage session needs for a signed
+/// commit. It applies to Pi always and to Claude only with a stage id (see wants_login_path). It is NOT
+/// `new-session -e PATH=...`: tmux 3.5a keeps the session value for FOO but starts the pane command with the server's
+/// PATH (tests/integration/pty-plumbing.test.ts shows it). Any other launch, or no resolved PATH, returns the command
+/// unchanged.
+fn with_login_path(cmd: String, harness: Harness, stage_id: Option<&str>, path: Option<&str>) -> String {
+    let (true, Some(path)) = (wants_login_path(harness, stage_id), path) else { return cmd };
     format!("PATH='{}' {cmd}", path.replace('\'', r"'\''"))
 }
 
@@ -1434,21 +1442,22 @@ pub async fn pty_spawn(
             role.as_deref(),
             &choice,
         )?;
-        let spawn_cmd = if harness == Harness::Pi {
+        let login = if wants_login_path(harness, stage_id.as_deref()) {
             // Blocking on the first call (up to 5 s): off the async runtime. None keeps the inherited PATH.
-            let login = tauri::async_runtime::spawn_blocking(crate::login_path::login_path)
+            tauri::async_runtime::spawn_blocking(crate::login_path::login_path)
                 .await
-                .map_err(|e| format!("login PATH worker failed: {e}"))?;
-            with_pi_path(spawn_cmd, harness, login)
+                .map_err(|e| format!("login PATH worker failed: {e}"))?
         } else {
-            spawn_cmd
+            None
         };
         // A hub launch carries the ticket part of the first message: written to a file, read by the command.
-        let spawn_cmd = match first_message.as_deref().filter(|m| !m.is_empty()) {
-            Some(text) => with_first_message(&spawn_cmd, &write_first_message(&sessions_dir(), &agent, text)?),
-            None => spawn_cmd,
+        let first_file = match first_message.as_deref().filter(|m| !m.is_empty()) {
+            Some(text) => Some(write_first_message(&sessions_dir(), &agent, text)?),
+            None => None,
         };
-        let argv = build_spawn_argv(&agent, &cwd, &lang, api_key.as_deref(), &spawn_cmd, stage_id.as_deref());
+        let (spawn_cmd, argv) = final_spawn(
+            &agent, &cwd, &lang, api_key.as_deref(), spawn_cmd, harness, stage_id.as_deref(), login.as_deref(), first_file.as_deref(),
+        );
         let argv_refs: Vec<&str> = argv.iter().map(String::as_str).collect();
         tmux_run(&argv_refs)?;
         // Authoritative harness record; pane_harness falls back to the command only without it.
@@ -1564,6 +1573,28 @@ fn write_first_message(dir: &std::path::Path, session: &str, text: &str) -> Resu
     f.sync_all().map_err(|e| format!("sync {}: {e}", tmp.display()))?;
     std::fs::rename(&tmp, &target).map_err(|e| format!("rename {}: {e}", target.display()))?;
     Ok(target)
+}
+
+/// The final command and tmux argv of a launch, as pty_spawn runs them: login PATH, first message, argv.
+#[allow(clippy::too_many_arguments)]
+fn final_spawn(
+    agent: &str,
+    cwd: &str,
+    lang: &str,
+    api_key: Option<&str>,
+    cmd: String,
+    harness: Harness,
+    stage_id: Option<&str>,
+    login: Option<&str>,
+    first_file: Option<&std::path::Path>,
+) -> (String, Vec<String>) {
+    let cmd = with_login_path(cmd, harness, stage_id, login);
+    let cmd = match first_file {
+        Some(f) => with_first_message(&cmd, f),
+        None => cmd,
+    };
+    let argv = build_spawn_argv(agent, cwd, lang, api_key, &cmd, stage_id);
+    (cmd, argv)
 }
 
 /// The launch command plus the first message as ONE quoted argument, read by the shell from the file. `--` ends the
@@ -2364,17 +2395,57 @@ mod spawn_argv_tests {
     }
 
     #[test]
-    fn pi_path_is_an_env_prefix_on_the_command_for_pi_only() {
+    fn login_path_is_an_env_prefix_on_the_command_for_pi_and_claude_stage_sessions() {
         let cmd = "CHATBRIDGE_AGENT='a' 'pi' --no-approve".to_string();
-        let got = super::with_pi_path(cmd.clone(), Harness::Pi, Some("/opt/a:/usr/bin"));
+        let got = super::with_login_path(cmd.clone(), Harness::Pi, None, Some("/opt/a:/usr/bin"));
         assert_eq!(got, "PATH='/opt/a:/usr/bin' CHATBRIDGE_AGENT='a' 'pi' --no-approve");
-        assert_eq!(super::with_pi_path(cmd.clone(), Harness::Pi, Some("/o'x")), "PATH='/o'\\''x' CHATBRIDGE_AGENT='a' 'pi' --no-approve");
-        // the Claude launch and a Pi launch with no resolved PATH do not change, and the argv still has no PATH pair
-        assert_eq!(super::with_pi_path(cmd.clone(), Harness::Claude, Some("/opt/a")), cmd);
-        assert_eq!(super::with_pi_path(cmd.clone(), Harness::Pi, None), cmd);
+        assert_eq!(super::with_login_path(cmd.clone(), Harness::Pi, None, Some("/o'x")), "PATH='/o'\\''x' CHATBRIDGE_AGENT='a' 'pi' --no-approve");
+        assert_eq!(super::with_login_path(cmd.clone(), Harness::Pi, None, None), cmd);
         let argv = build_spawn_argv("alice", "/tmp", "en_US.UTF-8", None, &got, None);
         assert!(!argv[..argv.len() - 1].iter().any(|a| a.starts_with("PATH=")), "no -e PATH pair: {argv:?}");
         assert_eq!(argv.last(), Some(&got), "the command stays one last argv element");
+    }
+
+    /// The final command as pty_spawn builds it: login PATH, then the first message, then the argv.
+    fn final_claude_argv(stage_id: Option<&str>, login: Option<&str>) -> (String, Vec<String>) {
+        let cmd = "CHATBRIDGE_AGENT='a' '/bin/claude' --model x".to_string();
+        super::final_spawn("a", "/tmp", "en_US.UTF-8", None, cmd, Harness::Claude, stage_id, login, Some(std::path::Path::new("/tmp/m.txt")))
+    }
+
+    #[test]
+    fn claude_stage_session_gets_the_login_path_and_a_manual_spawn_does_not() {
+        let plain = "CHATBRIDGE_AGENT='a' '/bin/claude' --model x -- \"$(cat '/tmp/m.txt')\"";
+        let sid = Some("s_0123456789abcdef");
+        let (cmd, argv) = final_claude_argv(sid, Some("/opt/homebrew/bin:/usr/bin"));
+        assert_eq!(cmd, format!("PATH='/opt/homebrew/bin:/usr/bin' {plain}"));
+        assert_eq!(argv.last(), Some(&cmd));
+        assert!(!argv[..argv.len() - 1].iter().any(|a| a.starts_with("PATH=")), "no -e PATH pair: {argv:?}");
+        let (cmd, _) = final_claude_argv(sid, Some("/o'x"));
+        assert_eq!(cmd, format!("PATH='/o'\\''x' {plain}"));
+        // no resolved PATH, and no stage id: byte-equal to the command without the helper
+        assert_eq!(final_claude_argv(sid, None).0, plain);
+        let (cmd, argv) = final_claude_argv(None, Some("/opt/homebrew/bin"));
+        assert_eq!(cmd, plain);
+        assert_eq!(argv, build_spawn_argv("a", "/tmp", "en_US.UTF-8", None, plain, None));
+        assert!(super::wants_login_path(Harness::Pi, None) && !super::wants_login_path(Harness::Claude, None));
+    }
+
+    #[test]
+    fn pi_final_spawn_command_and_argv_are_unchanged() {
+        let pi = "CHATBRIDGE_AGENT='a' 'pi' --no-approve";
+        let tail = " -- \"$(cat '/tmp/m.txt')\"";
+        let first = Some(std::path::Path::new("/tmp/m.txt"));
+        for sid in [None, Some("s_0123456789abcdef")] {
+            let (cmd, argv) = super::final_spawn("a", "/tmp", "en_US.UTF-8", None, pi.to_string(), Harness::Pi, sid, Some("/opt/a:/usr/bin"), first);
+            let want = format!("PATH='/opt/a:/usr/bin' {pi}{tail}");
+            assert_eq!(cmd, want);
+            assert_eq!(argv, build_spawn_argv("a", "/tmp", "en_US.UTF-8", None, &want, sid));
+            assert!(!argv[..argv.len() - 1].iter().any(|a| a.starts_with("PATH=")), "no -e PATH pair: {argv:?}");
+            let plain = format!("{pi}{tail}");
+            let (cmd, argv) = super::final_spawn("a", "/tmp", "en_US.UTF-8", None, pi.to_string(), Harness::Pi, sid, None, first);
+            assert_eq!(cmd, plain);
+            assert_eq!(argv, build_spawn_argv("a", "/tmp", "en_US.UTF-8", None, &plain, sid));
+        }
     }
 
     #[test]
@@ -3559,7 +3630,7 @@ mod existing_session_tests {
                 } else {
                     let (e, f) = pi_role_flags(&role_launch_on(&spec, "pi", &launch_root, None)).unwrap();
                     let cmd = format!("CHATBRIDGE_AGENT='{agent}' CHATBRIDGE_ROOM='r' {e}'{}' --no-approve {f}-e '/x.js'", stub.display());
-                    with_pi_path(cmd, Harness::Pi, Some("/usr/bin:/bin"))
+                    with_login_path(cmd, Harness::Pi, None, Some("/usr/bin:/bin"))
                 };
                 let argv = build_spawn_argv(&agent, "/tmp", LANG, None, &cmd, None);
                 assert!(t.raw(&argv.iter().map(String::as_str).collect::<Vec<_>>()), "{harness} {case}: new-session");
