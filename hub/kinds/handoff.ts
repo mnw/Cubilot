@@ -435,6 +435,13 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
           return Response.json({ error: `unknown sender ${from}: connect /agent-stream first` }, { status: 409 });
         }
         const fromAgent = cap.agents.get(from)!;
+        // G2: a handoff with the stage_id of a running worker stage is checked first, so a missing or wrong ticket_id
+        // gets the worker refusal and stage.rejected, not a generic 400 or 404.
+        let workerResult: string[] | null = null;
+        if (stage?.isWorkerResult?.(from, body.context)) {
+          workerResult = stage.checkResult(from, body.context, cap, to);
+          if (workerResult?.length) return Response.json({ error: "result rejected", errors: workerResult }, { status: 400 });
+        }
         let handoffRoom: string;
         let ticketId: string | null = null;
         // A spec review (spec-review-stage 2.1): to_role validator + review "spec" + request_id; it names a request, not a ticket.
@@ -533,7 +540,7 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
         if (done) return Response.json({ error: done }, { status: 409 });
 
         // A result handoff of a stage session must pass the schema check; a failing one records nothing (stage-sessions 5.1).
-        const resultErrors = stage?.checkResult(from, body.context, cap, to) ?? null;
+        const resultErrors = workerResult ?? stage?.checkResult(from, body.context, cap, to) ?? null;
         if (resultErrors?.length) return Response.json({ error: "result rejected", errors: resultErrors }, { status: 400 });
 
         const id = mintHandoffId();

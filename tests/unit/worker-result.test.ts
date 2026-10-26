@@ -39,14 +39,15 @@ function makeRepo() {
   return { dir, git, commit, c0, c1, c2, c3, x };
 }
 
-function makeEnv(project?: string) {
+function makeEnv(project?: string, ledgerFile?: string) {
   const repo = makeRepo();
-  const db = new Database(":memory:");
+  let db = new Database(ledgerFile ?? ":memory:");
   migrateLedger(db);
   createTicketKind(db).migrate(db);
   setRoomSettings(db, "r1", { project_folder: project ?? repo.dir });
   const emitted: Array<{ e: Entry; s: Scope }> = [];
-  const cap = { db, sse: { emit: (e: Entry, s: Scope) => emitted.push({ e, s }) }, briefing: { refresh: () => {} } } as unknown as HubCapabilities;
+  const mkCap = () => ({ db, sse: { emit: (e: Entry, s: Scope) => emitted.push({ e, s }) }, briefing: { refresh: () => {} } }) as unknown as HubCapabilities;
+  let cap = mkCap();
   db.run(
     `INSERT INTO tickets (id, room, title, acceptance_criteria, blast_radius, priority, creator, status, request_id, created_at_ms, updated_at_ms, version)
      VALUES (?, 'r1', 'T', 'c', 'low', 'medium', 'a', 'in_progress', 'req-1', 1, 1, 1)`,
@@ -85,7 +86,30 @@ function makeEnv(project?: string) {
       rt.hooks.checkResult(`worker-${sn}`, { stage_id: stage, ticket_id: TID, ...(commit === undefined ? {} : { commit }) }, cap, to);
     return { stage, check, load: () => rt.api.load(stage)! };
   };
-  return { repo, db, cap, emitted, earlier, touch, work, running, restart: () => (rt = boot()), rt: () => rt };
+  /** A new hub process on the same ledger file: close the database, open the file again, build a new runtime. */
+  const reopen = () => {
+    db.close();
+    db = new Database(ledgerFile!);
+    cap = mkCap();
+    rt = boot();
+  };
+  return {
+    repo,
+    get db() {
+      return db;
+    },
+    get cap() {
+      return cap;
+    },
+    emitted,
+    earlier,
+    touch,
+    work,
+    running,
+    restart: () => (rt = boot()),
+    reopen,
+    rt: () => rt,
+  };
 }
 
 describe("first result: the base is the merge-base with staging", () => {
@@ -159,7 +183,15 @@ describe("fix loop: the base is the newest earlier passed result", () => {
     expect(w.check(e.repo.c1)![0]).toContain("equals the base");
     expect(w.check(e.repo.c2)).toEqual([]);
   });
-  test("a new hub process on the same ledger gives the same base", () => {
+  test("a new hub process on the same ledger file gives the same base", () => {
+    const e = makeEnv(undefined, join(mkdtempSync(join(tmpdir(), "g2-ledger-")), "ledger.db"));
+    e.earlier({ commit: e.repo.c2 });
+    e.reopen();
+    const w = e.work();
+    expect(w.check(e.repo.c2)![0]).toContain("equals the base");
+    expect(w.check(e.repo.c3)).toEqual([]);
+  });
+  test("a rebooted runtime in one process gives the same base", () => {
     const e = makeEnv();
     e.earlier({ commit: e.repo.c2 });
     e.restart();
@@ -170,6 +202,31 @@ describe("fix loop: the base is the newest earlier passed result", () => {
 });
 
 describe("refusals", () => {
+  test("a missing, unknown or foreign ticket_id gets the worker refusal and stage.rejected", () => {
+    const e = makeEnv();
+    const w = e.work();
+    const send = (ctx: Record<string, unknown>) => e.rt().hooks.checkResult("worker-1", { stage_id: w.stage, ...ctx }, e.cap, TESTER);
+    expect(send({ commit: e.repo.c1 })).toEqual([REFUSAL]);
+    expect(send({ ticket_id: "t_ffffffffffffffff", commit: e.repo.c1 })).toEqual([REFUSAL]);
+    expect(send({ ticket_id: "t_0000000000000002", commit: e.repo.c1 })).toEqual([REFUSAL]);
+    expect(e.emitted.filter((x) => x.e.kind === "stage.rejected")).toHaveLength(3);
+    expect(w.load().status).toBe("running");
+  });
+  test("a git exec error gives the git error text, not 'does not resolve'; an earlier result is not skipped", () => {
+    const e = makeEnv();
+    e.earlier({ commit: e.repo.c2 });
+    const w = e.work();
+    // Break the object database: the branch ref still resolves, rev-parse of an object fails with an error.
+    const objs = join(e.repo.dir, ".git", "objects");
+    Bun.spawnSync(["mv", objs, `${objs}.off`]);
+    const r = w.check(e.repo.c3);
+    Bun.spawnSync(["mv", `${objs}.off`, objs]);
+    expect(r).toHaveLength(1);
+    expect(r![0]).toContain(REFUSAL);
+    expect(r![0]).toContain("Git:");
+    expect(r![0]).not.toContain("does not resolve");
+    expect(w.load().status).toBe("running");
+  });
   test("a malformed hash is refused before any git call", () => {
     const e = makeEnv("/nonexistent/g2-project"); // any git call would add a detail to the message
     const w = e.work();

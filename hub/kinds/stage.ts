@@ -1363,7 +1363,8 @@ export function createStageRuntime(
   function runGit(project: string, args: string[]): { code: number | null; out: string; err: string } {
     try {
       const r = Bun.spawnSync(["git", "-C", project, ...args], { stdout: "pipe", stderr: "pipe", timeout: WORKER_GIT_TIMEOUT_MS });
-      return { code: r.exitCode, out: r.stdout.toString().trim(), err: r.stderr.toString().trim() };
+      const err = r.stderr.toString().trim();
+      return { code: r.exitCode, out: r.stdout.toString().trim(), err: r.exitedDueToTimeout ? `git timed out after ${WORKER_GIT_TIMEOUT_MS} ms. ${err}`.trim() : err };
     } catch (e) {
       return { code: null, out: "", err: String(e) };
     }
@@ -1377,15 +1378,24 @@ export function createStageRuntime(
     const ticketId = stage.ticket_id ?? "";
     const refuse = (detail?: string) => `${workerRefusal(ticketId)}${detail ? ` ${detail}` : ""}`;
     const commit = c.commit;
+    if (c.ticket_id !== stage.ticket_id) return refuse();
     if (to !== `${ROLE_RECIPIENT_PREFIX}tester` || typeof commit !== "string" || !FULL_SHA_RE.test(commit)) return refuse();
     const room = roomOfStage(stage.id);
     const project = room ? getRoomSettings(db, room)?.project_folder : null;
     if (!project) return refuse("The room has no project folder.");
-    const resolves = (sha: string) => runGit(project, ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`]).code === 0;
+    // rev-parse --verify --quiet exits 1 with no output when the object is not a commit; any other failure is a git error.
+    const resolve = (sha: string): { ok: boolean; error?: string } => {
+      const r = runGit(project, ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`]);
+      if (r.code === 0) return { ok: true };
+      if (r.code === 1 && !r.err) return { ok: false };
+      return { ok: false, error: `Git: ${r.err || "rev-parse failed"}` };
+    };
     const branch = `refs/heads/ticket/${ticketId}`;
     const tip = runGit(project, ["rev-parse", "--verify", "--quiet", branch]);
     if (tip.code !== 0) return refuse(`Git: branch ticket/${ticketId} not found. ${tip.err}`.trim());
-    if (!resolves(commit)) return refuse("The commit does not resolve to a commit.");
+    const own = resolve(commit);
+    if (own.error) return refuse(own.error);
+    if (!own.ok) return refuse("The commit does not resolve to a commit.");
     const onBranch = runGit(project, ["merge-base", "--is-ancestor", commit, branch]);
     if (onBranch.code === 1) return refuse(`The commit is not on ticket/${ticketId}.`);
     if (onBranch.code !== 0) return refuse(`Git: ${onBranch.err || "merge-base failed"}`);
@@ -1400,7 +1410,10 @@ export function createStageRuntime(
     let base: string | null = null;
     for (const row of earlier) {
       const prev = (JSON.parse(row.context_json) as Record<string, unknown>).commit;
-      if (typeof prev === "string" && FULL_SHA_RE.test(prev) && resolves(prev)) {
+      if (typeof prev !== "string" || !FULL_SHA_RE.test(prev)) continue;
+      const r = resolve(prev);
+      if (r.error) return refuse(r.error);
+      if (r.ok) {
         base = prev;
         break;
       }
@@ -1474,11 +1487,11 @@ export function createStageRuntime(
         if (c.verdict === "PASS" && blocking) errors.push("a PASS must not have a blocking finding");
       } else {
         if (c.stage_id !== stage.id) errors.push(`context.stage_id must be ${stage.id}`);
-        if (c.ticket_id !== stage.ticket_id) errors.push(`context.ticket_id must be ${stage.ticket_id}`);
-        if (stage.role === "worker" && !errors.length) {
+        if (stage.role === "worker") {
+          // G2: every worker result problem, a wrong ticket included, gets the one worker refusal.
           const refusal = checkWorkerResult(stage, c, to);
           if (refusal) errors.push(refusal);
-        }
+        } else if (c.ticket_id !== stage.ticket_id) errors.push(`context.ticket_id must be ${stage.ticket_id}`);
         if (REVIEW_ROLES.has(stage.role)) {
           if (typeof c.verdict !== "string" || !VERDICTS.has(c.verdict)) errors.push("context.verdict must be PASS or FAIL (upper case)");
           if (!Array.isArray(c.findings)) errors.push("context.findings must be a list of {ticket_id, text}");
