@@ -462,8 +462,8 @@ fn role_options(spec: &crate::factory::RoleSpec, harness: Harness, choice: &crat
     // "default" is written only here, when the launch carries no model or effort flag: the pill card shows what was recorded.
     let model = choice.model.clone().or_else(|| spec.model.clone().filter(|_| own)).unwrap_or_else(|| DEFAULT_RECORD.to_string());
     let provider = if is_pi { choice.provider.clone().or_else(|| spec.provider.clone().filter(|_| own)).unwrap_or_default() } else { String::new() };
-    // Claude roles have no default effort; a Pi role's thinking level is its effort on its own harness.
-    let effort = choice.effort.clone().or_else(|| spec.thinking.clone().filter(|_| own && is_pi)).unwrap_or_else(|| DEFAULT_RECORD.to_string());
+    // The role's own effort (Claude) or thinking level (Pi) applies on its own harness; the human's choice wins.
+    let effort = choice.effort.clone().or_else(|| if is_pi { spec.thinking.clone() } else { spec.effort.clone() }.filter(|_| own)).unwrap_or_else(|| DEFAULT_RECORD.to_string());
     vec![("@cubilot_role", spec.name.clone()), ("@cubilot_model", model), ("@cubilot_provider", provider), ("@cubilot_effort", effort)]
 }
 
@@ -2937,6 +2937,40 @@ mod spawn_argv_tests {
             provider: provider.map(str::to_string),
             effort: effort.map(str::to_string),
         }
+    }
+
+    #[test]
+    fn a_role_effort_is_launched_recorded_and_beaten_by_the_human_choice() {
+        use crate::factory::*;
+        use std::path::Path;
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
+        let (root, o) = staged_role("orchestrator", "orchestrator");
+        let version = o.plugin_dir.parent().unwrap().to_path_buf();
+        let cmd = |l: &RoleLaunch| format_claude_command("orchestrator", "r", None, Path::new("/c"), Path::new("/m"), None, Some(l)).unwrap();
+        let spec = load_role_spec("orchestrator", &src, &version).unwrap();
+        let launch = |c: &LaunchChoice| with_choice(role_launch_on(&spec, "claude", &version, o.settings.clone()), c);
+        // no choice: the role's medium, once
+        let m = cmd(&launch(&Default::default()));
+        assert!(m.contains("--effort 'medium'") && m.matches("--effort").count() == 1, "{m}");
+        // a modal choice of high wins
+        let h = cmd(&launch(&choice(None, None, Some("high"))));
+        assert!(h.contains("--effort 'high'") && !h.contains("'medium'") && h.matches("--effort").count() == 1, "{h}");
+        // pill metadata: medium with no choice, high after the override
+        assert_eq!(super::role_options(&spec, super::Harness::Claude, &Default::default())[3].1, "medium");
+        assert_eq!(super::role_options(&spec, super::Harness::Claude, &choice(None, None, Some("high")))[3].1, "high");
+        // on Pi the Claude effort is not used
+        assert_eq!(role_launch_on(&spec, "pi", &version, None).effort, None);
+        assert_eq!(super::role_options(&spec, super::Harness::Pi, &choice(Some("gpt-5.6-terra"), None, None))[3].1, "default");
+        // a role without an effort line: no --effort
+        let (root_w, w) = staged_role("worker", "worker-2");
+        let wc = cmd(&w);
+        assert!(!wc.contains("--effort"), "{wc}");
+        // byte-equal to the command before role efforts existed; temp paths are normalised
+        let ver = w.plugin_dir.parent().unwrap().to_string_lossy().to_string();
+        let norm = wc.replace(&ver, "<V>").replace(&*root_w.to_string_lossy(), "<R>");
+        assert_eq!(norm, "CHATBRIDGE_AGENT='orchestrator' CHATBRIDGE_ROOM='r' CHATBRIDGE_ROLE='worker' '/c' --plugin-dir '/m' --plugin-dir '<V>/worker' --plugin-dir '<V>/shared' --append-system-prompt-file '<V>/worker/role.md' --settings '<R>/settings/worker-2.json' --model 'sonnet' --disallowed-tools 'Task,Agent,mcp__chatbridge__ack_permission' --allowed-tools 'mcp__chatbridge__post,mcp__chatbridge__post_file,mcp__chatbridge__send_handoff,mcp__chatbridge__accept_handoff,mcp__chatbridge__decline_handoff,mcp__chatbridge__cancel_handoff,mcp__chatbridge__send_interrupt,mcp__chatbridge__ack_interrupt,mcp__chatbridge__create_ticket,mcp__chatbridge__claim_ticket,mcp__chatbridge__transition_ticket,mcp__chatbridge__assign_ticket,mcp__chatbridge__attach_ticket_file,mcp__chatbridge__list_tickets'", "worker command must stay byte-equal");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&root_w);
     }
 
     #[test]

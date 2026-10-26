@@ -553,6 +553,7 @@ pub(crate) struct RoleSpec {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub thinking: Option<String>,
+    pub effort: Option<String>, // Claude roles only; a Pi role file with `effort` is refused (Pi uses `thinking`)
     pub disallowed_tools: Vec<String>,
     pub exclude_tools: Vec<String>,
 }
@@ -588,12 +589,22 @@ pub(crate) fn parse_role_spec(role: &str, text: &str) -> Result<RoleSpec, String
         return Err(format!("role '{role}': unknown harness '{harness}'"));
     }
     let opt = |k: &str| frontmatter_value(text, k).filter(|v| !v.is_empty());
+    let effort = opt("effort");
+    if let Some(e) = &effort {
+        if harness == "pi" {
+            return Err(format!("role '{role}': 'effort' is for Claude roles; a Pi role uses 'thinking'"));
+        }
+        if !CLAUDE_EFFORTS.contains(&e.as_str()) {
+            return Err(format!("role '{role}': invalid effort '{e}' (allowed: {})", CLAUDE_EFFORTS.join(", ")));
+        }
+    }
     Ok(RoleSpec {
         name,
         harness,
         provider: opt("provider"),
         model: opt("model"),
         thinking: opt("thinking"),
+        effort,
         disallowed_tools: csv_list(frontmatter_value(text, "disallowedTools")),
         exclude_tools: csv_list(frontmatter_value(text, "excludeTools")),
     })
@@ -630,7 +641,7 @@ pub(crate) struct RoleLaunch {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub thinking: Option<String>,
-    pub effort: Option<String>, // Claude only: set by the human's choice for one launch (roles have no default)
+    pub effort: Option<String>, // Claude only: the role's effort, replaced by the human's choice for one launch
     pub disallowed_tools: Vec<String>, // Claude
     pub exclude_tools: Vec<String>,    // Pi
 }
@@ -651,7 +662,7 @@ pub(crate) fn role_launch_on(spec: &RoleSpec, harness: &str, version_dir: &Path,
         provider: spec.provider.clone().filter(|_| own),
         model: spec.model.clone().filter(|_| own),
         thinking: spec.thinking.clone().filter(|_| own),
-        effort: None,
+        effort: spec.effort.clone().filter(|_| own),
         disallowed_tools: spec.disallowed_tools.clone(),
         exclude_tools: spec.exclude_tools.clone(),
     }
@@ -832,6 +843,7 @@ pub(crate) struct RoleInfo {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub thinking: Option<String>,
+    pub effort: Option<String>,
 }
 
 // Single-agent roles that the given staged version contains, sorted by name. A council (a11y, seo), a folder without
@@ -842,7 +854,7 @@ pub(crate) fn list_roles_in(src: &Path, version_dir: &Path) -> Vec<RoleInfo> {
         .flatten()
         .flatten()
         .filter_map(|e| load_role_spec(&e.file_name().to_string_lossy(), src, version_dir).ok())
-        .map(|s| RoleInfo { name: s.name, harness: s.harness, provider: s.provider, model: s.model, thinking: s.thinking })
+        .map(|s| RoleInfo { name: s.name, harness: s.harness, provider: s.provider, model: s.model, thinking: s.thinking, effort: s.effort })
         .collect();
     out.sort_by(|a, b| a.name.cmp(&b.name));
     out
@@ -1600,6 +1612,31 @@ mod tests {
         let val = roles.iter().find(|r| r.name == "validator").unwrap();
         assert_eq!((val.harness.as_str(), val.model.as_deref()), ("pi", Some("gpt-5.6-sol")));
         assert_eq!(list_roles_in(&src, &root.join("missing")), vec![]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn role_effort_frontmatter_is_read_checked_and_listed() {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
+        let spec = |r: &str| parse_role_spec(r, &fs::read_to_string(src.join(r).join(format!("{r}.md"))).unwrap()).unwrap();
+        assert_eq!(spec("orchestrator").effort.as_deref(), Some("medium"));
+        assert_eq!(spec("worker").effort, None);
+        let ok = parse_role_spec("x", "---\nname: x\neffort: max\n---\nbody").unwrap();
+        assert_eq!(ok.effort.as_deref(), Some("max"));
+        let bad = parse_role_spec("x", "---\nname: x\neffort: huge\n---\nbody").unwrap_err();
+        assert!(bad.contains("invalid effort 'huge'"), "{bad}");
+        let pi = parse_role_spec("x", "---\nname: x\nharness: pi\neffort: high\n---\nbody").unwrap_err();
+        assert!(pi.contains("Pi role uses 'thinking'"), "{pi}");
+        // list_roles: effort "medium" for orchestrator, null for worker and for a Pi role
+        let root = tmp_root("roleeffort");
+        let dest = root.join("out");
+        let v = stage_factory(&src, &dest, &root.join("user")).unwrap();
+        let roles = list_roles_in(&src, &dest.join(&v));
+        let json = |n: &str| serde_json::to_value(roles.iter().find(|r| r.name == n).unwrap()).unwrap();
+        assert_eq!(json("orchestrator")["effort"], serde_json::json!("medium"));
+        assert!(json("worker")["effort"].is_null());
+        assert_eq!(json("validator")["harness"], serde_json::json!("pi"));
+        assert!(json("validator")["effort"].is_null());
         let _ = fs::remove_dir_all(&root);
     }
 
