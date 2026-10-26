@@ -39,7 +39,8 @@
   const roleList = spawnRoleEl && spawnRoleBtn && spawnRoleMenu
     ? window.__CUBILOT_TERM__.roleList.attach({ select: spawnRoleEl, button: spawnRoleBtn, menu: spawnRoleMenu, doc: document })
     : null;
-  const spawnRoleErrEl = document.getElementById('spawn-role-error');
+  const spawnLineEl = document.getElementById('spawn-launch-line');   // the one live line under Launch
+  const spawnGridLabelEl = document.getElementById('spawn-grid-label');
   const spawnGridEl    = document.getElementById('spawn-grid');
   const spawnGridFilterEl = document.getElementById('spawn-grid-filter');
   const spawnGridCountEl  = document.getElementById('spawn-grid-count');
@@ -70,8 +71,6 @@
   const spawnSubmit   = document.getElementById('spawn-submit');
   const spawnSessionContinue = document.getElementById('spawn-session-continue');
   const spawnSessionResume   = document.getElementById('spawn-session-resume');
-
-  const NAME_RE = /^[A-Za-z0-9_.-][A-Za-z0-9 _.-]{0,62}[A-Za-z0-9_.-]$|^[A-Za-z0-9_.-]$/;
 
   const LOADING_VERBS = [
     'Spawning the session…',
@@ -181,7 +180,7 @@
     localStorage.setItem('cubilot_agent_cwds', JSON.stringify(cwdCache));
   }
 
-  const { roleMemory, factoryRoom, modelGrid, gridView } = window.__CUBILOT_TERM__;
+  const { roleMemory, factoryRoom, modelGrid, spawnForm, gridView } = window.__CUBILOT_TERM__;
 
   const {
     ptySpawn, listRoles, listModels, ptyWrite, ptyResize, ptyKill, ptyList, ptyEventName,
@@ -1268,50 +1267,43 @@
     if (spawnSessionResume)   spawnSessionResume.checked = false;
     gridModels = {};   // the model lists (and Pi sign-in marks) are read again each time the modal opens
     gridSelected = null;
+    spawnTouched.clear();
+    if (spawnHarnessClaude) spawnHarnessClaude.checked = true;   // nothing of an earlier opening is used
+    if (spawnHarnessPi) spawnHarnessPi.checked = false;
     if (spawnGridFilterEl) spawnGridFilterEl.value = '';
-    if (spawnRoleEl) spawnRoleEl.value = '';   // every opening starts at "Pick a role"; refreshSpawnRoles keeps only a pick made during its wait
-    roleList?.sync();
-    gateSpawnWithoutRole('');   // Launch is off and the reason shows from the first moment, before the role list is read
     refreshSpawnRoles();
     spawnModal.classList.add('open');
     setTimeout(() => spawnAgentEl.focus(), 0);
   }
 
-  // Roles come from the staged version; "Pick a role" is a prompt, not a choice: a launch needs a role.
+  // Roles come from the staged version, read again at each opening (nothing of an earlier opening stays). Until the
+  // answer arrives Launch is off with "Loading roles…"; a failed read keeps it off with the error (spawn-form.js).
+  const spawnLoader = spawnForm.createRolesLoader(listRoles);
   let spawnOpening = 0;   // counts openings of the modal: a list_roles answer of an earlier opening is dropped
+  const spawnTouched = new Set();   // fields the human changed: only those get aria-invalid
   async function refreshSpawnRoles() {
     if (!spawnRoleEl) return;
     const opening = ++spawnOpening;
-    let roles;
-    try {
-      roles = await listRoles();
-    } catch (e) {
-      if (opening !== spawnOpening) return;
-      // An error is not "no roles": keep the options and the role the human picked, and say so in the window.
-      console.warn('[terminal] list_roles failed:', e);
-      gateSpawnWithoutRole(`Could not read the roles: ${e?.message ?? e}. The role list is not refreshed.`);
-      return;
-    }
-    if (opening !== spawnOpening) return;
-    if (spawnRoleErrEl) { spawnRoleErrEl.textContent = ''; spawnRoleErrEl.hidden = true; }
-    const keep = spawnRoleEl.value;   // a role picked while list_roles ran (the options of the last opening are still there)
-    console.info('[terminal] refreshSpawnRoles', { opening, keep, roles: roles.length });   // t_41e14dde706805e3 trace
-    spawnRoles = new Map(roles.map((r) => [r.name, r]));
+    spawnRoles = new Map();
     spawnRoleEl.innerHTML = '';
     spawnRoleEl.add(new Option(modelGrid.ROLE_PROMPT, ''));
-    for (const r of roles) {
-      spawnRoleEl.add(new Option(r.name, r.name));
+    spawnRoleEl.value = '';
+    roleList?.sync();
+    const loading = spawnLoader.open();
+    updateSpawnForm();   // "Loading roles…"
+    await loading;
+    if (opening !== spawnOpening) return;
+    const st = spawnLoader.state();
+    if (st.status !== 'ready') {
+      console.warn('[terminal] list_roles failed:', st.error);
+      updateSpawnForm();
+      return;
     }
-    if (keep && !spawnRoles.has(keep)) {
-      // The pick is not in the answer (a list read while the version was being staged). Never turn a pick into None
-      // in silence: keep it, say so, and let the launch guard refuse it ("not in the role list").
-      spawnRoleEl.add(new Option(keep, keep));
-      if (spawnRoleErrEl) { spawnRoleErrEl.textContent = `The role "${keep}" is not in the staged role list. Pick a role again or reopen this window.`; spawnRoleErrEl.hidden = false; }
-    }
-    spawnRoleEl.value = keep;
+    spawnRoles = new Map(st.roles.map((r) => [r.name, r]));
+    for (const r of st.roles) spawnRoleEl.add(new Option(r.name, r.name));
     roleList?.sync();
     await onSpawnRoleChange();
-    if (!spawnRoleEl.value) await recallSpawnRole();   // a role the human picked is not overridden by the memory
+    if (opening === spawnOpening && !spawnRoleEl.value) await recallSpawnRole();
   }
 
   // The last role and grid choice used for this agent name, if the role is still staged and its model is still
@@ -1330,17 +1322,6 @@
     const sel = modelGrid.selectionFromChoice(buildSpawnGrid(), m);
     if (sel) { gridSelected = sel; renderSpawnGrid(); }
   }
-  // No role: Launch is disabled and the reason shows next to the role field. `extra` is another message of that field.
-  function gateSpawnWithoutRole(extra) {
-    const need = !spawnRoleEl?.value;
-    if (spawnSubmit && need) spawnSubmit.disabled = true;
-    if (spawnRoleErrEl) {
-      const text = [need ? modelGrid.ROLE_REQUIRED : '', extra].filter(Boolean).join(' ');
-      spawnRoleErrEl.textContent = text;
-      spawnRoleErrEl.hidden = !text;
-    }
-  }
-
   // A remembered role fills an empty choice only; a role the human picked is never replaced by the name's memory.
   function onSpawnNameCommit() { if (!spawnRoleEl?.value) return recallSpawnRole(); }
   spawnAgentEl?.addEventListener('change', onSpawnNameCommit);
@@ -1382,17 +1363,42 @@
     if (spawnGridNoteEl) spawnGridNoteEl.textContent = '';
   }
 
+  // The values the form checks, from the controls as they are now.
+  function spawnFormValues() {
+    const role = spawnRole();
+    return {
+      agent: spawnAgentEl?.value ?? '',
+      role: role ? role.name : '',
+      harness: spawnGridHarness(),
+      cell: modelGrid.cellSelected(buildSpawnGrid(), gridSelected),
+      cwd: spawnCwdEl?.value ?? '',
+      room: spawnRoomEl?.value ?? '',
+    };
+  }
+
+  // Launch, the line under it, the grid label and aria-invalid all follow spawn-form.js.
+  function updateSpawnForm() {
+    const values = spawnFormValues();
+    const st = spawnForm.launchState(spawnLoader.state(), values);
+    if (spawnSubmit) spawnSubmit.disabled = st.disabled;
+    if (spawnLineEl) spawnLineEl.textContent = st.line;
+    if (spawnGridLabelEl) spawnGridLabelEl.textContent = `${spawnForm.cellName(values.harness)} (required)`;
+    const bad = new Set(spawnForm.invalidFields(values).map((f) => f.key));
+    const controls = { agent: spawnAgentEl, role: spawnRoleBtn, cell: spawnGridEl, cwd: spawnCwdEl, room: spawnRoomEl };
+    for (const [key, el] of Object.entries(controls)) {
+      if (!el) continue;
+      if (spawnTouched.has(key) && bad.has(key)) el.setAttribute('aria-invalid', 'true');
+      else el.removeAttribute('aria-invalid');
+    }
+  }
+  const touchSpawn = (key) => { spawnTouched.add(key); updateSpawnForm(); };
+  spawnAgentEl?.addEventListener('input', () => touchSpawn('agent'));
+  spawnRoomEl?.addEventListener('input', () => touchSpawn('room'));
+
   function renderSpawnGrid() {
     if (!spawnGridEl) return;
     const grid = buildSpawnGrid();
-    if (spawnSubmit) spawnSubmit.disabled = !modelGrid.launchReady(grid, gridSelected, spawnRole());
-    // The reason sits next to the role field. Another message of that field (role list unreadable, role not staged)
-    // is not replaced.
-    if (spawnRoleErrEl && (!spawnRoleErrEl.textContent || spawnRoleErrEl.textContent === modelGrid.ROLE_REQUIRED)) {
-      const need = !spawnRoleEl?.value;
-      spawnRoleErrEl.textContent = need ? modelGrid.ROLE_REQUIRED : '';
-      spawnRoleErrEl.hidden = !need;
-    }
+    updateSpawnForm();
     const isPi = grid.harness === 'pi';
     if (spawnGridFilterEl) spawnGridFilterEl.hidden = !isPi;
     if (spawnGridCountEl) spawnGridCountEl.textContent = isPi ? `${grid.count.shown}/${grid.count.total}` : '';
@@ -1445,6 +1451,7 @@
     if (!b) return;
     const same = gridSelected && gridSelected.rowKey === b.dataset.row && gridSelected.effort === b.dataset.effort;
     gridSelected = same ? null : { rowKey: b.dataset.row, effort: b.dataset.effort };   // a second click clears it
+    spawnTouched.add('cell');
     renderSpawnGrid();
   });
   spawnGridFilterEl?.addEventListener('input', renderSpawnGrid);
@@ -1470,9 +1477,9 @@
     gridSelected = null;
     await refreshSpawnGrid();
   }
-  spawnRoleEl?.addEventListener('change', () => onSpawnRoleChange());
-  spawnHarnessClaude?.addEventListener('change', () => { gridSelected = null; refreshSpawnGrid(); });
-  spawnHarnessPi?.addEventListener('change', () => { gridSelected = null; refreshSpawnGrid(); });
+  spawnRoleEl?.addEventListener('change', () => { spawnTouched.add('role'); return onSpawnRoleChange(); });
+  spawnHarnessClaude?.addEventListener('change', () => { gridSelected = null; spawnTouched.add('cell'); refreshSpawnGrid(); });
+  spawnHarnessPi?.addEventListener('change', () => { gridSelected = null; spawnTouched.add('cell'); refreshSpawnGrid(); });
 
   // What the launch sends: only the parts of the chosen cell that differ from the role default, or nothing.
   const spawnGridChoice = () => modelGrid.choiceFromSelection(buildSpawnGrid(), gridSelected);
@@ -1502,6 +1509,7 @@
       opt.textContent = `# ${r}`;
       opt.addEventListener('click', () => {
         if (spawnRoomEl) spawnRoomEl.value = r;
+        touchSpawn('room');
         closeSpawnRoomMenu();
         spawnRoomEl?.focus();
       });
@@ -1557,7 +1565,7 @@
       activeAgent = null;
     }
   });
-  function closeSpawnModal() { spawnModal.classList.remove('open'); }
+  function closeSpawnModal() { spawnOpening++; spawnLoader.close(); spawnModal.classList.remove('open'); }
   spawnCancel?.addEventListener('click', closeSpawnModal);
   spawnModal?.addEventListener('click', (e) => {
     if (e.target === spawnModal) closeSpawnModal();
@@ -1566,6 +1574,7 @@
     const dir = await pickDirectory();
     if (!dir) return;
     spawnCwdEl.value = dir;
+    touchSpawn('cwd');
     // Pre-fill Room with git-root basename for one-click common case.
     if (spawnRoomEl && !spawnRoomEl.value.trim()) {
       try {
@@ -1576,34 +1585,30 @@
       } catch (e) {
         console.warn('[terminal] resolve_default_room failed:', e);
       }
+      updateSpawnForm();
     }
   });
 
   spawnSubmit?.addEventListener('click', async () => {
-    const agent = spawnAgentEl.value.trim();
-    const cwd = spawnCwdEl.value.trim();
-    const room = (spawnRoomEl?.value ?? '').trim();
-    if (!NAME_RE.test(agent)) {
-      alert('Invalid agent name (letters, digits, _.-, spaces in the middle).');
-      return;
-    }
-    if (factoryRoom.terminalNameError(agent)) { alert(`Agent name: ${factoryRoom.terminalNameError(agent)}.`); return; }
-    if (!cwd) { alert('Pick a working directory.'); return; }
-    if (room && !NAME_RE.test(room)) {
-      alert('Invalid room label (same charset as agent names). Leave blank to auto-detect from cwd.');
-      return;
-    }
+    const values = spawnFormValues();
+    const agent = values.agent.trim();
+    const cwd = values.cwd.trim();
+    const room = values.room.trim();
     let sessionMode = null;
     if (spawnSessionContinue?.checked) sessionMode = 'continue';
     else if (spawnSessionResume?.checked) sessionMode = 'resume';
-    const harness = spawnHarnessPi?.checked ? 'pi' : 'claude';
     console.info('[terminal] launch click', { agent, value: spawnRoleEl?.value || '', shown: roleList?.shown?.() });
     const mismatch = spawnRoleMismatch();
     if (mismatch) { alert(`Launch refused: ${mismatch}. Pick the role again.`); return; }
-    if (!spawnRoleEl?.value) return;   // Launch is disabled without a role; this guards a click that still arrives
-    closeSpawnModal();
     const choice = spawnGridChoice();
-    await handleLaunch(agent, cwd, sessionMode, room || null, harness, spawnRoleEl.value, choice?.model || null, choice?.effort || null, choice?.provider || null);
+    const roleName = spawnRoleEl.value;
+    let launched;
+    // The form decides: Launch is disabled while a field is missing; this guards a click that still arrives.
+    spawnForm.tryLaunch(spawnLoader.state(), values, () => {
+      closeSpawnModal();
+      launched = handleLaunch(agent, cwd, sessionMode, room, values.harness, roleName, choice?.model || null, choice?.effort || null, choice?.provider || null);
+    });
+    await launched;
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && spawnModal.classList.contains('open')) closeSpawnModal();

@@ -30,12 +30,12 @@ describe("buildFactoryRoom harness and model", () => {
     expect(buildFactoryRoom({ ...base, harness: "bogus" }, []).error).toMatch(/Unknown harness/);
   });
   test("the grid: the orchestrator default is Claude opus; on Pi no default and a cell is needed", () => {
-    const role = { harness: "claude", model: "opus", provider: null, thinking: null };
+    const role = { harness: "claude", model: "opus", provider: null, thinking: null, effort: "medium" };
     const claude = ["haiku", "sonnet", "opus", "fable"].map((m) => ({ provider: "", model: m, thinking: true, ready: true }));
     const pi = [{ provider: "openai-codex", model: "gpt-5.6-sol", thinking: true, ready: true }];
     const c = g.gridModel({ harness: "claude", models: claude, role });
     expect(c.defaultCell.rowKey).toBe("/opus");
-    expect(g.launchReady(c, null, role)).toBe(true);
+    expect(g.launchReady(c, g.initialSelection(c), role)).toBe(true);   // opus + medium is preselected
     const p = g.gridModel({ harness: "pi", models: pi, role });
     expect(p.defaultCell).toBeNull();
     expect(g.launchReady(p, null, role)).toBe(false);

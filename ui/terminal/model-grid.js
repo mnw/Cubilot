@@ -25,13 +25,13 @@
     }));
     const q = String(filter || '').trim().toLowerCase();
     const rows = q ? all.filter((r) => r.label.toLowerCase().includes(q)) : all;
-    // The role default: its row and, when the role names one (Pi: `thinking`), its column. A Claude role has no
-    // default effort, so only the row is marked.
+    // The role default: its row and, when the role names one (Pi: `thinking`, Claude: `effort`), its column. A role
+    // without one marks only the row.
     let defaultCell = null;
     if (role && role.harness === h && role.model) {
       const key = rowKey(h === 'pi' ? role.provider : '', role.model);
       if (all.some((r) => r.key === key)) {
-        defaultCell = { rowKey: key, effort: role.thinking && h === 'pi' ? role.thinking : null };
+        defaultCell = { rowKey: key, effort: (h === 'pi' ? role.thinking : role.effort) || null };
       }
     }
     return { harness: h, columns: EFFORTS[h], rows, count: { shown: rows.length, total: all.length }, defaultCell, all };
@@ -45,7 +45,7 @@
 
   // → { model, provider, effort } with only the parts that differ from the role default, or null for "send nothing".
   // Without a role every part of the chosen cell is sent. With a role, the model (and provider) only when the row is
-  // not the role's row, and the effort only when it is not the role's effort (a Claude role has none: always sent).
+  // not the role's row, and the effort only when it is not the role's effort (a role without one: always sent).
   function choiceFromSelection(grid, selected) {
     if (!selected) return null;
     const row = grid.all.find((r) => r.key === selected.rowKey);
@@ -60,16 +60,15 @@
     return out.model || out.effort ? out : null;
   }
 
-  // Shown next to the role field while no role is picked (#spawn-role-error); also the placeholder of the role field.
+  // The placeholder of the role field.
   const ROLE_PROMPT = 'Pick a role';
-  const ROLE_REQUIRED = 'Pick a role. An agent without a role cannot be spawned.';
 
-  // Launch needs a role. It is then allowed unless the role's harness is not the launch harness: then the role has no
-  // default model here, so a cell must be picked (the launch has to name a model).
+  // Launch needs a role and one selected cell (a preselected default cell counts), on any harness.
+  function cellSelected(grid, selected) {
+    return !!selected && grid.all.some((r) => r.key === selected.rowKey) && grid.columns.includes(selected.effort);
+  }
   function launchReady(grid, selected, role) {
-    if (!role) return false;
-    if (role.harness === grid.harness) return true;
-    return choiceFromSelection(grid, selected) !== null;
+    return !!role && cellSelected(grid, selected);
   }
 
   // For the remembered choice of an agent (role-memory): the selection a stored choice stands for, or null when the
@@ -81,5 +80,5 @@
   }
 
   window.__CUBILOT_TERM__ = window.__CUBILOT_TERM__ || {};
-  window.__CUBILOT_TERM__.modelGrid = { EFFORTS, ROLE_PROMPT, ROLE_REQUIRED, gridModel, initialSelection, choiceFromSelection, launchReady, selectionFromChoice };
+  window.__CUBILOT_TERM__.modelGrid = { EFFORTS, ROLE_PROMPT, gridModel, initialSelection, choiceFromSelection, cellSelected, launchReady, selectionFromChoice };
 })();

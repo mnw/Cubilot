@@ -240,23 +240,22 @@
       Creates a tmux session on <code>~/Library/Application Support/Cubilot/tmux.sock</code>
       running the chosen harness in the chosen directory.
     </p>
-    <label>Agent name</label>
-    <input id="spawn-agent-input" spellcheck="false" autocomplete="off" placeholder="alice" style="width:100%;" />
-    <label>Role/Skill</label>
+    <label for="spawn-agent-input">Agent name (required)</label>
+    <input id="spawn-agent-input" spellcheck="false" autocomplete="off" placeholder="alice" aria-required="true" style="width:100%;" />
+    <label for="spawn-role-btn">Role (required)</label>
     <div class="spawn-role-combo">
       <select id="spawn-role-select" hidden>
         <option value="">Pick a role</option>
       </select>
-      <button type="button" class="spawn-role-btn" id="spawn-role-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Role">
+      <button type="button" class="spawn-role-btn" id="spawn-role-btn" aria-haspopup="listbox" aria-expanded="false">
         <span class="role-label">Pick a role</span>
         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="spawn-role-menu" id="spawn-role-menu" role="listbox"></div>
     </div>
-    <div id="spawn-role-error" role="alert" hidden style="margin-top:4px; font-family:var(--sans); font-size:11px; color:var(--error-text);"></div>
     <div id="spawn-harness-row" style="margin-top:6px;">
-      <label style="text-transform:uppercase; letter-spacing:0.1em; font-family:var(--mono); font-size:10px; color:var(--text-dim);">Harness</label>
-      <div style="display:flex; flex-direction:column; gap:6px; margin-top:4px; font-family:var(--sans); font-size:12px; color:var(--text-muted);">
+      <span id="spawn-harness-label" class="spawn-label">Harness (required)</span>
+      <div role="radiogroup" aria-labelledby="spawn-harness-label" aria-required="true" id="spawn-harness-group" style="display:flex; flex-direction:column; gap:6px; margin-top:4px; font-family:var(--sans); font-size:12px; color:var(--text-muted);">
         <label style="display:flex; align-items:center; gap:8px; cursor:pointer; text-transform:none; letter-spacing:0;">
           <input type="radio" name="spawn-harness" value="claude" id="spawn-harness-claude" checked />
           <span><code style="font-family:var(--mono); font-size:11px; color:var(--text);">claude</code> <span class="sub">Claude Code</span></span>
@@ -268,19 +267,19 @@
       </div>
     </div>
     <div id="spawn-grid-row" style="margin-top:6px;">
-      <label>Model × effort <span id="spawn-grid-count" class="grid-count"></span></label>
-      <input id="spawn-grid-filter" class="grid-filter" spellcheck="false" autocomplete="off" placeholder="type to filter models" hidden />
-      <div id="spawn-grid" class="model-grid" role="grid" aria-label="Model and effort"></div>
+      <span id="spawn-grid-label" class="spawn-label">Model and effort (required)</span><span id="spawn-grid-count" class="grid-count"></span>
+      <input id="spawn-grid-filter" class="grid-filter" spellcheck="false" autocomplete="off" placeholder="type to filter models" aria-label="Filter models" hidden />
+      <div id="spawn-grid" class="model-grid" role="grid" aria-labelledby="spawn-grid-label"></div>
       <div id="spawn-grid-note" class="grid-note"></div>
     </div>
-    <label>Working directory</label>
+    <label for="spawn-cwd-input">Project folder (required)</label>
     <div style="display:flex; gap:6px; align-items:center;">
-      <input id="spawn-cwd-input" spellcheck="false" autocomplete="off" placeholder="/Users/you/project" style="flex:1;" readonly />
+      <input id="spawn-cwd-input" spellcheck="false" autocomplete="off" placeholder="/Users/you/project" aria-required="true" style="flex:1;" readonly />
       <button type="button" id="spawn-cwd-pick">Pick…</button>
     </div>
-    <label>Room</label>
+    <label for="spawn-room-input">Room (required)</label>
     <div class="spawn-room-combo">
-      <input id="spawn-room-input" spellcheck="false" autocomplete="off" placeholder="defaults to git-root basename" />
+      <input id="spawn-room-input" spellcheck="false" autocomplete="off" placeholder="defaults to git-root basename" aria-required="true" />
       <button type="button" class="spawn-room-picker-btn" id="spawn-room-picker-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Pick from existing rooms">
         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
@@ -301,8 +300,9 @@
     </div>
     <div class="modal-actions">
       <button type="button" id="spawn-cancel">Cancel</button>
-      <button type="button" id="spawn-submit" disabled>Launch</button>
+      <button type="button" id="spawn-submit" aria-describedby="spawn-launch-line" disabled>Launch</button>
     </div>
+    <div id="spawn-launch-line" class="spawn-launch-line" aria-live="polite"></div>
   </div>
 </div>
 
@@ -502,6 +502,7 @@
 <script src="terminal/pty.js"></script>
 <script src="terminal/role-memory.js"></script>
 <script src="terminal/model-grid.js"></script>
+<script src="terminal/spawn-form.js"></script>
 <script src="terminal/role-list.js"></script>
 <script src="terminal/factory-room.js"></script>
 <script src="terminal/xterm-themes.js"></script>

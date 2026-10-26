@@ -32,7 +32,8 @@
   line-height: var(--lh-relaxed);
   color: var(--text-muted);
 }
-.modal label {
+.modal label,
+.spawn-label {
   font-family: var(--mono);
   font-size: var(--fs-2xs);
   letter-spacing: 0.1em;
@@ -214,3 +215,7 @@
 .role-option:hover, .role-option.active { background: color-mix(in oklab, var(--orange) 12%, transparent); color: var(--text); }
 .role-option.selected { color: var(--text); }
 .role-option .role-check { color: var(--orange); font-weight: 600; }
+
+/* The one live line under Launch: what is missing, or why Launch is off (spawn-form.js). */
+.spawn-launch-line { min-height: 16px; margin-top: var(--sp-8); text-align: right; font-family: var(--sans); font-size: 11px; color: var(--error-text); }
+#spawn-modal [aria-invalid="true"] { border-color: var(--error-text); }

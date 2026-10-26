@@ -6,7 +6,9 @@ import vm from "node:vm";
 
 const win: any = {};
 new Function("window", readFileSync("ui/terminal/model-grid.js", "utf8"))(win);
+new Function("window", readFileSync("ui/terminal/spawn-form.js", "utf8"))(win);
 const g = win.__CUBILOT_TERM__.modelGrid;
+const sf = win.__CUBILOT_TERM__.spawnForm;
 
 const claude = ["haiku", "sonnet", "opus", "fable"].map((m) => ({ provider: "", model: m, thinking: true, ready: true }));
 const pi = [
@@ -17,36 +19,43 @@ const pi = [
 ];
 
 describe("grid model", () => {
-  test("launchReady: a role on its own harness is always ready; on the other harness only with a cell", () => {
+  test("launchReady: a role and one selected cell, on any harness", () => {
     const role = { harness: "pi", model: "gpt-5.6-sol", provider: "openai-codex", thinking: "high" };
     const c = g.gridModel({ harness: "claude", models: claude, role });
     expect(g.launchReady(c, null, role)).toBe(false);
     expect(g.launchReady(c, { rowKey: "/opus", effort: "high" }, role)).toBe(true);
-    expect(g.launchReady(c, null, null)).toBe(false);   // a launch needs a role
-    expect(g.launchReady(g.gridModel({ harness: "pi", models: pi, role }), null, role)).toBe(true);
+    expect(g.launchReady(c, { rowKey: "/gone", effort: "high" }, role)).toBe(false);
+    expect(g.launchReady(c, { rowKey: "/opus", effort: "bogus" }, role)).toBe(false);
+    expect(g.launchReady(c, { rowKey: "/opus", effort: "high" }, null)).toBe(false);   // a launch needs a role
+    const p = g.gridModel({ harness: "pi", models: pi, role });
+    expect(g.launchReady(p, null, role)).toBe(false);   // no cell: not ready, even on the role's own harness
+    expect(g.launchReady(p, g.initialSelection(p), role)).toBe(true);   // the preselected default cell counts
   });
 
-  test("no role: not ready, with the exact text; each staged single-agent role on its default harness is ready", () => {
-    expect(g.ROLE_REQUIRED).toBe("Pick a role. An agent without a role cannot be spawned.");
-    for (const h of ["claude", "pi"]) {
-      const grid = g.gridModel({ harness: h, models: h === "pi" ? pi : claude });
-      expect(g.launchReady(grid, null, null)).toBe(false);
-      expect(g.launchReady(grid, { rowKey: h === "pi" ? "openai-codex/gpt-5.6-sol" : "/opus", effort: "high" }, null)).toBe(false);
-    }
-    // The real factory role files (frontmatter), each on its own default harness. Councils (a11y, seo) have no launch command.
+  test("a Claude role with an effort marks and preselects that cell; an explicit choice wins", () => {
+    const role = { harness: "claude", model: "opus", provider: null, thinking: null, effort: "medium" };
+    const c = g.gridModel({ harness: "claude", models: claude, role });
+    expect(c.defaultCell).toEqual({ rowKey: "/opus", effort: "medium" });
+    expect(g.initialSelection(c)).toEqual({ rowKey: "/opus", effort: "medium" });
+    expect(g.launchReady(c, g.initialSelection(c), role)).toBe(true);
+    expect(g.choiceFromSelection(c, g.initialSelection(c))).toBeNull();   // the role default sends nothing
+    expect(g.choiceFromSelection(c, { rowKey: "/opus", effort: "high" })).toEqual({ model: null, provider: null, effort: "high" });
+  });
+
+  test("each staged single-agent role on its default harness has its model row marked", () => {
+    // The real factory role files (frontmatter). Councils (a11y, seo) have no launch command.
     const fm = (t: string, k: string) => t.match(new RegExp(`^---\\n[\\s\\S]*?^${k}:[ \\t]*(.*)$`, "m"))?.[1]?.trim().replace(/^["']|["']$/g, "") || null;
     const staged = readdirSync("factory").flatMap((name) => {
       const f = `factory/${name}/${name}.md`;
       if (!existsSync(f)) return [];
       const t = readFileSync(f, "utf8");
       if (fm(t, "council") !== null) return [];
-      return [{ name, harness: fm(t, "harness") || "claude", model: fm(t, "model"), provider: fm(t, "provider"), thinking: fm(t, "thinking") }];
+      return [{ name, harness: fm(t, "harness") || "claude", model: fm(t, "model"), provider: fm(t, "provider"), thinking: fm(t, "thinking"), effort: fm(t, "effort") }];
     });
     expect(staged.map((r) => r.name).sort()).toEqual(["editor", "orchestrator", "reviewer", "tester", "validator", "worker", "writer"]);
     expect(staged.filter((r) => r.harness === "pi").map((r) => r.name).sort()).toEqual(["reviewer", "validator"]);
     for (const role of staged) {
       const grid = g.gridModel({ harness: role.harness, models: role.harness === "pi" ? pi : claude, role });
-      expect(g.launchReady(grid, null, role)).toBe(true);
       expect(g.launchReady(grid, null, null)).toBe(false);
       expect(grid.defaultCell).not.toBeNull();   // the role's own model is in the list: its cell is marked
     }
@@ -118,6 +127,7 @@ class El {
   set textContent(v: string) { this._text = v; if (v === "") this.children = []; }
   get textContent() { return this._text; }
   setAttribute(k: string, v: string) { this.attrs[k] = v; }
+  removeAttribute(k: string) { delete this.attrs[k]; }
   addEventListener(t: string, f: Function) { (this.listeners[t] = this.listeners[t] || []).push(f); }
   closest(_sel: string) { return this.className.includes("cell") ? this : null; }
   fire(t: string, e: any = {}) { for (const f of this.listeners[t] || []) f({ target: this, ...e }); }
@@ -126,7 +136,7 @@ class El {
 
 describe("spawn modal grid glue", () => {
   const src = readFileSync("ui/terminal.js", "utf8");
-  const block = src.slice(src.indexOf("  // Roles come from the staged version;"), src.indexOf("  function refreshSpawnRoomDatalist() {"));
+  const block = src.slice(src.indexOf("  // Roles come from the staged version"), src.indexOf("  function refreshSpawnRoomDatalist() {"));
   const roles = [
     { name: "worker", harness: "claude", model: "sonnet", provider: null, thinking: null },
     { name: "validator", harness: "pi", model: "gpt-5.6-sol", provider: "openai-codex", thinking: "high" },
@@ -135,13 +145,13 @@ describe("spawn modal grid glue", () => {
 
   test("rendering, selection, role defaults, filter, marks and the choice that is sent", async () => {
     const els: Record<string, El> = {};
-    for (const id of ["spawnRoleEl", "spawnRoleErrEl", "spawnGridEl", "spawnGridFilterEl", "spawnGridCountEl", "spawnGridNoteEl", "spawnHarnessPi", "spawnHarnessClaude", "spawnAgentEl", "spawnSubmit"]) els[id] = new El("x");
-    els.spawnAgentEl.value = "worker-1";
+    for (const id of ["spawnRoleEl", "spawnLineEl", "spawnGridLabelEl", "spawnRoleBtn", "spawnCwdEl", "spawnRoomEl", "spawnGridEl", "spawnGridFilterEl", "spawnGridCountEl", "spawnGridNoteEl", "spawnHarnessPi", "spawnHarnessClaude", "spawnAgentEl", "spawnSubmit"]) els[id] = new El("x");
+    els.spawnAgentEl.value = "worker-1"; els.spawnCwdEl.value = "/p"; els.spawnRoomEl.value = "p";
     const calls: string[] = [];
     const Option = function (label: string, value: string) { const o = new El("option"); o._text = label; o.value = value; return o; };
     const ctx = vm.createContext({
       document: { createElement: (t: string) => new El(t) }, Option, console, Map, Promise, localStorage: {},
-      ...els, roleList: null, modelGrid: g, roleMemory: { recall: () => null },
+      ...els, spawnForm: sf, roleList: null, modelGrid: g, roleMemory: { recall: () => null },
       listRoles: async () => roles, listModels: async (h: string) => { calls.push(h); return lists[h]; },
     });
     vm.runInContext("let spawnRoles = new Map();" + block + ";this.api={refreshSpawnRoles,onSpawnRoleChange,spawnGridChoice,get sel(){return gridSelected;}};", ctx);
@@ -151,6 +161,8 @@ describe("spawn modal grid glue", () => {
     const click = (c: El) => els.spawnGridEl.fire("click", { target: c });
 
     await api.refreshSpawnRoles();   // no role, Claude radio
+    expect(els.spawnSubmit.disabled).toBe(true);
+    expect(els.spawnLineEl.textContent).toBe("Fill in: Role, Model and effort.");
     expect(calls).toEqual(["claude"]);
     expect(cells()).toHaveLength(20);
     expect(els.spawnGridFilterEl.hidden).toBe(true);
@@ -166,9 +178,12 @@ describe("spawn modal grid glue", () => {
     await api.onSpawnRoleChange();
     expect(els.spawnHarnessPi.disabled || els.spawnHarnessClaude.disabled).toBe(false);   // a role does not lock the radios
     expect(els.spawnHarnessClaude.checked).toBe(true);
-    expect(els.spawnSubmit.disabled).toBe(false);
+    expect(els.spawnSubmit.disabled).toBe(true);   // a Claude role without an effort: a cell is still required
+    expect(els.spawnLineEl.textContent).toBe("Fill in: Model and effort.");
     expect(labels().some((l) => l.className.includes("default") && l._text === "sonnet")).toBe(true);
     click(cells()[8]);
+    expect(els.spawnSubmit.disabled).toBe(false);
+    expect(els.spawnLineEl.textContent).toBe("");
     expect(api.spawnGridChoice()).toEqual({ model: null, provider: null, effort: "xhigh" });
 
     els.spawnRoleEl.value = "validator";
@@ -183,6 +198,8 @@ describe("spawn modal grid glue", () => {
     expect(cells().filter((c) => c.className.includes("default"))).toHaveLength(1);
     expect(cells().filter((c) => c.className.includes("selected"))).toHaveLength(1);
     expect(api.spawnGridChoice()).toBeNull();   // the default cell sends nothing
+    expect(els.spawnSubmit.disabled).toBe(false);   // a preselected default cell counts
+    expect(els.spawnGridLabelEl.textContent).toBe("Model and thinking (required)");
 
     els.spawnGridFilterEl.value = "terra";
     els.spawnGridFilterEl.fire("input");
@@ -214,150 +231,178 @@ describe("spawn modal grid glue", () => {
     expect(calls).toEqual(["claude", "pi"]);   // rows are cached for one opening of the modal
   });
 
-  // C1 of install 5: name, role worker, harness pi, a Pi cell, Launch. The launch came with no role.
+  // The form around the grid: a fake DOM, the real slices of ui/terminal.js, and stubs for the backend.
+  const roles2 = [...roles, { name: "orchestrator", harness: "claude", model: "opus", provider: null, thinking: null, effort: "medium" }];
   function mkCtx(listRolesImpl: () => Promise<any[]>) {
     const els: Record<string, El> = {};
-    for (const id of ["spawnRoleEl", "spawnRoleErrEl", "spawnGridEl", "spawnGridFilterEl", "spawnGridCountEl", "spawnGridNoteEl", "spawnHarnessPi", "spawnHarnessClaude", "spawnAgentEl", "spawnSubmit"]) els[id] = new El("x");
-    els.spawnAgentEl.value = "t-worker-pi";
+    for (const id of ["spawnRoleEl", "spawnLineEl", "spawnGridLabelEl", "spawnRoleBtn", "spawnGridEl", "spawnGridFilterEl", "spawnGridCountEl", "spawnGridNoteEl", "spawnHarnessPi", "spawnHarnessClaude", "spawnAgentEl", "spawnSubmit", "spawnCwdEl", "spawnRoomEl"]) els[id] = new El("x");
+    els.spawnAgentEl.value = "t-agent"; els.spawnCwdEl.value = "/p"; els.spawnRoomEl.value = "p";
+    els.spawnHarnessClaude.checked = true;
     const Option = function (label: string, value: string) { const o = new El("option"); o._text = label; o.value = value; return o; };
+    const launched: any[][] = [];
+    const modalClasses = new Set<string>();
     const ctx = vm.createContext({
-      document: { createElement: (t: string) => new El(t) }, Option, console, Map, Promise, localStorage: {},
-      ...els, roleList: null, modelGrid: g, roleMemory: { recall: () => null },
+      document: { createElement: (t: string) => new El(t) }, Option, console, Map, Set, Object, Promise, localStorage: {}, setTimeout: () => 0, alert: () => {},
+      ...els, spawnForm: sf, roleList: null, modelGrid: g, roleMemory: { recall: () => null },
+      spawnModal: { classList: { add: (c: string) => modalClasses.add(c), remove: (c: string) => modalClasses.delete(c) } },
+      spawnSessionContinue: null, spawnSessionResume: null, refreshSpawnRoomDatalist: () => {},
+      handleLaunch: async (...a: any[]) => { launched.push(a); },
       listRoles: listRolesImpl, listModels: async (h: string) => lists[h],
     });
     const src = readFileSync("ui/terminal.js", "utf8");
-    const block = src.slice(src.indexOf("  // Roles come from the staged version;"), src.indexOf("  function refreshSpawnRoomDatalist() {"));
-    vm.runInContext("let spawnRoles = new Map();" + block + ";this.api={refreshSpawnRoles,onSpawnRoleChange};", ctx);
-    return { els, api: (ctx as any).api };
+    const slice = (a: string, b: string) => src.slice(src.indexOf(a), src.indexOf(b));
+    const code = "let spawnRoles = new Map();"
+      + slice("  function openSpawnModal(", "  function refreshSpawnRoomDatalist() {")
+      + slice("  function closeSpawnModal()", "  spawnCancel?.addEventListener")
+      + slice("  spawnSubmit?.addEventListener('click'", "  document.addEventListener('keydown'")
+      + ";this.api={openSpawnModal,closeSpawnModal,refreshSpawnRoles,onSpawnRoleChange,get sel(){return gridSelected;}};";
+    vm.runInContext(code, ctx);
+    const api = (ctx as any).api;
+    const click = (row: string, effort: string) => els.spawnGridEl.fire("click", { target: Object.assign(new El("b"), { className: "cell", dataset: { row, effort } }) });
+    const flush = () => new Promise((r) => setTimeout(r, 0));
+    return { els, api, launched, click, flush, modalClasses };
   }
+  const fill = (t: ReturnType<typeof mkCtx>) => { t.els.spawnAgentEl.value = "t-agent"; t.els.spawnCwdEl.value = "/p"; t.els.spawnRoomEl.value = "p"; };   // opening clears them
+  const pick = async (t: ReturnType<typeof mkCtx>, name: string) => { t.els.spawnRoleEl.value = name; await t.api.onSpawnRoleChange(); };
 
-  test("C1 in order: the role stays 'worker' through the harness change and the cell pick", async () => {
-    const { els, api } = mkCtx(async () => roles);
-    await api.refreshSpawnRoles();
-    els.spawnRoleEl.value = "worker";
-    await api.onSpawnRoleChange();
-    els.spawnHarnessPi.checked = true; els.spawnHarnessClaude.checked = false;
-    els.spawnHarnessPi.fire("change");
-    await new Promise((r) => setTimeout(r, 0));
-    els.spawnGridEl.fire("click", { target: Object.assign(new El("b"), { className: "cell", dataset: { row: "openai-codex/gpt-5.6-sol", effort: "high" } }) });
-    expect(els.spawnRoleEl.value).toBe("worker");
-  });
-
-  test("a slow list_roles must not reset a role picked from the options of the previous opening", async () => {
-    let release: (v: any[]) => void = () => {};
-    const { els, api } = mkCtx(() => new Promise((r) => { release = r; }));
-    // the modal was opened before: its options are still there
-    els.spawnRoleEl.add(Object.assign(new El("option"), { value: "worker", _text: "worker" }));
-    const pending = api.refreshSpawnRoles();
-    els.spawnRoleEl.value = "worker";   // the human picks the role while list_roles is still running
-    release(roles);
-    await pending;
-    expect(els.spawnRoleEl.value).toBe("worker");
+  test("the role stays picked through the harness change and the cell pick", async () => {
+    const t = mkCtx(async () => roles2);
+    await t.api.refreshSpawnRoles();
+    await pick(t, "worker");
+    t.els.spawnHarnessPi.checked = true; t.els.spawnHarnessClaude.checked = false;
+    t.els.spawnHarnessPi.fire("change");
+    await t.flush();
+    t.click("openai-codex/gpt-5.6-sol", "high");
+    expect(t.els.spawnRoleEl.value).toBe("worker");
   });
 
-  // t_41e14dde706805e3: list_roles used to turn an error into "no roles", which cleared a picked role in silence.
-  test("a list_roles error keeps the picked role and its options, and shows the error in the window", async () => {
-    let fail: (e: Error) => void = () => {};
-    const { els, api } = mkCtx(() => new Promise((_r, rej) => { fail = rej; }));
-    els.spawnRoleEl.add(Object.assign(new El("option"), { value: "worker", _text: "worker" }));
-    els.spawnRoleErrEl.hidden = true;
-    const pending = api.refreshSpawnRoles();
-    els.spawnRoleEl.value = "worker";
-    fail(new Error("backend gone"));
-    await pending;
-    expect(els.spawnRoleEl.value).toBe("worker");
-    expect(els.spawnRoleEl.children.length).toBe(1);   // the options were not rebuilt from an empty list
-    expect(els.spawnRoleErrEl.hidden).toBe(false);
-    expect(els.spawnRoleErrEl.textContent).toContain("backend gone");
+  test("orchestrator preselects opus + medium and Launch is on; an explicit high wins", async () => {
+    const t = mkCtx(async () => roles2);
+    await t.api.refreshSpawnRoles();
+    await pick(t, "orchestrator");
+    expect(t.api.sel).toEqual({ rowKey: "/opus", effort: "medium" });
+    expect(t.els.spawnSubmit.disabled).toBe(false);
+    t.click("/opus", "high");
+    expect(t.api.sel).toEqual({ rowKey: "/opus", effort: "high" });
+    expect(t.els.spawnSubmit.disabled).toBe(false);
   });
-  test("a list_roles answer without the picked role keeps the pick, says so, and the launch guard refuses it", async () => {
-    let release: (v: any[]) => void = () => {};
-    const { els, api } = mkCtx(() => new Promise((r) => { release = r; }));
-    els.spawnRoleEl.add(Object.assign(new El("option"), { value: "editor", _text: "editor" }));
-    els.spawnRoleErrEl.hidden = true;
-    const pending = api.refreshSpawnRoles();
-    els.spawnRoleEl.value = "editor";
-    release(roles);   // the answer lists worker and validator only
-    await pending;
-    expect(els.spawnRoleEl.value).toBe("editor");   // not cleared
-    expect(els.spawnRoleErrEl.hidden).toBe(false);
-    expect(els.spawnRoleErrEl.textContent).toContain('"editor" is not in the staged role list');
+
+  test("loading: Launch is off with the loading line and nothing launches", async () => {
+    const t = mkCtx(() => new Promise(() => {}));
+    t.els.spawnSubmit.disabled = false;
+    t.api.openSpawnModal();
+    expect(t.els.spawnSubmit.disabled).toBe(true);
+    expect(t.els.spawnLineEl.textContent).toBe("Loading roles…");
+    expect(t.modalClasses.has("open")).toBe(true);
+    t.els.spawnSubmit.fire("click");
+    await t.flush();
+    expect(t.launched).toHaveLength(0);
   });
-  test("a later successful list_roles clears the error", async () => {
+
+  test("a failed list_roles: Launch is off with the error line and nothing launches", async () => {
+    const t = mkCtx(async () => { throw new Error("backend gone"); });
+    t.els.spawnSubmit.disabled = false;
+    t.api.openSpawnModal();
+    await t.flush(); await t.flush();
+    expect(t.els.spawnSubmit.disabled).toBe(true);
+    expect(t.els.spawnLineEl.textContent).toBe("Could not load the roles: backend gone. Close and open the form again.");
+    t.els.spawnSubmit.fire("click");
+    await t.flush();
+    expect(t.launched).toHaveLength(0);
+  });
+
+  test("stale state: open OK, close, reopen with list_roles pending then rejected: Launch off, handleLaunch not called", async () => {
     let n = 0;
-    const { els, api } = mkCtx(async () => { if (++n === 1) throw new Error("x"); return roles; });
-    await api.refreshSpawnRoles();
-    expect(els.spawnRoleErrEl.hidden).toBe(false);
-    await api.refreshSpawnRoles();
-    // the failure text is gone; with no role picked the field says why Launch is off
-    expect(els.spawnRoleErrEl.hidden).toBe(false);
-    expect(els.spawnRoleErrEl.textContent).toBe(g.ROLE_REQUIRED);
-    expect(els.spawnSubmit.disabled).toBe(true);
-    els.spawnRoleEl.value = "worker";
-    await api.onSpawnRoleChange();
-    expect(els.spawnRoleErrEl.hidden).toBe(true);
-    expect(els.spawnRoleErrEl.textContent).toBe("");
-    expect(els.spawnSubmit.disabled).toBe(false);
+    let fail: (e: Error) => void = () => {};
+    const t = mkCtx(() => (++n === 1 ? Promise.resolve(roles2) : new Promise((_r, rej) => { fail = rej; })));
+    t.api.openSpawnModal();
+    await t.flush(); await t.flush();
+    fill(t);
+    await pick(t, "orchestrator");
+    expect(t.els.spawnSubmit.disabled).toBe(false);   // the first opening is complete
+    t.api.closeSpawnModal();
+    t.api.openSpawnModal();                            // list_roles pending
+    expect(t.els.spawnRoleEl.value).toBe("");          // the role of the earlier opening is not used
+    expect(t.els.spawnSubmit.disabled).toBe(true);
+    t.els.spawnSubmit.fire("click");
+    fail(new Error("late"));
+    await t.flush(); await t.flush();
+    expect(t.els.spawnSubmit.disabled).toBe(true);
+    expect(t.els.spawnLineEl.textContent).toBe("Could not load the roles: late. Close and open the form again.");
+    t.els.spawnSubmit.fire("click");
+    await t.flush();
+    expect(t.launched).toHaveLength(0);
   });
-  test("a list_roles failure with no role keeps Launch disabled and the role text shown", async () => {
-    const { els, api } = mkCtx(async () => { throw new Error("backend gone"); });
-    els.spawnSubmit.disabled = false;
-    await api.refreshSpawnRoles();
-    expect(els.spawnSubmit.disabled).toBe(true);
-    expect(els.spawnRoleErrEl.hidden).toBe(false);
-    expect(els.spawnRoleErrEl.textContent).toContain(g.ROLE_REQUIRED);
-    expect(els.spawnRoleErrEl.textContent).toContain("backend gone");
+
+  test("a valid form launches once with the role, harness and the choice", async () => {
+    const t = mkCtx(async () => roles2);
+    t.api.openSpawnModal();
+    await t.flush(); await t.flush();
+    fill(t);
+    await pick(t, "orchestrator");
+    t.click("/opus", "high");
+    t.els.spawnSubmit.fire("click");
+    await t.flush();
+    expect(t.launched).toEqual([["t-agent", "/p", null, "p", "claude", "orchestrator", null, "high", null]]);
   });
+
+  test("aria-invalid only after the field's first change", async () => {
+    const t = mkCtx(async () => roles2);
+    t.els.spawnAgentEl.value = "";
+    t.api.openSpawnModal();
+    await t.flush(); await t.flush();
+    expect(t.els.spawnAgentEl.attrs["aria-invalid"]).toBeUndefined();
+    expect(t.els.spawnRoleBtn.attrs["aria-invalid"]).toBeUndefined();
+    t.els.spawnAgentEl.fire("input");
+    expect(t.els.spawnAgentEl.attrs["aria-invalid"]).toBe("true");
+    expect(t.els.spawnRoleBtn.attrs["aria-invalid"]).toBeUndefined();
+    t.els.spawnAgentEl.value = "bob";
+    t.els.spawnAgentEl.fire("input");
+    expect(t.els.spawnAgentEl.attrs["aria-invalid"]).toBeUndefined();
+  });
+
+  test("a new opening starts at no role and the Claude harness", async () => {
+    const t = mkCtx(async () => roles2);
+    t.api.openSpawnModal();
+    await t.flush(); await t.flush();
+    await pick(t, "validator");
+    expect(t.els.spawnHarnessPi.checked).toBe(true);
+    t.api.openSpawnModal();
+    expect(t.els.spawnRoleEl.value).toBe("");
+    expect(t.els.spawnHarnessClaude.checked).toBe(true);
+    expect(t.els.spawnHarnessPi.checked).toBe(false);
+  });
+
   test("pty.listRoles rejects when the command fails (it no longer answers [])", async () => {
     const win: any = { __TAURI__: { core: { invoke: async () => { throw new Error("nope"); } } } };
     new Function("window", "TextEncoder", readFileSync("ui/terminal/pty.js", "utf8"))(win, TextEncoder);
     await expect(win.__CUBILOT_TERM__.pty.listRoles()).rejects.toThrow("nope");
   });
-  test("a new opening starts at None, not at the role of the last launch", async () => {
-    const els: Record<string, El> = {};
-    for (const id of ["spawnRoleEl", "spawnRoleErrEl", "spawnGridEl", "spawnGridFilterEl", "spawnGridCountEl", "spawnGridNoteEl", "spawnHarnessPi", "spawnHarnessClaude", "spawnAgentEl", "spawnSubmit", "spawnCwdEl", "spawnRoomEl"]) els[id] = new El("x");
-    const modalClasses = new Set<string>();
-    const Option = function (label: string, value: string) { const o = new El("option"); o._text = label; o.value = value; return o; };
-    const ctx = vm.createContext({
-      document: { createElement: (t: string) => new El(t) }, Option, console, Map, Promise, localStorage: {}, setTimeout: () => 0,
-      ...els, spawnModal: { classList: { add: (c: string) => modalClasses.add(c) } }, spawnSessionContinue: null, spawnSessionResume: null,
-      refreshSpawnRoomDatalist: () => {}, roleList: null, modelGrid: g, roleMemory: { recall: () => null },
-      listRoles: async () => roles, listModels: async (h: string) => lists[h],
-    });
-    const src = readFileSync("ui/terminal.js", "utf8");
-    const block = src.slice(src.indexOf("  function openSpawnModal("), src.indexOf("  function refreshSpawnRoomDatalist() {"));
-    vm.runInContext("let spawnRoles = new Map();" + block + ";this.api={openSpawnModal};", ctx);
-    const { openSpawnModal } = (ctx as any).api;
-    openSpawnModal();
-    await new Promise((r) => setTimeout(r, 0));
-    els.spawnRoleEl.value = "worker";           // the human picks worker and launches
-    openSpawnModal();                            // a new opening for a new name
-    expect(els.spawnRoleEl.value).toBe("");
-    await new Promise((r) => setTimeout(r, 0));
-    expect(els.spawnRoleEl.value).toBe("");
-    expect(modalClasses.has("open")).toBe(true);
+});
+
+describe("spawn modal markup", () => {
+  const html = readFileSync("ui/index.html", "utf8");
+  const modal = html.slice(html.indexOf('id="spawn-modal"'), html.indexOf('id="factory-room-modal"'));
+  test("one live region: the line under Launch; Launch points at it", () => {
+    expect(modal.match(/aria-live=/g)).toHaveLength(1);
+    expect(modal).toContain('id="spawn-launch-line" class="spawn-launch-line" aria-live="polite"');
+    expect(modal).toContain('id="spawn-submit" aria-describedby="spawn-launch-line"');
+    expect(modal).not.toContain('role="alert"');
   });
-  test("on opening with no role, Launch is disabled and the role text shows before list_roles answers", async () => {
-    const els: Record<string, El> = {};
-    for (const id of ["spawnRoleEl", "spawnRoleErrEl", "spawnGridEl", "spawnGridFilterEl", "spawnGridCountEl", "spawnGridNoteEl", "spawnHarnessPi", "spawnHarnessClaude", "spawnAgentEl", "spawnSubmit", "spawnCwdEl", "spawnRoomEl"]) els[id] = new El("x");
-    const modalClasses = new Set<string>();
-    const Option = function (label: string, value: string) { const o = new El("option"); o._text = label; o.value = value; return o; };
-    const ctx = vm.createContext({
-      document: { createElement: (t: string) => new El(t) }, Option, console, Map, Promise, localStorage: {}, setTimeout: () => 0,
-      ...els, spawnModal: { classList: { add: (c: string) => modalClasses.add(c) } }, spawnSessionContinue: null, spawnSessionResume: null,
-      refreshSpawnRoomDatalist: () => {}, roleList: null, modelGrid: g, roleMemory: { recall: () => null },
-      listRoles: () => new Promise(() => {}), listModels: async (h: string) => lists[h],
-    });
-    const src = readFileSync("ui/terminal.js", "utf8");
-    const block = src.slice(src.indexOf("  function openSpawnModal("), src.indexOf("  function refreshSpawnRoomDatalist() {"));
-    vm.runInContext("let spawnRoles = new Map();" + block + ";this.api={openSpawnModal};", ctx);
-    const { openSpawnModal } = (ctx as any).api;
-    els.spawnSubmit.disabled = false;   // the markup starts Launch enabled; a past launch may have left it enabled
-    els.spawnRoleErrEl.hidden = true;
-    openSpawnModal();                   // list_roles has not answered
-    expect(els.spawnSubmit.disabled).toBe(true);
-    expect(els.spawnRoleErrEl.hidden).toBe(false);
-    expect(els.spawnRoleErrEl.textContent).toBe(g.ROLE_REQUIRED);
-    expect(modalClasses.has("open")).toBe(true);
+  test("each required label ends with (required) and is linked to its control", () => {
+    for (const [forId, text] of [["spawn-agent-input", "Agent name"], ["spawn-role-btn", "Role"], ["spawn-cwd-input", "Project folder"], ["spawn-room-input", "Room"]]) {
+      expect(modal).toContain(`<label for="${forId}">${text} (required)</label>`);
+      expect(modal).toContain(`id="${forId}"`);
+    }
+    expect(modal).toContain('role="radiogroup" aria-labelledby="spawn-harness-label"');
+    expect(modal).toContain('id="spawn-harness-label" class="spawn-label">Harness (required)');
+    expect(modal).toContain('id="spawn-grid-label" class="spawn-label">Model and effort (required)');
+    expect(modal).toContain('role="grid" aria-labelledby="spawn-grid-label"');
+    expect(modal.match(/aria-required="true"/g)!.length).toBeGreaterThanOrEqual(4);
+  });
+  test("the line uses a theme token, not a hard-coded colour", () => {
+    const css = readFileSync("ui/styles/modals.css", "utf8");
+    expect(css).toMatch(/\.spawn-launch-line \{[^}]*color: var\(--error-text\)/);
+    expect(css).not.toContain("#ff6b6b");
   });
 });

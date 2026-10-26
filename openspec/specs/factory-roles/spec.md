@@ -205,7 +205,7 @@ The app SHALL stage the skills in `<app data>/factory-user/<role>/skills/` on to
 
 ### Requirement: The human picks the model and the effort for one launch
 
-The spawn modal SHALL show a model × effort grid. The rows SHALL be the models of the selected harness: the Claude models for Claude Code, and for Pi all models that `pi --list-models` reports, with a filter box; a provider that is not signed in SHALL be marked. The columns SHALL be the effort levels of that harness. The role's default cell SHALL be marked. A choice SHALL apply to one launch only.
+The spawn modal SHALL show a model × effort grid. The rows SHALL be the models of the selected harness: the Claude models for Claude Code, and for Pi all models that `pi --list-models` reports, with a filter box; a provider that is not signed in SHALL be marked. The columns SHALL be the effort levels of that harness. The role's default cell SHALL be marked. A Claude role with an `effort` SHALL mark and preselect its model row and that effort column, as a Pi role does with `thinking`. A launch SHALL need one selected cell: a preselected default cell counts, and an explicit choice of the human wins. A choice SHALL apply to one launch only.
 
 #### Scenario: A Claude role with a chosen cell
 
@@ -226,6 +226,18 @@ The spawn modal SHALL show a model × effort grid. The rows SHALL be the models 
 
 - **WHEN** the human selects the role `worker` and then the harness Pi
 - **THEN** the grid marks no default cell and Launch stays off until the human picks a cell
+
+#### Scenario: No selected cell, no launch
+
+- **WHEN** the human selects a role without a default cell, for example `worker` on Claude, and picks no cell
+- **THEN** Launch is off and the line under it names `Model and effort`
+- **AND** a selected cell, or a preselected default cell, turns the name off the line
+
+#### Scenario: A Claude role effort is preselected
+
+- **WHEN** the human selects the role `orchestrator` on Claude
+- **THEN** the grid marks and selects opus × medium
+- **AND** a click on opus × high replaces the selection and the launch uses `--effort 'high'`
 
 ### Requirement: A Claude role file may set a default effort
 
