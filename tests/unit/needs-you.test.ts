@@ -42,7 +42,36 @@ function makeEnv() {
     db.run("INSERT INTO events (entity_id, kind, actor, payload_json, at_ms, room) VALUES (?, 'handoff.created', ?, '{}', 1, 'r1')", [hid, session]);
     rt.hooks.onResult(session, JSON.parse(context), cap);
   };
-  return { db, ticket, review };
+  /** A newer spec stage that is not ended: moved to the asked open status. */
+  const openStage = (request: string, scope: string[], status: "queued" | "launching" | "running" | "retrying") => {
+    const s = rt.api.create({ request_id: request, review: "spec", role: "validator" }, "system", cap, (ctx) => {
+      for (const t of scope) ctx.tx.run("INSERT INTO stage_scope (stage_id, ticket_id) VALUES (?, ?)", [ctx.next.id, t]);
+    });
+    if (status !== "queued") rt.api.move(s.id, { to: "launching", session: `validator-${++sessions}` }, "system", cap);
+    if (status === "running" || status === "retrying") rt.api.move(s.id, { to: "running" }, "system", cap);
+    if (status === "retrying") rt.api.move(s.id, { to: "retrying", reason: "x" }, "system", cap);
+    return s.id;
+  };
+  /** An open stage ends with a verdict (as the hub does) or with no verdict (operational failed). */
+  const endStage = (id: string, request: string, end: "PASS" | "FAIL" | "failed", findings: unknown[] = []) => {
+    if (end === "failed") {
+      rt.api.move(id, { to: "failed" }, "system", cap);
+      return;
+    }
+    if (rt.api.load(id)!.status === "queued") rt.api.move(id, { to: "launching", session: `validator-${++sessions}` }, "system", cap);
+    if (rt.api.load(id)!.status === "launching") rt.api.move(id, { to: "running" }, "system", cap);
+    if (rt.api.load(id)!.status === "retrying") {
+      rt.api.move(id, { to: "launching", session: `validator-${++sessions}` }, "system", cap);
+      rt.api.move(id, { to: "running" }, "system", cap);
+    }
+    const session = rt.api.load(id)!.session!;
+    const hid = `h_${(++h).toString(16).padStart(16, "0")}`;
+    const context = JSON.stringify({ stage_id: id, review: "spec", request_id: request, verdict: end, findings });
+    db.run("INSERT INTO handoffs (id, from_agent, to_agent, task, context_json, status, created_at_ms, expires_at_ms, room) VALUES (?, ?, 'Orchestrator', 'r', ?, 'pending', 1, 2, 'r1')", [hid, session, context]);
+    db.run("INSERT INTO events (entity_id, kind, actor, payload_json, at_ms, room) VALUES (?, 'handoff.created', ?, '{}', 1, 'r1')", [hid, session]);
+    rt.hooks.onResult(session, JSON.parse(context), cap);
+  };
+  return { db, ticket, review, openStage, endStage };
 }
 
 describe("needsYouRequests", () => {
@@ -146,6 +175,98 @@ describe("needsYouRequests", () => {
       e.review("req-same", [b], "FAIL", f(b, "B-NEWER"));
       e.review("req-same", [b], "FAIL", f(b, "B-NEWEST"));
       expect(needsYouRequests(e.db, "r1")[0].findings.map((x) => x.text)).toEqual(["A-LATEST"]);
+    });
+  });
+
+  describe("a newer spec review of the request", () => {
+    const f = (t: string, text: string) => [{ ticket_id: t, severity: "blocking", text }];
+    const failed2 = () => {
+      const e = makeEnv();
+      const a = e.ticket("req-1", "Plan A");
+      e.review("req-1", [a], "FAIL", f(a, "one"));
+      e.review("req-1", [a], "FAIL", f(a, "two"));
+      return { e, a };
+    };
+
+    test("2 FAILs show the row with today's fields", () => {
+      const { e, a } = failed2();
+      expect(needsYouRequests(e.db, "r1")).toEqual([
+        { request_id: "req-1", fail_count: 2, findings: [{ ticket_id: a, title: "Plan A", severity: "blocking", text: "two" }] },
+      ]);
+    });
+
+    for (const status of ["queued", "launching", "running", "retrying"] as const) {
+      test(`a newer stage in ${status} hides the row`, () => {
+        const { e, a } = failed2();
+        e.openStage("req-1", [a], status);
+        expect(needsYouRequests(e.db, "r1")).toEqual([]);
+      });
+    }
+
+    test("newer stage FAILs: row back with fail_count 3 and its findings", () => {
+      const { e, a } = failed2();
+      const s = e.openStage("req-1", [a], "running");
+      e.endStage(s, "req-1", "FAIL", f(a, "three"));
+      const r = needsYouRequests(e.db, "r1");
+      expect(r[0].fail_count).toBe(3);
+      expect(r[0].findings.map((x) => x.text)).toEqual(["three"]);
+    });
+
+    test("newer stage PASSes: row gone", () => {
+      const { e, a } = failed2();
+      const s = e.openStage("req-1", [a], "running");
+      e.endStage(s, "req-1", "PASS");
+      expect(needsYouRequests(e.db, "r1")).toEqual([]);
+    });
+
+    test("newer stage ends operational failed: row back with fail_count 2 and the old findings", () => {
+      const { e, a } = failed2();
+      const s = e.openStage("req-1", [a], "running");
+      e.endStage(s, "req-1", "failed");
+      const r = needsYouRequests(e.db, "r1");
+      expect(r[0].fail_count).toBe(2);
+      expect(r[0].findings.map((x) => x.text)).toEqual(["two"]);
+    });
+
+    test("a newer stage of another request or another room does not hide the row", () => {
+      const { e, a } = failed2();
+      const o = e.ticket("req-9", "Other", "r1");
+      const p = e.ticket("req-1", "Same id, other room", "r2");
+      e.openStage("req-9", [o], "running");
+      e.openStage("req-1", [p], "running");
+      expect(needsYouRequests(e.db, "r1")).toHaveLength(1);
+    });
+
+    test("two newer stages, one FAILs, the other queued: hidden; then the second FAILs: fail_count 4", () => {
+      const { e, a } = failed2();
+      const s1 = e.openStage("req-1", [a], "running");
+      const s2 = e.openStage("req-1", [a], "queued");
+      e.endStage(s1, "req-1", "FAIL", f(a, "three"));
+      expect(needsYouRequests(e.db, "r1")).toEqual([]);
+      e.endStage(s2, "req-1", "FAIL", f(a, "four"));
+      const r = needsYouRequests(e.db, "r1");
+      expect(r[0].fail_count).toBe(4);
+      expect(r[0].findings.map((x) => x.text)).toEqual(["four"]);
+    });
+
+    test("two newer stages, one FAILs, the other queued then operational failed: fail_count 3 with the first newer FAIL", () => {
+      const { e, a } = failed2();
+      const s1 = e.openStage("req-1", [a], "running");
+      const s2 = e.openStage("req-1", [a], "queued");
+      e.endStage(s1, "req-1", "FAIL", f(a, "three"));
+      expect(needsYouRequests(e.db, "r1")).toEqual([]);
+      e.endStage(s2, "req-1", "failed");
+      const r = needsYouRequests(e.db, "r1");
+      expect(r[0].fail_count).toBe(3);
+      expect(r[0].findings.map((x) => x.text)).toEqual(["three"]);
+    });
+
+    test("two newer stages, one operational failed, the other queued: hidden", () => {
+      const { e, a } = failed2();
+      const s1 = e.openStage("req-1", [a], "running");
+      e.openStage("req-1", [a], "queued");
+      e.endStage(s1, "req-1", "failed");
+      expect(needsYouRequests(e.db, "r1")).toEqual([]);
     });
   });
 });
