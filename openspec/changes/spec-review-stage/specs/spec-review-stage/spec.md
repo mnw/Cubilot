@@ -111,6 +111,8 @@ A spec-review FAIL SHALL be recorded as `stage.passed` with verdict `FAIL`. The 
 
 When the request has two spec verdicts of FAIL since its last PASS, the hub SHALL add a `ui-only` entry for the human that lists the open findings, and SHALL show the same list in the "Needs you" area with the approvals. The open findings SHALL be the findings of the latest FAIL.
 
+The hub SHALL leave a request out of the "Needs you" area while a newer spec review of the same request and room is open. A newer review is created after the latest FAIL stage. It is open in status `queued`, `launching`, `running` or `retrying`. The row SHALL return when no newer review is open. A newer review that ends with a FAIL verdict becomes the latest FAIL. A newer review that ends with a PASS removes the row. A newer review that ends `failed` with no verdict SHALL NOT count as a FAIL.
+
 #### Scenario: Second FAIL
 
 - **GIVEN** the request `r-1` has one FAIL verdict

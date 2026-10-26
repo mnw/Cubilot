@@ -452,6 +452,7 @@ export type NeedsYouRequest = {
 /**
  * The requests of one room that need the human because their spec review failed twice or more since its last PASS
  * (spec-review-stage 4.3). The open findings are the findings of the latest FAIL result. A PASS ends it: the count restarts.
+ * A request is left out while a newer spec review of it (created after the latest FAIL) is still open.
  */
 /**
  * The spec FAIL state of one request IN ONE ROOM: the FAIL stages created after the newest PASS stage, all read by room.
@@ -485,6 +486,15 @@ export function needsYouRequests(db: Database, room: string): NeedsYouRequest[] 
   for (const { request_id } of requests) {
     const { fails, latest: latestStage } = specFailState(db, room, request_id);
     if (fails < 2 || !latestStage) continue;
+    // A spec review of the same request and room, created after the latest FAIL and not ended, means the Orchestrator already answered.
+    const open = db
+      .query<{ id: string }, [string, string, string]>(
+        `SELECT s.id FROM stage s WHERE s.review = 'spec' AND s.request_id = ?1 AND ${STAGE_ROOM_SQL} = ?2
+          AND s.status IN ('queued', 'launching', 'running', 'retrying')
+          AND s.created_seq > (SELECT created_seq FROM stage WHERE id = ?3) LIMIT 1`,
+      )
+      .get(request_id, room, latestStage);
+    if (open) continue;
     // The findings of the latest FAIL STAGE of this room: its own result handoff names it in context.stage_id.
     const latest = db
       .query<{ c: string | null }, [string]>(
