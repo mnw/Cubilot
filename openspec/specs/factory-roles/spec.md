@@ -219,6 +219,25 @@ The spawn modal SHALL show a model × effort grid. The rows SHALL be the models 
 - **WHEN** the human selects the role `worker` and then the harness Pi
 - **THEN** the grid marks no default cell and Launch stays off until the human picks a cell
 
+### Requirement: A Claude role file may set a default effort
+
+A role file MAY have an optional `effort` frontmatter line. The value SHALL be one of `low`, `medium`, `high`, `xhigh` and `max`. An unknown value SHALL make the role fail to parse. A role file with `harness: pi` SHALL be refused when it has `effort` (a Pi role uses `thinking`). A Claude launch of a role with `effort` SHALL pass `--effort <value>`. The effort the human picks in the spawn modal SHALL win over the role value. The role list SHALL carry the effort (null when none). The session record and the roster pill SHALL show the effort the command used. A role without `effort` SHALL give the same command as before. The `orchestrator` role SHALL have `effort: medium`.
+
+#### Scenario: The orchestrator launches with its role effort
+
+- **WHEN** the orchestrator launches on Claude and the human picks no effort
+- **THEN** the command has `--effort 'medium'` and the session records effort medium
+
+#### Scenario: The human's effort wins
+
+- **WHEN** the human picks high for an orchestrator launch
+- **THEN** the command has `--effort 'high'` once and the session records effort high
+
+#### Scenario: A bad value is refused
+
+- **WHEN** a role file has `effort: huge`, or `effort` on a Pi role
+- **THEN** the role fails to parse and nothing launches
+
 ### Requirement: The human picks the orchestrator's harness and model for a new factory room
 
 The New factory room window SHALL show the harness choice and the model × effort grid of the spawn modal, with the same rules. The default SHALL be the `orchestrator` role default.

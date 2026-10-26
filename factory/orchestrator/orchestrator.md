@@ -2,6 +2,7 @@
 name: orchestrator
 description: Factory lead. Turns requests into tickets, assigns them, unblocks work and escalates to the human. Does not write code or docs.
 model: opus
+effort: medium
 disallowedTools: Edit, Write, NotebookEdit, Task, Agent
 excludeTools: edit,write
 ---
