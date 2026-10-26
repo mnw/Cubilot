@@ -1429,21 +1429,22 @@ pub async fn pty_spawn(
             role.as_deref(),
             &choice,
         )?;
-        let spawn_cmd = if wants_login_path(harness, stage_id.as_deref()) {
+        let login = if wants_login_path(harness, stage_id.as_deref()) {
             // Blocking on the first call (up to 5 s): off the async runtime. None keeps the inherited PATH.
-            let login = tauri::async_runtime::spawn_blocking(crate::login_path::login_path)
+            tauri::async_runtime::spawn_blocking(crate::login_path::login_path)
                 .await
-                .map_err(|e| format!("login PATH worker failed: {e}"))?;
-            with_login_path(spawn_cmd, harness, stage_id.as_deref(), login)
+                .map_err(|e| format!("login PATH worker failed: {e}"))?
         } else {
-            spawn_cmd
+            None
         };
         // A hub launch carries the ticket part of the first message: written to a file, read by the command.
-        let spawn_cmd = match first_message.as_deref().filter(|m| !m.is_empty()) {
-            Some(text) => with_first_message(&spawn_cmd, &write_first_message(&sessions_dir(), &agent, text)?),
-            None => spawn_cmd,
+        let first_file = match first_message.as_deref().filter(|m| !m.is_empty()) {
+            Some(text) => Some(write_first_message(&sessions_dir(), &agent, text)?),
+            None => None,
         };
-        let argv = build_spawn_argv(&agent, &cwd, &lang, api_key.as_deref(), &spawn_cmd, stage_id.as_deref());
+        let (spawn_cmd, argv) = final_spawn(
+            &agent, &cwd, &lang, api_key.as_deref(), spawn_cmd, harness, stage_id.as_deref(), login.as_deref(), first_file.as_deref(),
+        );
         let argv_refs: Vec<&str> = argv.iter().map(String::as_str).collect();
         tmux_run(&argv_refs)?;
         // Authoritative harness record; pane_harness falls back to the command only without it.
@@ -1559,6 +1560,28 @@ fn write_first_message(dir: &std::path::Path, session: &str, text: &str) -> Resu
     f.sync_all().map_err(|e| format!("sync {}: {e}", tmp.display()))?;
     std::fs::rename(&tmp, &target).map_err(|e| format!("rename {}: {e}", target.display()))?;
     Ok(target)
+}
+
+/// The final command and tmux argv of a launch, as pty_spawn runs them: login PATH, first message, argv.
+#[allow(clippy::too_many_arguments)]
+fn final_spawn(
+    agent: &str,
+    cwd: &str,
+    lang: &str,
+    api_key: Option<&str>,
+    cmd: String,
+    harness: Harness,
+    stage_id: Option<&str>,
+    login: Option<&str>,
+    first_file: Option<&std::path::Path>,
+) -> (String, Vec<String>) {
+    let cmd = with_login_path(cmd, harness, stage_id, login);
+    let cmd = match first_file {
+        Some(f) => with_first_message(&cmd, f),
+        None => cmd,
+    };
+    let argv = build_spawn_argv(agent, cwd, lang, api_key, &cmd, stage_id);
+    (cmd, argv)
 }
 
 /// The launch command plus the first message as ONE quoted argument, read by the shell from the file. `--` ends the
@@ -2373,10 +2396,7 @@ mod spawn_argv_tests {
     /// The final command as pty_spawn builds it: login PATH, then the first message, then the argv.
     fn final_claude_argv(stage_id: Option<&str>, login: Option<&str>) -> (String, Vec<String>) {
         let cmd = "CHATBRIDGE_AGENT='a' '/bin/claude' --model x".to_string();
-        let cmd = super::with_login_path(cmd, Harness::Claude, stage_id, login);
-        let cmd = super::with_first_message(&cmd, std::path::Path::new("/tmp/m.txt"));
-        let argv = build_spawn_argv("a", "/tmp", "en_US.UTF-8", None, &cmd, stage_id);
-        (cmd, argv)
+        super::final_spawn("a", "/tmp", "en_US.UTF-8", None, cmd, Harness::Claude, stage_id, login, Some(std::path::Path::new("/tmp/m.txt")))
     }
 
     #[test]
