@@ -148,7 +148,7 @@ Do not use these parts:
 1. Add `role: Option<String>` to `pty_spawn` and to `format_claude_command`.
 2. Parse the role frontmatter: `harness` (default `claude`), `provider`, `model`, `thinking`, `effort` (optional, Claude roles only; one of `low`, `medium`, `high`, `xhigh`, `max`; refused on a Pi role; the human's effort choice in the spawn modal wins; the `orchestrator` has `medium`), `disallowedTools` (Claude) and `excludeTools` (Pi). **Harness choice (human decision 2026-10-22).** The role's `harness` is the default only. The harness in the spawn modal decides the launch. Every role file has both `disallowedTools` and `excludeTools`, so a role works on both harnesses: every role blocks `Task, Agent` on Claude; `orchestrator`, `validator` and `reviewer` also block `Edit, Write, NotebookEdit` on Claude and `edit,write` on Pi. The role's `provider`, `model` and `thinking` apply only when the launch harness is the role's harness. On the other harness the role has no default model, and the launch needs a model from the grid (step 4). A `validator` or `reviewer` on Claude loses the cross-check by a different model family. That is the human's choice.
 3. For a Claude role, add to the Claude command: `--plugin-dir '<app data>/factory/<current>/<role>' --plugin-dir '<app data>/factory/<current>/shared' --append-system-prompt-file '<app data>/factory/<current>/<role>/role.md' --settings '<app data>/factory-settings/<agent>.json' --model <model>`, and `--disallowed-tools ...` from `disallowedTools`. Every Claude role sets `Task, Agent`.
-4. When `role` is `None`, the command does not change.
+4. When `role` is `None` and no session of that name exists, the launch fails with "a role is required" and nothing is created (human decision 2026-10-26). When the session already runs, `role` `None` re-attaches it as before: a running roleless session keeps working.
 5. Many agents share one role. `worker-1` and `worker-2` both use `worker`. `tester-1` and `tester-2` both use `tester`.
 
 ### Step 3. Pre-allowed tools
@@ -170,7 +170,7 @@ Removing `ack_permission` from `--allowed-tools` is not enough. In `default` mod
 Blocking the tool does not change the permission relay. The human still resolves a permission request from the card in the UI and from the agent's terminal.
 
 ### Step 4. UI
-1. Add a Role dropdown to the spawn modal. Fill it from the staged roles. "None" keeps the current behaviour.
+1. Add a Role dropdown to the spawn modal. Fill it from the staged roles. There is no "None" choice: until a role is picked, Launch is off and the text "Pick a role. An agent without a role cannot be spawned." shows. A new launch without a role fails; re-attach of a running roleless session still works.
 2. When the user selects a role, select its harness and mark its default cell. The user can change the harness (human decision 2026-10-22) and override the model for one launch, for example `worker-2` on `opus` for a hard ticket. When the harness is not the role's harness, the grid has no default cell and Launch stays off until the user picks a cell.
 3. Remember the role, the harness and any model override for each agent name, like the cwd cache (`ui/terminal.js:142`).
 4. Show the role and the model on the roster pill.
@@ -189,7 +189,7 @@ Blocking the tool does not change the permission relay. The human still resolves
 2. Add `role: Option<&str>` to `pi_command` (`src-tauri/src/pty.rs:560`).
 3. Add to the Pi command, before `-e`:
    `--provider '<provider>' --model '<model>' --thinking '<thinking>' --append-system-prompt '<app data>/factory/<current>/<role>/role.md' --skill '<app data>/factory/<current>/<role>/skills' --exclude-tools '<excludeTools>'`
-4. Keep `--no-approve` and `-e <pi extension>`. For a role, pass `--no-skills --no-extensions -e builtin:mcp -e builtin:tool-search` (finding of 2026-10-22: without `--no-extensions` the user's pi packages add skills and tools such as `filler`; explicit `-e` paths still load, so the chatbridge extension stays. `builtin:mcp` keeps the user's MCP servers, like `--mcp-config` for a Claude role, and `builtin:tool-search` makes their tools callable: probe 2 showed serena connected in `/mcp` and a real `mcp__serena__*` call, with no package skill or `filler` tool), then only the role and `factory-shared` `--skill` folders, and drop the `--skill` and `--prompt-template` folders of `claude_resource_flags`. Finding of task 1.4 (2026-10-21, pi 1.3.0): Pi loads `~/.claude/skills` by itself, and that folder has its own `asd-ste100`, so the order of `--skill` flags alone does not pick the shared copy. A launch without a role keeps today's flags.
+4. Keep `--no-approve` and `-e <pi extension>`. For a role, pass `--no-skills --no-extensions -e builtin:mcp -e builtin:tool-search` (finding of 2026-10-22: without `--no-extensions` the user's pi packages add skills and tools such as `filler`; explicit `-e` paths still load, so the chatbridge extension stays. `builtin:mcp` keeps the user's MCP servers, like `--mcp-config` for a Claude role, and `builtin:tool-search` makes their tools callable: probe 2 showed serena connected in `/mcp` and a real `mcp__serena__*` call, with no package skill or `filler` tool), then only the role and `factory-shared` `--skill` folders, and drop the `--skill` and `--prompt-template` folders of `claude_resource_flags`. Finding of task 1.4 (2026-10-21, pi 1.3.0): Pi loads `~/.claude/skills` by itself, and that folder has its own `asd-ste100`, so the order of `--skill` flags alone does not pick the shared copy. A new launch without a role fails before these flags are built; re-attach of a running roleless session builds no command and still works.
 5. Do not add the role text in `pi-extension.ts` `before_agent_start`. The flag `--append-system-prompt` does this without a code change in the extension.
 6. Show the provider and model on the roster pill, so the human sees which agents run on OpenAI.
 7. When Pi has no credential for the launch provider, the launch fails. Before each Pi launch, run `pi auth check --provider <launch provider> --json` for the provider of that launch (the role default or the chosen grid row, for example `openai-codex`) and show a clear message when it is not ready.
@@ -216,7 +216,7 @@ Blocking the tool does not change the permission relay. The human still resolves
 ## Tests
 
 Follow the existing launch-command tests in `src-tauri/src/pty.rs`:
-1. No role: the command is the same as today.
+1. No role: a new launch fails with "a role is required"; re-attach of a running roleless session works. (The command builder without a role stays byte-equal to today for the re-attach and test paths.)
 2. Role `worker`: the command contains the role plugin, the role prompt file and `--model sonnet`.
 3. Role `editor`: the command contains `--model sonnet` and `--disallowed-tools` with `Task` and `Agent`.
 4. The builder escapes a quote in a role name, like it does for agent and room names.

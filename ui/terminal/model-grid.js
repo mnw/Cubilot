@@ -1,6 +1,6 @@
 // terminal/model-grid.js — the model x effort grid of the spawn modal (task 5.5). Pure (no DOM, no Tauri), so it
 // runs in node. Rows are models, columns are effort levels, one cell is selected, the role's default cell is marked.
-// Only what differs from the role default is sent to pty_spawn; without a role the chosen cell is sent whole.
+// Only what differs from the role default is sent to pty_spawn. A launch always has a role.
 
 (function () {
   const EFFORTS = {
@@ -60,10 +60,15 @@
     return out.model || out.effort ? out : null;
   }
 
-  // Launch is allowed unless the role's harness is not the launch harness: then the role has no default model here,
-  // so a cell must be picked (the launch has to name a model).
+  // Shown next to the role field while no role is picked (#spawn-role-error); also the placeholder of the role field.
+  const ROLE_PROMPT = 'Pick a role';
+  const ROLE_REQUIRED = 'Pick a role. An agent without a role cannot be spawned.';
+
+  // Launch needs a role. It is then allowed unless the role's harness is not the launch harness: then the role has no
+  // default model here, so a cell must be picked (the launch has to name a model).
   function launchReady(grid, selected, role) {
-    if (!role || role.harness === grid.harness) return true;
+    if (!role) return false;
+    if (role.harness === grid.harness) return true;
     return choiceFromSelection(grid, selected) !== null;
   }
 
@@ -76,5 +81,5 @@
   }
 
   window.__CUBILOT_TERM__ = window.__CUBILOT_TERM__ || {};
-  window.__CUBILOT_TERM__.modelGrid = { EFFORTS, gridModel, initialSelection, choiceFromSelection, launchReady, selectionFromChoice };
+  window.__CUBILOT_TERM__.modelGrid = { EFFORTS, ROLE_PROMPT, ROLE_REQUIRED, gridModel, initialSelection, choiceFromSelection, launchReady, selectionFromChoice };
 })();

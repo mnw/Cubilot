@@ -51,6 +51,7 @@
   --code-text:    #f0c4b0;
   --green-strong: #9dc285;
   --red-strong:   #e38f7a;
+  --error-text:   #e38f7a;  /* error text on --bg-raised (the modal): 6.74:1 */
 
   /* Theme-aware overlays. Light themes flip these to black-on-light in their
      override blocks; full white-on-dark looks wrong on a light background. */
@@ -291,6 +292,7 @@
   --code-text:    #d7827e;  /* rose */
   --green-strong: #286983;  /* pine — dark teal stays legible on light tint */
   --red-strong:   #b4637a;  /* love */
+  --error-text:   #8f3f5a;  /* error text on --bg-raised (the modal): 6.68:1; plain love is 4.04:1 */
 
   /* Light-theme scrim/overlays — black-on-light, lighter alpha. */
   --scrim:              rgba(0, 0, 0, 0.35);
@@ -351,6 +353,7 @@
   --code-text:    #ea9a97;
   --green-strong: #9ccfd8;  /* foam — brighter for legibility on dark tint */
   --red-strong:   #eb6f92;
+  --error-text:   #f29ab1;  /* error text on --bg-raised (the modal): 6.87:1 */
 
   /* Moon is dark; scrim/overlays stay white-on-dark like default. Inherits
      them automatically by not overriding. */
