@@ -50,7 +50,7 @@ describe("a spec result goes to the Orchestrator", () => {
   });
 
   const result = (to: string) => ({
-    stage_id: stageId, review: "spec", request_id: "req-9", verdict: "PASS",
+    notes: "n", stage_id: stageId, review: "spec", request_id: "req-9", verdict: "PASS",
     findings: [{ ticket_id: ticketId, severity: "suggestion", text: "ok" }], suggestions: [], questions_for_human: [],
   } as Record<string, unknown>);
   const stage = async () => ((await getJson(hub, `/stages/${stageId}`)).json as any);

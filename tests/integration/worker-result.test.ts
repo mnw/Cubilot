@@ -42,7 +42,7 @@ describe("worker result needs a new commit", () => {
   const handoffCount = async () => ((await getJson(hub, "/handoffs?for=alice")).json as unknown[]).length;
   const status = async () => ((await getJson(hub, `/stages/${stageId}`)).json as { status: string }).status;
   const send = (body: Record<string, unknown>, commit?: unknown) =>
-    postJson(hub, "/handoffs", { from: "worker-1", task: "result", ...body, context: { stage_id: stageId, ticket_id: ticketId, ...(commit === undefined ? {} : { commit }) } });
+    postJson(hub, "/handoffs", { from: "worker-1", task: "result", ...body, context: { notes: "n", stage_id: stageId, ticket_id: ticketId, ...(commit === undefined ? {} : { commit }) } });
   const newCommit = () => {
     const tip = git("rev-parse", `refs/heads/ticket/${ticketId}`);
     const sha = git("commit-tree", `${tip}^{tree}`, "-p", tip, "-m", "work");

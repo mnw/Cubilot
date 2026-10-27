@@ -83,7 +83,7 @@ describe("spec stage launch", () => {
 
     const bad = await postJson(hub, "/handoffs", {
       from: "validator-1", to: "Orchestrator", task: "result",
-      context: { stage_id: first, review: "spec", request_id: "req-1", verdict: "pass", findings: [], suggestions: [], questions_for_human: [] },
+      context: { notes: "n", stage_id: first, review: "spec", request_id: "req-1", verdict: "pass", findings: [], suggestions: [], questions_for_human: [] },
     });
     expect(bad.status).toBe(400);
     expect(((await getJson(hub, `/stages/${first}`)).json as { status: string }).status).toBe("running");
@@ -100,7 +100,7 @@ describe("spec stage launch", () => {
   test("when the first validator stage ends, the oldest queued stage (the second spec stage) starts", async () => {
     const pass = await postJson(hub, "/handoffs", {
       from: "validator-1", to: "Orchestrator", task: "result",
-      context: { stage_id: first, review: "spec", request_id: "req-1", verdict: "PASS", findings: [], suggestions: [], questions_for_human: [] },
+      context: { notes: "n", stage_id: first, review: "spec", request_id: "req-1", verdict: "PASS", findings: [], suggestions: [], questions_for_human: [] },
     });
     expect(pass.status, JSON.stringify(pass.json)).toBe(201);
     await sleep(300);

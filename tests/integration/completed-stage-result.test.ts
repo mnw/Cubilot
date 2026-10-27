@@ -47,7 +47,7 @@ describe("a result for a completed stage", () => {
     void (async () => { try { for await (const e of agentStream.events) events.push(e as { kind?: string }); } catch { /* closed */ } })();
     const result = {
       from: launch.session, to: "Orchestrator", task: "spec verdict",
-      context: { stage_id: launch.stage_id, review: "spec", request_id: "req-1", verdict: "FAIL", findings: [{ ticket_id: ticket, severity: "blocking", text: "x" }], questions_for_human: [] },
+      context: { notes: "n", stage_id: launch.stage_id, review: "spec", request_id: "req-1", verdict: "FAIL", findings: [{ ticket_id: ticket, severity: "blocking", text: "x" }], questions_for_human: [] },
     };
     expect((await postJson(hub, "/handoffs", result)).status).toBe(201);
     expect(((await getJson(hub, `/stages/${launch.stage_id}`)).json as { status: string }).status).toBe("passed");

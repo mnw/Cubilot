@@ -83,7 +83,7 @@ function makeEnv(project?: string, ledgerFile?: string) {
   const work = () => {
     const stage = running("worker", `worker-${++sn}`);
     const check = (commit: unknown, to: string | undefined = TESTER) =>
-      rt.hooks.checkResult(`worker-${sn}`, { stage_id: stage, ticket_id: TID, ...(commit === undefined ? {} : { commit }) }, cap, to);
+      rt.hooks.checkResult(`worker-${sn}`, { notes: "n", stage_id: stage, ticket_id: TID, ...(commit === undefined ? {} : { commit }) }, cap, to);
     return { stage, check, load: () => rt.api.load(stage)! };
   };
   /** A new hub process on the same ledger file: close the database, open the file again, build a new runtime. */
@@ -117,7 +117,7 @@ describe("first result: the base is the merge-base with staging", () => {
     const e = makeEnv();
     const w = e.work();
     expect(w.check(e.repo.c1)).toEqual([]);
-    e.rt().hooks.onResult("worker-1", { stage_id: w.stage, ticket_id: TID, commit: e.repo.c1 }, e.cap);
+    e.rt().hooks.onResult("worker-1", { notes: "n", stage_id: w.stage, ticket_id: TID, commit: e.repo.c1 }, e.cap);
     expect(w.load().status).toBe("passed");
   });
   test("the tip of the ticket branch passes", () => {
@@ -205,7 +205,7 @@ describe("refusals", () => {
   test("a missing, unknown or foreign ticket_id gets the worker refusal and stage.rejected", () => {
     const e = makeEnv();
     const w = e.work();
-    const send = (ctx: Record<string, unknown>) => e.rt().hooks.checkResult("worker-1", { stage_id: w.stage, ...ctx }, e.cap, TESTER);
+    const send = (ctx: Record<string, unknown>) => e.rt().hooks.checkResult("worker-1", { notes: "n", stage_id: w.stage, ...ctx }, e.cap, TESTER);
     expect(send({ commit: e.repo.c1 })).toEqual([REFUSAL]);
     expect(send({ ticket_id: "t_ffffffffffffffff", commit: e.repo.c1 })).toEqual([REFUSAL]);
     expect(send({ ticket_id: "t_0000000000000002", commit: e.repo.c1 })).toEqual([REFUSAL]);
@@ -285,10 +285,10 @@ describe("other roles are unchanged", () => {
   test("a writer, a tester and a validator result need no commit", () => {
     const e = makeEnv();
     const w = e.running("writer", "writer-1");
-    expect(e.rt().hooks.checkResult("writer-1", { stage_id: w, ticket_id: TID }, e.cap, "Orchestrator")).toEqual([]);
+    expect(e.rt().hooks.checkResult("writer-1", { notes: "n", stage_id: w, ticket_id: TID }, e.cap, "Orchestrator")).toEqual([]);
     const t = e.running("tester", "tester-1");
-    expect(e.rt().hooks.checkResult("tester-1", { stage_id: t, ticket_id: TID }, e.cap, "role:validator")).toEqual([]);
+    expect(e.rt().hooks.checkResult("tester-1", { notes: "n", stage_id: t, ticket_id: TID }, e.cap, "role:validator")).toEqual([]);
     const v = e.running("validator", "validator-1");
-    expect(e.rt().hooks.checkResult("validator-1", { stage_id: v, ticket_id: TID, verdict: "PASS", findings: [] }, e.cap, "Orchestrator")).toEqual([]);
+    expect(e.rt().hooks.checkResult("validator-1", { notes: "n", stage_id: v, ticket_id: TID, verdict: "PASS", findings: [] }, e.cap, "Orchestrator")).toEqual([]);
   });
 });

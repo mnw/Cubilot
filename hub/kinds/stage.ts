@@ -379,6 +379,34 @@ export type StageHooks = {
 
 const VERDICTS = new Set(["PASS", "FAIL"]);
 const REVIEW_ROLES = new Set(["validator", "reviewer"]);
+const NOTES_WORD_LIMIT = 400;
+
+/** Error for `context.notes` of a stage result (context-pack 1.3): required, non-empty, at most 400 words. */
+export function notesError(notes: unknown): string | null {
+  if (typeof notes !== "string" || !notes.trim()) return "context.notes must be a non-empty string (target 300 words, limit 400)";
+  const words = notes.trim().split(/\s+/).length;
+  return words > NOTES_WORD_LIMIT ? `context.notes has ${words} words; the limit is ${NOTES_WORD_LIMIT}` : null;
+}
+
+export type EarlierNote = { source: "planning" | "spec" | "stage"; stage_id: string | null; role: string | null; notes: string };
+
+/** Earlier notes of a ticket (context-pack 1.4): the planning note, then spec-result notes through stage_scope, then stage result notes, each by stage created_seq. */
+export function earlierNotes(db: Database, ticketId: string): EarlierNote[] {
+  const out: EarlierNote[] = [];
+  const planning = db.query<{ n: string | null }, [string]>("SELECT planning_note AS n FROM tickets WHERE id = ?").get(ticketId)?.n;
+  if (planning) out.push({ source: "planning", stage_id: null, role: null, notes: planning });
+  const fromResults = (source: "spec" | "stage", sql: string) => {
+    for (const r of db.query<{ id: string; role: string; c: string | null }, [string]>(sql).all(ticketId)) {
+      let notes: unknown;
+      try { notes = r.c ? (JSON.parse(r.c) as { notes?: unknown }).notes : undefined; } catch { /* an unreadable result has no notes */ }
+      if (typeof notes === "string" && notes.trim()) out.push({ source, stage_id: r.id, role: r.role, notes });
+    }
+  };
+  const join = `JOIN handoffs h ON json_extract(h.context_json, '$.stage_id') = s.id`;
+  fromResults("spec", `SELECT s.id, s.role, h.context_json AS c FROM stage s ${join} WHERE s.review = 'spec' AND s.id IN (SELECT stage_id FROM stage_scope WHERE ticket_id = ?) ORDER BY s.created_seq, h.rowid`);
+  fromResults("stage", `SELECT s.id, s.role, h.context_json AS c FROM stage s ${join} WHERE s.review IS NULL AND s.ticket_id = ? ORDER BY s.created_seq, h.rowid`);
+  return out;
+}
 
 /** The recipient name stored for a handoff to a role. validName() refuses ':', so no agent can ever have it. */
 export const ROLE_RECIPIENT_PREFIX = "role:";
@@ -1715,6 +1743,8 @@ export function createStageRuntime(
       const c = context && typeof context === "object" && !Array.isArray(context) ? (context as Record<string, unknown>) : null;
       if (!c) errors.push("context must be an object");
       else if (stage.review === "spec") {
+        const notes = notesError(c.notes);
+        if (notes) errors.push(notes);
         // The result goes to the Orchestrator of the room (spec-review-stage 4.1b); the error goes back to this session.
         if (to !== undefined) {
           const lead = leadOfRoom(roomOfStage(stage.id));
@@ -1745,6 +1775,8 @@ export function createStageRuntime(
         if (c.verdict === "PASS" && blocking) errors.push("a PASS must not have a blocking finding");
       } else {
         if (c.stage_id !== stage.id) errors.push(`context.stage_id must be ${stage.id}`);
+        const notes = notesError(c.notes);
+        if (notes) errors.push(notes);
         if (stage.role === "worker") {
           // G2: every worker result problem, a wrong ticket included, gets the one worker refusal.
           const refusal = checkWorkerResult(stage, c, to);

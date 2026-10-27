@@ -71,7 +71,7 @@ describe("spec FAIL gate", () => {
     postJson(hub, "/handoffs", {
       from: l.session, to: l.room === "gh" ? hub.humanName : "Orchestrator", task: "spec verdict",
       context: {
-        stage_id: l.stage_id, review: "spec", request_id: request, verdict,
+        notes: "n", stage_id: l.stage_id, review: "spec", request_id: request, verdict,
         findings: verdict === "FAIL" ? [{ ticket_id: ticket, severity: "blocking", text: `finding ${++seq}` }] : [],
         suggestions: [], questions_for_human: [], ...extra,
       },
