@@ -163,7 +163,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
     <div class="layer"><div class="lname">Human<small>you</small></div>
       <div class="row">
         <div class="n built"><span class="t">Desktop app window</span><span class="d">macOS, Apple Silicon only</span></div>
-        <div class="n idea"><span class="t">Browser and phone access</span><span class="d">Over Tailscale, pairing by QR code</span><span class="ref">§12</span></div>
+        <div class="n planned"><span class="t">Browser and phone access</span><span class="d">Hub serves the UI; over Tailscale, pairing by QR code</span><span class="ref">§12</span></div>
         <div class="n built"><span class="t">Approval gate</span><span class="d">High blast-radius tickets need your Allow</span></div>
       </div></div>
 
@@ -187,7 +187,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
         <div class="n built"><span class="t">Session per ticket stage</span><span class="d">Hub launches a fresh visible session per stage, closes it on result; live check open</span><span class="ref">§4</span></div>
         <div class="n planned"><span class="t">Internal remote + Deliver</span><span class="d">Bare repos in app data, factory clone (no client remote), delivery clone, leak gate</span><span class="ref">§5</span></div>
         <div class="n planned"><span class="t">Backup and restore</span><span class="d">One folder, restic hourly to one target, 3-step restore</span><span class="ref">§5</span></div>
-        <div class="n idea"><span class="t">Move terminal layer into hub</span><span class="d">Shell becomes thin, Linux becomes possible</span><span class="ref">§12</span></div>
+        <div class="n planned"><span class="t">Move terminal layer into hub</span><span class="d">tmux control mode first; shell becomes thin, Linux becomes possible</span><span class="ref">§12</span></div>
       </div></div>
 
     <div class="layer"><div class="lname">Hub<small>hub/ Bun, 127.0.0.1</small></div>
@@ -466,13 +466,13 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
     <div class="n planned"><span class="step">4</span><span class="t">Session per ticket stage</span><span class="d">in test: built and live-checked; open: 4 high-radius tests, waivers, context pack, stage diagnosis (proposed)</span><span class="ref">§4</span></div>
     <div class="n built"><span class="step">4a</span><span class="t">Agent column</span><span class="d">done: built to test Part 4; reload one agent, skill switches</span><span class="ref">§4a</span></div>
     <div class="n planned"><span class="step">6</span><span class="t">Checkpoint, routing, Warp patterns</span><span class="d">next: Orchestrator checkpoint first; then model × effort per Worker; triage, spec stage, review.json</span><span class="ref">§6</span></div>
-    <div class="n planned"><span class="step">5</span><span class="t">Delivery and backup</span><span class="d">after Part 6: internal remote, Deliver step, leak gate, hourly backup</span><span class="ref">§5</span></div>
+    <div class="n planned"><span class="step">12</span><span class="t">Hub-first, browser, Linux</span><span class="d">after Part 6: hub serves the UI, terminal layer into the hub, browser access and pairing, Linux</span><span class="ref">§12</span></div>
+    <div class="n planned"><span class="step">5</span><span class="t">Delivery and backup</span><span class="d">after Part 12: internal remote, Deliver step, leak gate, hourly backup</span><span class="ref">§5</span></div>
     <div class="n planned"><span class="step">7</span><span class="t">Toolchain</span><span class="d">bundled tools, worktrees, Serena limits</span><span class="ref">§7</span></div>
     <div class="n planned"><span class="step">8</span><span class="t">Setup and admin</span><span class="d">components, accounts, projects, Doctor</span><span class="ref">§8</span></div>
     <div class="n planned"><span class="step">9</span><span class="t">Accessibility council</span><span class="d">builds the council form; axe-core, Figma</span><span class="ref">§9</span></div>
     <div class="n planned"><span class="step">10</span><span class="t">SEO council</span><span class="d">same council form</span><span class="ref">§10</span></div>
     <div class="n planned"><span class="step">11</span><span class="t">Dashboard</span><span class="d">waiting for you, stuck, flow, quality, cost</span><span class="ref">§11</span></div>
-    <div class="n idea"><span class="step">12</span><span class="t">Hub-first and Linux</span><span class="d">terminal layer into hub, browser access</span><span class="ref">§12</span></div>
     <div class="n planned"><span class="step">13</span><span class="t">Mutation testing</span><span class="d">advisory first, opt-in, the most risk</span><span class="ref">§13</span></div>
     <div class="n planned"><span class="step">14</span><span class="t">UI redesign</span><span class="d">title bar, tab bar, roster view (agent rail done in 4a)</span><span class="ref">§14</span></div>
     <div class="n built"><span class="step">15</span><span class="t">Ticket card and dialog</span><span class="d">done: replaces the card tickets of Part 14</span><span class="ref">§15</span></div>

@@ -1,6 +1,6 @@
 # Part 12: hub-first architecture, browser access and Linux hosting
 
-Status: idea, saved for later. Not ready to build.
+Status: planned (decision of the human, 2026-10-27). Build it directly after Part 6, before Part 5 and Parts 7 to 11. Reason: the desktop app approach limits the factory; the human must reach it from other devices, and the factory must be able to run on a Linux server.
 
 ## Idea
 
@@ -82,9 +82,11 @@ Tests for Linux:
 
 ## Order of work
 
-- Build the earlier parts first, in the current app on macOS. They do not depend on this part.
-- Part 7 (Doctor) and Part 11 (dashboard) come before this part. When you do this part, move their logic into the hub.
-- First step: move the settings commands. Second step: the terminal stream (after the tmux control mode test). Third step: browser access and pairing.
+- Parts 1 to 4 and Part 6 come first, in the current app on macOS.
+- Then this part, before Part 5 and Parts 7 to 11 (decision 2026-10-27). So the Doctor (Part 7), the setup screen (Part 8) and the dashboard (Part 11) are built in the hub and served to the browser from the start. Nothing moves later.
+- Part 14 (UI redesign) works on the UI that the hub serves.
+- First step: the tmux control mode test (open question 1). It decides the terminal design. Second step: move the settings commands. Third step: the terminal stream. Fourth step: browser access and pairing. Fifth step: the Linux checklist.
+- Start with an OpenSpec change for steps 1 to 4. The Linux checklist can be a second change.
 
 ## Open questions
 

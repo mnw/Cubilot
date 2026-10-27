@@ -24,7 +24,7 @@ The brief has sixteen parts. The numbers follow the build order (decision 2026-1
 9. [09-a11y-council.md](09-a11y-council.md): Accessibility and usability council. It builds the council form. It works on live pages, code, documents and Figma designs.
 10. [10-seo-council.md](10-seo-council.md): SEO council: the same council form, for SEO, AEO and GEO.
 11. [11-dashboard.md](11-dashboard.md): Progress dashboard: what waits for the human, what is stuck, flow, quality and cost.
-12. [12-hub-first-linux.md](12-hub-first-linux.md): Hub-first architecture, browser access and Linux hosting (idea).
+12. [12-hub-first-linux.md](12-hub-first-linux.md): Hub-first architecture, browser access and Linux hosting (planned). Build it directly after Part 6 (decision 2026-10-27).
 13. [13-mutation-testing.md](13-mutation-testing.md): Mutation testing: advisory first, opt-in for each project. Last, because of its risk.
 14. [14-ui-redesign.md](14-ui-redesign.md): UI redesign (refined warm terminal). One agent rail, one title bar and a compact chat log. One tab bar for the right pane, clearer ticket cards and an Agent roster view.
 15. [15-ticket-card-dialog.md](15-ticket-card-dialog.md): Ticket card and ticket dialog redesign (done). It replaces T11, T12 and T13 of Part 14.
@@ -32,6 +32,6 @@ The brief has sixteen parts. The numbers follow the build order (decision 2026-1
 ## How to use these files
 
 - Each part is complete in its file. It names other parts as "Part N". Find Part N in the list above.
-- Build order: the parts in their number order, with one exception. Part 6 comes before Part 5 (decision 2026-10-26). Part 6 makes the work of the agents more reliable. Part 5 is a local item that can wait. Parts 2 and 4 have a fast path outside the app: a launch script and a ticket runner. You can set up the hourly backup of Part 5 at once.
-- Why this order: Parts 1 to 5 make a working factory with fresh sessions and safe delivery. Parts 6 to 10 add the review format, the toolchain, the setup screen and the two councils. Parts 11 to 13 are improvements, the Linux move, and the part with the most risk.
+- Build order: the parts in their number order, with two exceptions. Part 6 comes before Part 5 (decision 2026-10-26). Part 12 comes directly after Part 6, before Part 5 (decision 2026-10-27): the desktop app approach limits the factory, and Parts 7, 8, 11 and 14 must be built on the hub-served UI from the start. The order is 1, 2, 3, 4, 6, 12, 5, 7, 8, 9, 10, 11, 13, 14. Part 6 makes the work of the agents more reliable. Part 5 is a local item that can wait. Parts 2 and 4 have a fast path outside the app: a launch script and a ticket runner. You can set up the hourly backup of Part 5 at once.
+- Why this order: Parts 1 to 5 make a working factory with fresh sessions and safe delivery. Parts 6 to 10 add the review format, the toolchain, the setup screen and the two councils. Part 12 makes the UI reachable from a browser and the hub able to run on Linux. Parts 11 and 13 are improvements and the part with the most risk.
 - The order of Parts 1 and 2 changed on 2026-10-21: the rebrand is now first.
