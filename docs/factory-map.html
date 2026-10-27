@@ -310,7 +310,8 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
       <div class="head"><h3>Diagnostician</h3><span class="model">Claude · tier</span></div>
       <span class="track">All tracks · failed stages</span>
       <p class="job">Reads the trace and the failure record of a failed stage. Returns cause, evidence, proven or probable, and one action. Code picks the tier from a score: 0 rules only, 1–3 sonnet low, 4–6 sonnet medium, 7+ and the daily pattern run opus high.</p>
-      <dl><dt>skills</dt><dd>debugging-and-error-recovery, silent-failure-hunter, evidence-collector, stage-failure-categories (new)</dd>
+      <dl><dt>skills</dt><dd>agent-introspection-debugging, debugging-and-error-recovery, silent-failure-hunter, evidence-collector, stage-failure-categories (new)</dd>
+      <dt>pattern run</dt><dd>loop-design-check, agent-architecture-audit, growth-log</dd>
       <dt>actions</dt><dd>retry, setup-fix-and-retry, gap-ticket, ticket-change, escalate</dd>
       <dt>measured</dt><dd>share of actions that led to a PASS, per tier</dd>
       <dt>never</dt><dd>edits files, commits, launches, diagnoses a diagnosis</dd></dl>

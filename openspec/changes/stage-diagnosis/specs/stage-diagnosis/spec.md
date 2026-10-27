@@ -60,11 +60,22 @@ A failure at tier 0 that no code rule matches SHALL get the action `retry` from 
 - **THEN** no diagnosis stage is created and the stage relaunches once
 
 ### Requirement: The Diagnostician is a read-only factory role
-The role `diagnostician` SHALL run on Claude. Its worktree SHALL be read-only, as for the Validator. It SHALL NOT have Edit, Write, NotebookEdit, Task, Agent, or the Bash commands of the blocked list. It SHALL have the skills `debugging-and-error-recovery`, `silent-failure-hunter`, `agency-testing-evidence-collector` and `stage-failure-categories`. A ticket and a `to_role` handoff SHALL NOT name it.
+The role `diagnostician` SHALL run on Claude. Its worktree SHALL be read-only, as for the Validator. It SHALL NOT have Edit, Write, NotebookEdit, Task, Agent, or the Bash commands of the blocked list. It SHALL have the core skills `agent-introspection-debugging`, `debugging-and-error-recovery`, `silent-failure-hunter`, `agency-testing-evidence-collector` and `stage-failure-categories`. A ticket and a `to_role` handoff SHALL NOT name it.
 
 #### Scenario: Launch flags
 - **WHEN** the hub launches a diagnosis stage
 - **THEN** the launch command blocks Edit, Write, NotebookEdit, Task, Agent and each Bash command of the blocked list
+
+### Requirement: The pattern run has three more skills
+The role SHALL also have the skills `loop-design-check`, `agent-architecture-audit` and `growth-log`. The first message of a pattern run SHALL tell the Diagnostician to use them. The first message of a single diagnosis SHALL NOT name them.
+
+#### Scenario: Pattern-run skills
+- **WHEN** the hub writes the first message of a pattern run
+- **THEN** it names `loop-design-check`, `agent-architecture-audit` and `growth-log`, and the first message of a single diagnosis names none of them
+
+#### Scenario: The Diagnostician names the action, code runs it
+- **WHEN** the skill `agent-introspection-debugging` describes a recovery action
+- **THEN** the Diagnostician's result names one action from the action list, and the Diagnostician does not run it
 
 ### Requirement: The Diagnostician's Bash commands have a blocked list
 The launch SHALL block `git commit`, `git push`, `git checkout`, `git reset`, `git clean`, `git restore`, `git stash`, `git rebase`, `git merge` and `rm` as Bash commands. The blocked list and the read-only worktree are limits, not a sandbox: Bash can still write through other commands. The role file and `docs/rules/` SHALL state this.
