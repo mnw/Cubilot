@@ -53,7 +53,7 @@ When the work moves again, ask: will this block come back? If yes, open one draf
 - The role of each ticket runs on the hub.
 - Each `blocked_by` names an open ticket or a ticket that is done.
 - Each `blocked_by` has a reason: the ticket needs the other ticket's output (code, table, file), or both edit the same file. Name the file. Order, caution or "same area" is not a reason.
-- A shared record file (`tasks.md` ticks, a status table) is not a reason for a chain. Move the record edits into one closing ticket (for example the archive ticket), so the work tickets edit only their own files.
+- A shared record file (`tasks.md` ticks, a status table) is not a reason for a chain. Move the record edits into one closing ticket (for example the archive ticket), so the work tickets edit only their own files. The rule applies to tickets that can run at the same time. A ticket that runs before the closing ticket (through `blocked_by`) and has no other ticket beside it on that file may keep its record edit.
 - After you plan a request, count the tickets that can start now. If that number is lower than the free Worker slots, check each chain link again. A chain longer than 5 links needs a reason in the request.
 - The request needs the human to queue it if it has a high-radius ticket. Ask once, for the whole request, with all ticket ids.
 - A doc ticket says which roles do the work while the writing chain is not on the hub (Worker, then Validator).
