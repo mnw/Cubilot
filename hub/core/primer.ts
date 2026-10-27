@@ -3,8 +3,8 @@
 // No stage, time, session or worktree field is here: two sessions of one room get the same bytes while
 // docs/PRIMER.md and the Nutshell do not change.
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, realpathSync } from "node:fs";
+import { join, sep } from "node:path";
 
 /** The cap on docs/PRIMER.md in tokens; tokens are estimated as ceil(bytes / 4). */
 export const PRIMER_CAP_TOKENS = 2000;
@@ -26,12 +26,21 @@ export function cutPrimerFile(text: string): string {
   return `${kept.trimEnd()}\n${PRIMER_CUT_LINE}`;
 }
 
+/** Reads docs/PRIMER.md only when its real path is inside the real project folder. Logs one line for any failure but ENOENT. */
 function readPrimerFile(projectFolder: string | null): string | null {
   if (!projectFolder) return null;
   try {
-    const text = readFileSync(join(projectFolder, "docs", "PRIMER.md"), "utf8");
+    const root = realpathSync(projectFolder);
+    const real = realpathSync(join(root, "docs", "PRIMER.md"));
+    if (!real.startsWith(root.endsWith(sep) ? root : root + sep)) {
+      console.warn("[primer] docs/PRIMER.md not read: it resolves outside the project folder");
+      return null;
+    }
+    const text = readFileSync(real, "utf8");
     return text.trim() ? text : null;
-  } catch {
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code ?? "unknown";
+    if (code !== "ENOENT") console.warn(`[primer] docs/PRIMER.md not read: ${code}`);
     return null;
   }
 }

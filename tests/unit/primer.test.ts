@@ -1,6 +1,6 @@
 // context-pack 2.2: primer = docs/PRIMER.md + Nutshell; cap 2,000 tokens on the file; the Nutshell is never cut; CONTEXT.md is never read.
-import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PRIMER_CAP_BYTES, PRIMER_CUT_LINE, PRIMER_MISSING_LINE, renderStable } from "../../hub/core/primer";
@@ -66,5 +66,68 @@ describe("renderStable", () => {
     const out = renderStable({ projectFolder: project(undefined, "SECRET-CONTEXT-MARKER architecture notes"), nutshell: "Nutshell." });
     expect(out).not.toContain("SECRET-CONTEXT-MARKER");
     expect(out).toContain(PRIMER_MISSING_LINE);
+  });
+});
+
+describe("renderStable file containment and read errors", () => {
+  const logs: string[] = [];
+  const spy = () => spyOn(console, "warn").mockImplementation((...a: unknown[]) => { logs.push(a.join(" ")); });
+  afterEach(() => { logs.length = 0; });
+  const missing = `${PRIMER_MISSING_LINE}\n\n`;
+
+  test("a symlink to a file outside the project folder gives 'primer missing', none of the target text, one log line", () => {
+    const outside = join(mkdtempSync(join(tmpdir(), "outside-")), "secret.md");
+    writeFileSync(outside, "OUTSIDE-TARGET-MARKER");
+    const dir = project();
+    symlinkSync(outside, join(dir, "docs", "PRIMER.md"));
+    const s = spy();
+    const out = renderStable({ projectFolder: dir, nutshell: "" });
+    s.mockRestore();
+    expect(out).toBe(missing);
+    expect(out).not.toContain("OUTSIDE-TARGET-MARKER");
+    expect(logs.length).toBe(1);
+    expect(logs[0]).toContain("outside the project folder");
+    expect(logs[0]).not.toContain("OUTSIDE-TARGET-MARKER");
+  });
+
+  test("a symlink to a file inside the project folder is read", () => {
+    const dir = project();
+    writeFileSync(join(dir, "real.md"), "INSIDE-TARGET-TEXT\n");
+    symlinkSync(join(dir, "real.md"), join(dir, "docs", "PRIMER.md"));
+    const s = spy();
+    const out = renderStable({ projectFolder: dir, nutshell: "" });
+    s.mockRestore();
+    expect(out).toContain("INSIDE-TARGET-TEXT");
+    expect(logs.length).toBe(0);
+  });
+
+  test("a project folder that is itself a symlink still reads its primer", () => {
+    const dir = project("# Primer\nText.\n");
+    const link = join(mkdtempSync(join(tmpdir(), "link-")), "proj");
+    symlinkSync(dir, link);
+    const s = spy();
+    const out = renderStable({ projectFolder: link, nutshell: "" });
+    s.mockRestore();
+    expect(out).toContain("Text.");
+    expect(logs.length).toBe(0);
+  });
+
+  test("a read error other than ENOENT (a directory at docs/PRIMER.md) gives 'primer missing' and one log line with the code", () => {
+    const dir = project();
+    mkdirSync(join(dir, "docs", "PRIMER.md"));
+    const s = spy();
+    const out = renderStable({ projectFolder: dir, nutshell: "" });
+    s.mockRestore();
+    expect(out).toBe(missing);
+    expect(logs.length).toBe(1);
+    expect(logs[0]).toContain("EISDIR");
+  });
+
+  test("ENOENT gives 'primer missing' and no log line", () => {
+    const s = spy();
+    const out = renderStable({ projectFolder: project(), nutshell: "" });
+    s.mockRestore();
+    expect(out).toBe(missing);
+    expect(logs.length).toBe(0);
   });
 });
