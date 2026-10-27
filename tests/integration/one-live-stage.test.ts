@@ -108,8 +108,8 @@ describe("one live stage per ticket", () => {
     return req.session as string;
   };
   /** Ends a tester or writer stage with a result to a named agent (not to_role). */
-  const finish = async (stage: Stage, session: string, h: HubHandle = hub) => {
-    const r = await postJson(h, "/handoffs", { from: session, to: "ols-alice", task: "result", context: { stage_id: stage.id, ticket_id: stage.ticket_id } });
+  const finish = async (stage: Stage, session: string, h: HubHandle = hub, to = "ols-alice") => {
+    const r = await postJson(h, "/handoffs", { from: session, to, task: "result", context: { stage_id: stage.id, ticket_id: stage.ticket_id } });
     expect(r.status).toBe(201);
   };
   const finishReview = async (stage: Stage, session: string, verdict: "PASS" | "FAIL") => {
@@ -254,6 +254,39 @@ describe("one live stage per ticket", () => {
     expect(await roles(t)).toEqual(["validator", "worker"]);
   });
 
+  test("a ticket stage that fails for no project folder lets the waiting handoff of its ticket start a stage", async () => {
+    const R2 = "ols2";
+    await giveProjectHttp(hub, R2);
+    open.push(await registerAgent(hub, "ols2-bob", { room: R2 }));
+    const put = (body: Record<string, unknown>) => authedFetch(hub, `/rooms/${R2}/settings`, { method: "PUT", body: JSON.stringify(body) });
+    expect((await put({ role_limits: { worker: 10, tester: 1, validator: 10, writer: 10 } })).status).toBe(200);
+    const mk2 = async () => {
+      const r = await postJson(hub, "/tickets", { by: "ols2-bob", title: "t", acceptance_criteria: "c", blast_radius: "low", role: null });
+      expect(r.status).toBe(201);
+      return (r.json as { snapshot: { id: string } }).snapshot.id;
+    };
+    const a = await mk2();
+    const t = await mk2();
+    expect((await roleHandoff(a, "tester", { from: "ols2-bob" })).status).toBe(201);
+    await settle();
+    const [aStage] = await stagesOf(a);
+    expect(aStage.status).toBe("launching"); // holds the one tester slot
+    expect((await roleHandoff(t, "tester", { from: "ols2-bob" })).status).toBe(201);
+    expect((await roleHandoff(t, "worker", { from: "ols2-bob" })).status).toBe(201);
+    await settle();
+    expect((await stagesOf(t)).map((s) => [s.role, s.status])).toEqual([["tester", "queued"]]);
+    expect((await put({ project_folder: null })).status).toBe(200);
+    // the slot frees: the queued tester stage of t fails (no project folder); the evaluator then starts the worker stage
+    const req = launches.find((r) => r.stage_id === aStage.id);
+    expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+    const sess = await registerAgent(hub, req.session, { room: R2 });
+    await finish(aStage, req.session, hub, "ols2-bob");
+    await settle();
+    expect((await stagesOf(t)).map((s) => [s.role, s.status])).toEqual([["tester", "failed"], ["worker", "failed"]]);
+    sess.close();
+  });
+
+
   test("(d) a role handoff older than a later terminal stage of its role stays spent after a restart; an unspent expired handoff still starts one stage", async () => {
     const t = await mk();
     expect((await roleHandoff(t, "tester")).status).toBe(201);
@@ -264,9 +297,14 @@ describe("one live stage per ticket", () => {
     // an unspent expired handoff: recorded on a draft ticket, expired before the ticket is queued
     const d = await mk({ status: "draft" });
     expect((await roleHandoff(d, "tester", { ttl_seconds: 1 })).status).toBe(201);
-    await sleep(1500);
-    const h = (await getJson(hub, `/handoffs?for=role:tester`)).json as Array<{ status: string; context: { ticket_id: string } }> | null;
-    if (Array.isArray(h)) expect(h.find((x) => x.context?.ticket_id === d)?.status).toMatch(/pending|expired/);
+    // the sweep runs every 5 s: wait for the real expiry, then prove it
+    let status = "";
+    for (let i = 0; i < 160 && status !== "expired"; i++) {
+      const all = (await getJson(hub, `/handoffs?status=expired`)).json as Array<{ status: string; context: { ticket_id: string } }>;
+      status = all.find((x) => x.context?.ticket_id === d)?.status ?? "";
+      if (status !== "expired") await sleep(100);
+    }
+    expect(status).toBe("expired");
 
     stream.close();
     await hub.kill();

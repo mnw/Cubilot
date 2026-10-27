@@ -270,3 +270,21 @@ describe("evaluateStages: a stage needs no launch", () => {
     expect(e.rt.queue.size()).toEqual({ undelivered: 0, awaitingAck: 0, retained: 0 });
   });
 });
+
+describe("evaluateStages: queries", () => {
+  test("the spent state of all handoffs of a ticket comes from one stage query per evaluation", () => {
+    const e = makeEnv();
+    const t = e.ticket({ role: null });
+    const hs = ["tester", "validator", "worker"].map((role) => ({ role, seq: e.nextSeq() }));
+    const sqls: string[] = [];
+    const orig = e.db.query.bind(e.db);
+    (e.db as any).query = (sql: string) => (sqls.push(sql), orig(sql));
+    try {
+      expect(e.rt.evaluateStages(t, e.cap, hs).map((s) => s.role)).toEqual(["tester"]);
+    } finally {
+      (e.db as any).query = orig;
+    }
+    // the spent check of every handoff and the ticket-role check read the ticket's stage rows through this one query
+    expect(sqls.filter((q) => /FROM stage WHERE ticket_id = \?$/.test(q.trim()) && q.includes("created_seq"))).toHaveLength(1);
+  });
+});
