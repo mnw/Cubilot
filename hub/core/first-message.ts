@@ -105,6 +105,8 @@ export type SpecFirstMessageInput = {
   commit?: string | null;
   /** The findings of the FAIL results of this request since its last PASS, oldest first (spec-review-stage 2.5). */
   earlierFindings?: Array<{ ticket_id: string; severity: string; text: string }>;
+  /** The hub count of FAILs since the last PASS, plus one (spec-fail-gate 6). */
+  reviewNumber?: number;
   reason?: string;
 };
 
@@ -122,6 +124,7 @@ export function renderSpecFirstMessage(i: SpecFirstMessageInput): string {
     ...(i.commit ? [`- Commit: ${i.commit}`] : []),
     `- Result goes to: ${i.recipient}`,
     ...(i.specPaths.length ? ["- Spec files:", ...i.specPaths.map((p) => `  - ${p}`)] : []),
+    ...(i.reviewNumber ? ["", `This is spec review ${i.reviewNumber} of this request since its last PASS.`] : []),
     "",
     "## Request text",
     i.requestText.trim(),
