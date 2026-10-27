@@ -353,6 +353,8 @@ const workerRefusal = (ticketId: string) =>
 
 export type StageRuntime = {
   module: KindModule;
+  /** How many launch requests wait with values from role_models (tests: the set empties when a launch ends). */
+  pendingRoleModelLaunches(): number;
   api: StageApi;
   /**
    * Creates the stages a ticket is ready for (each as `queued`, one `stage.queued` event each) and returns them.
@@ -553,6 +555,9 @@ export function waitingRequests(db: Database, room: string): WaitingRequest[] {
   return out;
 }
 
+/** The texts of the checks in `launch_choice` and `check_role_harness` (src-tauri/src/factory.rs). Cargo tests pin them. */
+const VALUE_REFUSAL = /^(invalid (model|provider|effort|thinking level)\b|a provider \(|role '.*' runs on \S+ by default; to launch it on)/;
+
 export function createStageRuntime(
   db: Database,
   opts: {
@@ -596,14 +601,16 @@ export function createStageRuntime(
     },
     onLaunchEnd(req, end: LaunchEnd, cap) {
       if (req.kind !== "launch") return;
+      const fromRoleModels = roleModelLaunches.delete(req.id);
       try {
         if (end.by === "ack" && end.outcome.result === "spawned") {
           const stage = api.load(req.stage_id);
           if (stage?.status === "launching") api.move(req.stage_id, { to: "running" }, "system", cap);
         } else {
           const raw = end.by === "timeout" ? "no ack in time" : (end.outcome as { error: string }).error;
-          // A value that came from role_models and was refused names its source (role-models 4).
-          const why = end.by === "ack" && roleModelLaunches.has(req.id) ? `role_models.${req.role}: ${raw}` : raw;
+          // A value that came from role_models and was refused by pty_spawn names its source (role-models 4). A later
+          // tmux or filesystem error does not: the value was fine.
+          const why = end.by === "ack" && fromRoleModels && VALUE_REFUSAL.test(raw) ? `role_models.${req.role}: ${raw}` : raw;
           endLaunchAttempt(api, req.stage_id, cap, why);
           reportFinalFailure(req.stage_id, `the launch did not start: ${why}`, cap);
         }
@@ -1621,7 +1628,7 @@ export function createStageRuntime(
       }
     },
   };
-  return { module, api, evaluateStages, hooks, enqueueLaunch, queue, passSpecStage, sweep };
+  return { module, api, evaluateStages, hooks, enqueueLaunch, queue, passSpecStage, sweep, pendingRoleModelLaunches: () => roleModelLaunches.size };
 }
 
 export function createStageKind(db: Database): KindModule {

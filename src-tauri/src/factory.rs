@@ -868,6 +868,21 @@ pub(crate) fn list_roles() -> Result<Vec<RoleInfo>, String> {
 mod tests {
     use super::*;
 
+    // The hub (VALUE_REFUSAL in hub/kinds/stage.ts) puts `role_models.<role>:` before a launch ack error only when it
+    // starts with one of these texts. A change here needs the same change there.
+    #[test]
+    fn value_refusal_texts_start_as_the_hub_expects() {
+        let starts = |e: String, p: &str| assert!(e.starts_with(p), "{e}");
+        starts(launch_choice(false, Some("bad model!"), None, None).unwrap_err(), "invalid model");
+        starts(launch_choice(false, None, Some("p"), None).unwrap_err(), "a provider (");
+        starts(launch_choice(true, None, Some("bad provider!"), None).unwrap_err(), "invalid provider");
+        starts(launch_choice(false, None, None, Some("max9")).unwrap_err(), "invalid effort");
+        starts(launch_choice(true, None, None, Some("max9")).unwrap_err(), "invalid thinking level");
+        let spec = RoleSpec { name: "worker".into(), harness: "claude".into(), provider: None, model: None, thinking: None, effort: None, disallowed_tools: vec![], exclude_tools: vec![] };
+        let e = check_role_harness(&spec, "pi", &LaunchChoice::default()).unwrap_err();
+        starts(e, "role 'worker' runs on claude by default; to launch it on");
+    }
+
     fn tmp_root(tag: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!("cubilot-factory-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&p);

@@ -31,11 +31,11 @@ afterEach(() => {
 });
 const config = (text: string) => writeFileSync(join(dir, "config.yml"), text);
 
-function makeEnv() {
+function makeEnv(o: { ackMs?: number } = {}) {
   const db = new Database(":memory:");
   migrateLedger(db);
   createTicketKind(db).migrate(db);
-  const rt = createStageRuntime(db, { ackMs: 60_000 });
+  const rt = createStageRuntime(db, { ackMs: o.ackMs ?? 60_000 });
   rt.module.migrate(db);
   const cap = { db, sse: { emit: (_e: Entry, _s: Scope) => {} }, briefing: { refresh: () => {} } } as unknown as HubCapabilities;
   const sent: LaunchRequest[] = [];
@@ -153,12 +153,42 @@ describe("role_models in a launch request", () => {
     config("role_models:\n  worker:\n    model: nope\n");
     const e = makeEnv();
     const a = e.launch("worker");
-    e.rt.queue.ack(a.req!.id, { result: "error", error: "unknown model nope" }, e.cap);
+    e.rt.queue.ack(a.req!.id, { result: "error", error: 'invalid model: "nope"' }, e.cap);
     const why = (id: string) => e.db.query<{ payload_json: string }, [string]>("SELECT payload_json FROM events WHERE entity_id = ? AND kind = 'stage.retrying'").get(id)!;
-    expect(JSON.parse(why(a.s.id).payload_json).reason).toBe("the launch did not start: role_models.worker: unknown model nope");
+    expect(JSON.parse(why(a.s.id).payload_json).reason).toBe("the launch did not start: role_models.worker: invalid model: \"nope\"");
     const t = e.launch("tester");
     e.rt.queue.ack(t.req!.id, { result: "error", error: "tmux failed" }, e.cap);
     expect(JSON.parse(why(t.s.id).payload_json).reason).toBe("the launch did not start: tmux failed");
+    e.stop();
+  });
+
+  test("a launch id leaves the role_models set when its launch ends: ack spawned, ack error or time-out", () => {
+    config("role_models:\n  worker:\n    model: m\n  tester:\n    model: m\n");
+    const e = makeEnv();
+    const a = e.launch("worker");
+    const b = e.launch("tester");
+    const c = e.launch("worker", "worker-2");
+    expect(e.rt.pendingRoleModelLaunches()).toBe(3);
+    e.rt.queue.ack(a.req!.id, { result: "spawned" }, e.cap);
+    expect(e.rt.pendingRoleModelLaunches()).toBe(2);
+    // An error ack ends the first attempt of b; its retry is a new request with its own id.
+    e.rt.queue.ack(b.req!.id, { result: "error", error: "tmux failed" }, e.cap);
+    const retry = e.sent.filter((x): x is Launch => x.kind === "launch" && x.stage_id === b.s.id).at(-1)!;
+    expect(retry.id).not.toBe(b.req!.id);
+    expect(e.rt.pendingRoleModelLaunches()).toBe(2); // c and the retry of b
+    e.rt.queue.ack(retry.id, { result: "spawned" }, e.cap);
+    e.rt.queue.ack(c.req!.id, { result: "spawned" }, e.cap);
+    expect(e.rt.pendingRoleModelLaunches()).toBe(0);
+    e.stop();
+  });
+
+  test("a launch that times out leaves the set", async () => {
+    config("role_models:\n  worker:\n    model: m\n");
+    const e = makeEnv({ ackMs: 20 });
+    e.launch("worker");
+    expect(e.rt.pendingRoleModelLaunches()).toBe(1);
+    await new Promise((r) => setTimeout(r, 120));
+    expect(e.rt.pendingRoleModelLaunches()).toBe(0);
     e.stop();
   });
 });
