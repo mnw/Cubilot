@@ -45,6 +45,7 @@ mkdir -p src-tauri/binaries src-tauri/resources
 cp "$SIGNED" "src-tauri/binaries/cubilot-bin-$T"
 echo x > src-tauri/resources/pi-extension.js
 echo x > src-tauri/resources/chatbridge-mod.js
+[ -n "\${RO_STAMPS:-}" ] && chmod a-w .stage-prep
 [ "\${FAIL_STEP:-}" = sidecars ] && exit 1
 exit 0
 `,
@@ -148,6 +149,21 @@ describe("stage-prep.sh", () => {
     const r = run({ FAIL_STEP: "sidecars" });
     expect(r.out).toMatch(/stage-prep exit [1-9]/);
     expect(r.err).toContain("step sidecars");
+  });
+
+  test("(k) a stamp that cannot be written: non-zero exit and the step name", () => {
+    const r = run({ RO_STAMPS: "1" });
+    chmodSync(join(repo, ".stage-prep"), 0o755);
+    expect(r.out).toMatch(/stage-prep exit [1-9]/);
+    expect(r.err).toContain("step sidecars failed (stamp write)");
+  });
+
+  test("(l) an env file that cannot be written: non-zero exit and the step name", () => {
+    mkdirSync(join(repo, ".stage-prep.env.tmp"));
+    const r = run();
+    expect(r.out).toMatch(/stage-prep exit [1-9]/);
+    expect(r.err).toContain("step env failed");
+    expect(existsSync(join(repo, ".stage-prep.env"))).toBe(false);
   });
 
   test("(e) a held lock: exit 3 and the other lock stays", () => {

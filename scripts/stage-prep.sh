@@ -102,7 +102,7 @@ run_step() {
   code=$?
   if [ "$code" -ne 0 ]; then echo "stage-prep: step $name failed (exit $code)" >&2; exit 1; fi
   if ! "check_$name"; then echo "stage-prep: step $name failed (output check)" >&2; exit 1; fi
-  touch "$STAMPS/$name.ok"
+  if ! touch "$STAMPS/$name.ok"; then echo "stage-prep: step $name failed (stamp write)" >&2; exit 1; fi
 }
 
 mkdir -p "$STAMPS"
@@ -123,7 +123,11 @@ if ! { fresh sidecars "${INPUTS_sidecars[@]}" && fresh tmux "${INPUTS_tmux[@]}";
   release_lock
 fi
 
-{
-  printf 'export PATH=%q:%q:/opt/homebrew/bin:"$PATH"\n' "$ROOT/src-tauri/resources" "$BUN_DIR"
-} > .stage-prep.env
+ENV_TMP=.stage-prep.env.tmp
+if ! printf 'export PATH=%q:%q:/opt/homebrew/bin:"$PATH"\n' "$ROOT/src-tauri/resources" "$BUN_DIR" > "$ENV_TMP" \
+  || ! mv -f "$ENV_TMP" .stage-prep.env; then
+  rm -f "$ENV_TMP" 2> /dev/null
+  echo "stage-prep: step env failed" >&2
+  exit 1
+fi
 exit 0
