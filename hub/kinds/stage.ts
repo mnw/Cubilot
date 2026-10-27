@@ -360,6 +360,8 @@ export type StageRuntime = {
   module: KindModule;
   /** How many launch requests wait with values from role_models (tests: the set empties when a launch ends). */
   pendingRoleModelLaunches(): number;
+  /** Resolves when the deferred metrics writes of ended stages are done (tests). */
+  metricsIdle(): Promise<void>;
   api: StageApi;
   /**
    * Creates the stages a ticket is ready for (each as `queued`, one `stage.queued` event each) and returns them.
@@ -620,17 +622,25 @@ export function createStageRuntime(
     bootGraceMs?: number;
     /** Where Claude Code writes its transcripts (default `~/.claude/projects`). Tests point it at a temp folder. */
     claudeProjectsDir?: string;
+    /** Replaces the metrics writer (tests only). */
+    recordMetrics?: typeof recordStageMetrics;
   } = {},
 ): StageRuntime {
   const entity = createLedgerEntity({ decl: stageDecl, db });
+  const pendingMetrics = new Set<Promise<void>>();
   const api = createStageApi(db, (freed, cap) => {
     if (freed.status === "passed" || freed.status === "failed") {
-      // After the commit of stage.passed/failed, outside its transaction. recordStageMetrics logs its own failures; this guards the rest.
-      try {
-        recordStageMetrics(db, freed.id, freed.version, console.error, opts.claudeProjectsDir);
-      } catch (e) {
-        console.error(`[stage-metrics] ${freed.id}: ${(e as Error).message}`);
-      }
+      // After the commit of stage.passed/failed, outside its transaction and after this call returns: the reads must not delay the result.
+      // recordStageMetrics logs its own failures; the catch guards the rest.
+      const run = new Promise<void>((resolve) =>
+        setImmediate(() => {
+          (opts.recordMetrics ?? recordStageMetrics)(db, freed.id, freed.version, console.error, opts.claudeProjectsDir)
+            .catch((e) => console.error(`[stage-metrics] ${freed.id}: ${(e as Error).message}`))
+            .finally(resolve);
+        }),
+      );
+      pendingMetrics.add(run);
+      void run.then(() => pendingMetrics.delete(run));
     }
     drainQueue(freed, cap);
   });
@@ -1715,7 +1725,7 @@ export function createStageRuntime(
       }
     },
   };
-  return { module, api, evaluateStages, hooks, enqueueLaunch, queue, passSpecStage, sweep, pendingRoleModelLaunches: () => roleModelLaunches.size };
+  return { module, api, evaluateStages, hooks, enqueueLaunch, queue, passSpecStage, sweep, pendingRoleModelLaunches: () => roleModelLaunches.size, metricsIdle: async () => void (await Promise.all([...pendingMetrics])) };
 }
 
 export function createStageKind(db: Database): KindModule {

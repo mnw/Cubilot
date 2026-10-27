@@ -10,7 +10,7 @@ import { giveProject } from "../helpers/repo";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createTicketKind } from "../../hub/kinds/ticket";
 import { createStageRuntime } from "../../hub/kinds/stage";
-import { claudeProjectFolder, recordStageMetrics } from "../../hub/core/stage-metrics";
+import { HEAD_CAP_BYTES, claudeProjectFolder, recordStageMetrics, selectTranscript } from "../../hub/core/stage-metrics";
 import type { Entry, HubCapabilities, RouteDef, Scope } from "../../hub/core/types";
 import type { LaunchRequest } from "../../hub/core/launch-queue";
 
@@ -31,12 +31,12 @@ function transcript(folder: string, name: string, ts: number, firstText: string,
   return file;
 }
 
-function makeEnv() {
+function makeEnv(extra: { recordMetrics?: typeof recordStageMetrics } = {}) {
   const projects = mkdtempSync(join(tmpdir(), "sm-projects-"));
   const db = new Database(":memory:");
   migrateLedger(db);
   createTicketKind(db).migrate(db);
-  const rt = createStageRuntime(db, { ackMs: 60_000, bootGraceMs: 1000, claudeProjectsDir: projects });
+  const rt = createStageRuntime(db, { ackMs: 60_000, bootGraceMs: 1000, claudeProjectsDir: projects, ...extra });
   rt.module.migrate(db);
   giveProject(db, "r1");
   const cap = {
@@ -74,7 +74,11 @@ function makeEnv() {
     const seqs = db.query<{ seq: number }, [string]>("SELECT seq FROM events WHERE entity_id = ? AND kind = 'stage.launching' ORDER BY seq").all(stageId);
     seqs.forEach((s, i) => db.run("UPDATE events SET at_ms = ? WHERE seq = ?", [ms[i], s.seq]));
   };
-  const pass = () => rt.api.move(stageId, { to: "passed" }, "system", cap);
+  const pass = async () => {
+    const r = rt.api.move(stageId, { to: "passed" }, "system", cap);
+    await rt.metricsIdle();
+    return r;
+  };
   const rows = () => db.query<Record<string, unknown>, []>("SELECT * FROM stage_metrics ORDER BY attempt").all();
   const folder = (l: LaunchRequest & { kind: "launch" }) => claudeProjectFolder(l.cwd!, projects);
   return { db, rt, cap, projects, stageId, spawn, launches, retry, pinLaunchTimes, pass, rows, folder, turnEnd };
@@ -95,7 +99,7 @@ afterEach(() => {
 });
 
 describe("stage metrics writer", () => {
-  test("a transcript gives the first-message numbers, the first request's cache read and the tokens before the first Edit", () => {
+  test("a transcript gives the first-message numbers, the first request's cache read and the tokens before the first Edit", async () => {
     capture();
     const e = makeEnv();
     const l = e.spawn();
@@ -107,7 +111,7 @@ describe("stage metrics writer", () => {
       asst("m2", usage(5, 0, 3200, 40), "Edit"),
       asst("m3", usage(1, 0, 3300, 10)), // after the Edit: not counted
     );
-    e.pass();
+    await e.pass();
     const [r] = e.rows();
     expect(r).toMatchObject({
       stage_id: e.stageId, attempt: 1, role: "worker", source: "claude",
@@ -120,13 +124,13 @@ describe("stage metrics writer", () => {
     expect(logged).toEqual([]);
   });
 
-  test("the result handoff is an action: a Tester that never edits counts up to its verdict", () => {
+  test("the result handoff is an action: a Tester that never edits counts up to its verdict", async () => {
     capture();
     const e = makeEnv();
     const l = e.spawn();
     e.pinLaunchTimes(1000);
     transcript(e.folder(l), "s1", 1500, e.stageId, asst("m1", usage(1, 0, 100, 5)), asst("m2", usage(1, 0, 100, 7), "mcp__chatbridge__send_handoff"), asst("m3", usage(9, 9, 9, 9)));
-    e.pass();
+    await e.pass();
     expect(e.rows()[0]).toMatchObject({ source: "claude", tokens_before_action: 106 + 108 });
   });
 
@@ -143,7 +147,7 @@ describe("stage metrics writer", () => {
     transcript(f, "old-same-id", 200, `Stage: ${e.stageId}`, asst("o", usage(1, 0, 888, 1))); // before the window of attempt 1
     transcript(f, "a1", 1200, `Stage: ${e.stageId}`, asst("a", usage(1, 0, 111, 1)));
     transcript(f, "a2", 5200, `Stage: ${e.stageId}`, asst("b", usage(1, 0, 222, 1)));
-    e.pass();
+    await e.pass();
     const rows = e.rows();
     expect(rows.map((r) => [r.attempt, r.source, r.cache_read_tokens])).toEqual([[1, "claude", 111], [2, "claude", 222]]);
     expect(logged).toEqual([]);
@@ -157,7 +161,7 @@ describe("stage metrics writer", () => {
     e.spawn();
     e.pinLaunchTimes(1000, 5000);
     transcript(e.folder(l1), "a2", 5100, `Stage: ${e.stageId}`, asst("b", usage(2, 0, 70, 3)));
-    e.pass();
+    await e.pass();
     const [a1, a2] = e.rows();
     expect(a1).toMatchObject({ attempt: 1, source: "none", prompt_tokens_first: null, cache_read_tokens: null, tokens_before_action: null });
     expect(a1!.first_message_bytes).toBe(Buffer.byteLength(l1.prompt));
@@ -165,11 +169,11 @@ describe("stage metrics writer", () => {
     expect(logged).toHaveLength(1);
   });
 
-  test("a missing transcript stores NULL and source none, keeps the first-message size, leaves the stage passed, logs one line", () => {
+  test("a missing transcript stores NULL and source none, keeps the first-message size, leaves the stage passed, logs one line", async () => {
     capture();
     const e = makeEnv();
     const l = e.spawn();
-    e.pass();
+    await e.pass();
     expect(e.rt.api.load(e.stageId)!.status).toBe("passed");
     expect(e.rows()[0]).toMatchObject({
       source: "none", prompt_tokens_first: null, cache_read_tokens: null, tokens_before_action: null,
@@ -178,29 +182,29 @@ describe("stage metrics writer", () => {
     expect(logged).toHaveLength(1);
   });
 
-  test("a transcript without usage stores source none and logs one line", () => {
+  test("a transcript without usage stores source none and logs one line", async () => {
     capture();
     const e = makeEnv();
     const l = e.spawn();
     e.pinLaunchTimes(1000);
     transcript(e.folder(l), "s1", 1500, e.stageId);
-    e.pass();
+    await e.pass();
     expect(e.rows()[0]).toMatchObject({ source: "none", cache_read_tokens: null });
     expect(logged).toHaveLength(1);
   });
 
-  test("a forced write failure leaves the stage passed and writes exactly one log line", () => {
+  test("a forced write failure leaves the stage passed and writes exactly one log line", async () => {
     capture();
     const e = makeEnv();
     e.spawn();
     e.db.exec("DROP TABLE stage_metrics");
-    expect(e.pass().status).toBe("passed");
+    expect((await e.pass()).status).toBe("passed");
     expect(e.rt.api.load(e.stageId)!.status).toBe("passed");
     expect(logged).toHaveLength(1);
     expect(logged[0]).toContain("writing the row failed");
   });
 
-  test("a forced read failure writes exactly one log line; the row is stored as none and the stage is passed", () => {
+  test("a forced read failure writes exactly one log line; the row is stored as none and the stage is passed", async () => {
     capture();
     const e = makeEnv();
     const l = e.spawn();
@@ -208,7 +212,7 @@ describe("stage metrics writer", () => {
     const file = transcript(e.folder(l), "s1", 1500, e.stageId, asst("a", usage(1, 0, 5, 1)));
     chmodSync(file, 0o000);
     try {
-      e.pass();
+      await e.pass();
     } finally {
       chmodSync(file, 0o644);
     }
@@ -223,37 +227,40 @@ describe("restart, old events and unreadable usage", () => {
   /** A new runtime on the same ledger: the hub restarted between the launch and the end of the stage. */
   const restarted = (e: ReturnType<typeof makeEnv>) => {
     const rt2 = createStageRuntime(e.db, { ackMs: 60_000, bootGraceMs: 1000, claudeProjectsDir: e.projects });
-    return () => rt2.api.move(e.stageId, { to: "passed" }, "system", e.cap);
+    return async () => {
+      rt2.api.move(e.stageId, { to: "passed" }, "system", e.cap);
+      await rt2.metricsIdle();
+    };
   };
 
-  test("a hub restart keeps the row: one row, first_message_bytes set, transcript values read", () => {
+  test("a hub restart keeps the row: one row, first_message_bytes set, transcript values read", async () => {
     capture();
     const e = makeEnv();
     const l = e.spawn();
     e.pinLaunchTimes(1000);
     transcript(e.folder(l), "s1", 1500, e.stageId, asst("m1", usage(1, 2, 30, 4)));
-    restarted(e)();
+    await restarted(e)();
     expect(e.rows()).toHaveLength(1);
     expect(e.rows()[0]).toMatchObject({ source: "claude", first_message_bytes: Buffer.byteLength(l.prompt), cache_read_tokens: 30, prompt_tokens_first: 33 });
     expect(logged).toEqual([]);
   });
 
-  test("a hub restart with no transcript: one row, source none, NULL token fields", () => {
+  test("a hub restart with no transcript: one row, source none, NULL token fields", async () => {
     capture();
     const e = makeEnv();
     const l = e.spawn();
-    restarted(e)();
+    await restarted(e)();
     expect(e.rows()).toHaveLength(1);
     expect(e.rows()[0]).toMatchObject({ source: "none", first_message_bytes: Buffer.byteLength(l.prompt), prompt_tokens_first: null, cache_read_tokens: null, tokens_before_action: null });
     expect(logged).toHaveLength(1);
   });
 
-  test("an old stage.launching event without launch metadata: no row, one log line", () => {
+  test("an old stage.launching event without launch metadata: no row, one log line", async () => {
     capture();
     const e = makeEnv();
     e.spawn();
     e.db.run("UPDATE events SET payload_json = json_remove(payload_json, '$.launch') WHERE entity_id = ? AND kind = 'stage.launching'", [e.stageId]);
-    e.pass();
+    await e.pass();
     expect(e.rows()).toHaveLength(0);
     expect(logged).toHaveLength(1);
     expect(logged[0]).toContain(e.stageId);
@@ -268,13 +275,13 @@ describe("restart, old events and unreadable usage", () => {
     ["a non-integer token field", { input_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 2.5, output_tokens: 1 }],
   ];
   for (const [name, u] of unreadable) {
-    test(`${name}: source none, NULL token fields, one log line`, () => {
+    test(`${name}: source none, NULL token fields, one log line`, async () => {
       capture();
       const e = makeEnv();
       const l = e.spawn();
       e.pinLaunchTimes(1000);
       transcript(e.folder(l), "s1", 1500, e.stageId, line({ type: "assistant", message: { id: "m1", usage: u, content: [] } }));
-      e.pass();
+      await e.pass();
       expect(e.rows()[0]).toMatchObject({ source: "none", prompt_tokens_first: null, cache_read_tokens: null, tokens_before_action: null });
       expect(logged).toHaveLength(1);
     });
@@ -282,7 +289,7 @@ describe("restart, old events and unreadable usage", () => {
 });
 
 describe("pi usage source (5.3)", () => {
-  test("a pi stage row has source none and three NULLs, even when a matching Claude transcript exists", () => {
+  test("a pi stage row has source none and three NULLs, even when a matching Claude transcript exists", async () => {
     capture();
     const db = new Database(":memory:");
     migrateLedger(db);
@@ -291,12 +298,72 @@ describe("pi usage source (5.3)", () => {
     const payload = JSON.stringify({ launch: { role: "worker", harness: "pi", cwd, bytes: 400 } });
     db.run("INSERT INTO events (entity_id, kind, actor, payload_json, at_ms) VALUES ('s_1', 'stage.launching', 'system', ?, 1000)", [payload]);
     transcript(claudeProjectFolder(cwd, projects), "s1", 1500, "Stage: s_1", asst("a", usage(1, 0, 5, 1)));
-    recordStageMetrics(db, "s_1", 7, console.error, projects);
+    await recordStageMetrics(db, "s_1", 7, console.error, projects);
     const r = db.query<Record<string, unknown>, []>("SELECT * FROM stage_metrics").get()!;
     expect(r).toMatchObject({
       source: "none", prompt_tokens_first: null, cache_read_tokens: null, tokens_before_action: null,
       first_message_bytes: 400, first_message_tokens_est: 100, created_seq: 7,
     });
     expect(logged).toEqual([]);
+  });
+});
+
+describe("deferred writer", () => {
+  test("a reader that does not resolve does not delay the stage: it is passed with no row, then the row appears", async () => {
+    capture();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let calls = 0;
+    const e = makeEnv({
+      recordMetrics: async (...a) => {
+        calls++;
+        await gate;
+        return recordStageMetrics(...a);
+      },
+    });
+    e.spawn();
+    const moved = e.rt.api.move(e.stageId, { to: "passed" }, "system", e.cap); // returns while the reader is still open
+    expect(moved.status).toBe("passed");
+    expect(e.rt.api.load(e.stageId)!.status).toBe("passed");
+    expect(calls).toBe(0); // not inline: it starts after this call returns
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    expect(calls).toBe(1);
+    expect(e.rows()).toHaveLength(0);
+    release();
+    await e.rt.metricsIdle();
+    expect(e.rows()).toHaveLength(1);
+  });
+});
+
+describe("bounded candidate read", () => {
+  const dir = () => mkdtempSync(join(tmpdir(), "sm-cap-"));
+
+  test("a first user message on line 3 matches", async () => {
+    const f = dir();
+    const file = join(f, "a.jsonl");
+    writeFileSync(file, [line({ type: "mode" }), line({ type: "permission-mode" }), user(1500, "Stage: s_x")].join("\n") + "\n");
+    expect(await selectTranscript(f, "s_x", 1000, null)).toBe(file);
+  });
+
+  test("a first user message over the cap does not match and logs nothing", async () => {
+    capture();
+    const f = dir();
+    writeFileSync(join(f, "big.jsonl"), user(1500, "Stage: s_x " + "y".repeat(HEAD_CAP_BYTES)) + "\n");
+    const stats = { bytes: 0 };
+    expect(await selectTranscript(f, "s_x", 1000, null, stats)).toBeNull();
+    expect(stats.bytes).toBeLessThanOrEqual(HEAD_CAP_BYTES);
+    expect(logged).toEqual([]);
+  });
+
+  test("58 candidate files read under 58 x 64 KiB, in chunks of at most 4 KiB", async () => {
+    const f = dir();
+    for (let i = 0; i < 57; i++) writeFileSync(join(f, `c${i}.jsonl`), user(1500, "Stage: s_other " + "z".repeat(200 * 1024)) + "\n");
+    const hit = join(f, "hit.jsonl");
+    writeFileSync(hit, user(1600, "Stage: s_x") + "\n");
+    const stats = { bytes: 0 };
+    expect(await selectTranscript(f, "s_x", 1000, null, stats)).toBe(hit);
+    expect(stats.bytes).toBeLessThan(58 * HEAD_CAP_BYTES);
+    console.log(`bytes read for 58 files: ${stats.bytes}`);
   });
 });

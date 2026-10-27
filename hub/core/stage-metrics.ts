@@ -2,7 +2,7 @@
 // The Claude transcript is `~/.claude/projects/<cwd with every non-alphanumeric character as "-">/<session>.jsonl`.
 // Nothing here changes a stage: the caller catches every throw and logs one line.
 
-import { closeSync, openSync, readdirSync, readFileSync, readSync } from "node:fs";
+import { open, readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
@@ -22,8 +22,10 @@ export type MetricsRow = {
 
 export type Usage = { prompt_tokens_first: number; cache_read_tokens: number; tokens_before_action: number };
 
-/** Bytes read from the head of a candidate file to find its first entry time and first user message. */
-const HEAD_BYTES = 256 * 1024;
+/** A candidate file is read from the start in chunks of this size, up to the first user message line. */
+const CHUNK_BYTES = 4 * 1024;
+/** Hard cap per candidate. A candidate whose first user message is not complete by then does not match (no error, no log line). */
+export const HEAD_CAP_BYTES = 64 * 1024;
 /** A tool call that changes a file ends "before the first action"; so does the result handoff. */
 const ACTION_TOOLS = new Set(["Edit", "Write", "NotebookEdit"]);
 const isResultTool = (name: string) => name === "send_handoff" || name.endsWith("__send_handoff");
@@ -36,44 +38,59 @@ export const tokensEst = (bytes: number): number => Math.ceil(bytes / 4);
 
 type Head = { ts: number; firstUser: string };
 
-function readHead(file: string): Head | null {
-  const fd = openSync(file, "r");
-  let text: string;
+function entry(line: string): any {
   try {
-    const buf = Buffer.alloc(HEAD_BYTES);
-    text = buf.subarray(0, readSync(fd, buf, 0, HEAD_BYTES, 0)).toString("utf8");
+    return JSON.parse(line);
+  } catch {
+    return null; // an empty line
+  }
+}
+
+/** Reads whole lines from the start of `file` in small chunks and stops at the first user message. `stats.bytes` counts the bytes read. */
+async function readHead(file: string, stats?: { bytes: number }): Promise<Head | null> {
+  const fh = await open(file, "r");
+  try {
+    const buf = Buffer.alloc(CHUNK_BYTES);
+    let pending = "";
+    let total = 0;
+    let ts: number | null = null;
+    while (total < HEAD_CAP_BYTES) {
+      const { bytesRead } = await fh.read(buf, 0, CHUNK_BYTES, total);
+      if (!bytesRead) return null;
+      total += bytesRead;
+      if (stats) stats.bytes += bytesRead;
+      pending += buf.subarray(0, bytesRead).toString("utf8");
+      const cut = pending.lastIndexOf("\n");
+      if (cut < 0) continue;
+      const lines = pending.slice(0, cut).split("\n");
+      pending = pending.slice(cut + 1);
+      for (const l of lines) {
+        const d = entry(l);
+        if (ts === null && typeof d?.timestamp === "string") {
+          const t = Date.parse(d.timestamp);
+          if (!Number.isNaN(t)) ts = t;
+        }
+        if (d?.type === "user" && !d.isMeta) {
+          const c = d.message?.content;
+          const text = typeof c === "string" ? c : Array.isArray(c) ? c.map((x: any) => (typeof x?.text === "string" ? x.text : "")).join("\n") : "";
+          return ts === null ? null : { ts, firstUser: text };
+        }
+      }
+    }
+    return null;
   } finally {
-    closeSync(fd);
+    await fh.close();
   }
-  let ts: number | null = null;
-  for (const line of text.split("\n")) {
-    let d: any;
-    try {
-      d = JSON.parse(line);
-    } catch {
-      continue; // an empty line, or the cut end of the buffer
-    }
-    if (ts === null && typeof d?.timestamp === "string") {
-      const t = Date.parse(d.timestamp);
-      if (!Number.isNaN(t)) ts = t;
-    }
-    if (d?.type === "user" && !d.isMeta) {
-      const c = d.message?.content;
-      const s = typeof c === "string" ? c : Array.isArray(c) ? c.map((x: any) => (typeof x?.text === "string" ? x.text : "")).join("\n") : "";
-      return ts === null ? null : { ts, firstUser: s };
-    }
-  }
-  return null;
 }
 
 /**
  * The transcript of one attempt: of the files in `folder` whose first entry time is in [from, to), the earliest whose first
  * user message contains the stage id. A missing folder is no transcript (null); any other read error throws.
  */
-export function selectTranscript(folder: string, stageId: string, from: number, to: number | null): string | null {
+export async function selectTranscript(folder: string, stageId: string, from: number, to: number | null, stats?: { bytes: number }): Promise<string | null> {
   let names: string[];
   try {
-    names = readdirSync(folder).filter((n) => n.endsWith(".jsonl"));
+    names = (await readdir(folder)).filter((n) => n.endsWith(".jsonl"));
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw e;
@@ -81,7 +98,7 @@ export function selectTranscript(folder: string, stageId: string, from: number, 
   let best: { file: string; ts: number } | null = null;
   for (const n of names) {
     const file = join(folder, n);
-    const h = readHead(file);
+    const h = await readHead(file, stats);
     if (!h || h.ts < from || (to !== null && h.ts >= to) || !h.firstUser.includes(stageId)) continue;
     if (!best || h.ts < best.ts) best = { file, ts: h.ts };
   }
@@ -98,12 +115,12 @@ const sum = (u: any): number => TOKEN_FIELDS.reduce((a, k) => a + u[k], 0);
  * a usage object it counts is not readable (a missing, string, negative or non-integer field): never a 0 for a bad field.
  * A request can span several lines with one `message.id`: the last line of an id holds its final usage.
  */
-export function readUsage(file: string): Usage | null {
+export async function readUsage(file: string): Promise<Usage | null> {
   const order: string[] = [];
   const usage = new Map<string, any>();
   let actionAt: string | null = null;
   let n = 0;
-  for (const line of readFileSync(file, "utf8").split("\n")) {
+  for (const line of (await readFile(file, "utf8")).split("\n")) {
     if (!line) continue;
     let d: any;
     try {
@@ -156,13 +173,13 @@ export function launchEvents(db: Database, stageId: string): Array<{ at_ms: numb
  * A pi attempt is `source = 'none'` (5.3). Every attempt logs at most one line through `log`; a write failure of one
  * attempt does not stop the next.
  */
-export function recordStageMetrics(
+export async function recordStageMetrics(
   db: Database,
   stageId: string,
   createdSeq: number,
   log: (line: string) => void,
   projectsRoot = claudeProjectsDir(),
-): void {
+): Promise<void> {
   let events: ReturnType<typeof launchEvents>;
   try {
     events = launchEvents(db, stageId);
@@ -170,12 +187,13 @@ export function recordStageMetrics(
     log(`[stage-metrics] ${stageId}: reading the launch events failed: ${(e as Error).message}`);
     return;
   }
-  events.forEach((ev, i) => {
+  for (let i = 0; i < events.length; i++) {
+    const ev = events[i]!;
     const attempt = i + 1;
     const l = ev.launch;
     if (!l) {
       log(`[stage-metrics] ${stageId} attempt ${attempt}: launched before stage metrics; no row`);
-      return;
+      continue;
     }
     let usage: Usage | null = null;
     let why: string | null = null;
@@ -185,10 +203,10 @@ export function recordStageMetrics(
       why = "no worktree cwd";
     } else {
       try {
-        const file = selectTranscript(claudeProjectFolder(l.cwd, projectsRoot), stageId, ev.at_ms, events[i + 1]?.at_ms ?? null);
+        const file = await selectTranscript(claudeProjectFolder(l.cwd, projectsRoot), stageId, ev.at_ms, events[i + 1]?.at_ms ?? null);
         if (!file) why = "no transcript matched";
         else {
-          usage = readUsage(file);
+          usage = await readUsage(file);
           if (!usage) why = "the transcript usage is not readable";
         }
       } catch (e) {
@@ -206,7 +224,7 @@ export function recordStageMetrics(
     } catch (e) {
       log(`[stage-metrics] ${stageId} attempt ${attempt}: writing the row failed: ${(e as Error).message}`);
     }
-  });
+  }
 }
 
 /** The stored rows of a room, grouped by role. `roomSql` selects the room of stage alias `s`. */
