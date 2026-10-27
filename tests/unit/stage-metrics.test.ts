@@ -472,7 +472,7 @@ describe("start repair of missing rows (t_8c328391ae299304)", () => {
     const tidB = "t_0000000000000002";
     e.db.run(
       `INSERT INTO tickets (id, room, title, acceptance_criteria, blast_radius, priority, creator, status, role, created_at_ms, updated_at_ms, version)
-       VALUES (?, 'r1', 'T', 'c', 'low', 'medium', 'a', 'queued', 'tester', 1, 1, 1)`,
+       VALUES (?, 'r1', 'T', 'c', 'low', 'medium', 'a', 'queued', 'worker', 1, 1, 1)`,
       [tidB],
     );
     e.spawn(); // A attempt 1
@@ -487,22 +487,30 @@ describe("start repair of missing rows (t_8c328391ae299304)", () => {
     await e.rt.metricsIdle();
     return stageB;
   }
-  /** The route's source: rows by role (each role ordered by created_seq), merged by created_seq. */
+  /** The route's source, unsorted here: all stages are role worker, so the order is the ORDER BY of metricsByRole. */
   const route = (e: ReturnType<typeof makeEnv>) =>
-    Object.values(metricsByRole(e.db, "r1", "(SELECT room FROM tickets WHERE id = s.ticket_id)"))
-      .flat()
-      .sort((x, y) => x.created_seq - y.created_seq)
-      .map((r) => `${r.stage_id}:${r.attempt}`);
+    metricsByRole(e.db, "r1", "(SELECT room FROM tickets WHERE id = s.ticket_id)")
+      .worker!.map((r) => `${r.stage_id}:${r.attempt}`);
 
   for (const mode of ["deferred write", "repair"] as const) {
     test(`created_seq is the seq of each attempt's own terminal event (${mode}); the route order is A1, B, A2`, async () => {
       capture();
-      const e = makeEnv(mode === "repair" ? { recordMetrics: noWrite } : {});
+      // deferred write: hold the writes and run them in reverse, so the insert order differs from the terminal-event order
+      const held: Array<() => Promise<unknown>> = [];
+      const hold: typeof recordStageMetrics = (...a) => {
+        held.push(() => recordStageMetrics(...a));
+        return Promise.resolve() as any;
+      };
+      const e = makeEnv({ recordMetrics: mode === "repair" ? noWrite : hold });
       const stageB = await interleave(e);
       if (mode === "repair") {
         expect(e.rows()).toHaveLength(0);
         await startAgain(e);
+      } else {
+        for (const w of held.reverse()) await w();
       }
+      const inserted = e.db.query<{ stage_id: string; attempt: number }, []>("SELECT stage_id, attempt FROM stage_metrics ORDER BY rowid").all().map((r) => `${r.stage_id}:${r.attempt}`);
+      expect(inserted).not.toEqual([`${e.stageId}:1`, `${stageB}:1`, `${e.stageId}:2`]);
       const ends = e.db
         .query<{ entity_id: string; kind: string; seq: number }, []>("SELECT entity_id, kind, seq FROM events WHERE kind IN ('stage.passed','stage.failed','stage.retrying') ORDER BY seq")
         .all();
