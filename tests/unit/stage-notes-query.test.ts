@@ -20,12 +20,17 @@ function makeEnv(planning: string | null = "plan") {
     [T, planning],
   );
   let n = 0;
-  const result = (stageId: string, notes: unknown) =>
+  const send = (from: string, stageId: string, notes: unknown) =>
     db.run(
       `INSERT INTO handoffs (id, from_agent, to_agent, task, status, context_json, room, created_at_ms, expires_at_ms)
-       VALUES (?, 'x', 'y', 'result', 'pending', ?, 'r1', 1, 9999999999999)`,
-      [`h_${++n}`.padEnd(18, "0"), JSON.stringify({ stage_id: stageId, notes })],
+       VALUES (?, ?, 'y', 'result', 'pending', ?, 'r1', 1, 9999999999999)`,
+      [`h_${++n}`.padEnd(18, "0"), from, JSON.stringify({ stage_id: stageId, notes })],
     );
+  // The result handoff comes from the stage's own session.
+  const result = (stageId: string, notes: unknown) => {
+    db.run("UPDATE stage SET session = ? WHERE id = ?", [`sess-${stageId}`, stageId]);
+    send(`sess-${stageId}`, stageId, notes);
+  };
   const stage = (role: string, notes?: unknown) => {
     const s = rt.api.create({ ticket_id: T, role: role as never }, "system", cap);
     if (notes !== undefined) result(s.id, notes);
@@ -38,7 +43,7 @@ function makeEnv(planning: string | null = "plan") {
     result(s.id, notes);
     return s.id;
   };
-  return { db, stage, spec, result };
+  return { db, stage, spec, result, send };
 }
 
 describe("earlierNotes", () => {
@@ -71,6 +76,15 @@ describe("earlierNotes", () => {
     e.stage("validator", undefined);
     expect(earlierNotes(e.db, T)).toEqual([]);
     expect(earlierNotes(e.db, "t_ffffffffffffffff")).toEqual([]);
+  });
+
+  test("a named-agent handoff that quotes a stage_id is not a stage result", () => {
+    const e = makeEnv(null);
+    const w = e.stage("worker", "real result");
+    e.send("worker-9", w, "chat handoff");
+    const sp = e.spec("spec facts");
+    e.send("someone", sp, "spec chat handoff");
+    expect(earlierNotes(e.db, T).map((x) => x.notes)).toEqual(["spec facts", "real result"]);
   });
 
   test("a ticket with no planning note and no results returns an empty list", () => {

@@ -402,7 +402,8 @@ export function earlierNotes(db: Database, ticketId: string): EarlierNote[] {
       if (typeof notes === "string" && notes.trim()) out.push({ source, stage_id: r.id, role: r.role, notes });
     }
   };
-  const join = `JOIN handoffs h ON json_extract(h.context_json, '$.stage_id') = s.id`;
+  // A stage result is the handoff its own session sent; a named-agent handoff that only quotes the stage_id is not one.
+  const join = `JOIN handoffs h ON json_extract(h.context_json, '$.stage_id') = s.id AND h.from_agent = s.session`;
   fromResults("spec", `SELECT s.id, s.role, h.context_json AS c FROM stage s ${join} WHERE s.review = 'spec' AND s.id IN (SELECT stage_id FROM stage_scope WHERE ticket_id = ?) ORDER BY s.created_seq, h.rowid`);
   fromResults("stage", `SELECT s.id, s.role, h.context_json AS c FROM stage s ${join} WHERE s.review IS NULL AND s.ticket_id = ? ORDER BY s.created_seq, h.rowid`);
   return out;
