@@ -587,6 +587,7 @@ queued ──► launching ──► running ──► passed     (terminal)
   │            └──► retrying
   └──► failed  (no project folder: no attempt counted)
 launching / running / retrying ──► failed       (terminal, after attempt 2)
+queued / launching / running / retrying ──► cancelled   (terminal, a ticket cancel)
 ```
 
 | Status | Meaning |
@@ -597,8 +598,9 @@ launching / running / retrying ──► failed       (terminal, after attempt 2
 | `retrying` | Attempt 1 ended without a result. The stage waits for its relaunch. |
 | `passed` | A valid result arrived. A `FAIL` verdict also gives `passed`: the stage is a record and the verdict goes to the Orchestrator in the result handoff. |
 | `failed` | Attempt 2 ended without a result, or the room has no project folder. |
+| `cancelled` | The ticket of the stage was cancelled. Terminal. The stage is never retried and never reported as a failure. See "Cancelled stages". |
 
-A stage has at most two attempts (`attempt` 1 and 2). Each transition writes one ledger event (`stage.queued`, `stage.launching`, `stage.running`, `stage.retrying`, `stage.passed`, `stage.failed`) and one `stage` row update in one transaction. The actor of every stage event is `system`.
+A stage has at most two attempts (`attempt` 1 and 2). Each transition writes one ledger event (`stage.queued`, `stage.launching`, `stage.running`, `stage.retrying`, `stage.passed`, `stage.failed`, `stage.cancelled`) and one `stage` row update in one transaction. The actor of every stage event is `system`.
 
 ### Snapshot schema
 
@@ -614,6 +616,7 @@ A stage has at most two attempts (`attempt` 1 and 2). Each transition writes one
 | `status` | `string` | See "Lifecycle". |
 | `session` | `string \| null` | `<role>-<n>`. Set on `launching`. |
 | `slot_seq` | `number \| null` | |
+| `reason` | `string \| null` | The reason of the last `stage.cancelled` event of a `cancelled` stage, else null. Read from the event, not stored in a column. `GET /stages`, `GET /stages/<id>` and the SSE stage entry carry it. Old clients ignore it. |
 | `version` | `number` | `events.seq` of the last stage event. |
 
 The table also has `created_seq` (the queue order) and `updated_seq`. They are not in the snapshot.
@@ -749,6 +752,16 @@ The hub makes every stage worktree from the room's project folder (`project_fold
 When a stage moves to `launching`, the hub sets the ticket's `assignee` to the session name. The hub writes the `stage.launching` event and a `ticket.assigned` event with actor `system` in one transaction. Three transactions write events of two kinds: this one, the spec-review PASS (`stage.passed` and `ticket.queued`), and the final PASS of a ticket review (`stage.passed` and `ticket.done` or `ticket.assigned`, see "Final PASS"). A retry assigns the ticket to the new session name. After `passed`, the assignee stays the last session name, as a record, unless a final PASS assigns the ticket to the room lead. The assignment clears `approval_request_id`, as every assignment does. The bridge delivers a `ticket.assigned` from `system` in `context` mode to a stage session, so the new session is not woken: its first message already holds the ticket. Session names are used again, so an old open ticket can still name the same session as assignee. Therefore the Briefing of an agent follows the newest stage row of its session name, in any status. It lists only the ticket of that stage while the ticket is open, else no ticket. A spec-review session gets no ticket list. An agent with no stage row keeps the usual list.
 
 `system` is a reserved name (`RESERVED_NAMES` in `hub/core/ids.ts`). The dispatcher examines the JSON body of every mutating request. When `by`, `from`, `actor`, `voter`, `requester`, `agent` or `creator` is `system` (any case), it returns 400 `the actor 'system' is reserved for the hub`. Nothing is written. Only code in the hub writes events with actor `system`. These are the stage transitions, the launch assignment, the spec-review PASS, the ticket move after a final PASS, the handoff to the Orchestrator after a final failure, and handoff expiry.
+
+### Cancelled stages
+
+`cancelled` is terminal and has no retry. A cancelled stage is not a failure: it has no final-failure handoff to the Orchestrator, no Needs-you line, no FAIL count (`specFailState` reads `verdict` only), no failure record and no input to a diagnosis.
+
+1. **Ticket cancel.** After the commit of `ticket.cancelled`, the hub moves each `queued`, `launching`, `running` or `retrying` stage of the ticket to `cancelled` with the reason `ticket cancelled` and actor `system`. It does this through the stage API, one transaction per stage, after the ticket transaction. This adds no cross-kind transaction. A live stage (`launching`, `running`, or `retrying` with a session) first gets one close request. A `queued` stage gets none. A `passed` or `failed` stage does not change.
+2. **Release rule.** The session name, the role slot and the worktree of a cancelled stage stay reserved until a close ack arrives while no launch of that stage is in flight. A close ack (`absent` included) while its launch is in flight releases nothing. When the launch ends later (`spawned`, `error` or no ack), the hub queues one more close and only the ack of that close releases. The stage never moves to `running` and is never retried. A launch the shell never received is dropped, with no close, and releases at once.
+3. **Worktree.** A `ticket/<id>` worktree (worker, writer) stays. A temporary worktree goes at the releasing close ack (or at once for a dropped launch).
+4. **Hub start.** Before the sweep of `launching` stages, each open stage of a cancelled ticket moves to `cancelled` with the reason `ticket cancelled` and each live one gets one close request. The sweep then skips them.
+5. **Limits.** A time-out race on a launch (`t_b073b26136e9cf61`) and a shell restart (`t_81bfa8a84ecc06e5`) are out of scope. A launch ack lost in a shell restart holds the reservation until the hub restarts. The human closes an orphan pane.
 
 ### Results
 

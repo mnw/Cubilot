@@ -16,7 +16,7 @@ class El {
   text(): string { return this.textContent + this.children.map((c) => c.text()).join(" "); }
 }
 
-function setup(opts: { tickets: any[]; passed: any[]; failed: any[]; room?: string }) {
+function setup(opts: { tickets: any[]; passed: any[]; failed: any[]; cancelled?: any[]; room?: string }) {
   const els: Record<string, El> = {
     "terminal-finished": new El(), "terminal-finished-list": new El("ul"), "terminal-finished-count": new El("span"),
   };
@@ -27,7 +27,7 @@ function setup(opts: { tickets: any[]; passed: any[]; failed: any[]; room?: stri
     ROOM_ALL: "__ALL__",
     KindCardRenderer: { observe: (p: string, fn: (e: any) => void) => { observers[p] = fn; } },
     authedFetch: async (path: string) => {
-      const body = path.startsWith("/tickets") ? opts.tickets : path.includes("status=passed") ? opts.passed : opts.failed;
+      const body = path.startsWith("/tickets") ? opts.tickets : path.includes("status=passed") ? opts.passed : path.includes("status=cancelled") ? (opts.cancelled ?? []) : opts.failed;
       return { ok: true, json: async () => body };
     },
     globalThis: {} as any,
@@ -41,7 +41,7 @@ function setup(opts: { tickets: any[]; passed: any[]; failed: any[]; room?: stri
 
 const stage = (over: Record<string, unknown>) => ({
   id: "s_x", ticket_id: "t1", request_id: null, review: null, verdict: null, role: "worker", attempt: 1,
-  status: "passed", session: "worker-1", slot_seq: 1, version: 1, ...over,
+  status: "passed", session: "worker-1", slot_seq: 1, reason: null, version: 1, ...over,
 });
 const tickets = [{ id: "t1", title: "Ticket one", request_id: "req-a" }, { id: "t2", title: "Ticket two", request_id: null }];
 
@@ -99,5 +99,21 @@ describe("finished sessions list", () => {
     await t.api.load();
     expect(t.count()).toBe("0");
     expect(t.rows()[0]).toContain("Pick a room");
+  });
+  test("a cancelled stage shows its reason as text after a load and from a live event, with or without a session", async () => {
+    const t = setup({
+      tickets,
+      passed: [],
+      failed: [],
+      cancelled: [stage({ id: "c1", status: "cancelled", reason: "ticket cancelled", session: "worker-1", version: 3 })],
+    });
+    await t.api.load();
+    expect(t.rows()).toHaveLength(1);
+    expect(t.rows()[0]).toContain("worker-1");
+    expect(t.rows()[0]).toContain("cancelled: ticket cancelled");
+    t.observers.stage({ snapshot: stage({ id: "c2", ticket_id: "t2", role: "tester", status: "cancelled", reason: "ticket cancelled", session: null, version: 8 }) });
+    expect(t.rows()).toHaveLength(2);
+    expect(t.rows()[0]).toContain("tester (no session)");
+    expect(t.rows()[0]).toContain("cancelled: ticket cancelled");
   });
 });

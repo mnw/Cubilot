@@ -28,7 +28,7 @@ import { roleModelFor } from "../core/role-models";
 import { makeSSE } from "../core/sse";
 import { assignBySystemInTx, closeReviewedBySystemInTx, notifyHeldDrafts, queueBySystemInTx, type HeldDraft } from "./ticket";
 
-export type StageStatus = "queued" | "launching" | "running" | "retrying" | "passed" | "failed";
+export type StageStatus = "queued" | "launching" | "running" | "retrying" | "passed" | "failed" | "cancelled";
 
 export type StageSnapshot = {
   id: string;
@@ -41,11 +41,13 @@ export type StageSnapshot = {
   status: StageStatus;
   session: string | null;
   slot_seq: number | null;
+  /** Why a stage was cancelled: the reason of its last `stage.cancelled` event (no column). Null for any other status. */
+  reason: string | null;
   version: number;
 };
 
 const STAGE_ID_RE = /^s_[0-9a-f]{16}$/;
-const STAGE_STATUSES = new Set<string>(["queued", "launching", "running", "retrying", "passed", "failed"]);
+const STAGE_STATUSES = new Set<string>(["queued", "launching", "running", "retrying", "passed", "failed", "cancelled"]);
 
 // created_seq and updated_seq live in the table (the queue order and the audit) but not in the
 // snapshot: updated_seq is `version`, and the transitions set created_seq in 2.2.
@@ -65,7 +67,7 @@ const stageDecl: StateMachineDecl<StageSnapshot> = {
     slot_seq: "INTEGER_NULL",
   },
   forColumn: "role",
-  terminalStatuses: new Set(["passed", "failed"]),
+  terminalStatuses: new Set(["passed", "failed", "cancelled"]),
   rowToSnapshot: (row) => ({
     id: row.id as string,
     ticket_id: (row.ticket_id as string | null) ?? null,
@@ -77,6 +79,7 @@ const stageDecl: StateMachineDecl<StageSnapshot> = {
     status: row.status as StageStatus,
     session: (row.session as string | null) ?? null,
     slot_seq: row.slot_seq == null ? null : Number(row.slot_seq),
+    reason: null,
     version: Number(row.version ?? 0),
   }),
   snapshotToRow: (snap) => {
@@ -103,20 +106,36 @@ export function stageEntry(snapshot: StageSnapshot, eventKind: string, room: str
   };
 }
 
+/** The reason of the last `stage.cancelled` event of a cancelled stage (one event read); any other snapshot is returned as it is. */
+function withReason(db: Database, snap: StageSnapshot): StageSnapshot;
+function withReason(db: Database, snap: StageSnapshot | null): StageSnapshot | null;
+function withReason(db: Database, snap: StageSnapshot | null): StageSnapshot | null {
+  if (!snap || snap.status !== "cancelled") return snap;
+  const row = db
+    .query<{ payload_json: string }, [string]>("SELECT payload_json FROM events WHERE entity_id = ? AND kind = 'stage.cancelled' ORDER BY seq DESC LIMIT 1")
+    .get(snap.id);
+  let reason: string | null = null;
+  try {
+    reason = (JSON.parse(row?.payload_json ?? "{}") as { reason?: string | null }).reason ?? null;
+  } catch { /* an unreadable payload gives no reason */ }
+  return { ...snap, reason };
+}
+
 // ---------- Transitions ----------
 
 // The only moves a stage makes. `queued → failed` and `launching → failed` carry the launch errors that
 // count no attempt (no project folder). `retrying → launching` is the relaunch and raises the attempt.
 const MOVES: Record<StageStatus, readonly StageStatus[]> = {
-  queued: ["launching", "failed"],
-  launching: ["running", "retrying", "failed"],
-  running: ["passed", "retrying", "failed"],
-  retrying: ["launching", "failed"],
+  queued: ["launching", "failed", "cancelled"],
+  launching: ["running", "retrying", "failed", "cancelled"],
+  running: ["passed", "retrying", "failed", "cancelled"],
+  retrying: ["launching", "failed", "cancelled"],
   passed: [],
   failed: [],
+  cancelled: [],
 };
 const MAX_ATTEMPT = 2;
-const TERMINAL = new Set<StageStatus>(["passed", "failed"]);
+const TERMINAL = new Set<StageStatus>(["passed", "failed", "cancelled"]);
 
 export type StageCreateInput = {
   ticket_id?: string | null;
@@ -167,6 +186,7 @@ const createVerb: VerbDecl<StageSnapshot, StageCreateInput & { id: string }> = {
       status: "queued",
       session: null,
       slot_seq: null,
+      reason: null,
       version: 0,
     };
     return {
@@ -206,7 +226,7 @@ const moveVerb: VerbDecl<StageSnapshot, StageMoveInput & { id: string }> = {
       next,
       eventKind,
       payload: (post) => ({ from: prior.status, to: post.status, attempt: post.attempt, session: post.session, verdict: post.verdict, reason: p.reason ?? null }),
-      entry: (post) => stageEntry(post, eventKind, null),
+      entry: (post) => stageEntry(p.to === "cancelled" ? { ...post, reason: p.reason ?? null } : post, eventKind, null),
     };
   },
   scope: stageScope,
@@ -248,8 +268,8 @@ export function createStageApi(db: Database, onSlotFree?: (freed: StageSnapshot,
       first ? [ctx.seq, ctx.seq, ctx.next.id] : [ctx.seq, ctx.next.id],
     );
   return {
-    load: (id) => entity.load(id),
-    listByStatus: (f) => entity.listByStatus(f),
+    load: (id) => withReason(db, entity.load(id)),
+    listByStatus: (f) => entity.listByStatus(f).map((s) => withReason(db, s)),
     create(input, actor, cap, extra) {
       const id = mintStageId();
       return entity.applyWithSideEffect(id, createVerb, { ...input, id }, actor, cap, (ctx) => {
@@ -263,6 +283,7 @@ export function createStageApi(db: Database, onSlotFree?: (freed: StageSnapshot,
         stamp(ctx, false);
         return extra?.(ctx);
       });
+      const snapshot = withReason(db, r.snapshot);
       afterCommit?.(r.sideEffectResult);
       // A stage that leaves launching/running frees a slot of its role: the queue may start the oldest waiting stage.
       // G9: a ticket stage that ends from queued or retrying (no project folder, final failure) frees its ticket too.
@@ -270,7 +291,7 @@ export function createStageApi(db: Database, onSlotFree?: (freed: StageSnapshot,
       if (((was === "launching" || was === "running") && r.snapshot.status !== "launching" && r.snapshot.status !== "running") || (ended && was !== r.snapshot.status)) {
         onSlotFree?.(r.snapshot, cap);
       }
-      return r.snapshot;
+      return snapshot;
     },
   };
 }
@@ -324,6 +345,8 @@ export type StageHooks = {
    * as queued, a blocker done. It evaluates the ticket and starts the stages it creates. It never throws.
    */
   onTicketChanged(ticketId: string, cap: HubCapabilities): void;
+  /** The ticket kind calls this after the commit of `ticket.cancelled`: every open stage of the ticket is cancelled (G4). It never throws. */
+  onTicketCancelled(ticketId: string, cap: HubCapabilities): void;
   /**
    * The schema check of a result handoff (5.1; spec stages 3.1). A handoff from the session of a `running` stage is a result.
    * Returns null when `from` is no such session, else the list of errors (empty = valid). Errors also go to the same
@@ -621,11 +644,26 @@ export function createStageRuntime(
 
   /** Launch ids whose request carries role_models values: a refusal of the shell is stored with the prefix. */
   const roleModelLaunches = new Set<string>();
+  /** Launches that have no end yet (queued, delivered, not acked, not timed out), by stage. Memory only. */
+  const inflight = new Map<string, { id: string; session: string }>();
+  /**
+   * G4: a stage cancelled while its launch is in flight. Its session name, slot and worktree stay reserved until a close ack
+   * arrives with no launch in flight (and, once a late launch end queued the last close, only that close's ack).
+   */
+  const cancelHolds = new Map<string, { stageId: string; lastCloseId: string | null }>();
 
   const queue = createLaunchQueue({
     ackMs: opts.ackMs ?? DEFAULT_LAUNCH_ACK_MS,
     retainMs: opts.retainMs,
-    onCloseEnd(session, cap) {
+    onCloseEnd(session, cap, closeId) {
+      const hold = cancelHolds.get(session);
+      if (hold) {
+        // A close ack (absent included) while the launch is in flight releases nothing: the session may appear after it.
+        if (inflight.has(hold.stageId)) return;
+        if (hold.lastCloseId !== null && hold.lastCloseId !== closeId) return;
+        if (queue.pendingCloses().includes(session)) return;
+        cancelHolds.delete(session);
+      }
       // The session is gone: its role slot is free. Start what waits for it (a relaunch of a retrying stage first).
       const held = closing.get(session);
       closing.delete(session);
@@ -633,7 +671,7 @@ export function createStageRuntime(
       // in its old session's worktree until here: the close is only queued when the stage moves, and the session may still run.
       try {
         const done = held && api.load(held.stageId);
-        if (done && (done.status === "passed" || done.status === "retrying" || done.status === "failed") && held.room) removeTemporaryWorktree(done, held.room);
+        if (done && (done.status === "passed" || done.status === "retrying" || done.status === "failed" || done.status === "cancelled") && held.room) removeTemporaryWorktree(done, held.room);
       } catch (e) {
         console.error(`[stage] removing the worktree of ${session} failed:`, e);
       }
@@ -642,7 +680,19 @@ export function createStageRuntime(
     onLaunchEnd(req, end: LaunchEnd, cap) {
       if (req.kind !== "launch") return;
       const fromRoleModels = roleModelLaunches.delete(req.id);
+      if (inflight.get(req.stage_id)?.id === req.id) inflight.delete(req.stage_id);
       try {
+        const cancelled = api.load(req.stage_id);
+        if (cancelled?.status === "cancelled") {
+          // G4: a launch of a cancelled stage ended (spawned, error or no ack). The session may exist, so one more close is queued
+          // and only its ack releases the reservation. No running move, no retry, no final failure.
+          const hold = cancelHolds.get(req.session);
+          if (hold?.stageId === req.stage_id) {
+            hold.lastCloseId = mintLaunchId();
+            queue.push({ id: hold.lastCloseId, kind: "close", session: req.session });
+          }
+          return;
+        }
         if (end.by === "ack" && end.outcome.result === "spawned") {
           const stage = api.load(req.stage_id);
           if (stage?.status === "launching") api.move(req.stage_id, { to: "running" }, "system", cap);
@@ -773,6 +823,53 @@ export function createStageRuntime(
     reportFinalFailure(stage.id, reason, cap);
   }
 
+  /**
+   * G4: cancels one open stage of a cancelled ticket (queued, launching, running or retrying). A live one gets one close queued
+   * before the mark and keeps its name, slot and worktree until a close ack arrives with no launch in flight (onCloseEnd). A launch
+   * the shell never received is dropped and releases at once. It never retries and never reports a failure. It never throws.
+   */
+  function cancelStage(stageId: string, reason: string, cap: HubCapabilities, atStart = false): void {
+    try {
+      const stage = api.load(stageId);
+      if (!stage || !["queued", "launching", "running", "retrying"].includes(stage.status)) return;
+      turnEnds.delete(stageId);
+      refused.delete(stageId);
+      runningSeen.delete(stageId);
+      const session = stage.session;
+      let releaseAtOnce = false;
+      if (stage.status === "launching" && inflight.has(stageId) && queue.drop(inflight.get(stageId)!.id)) {
+        // Never delivered: no session exists, nothing to close.
+        roleModelLaunches.delete(inflight.get(stageId)!.id);
+        inflight.delete(stageId);
+        releaseAtOnce = true;
+      } else if (session && stage.status !== "queued") {
+        // A retrying stage has its own close already (its stop queued it): one close per stage. At hub start the close queue is gone,
+        // so one is queued unless another live stage uses the name.
+        const ownClose = stage.status === "retrying" && !atStart;
+        const taken = atStart && !!db.query("SELECT 1 FROM stage WHERE session = ? AND id != ? AND status IN ('launching', 'running') LIMIT 1").get(session, stageId);
+        if (!ownClose && !taken) {
+          if (!closing.has(session)) closing.set(session, { role: stage.role, room: roomOfStage(stageId), stageId });
+          if (stage.status === "launching" && inflight.has(stageId)) cancelHolds.set(session, { stageId, lastCloseId: null });
+          queue.push({ id: mintLaunchId(), kind: "close", session });
+        }
+      }
+      api.move(stageId, { to: "cancelled", reason }, "system", cap);
+      if (releaseAtOnce) {
+        const room = roomOfStage(stageId);
+        if (room) removeTemporaryWorktree(stage, room);
+      }
+    } catch (e) {
+      console.error(`[stage] cancelling ${stageId} failed:`, e);
+    }
+  }
+
+  function cancelStagesOfTicket(ticketId: string, cap: HubCapabilities, atStart = false): void {
+    const open = db
+      .query<{ id: string }, [string]>("SELECT id FROM stage WHERE ticket_id = ? AND status IN ('queued', 'launching', 'running', 'retrying') ORDER BY rowid")
+      .all(ticketId);
+    for (const { id } of open) cancelStage(id, "ticket cancelled", cap, atStart);
+  }
+
   function sweep(cap: HubCapabilities, now: number = Date.now()): void {
     // A passed stage whose turn-end report never came (5.3b): after the grace, queue its close anyway.
     for (const session of [...awaitingClose]) {
@@ -894,6 +991,7 @@ export function createStageRuntime(
         .map((r) => r.session),
     );
     for (const name of reserved) used.add(name);
+    for (const name of cancelHolds.keys()) used.add(name);
     // A passed stage keeps its session until its turn ends: the name is not free yet.
     for (const name of awaitingClose) if (name.startsWith(`${role}-`)) used.add(name);
     let n = 1;
@@ -926,7 +1024,7 @@ export function createStageRuntime(
       .all(ticketId);
     const spent = (h: RoleHandoff): boolean =>
       stages.some(
-        (s) => s.role === h.role && (s.created_seq > h.seq || (s.created_seq < h.seq && (s.status !== "passed" && s.status !== "failed" || s.updated_seq > h.seq))),
+        (s) => s.role === h.role && (s.created_seq > h.seq || (s.created_seq < h.seq && (s.status !== "passed" && s.status !== "failed" && s.status !== "cancelled" || s.updated_seq > h.seq))),
       );
     const ready: RoleHandoff[] = [...(opts.roleHandoffs ?? storedRoleHandoffs)(ticketId), ...handoffs]
       .filter((h) => isRole(h.role) && !spent(h))
@@ -1016,7 +1114,7 @@ export function createStageRuntime(
     const stage = api.load(input.stage_id);
     if (!stage) return { ok: false, reason: "no such stage" };
     if (stage.status !== "queued" && stage.status !== "retrying") return { ok: false, reason: `stage is ${stage.status}` };
-    if (queue.pendingCloses().includes(input.session)) {
+    if (queue.pendingCloses().includes(input.session) || cancelHolds.has(input.session)) {
       return { ok: false, reason: `session name ${input.session} is reserved until its close is acked` };
     }
     if (stage.ticket_id) {
@@ -1148,6 +1246,7 @@ export function createStageRuntime(
     };
     if (models.entry) roleModelLaunches.add(req.id);
     queue.push(req);
+    inflight.set(req.stage_id, { id: req.id, session: req.session });
     return { ok: true, request_id: req.id };
   }
 
@@ -1325,7 +1424,7 @@ export function createStageRuntime(
           return Response.json({ error: "invalid limit" }, { status: 400 });
         }
         const statuses = status === "all" ? [...STAGE_STATUSES] : [status];
-        const list = statuses.flatMap((s) => entity.listByStatus({ status: s, for: role, limit })).slice(0, limit);
+        const list = statuses.flatMap((s) => entity.listByStatus({ status: s, for: role, limit })).slice(0, limit).map((s) => withReason(db, s));
         return Response.json(list);
       },
     },
@@ -1357,7 +1456,7 @@ export function createStageRuntime(
       auth: "read",
       handler: (_req, _cap, params) => {
         if (!STAGE_ID_RE.test(params.id)) return Response.json({ error: "invalid stage id" }, { status: 400 });
-        const snap = entity.load(params.id);
+        const snap = withReason(db, entity.load(params.id));
         return snap ? Response.json(snap) : Response.json({ error: "not found" }, { status: 404 });
       },
     },
@@ -1439,6 +1538,13 @@ export function createStageRuntime(
     // The launch queue lives in memory. A launch the hub had sent, or queued, before a restart is gone, so each stage
     // still `launching` counts as a launch with no ack (attempt 1 -> retrying, attempt 2 -> failed; 5.3 relaunches).
     start: (cap) => {
+      // G4: the open stages of a cancelled ticket are cancelled first, so the sweep below skips them (no retry, no failure).
+      const ofCancelled = db
+        .query<{ id: string }, []>(
+          "SELECT s.id FROM stage s JOIN tickets t ON t.id = s.ticket_id WHERE t.status = 'cancelled' AND s.status IN ('queued', 'launching', 'running', 'retrying') ORDER BY s.rowid",
+        )
+        .all();
+      for (const { id } of ofCancelled) cancelStage(id, "ticket cancelled", cap, true);
       const stuck = db.query<{ id: string }, []>("SELECT id FROM stage WHERE status = 'launching' ORDER BY rowid").all();
       for (const { id } of stuck) {
         try {
@@ -1549,7 +1655,7 @@ export function createStageRuntime(
     completedStage(from, context) {
       const id = context && typeof context === "object" && !Array.isArray(context) ? (context as Record<string, unknown>).stage_id : undefined;
       if (typeof id !== "string") return null;
-      const row = db.query<{ id: string; status: string }, [string]>("SELECT id, status FROM stage WHERE id = ? AND status IN ('passed', 'failed')").get(id);
+      const row = db.query<{ id: string; status: string }, [string]>("SELECT id, status FROM stage WHERE id = ? AND status IN ('passed', 'failed', 'cancelled')").get(id);
       if (!row) return null;
       const own = db.query<{ id: string }, [string]>("SELECT id FROM stage WHERE session = ? AND status = 'running' LIMIT 1").get(from);
       return own
@@ -1693,6 +1799,9 @@ export function createStageRuntime(
         closing.delete(from);
         console.error(`[stage] recording the result of ${stage.id} failed:`, e);
       }
+    },
+    onTicketCancelled(ticketId, cap) {
+      cancelStagesOfTicket(ticketId, cap);
     },
     onTicketChanged(ticketId, cap) {
       try {

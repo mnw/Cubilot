@@ -1,0 +1,641 @@
+# Status audit (item 3)
+
+Command: `rg -n "queued|launching|running|retrying|passed|failed|cancelled" hub ui` (run on this branch). One line per match: `file:line: reason`. Test names refer to `tests/integration/stage-cancelled.test.ts` unless a path is given.
+
+Match count: 635
+
+- hub/channel/pi-extension.ts:33: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/pi-extension.ts:87: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/pi-extension.ts:103: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/pi-extension.ts:134: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/pi-extension.ts:135: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/pi-extension.ts:138: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/pi-extension.ts:139: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/pi-extension.ts:140: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/host.ts:24: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/host.ts:37: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/tools.ts:63: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/tools.ts:64: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/tools.ts:68: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/tools.ts:69: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/tools.ts:71: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/tools.ts:289: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/tools.ts:387: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/tools.ts:401: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/tools.ts:428: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/tools.ts:444: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/tools.ts:449: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/tools.ts:514: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/tools.ts:580: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/core.ts:9: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/core.ts:48: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/core.ts:93: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/core.ts:99: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/core.ts:140: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/core.ts:148: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/core.ts:253: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/core.ts:323: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/core.ts:327: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/core.ts:332: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/core.ts:418: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/core.ts:425: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/core.ts:481: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/core.ts:500: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/core.ts:518: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/node-host.ts:94: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/node-host.ts:102: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/hub-client.ts:112: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/hub-client.ts:118: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/hub-client.ts:126: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/register.ts:8: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/register.ts:143: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/register.ts:146: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/register.ts:173: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/register.ts:233: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/register.ts:237: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/register.ts:255: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/register.ts:258: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/register.ts:270: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/register.ts:347: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/register.ts:352: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/register.ts:360: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/register.ts:452: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/tests/register.test.ts:190: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/tests/register.test.ts:500: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/tests/register.test.ts:501: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/tests/register.test.ts:504: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/tests/register.test.ts:592: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/tests/register.test.ts:602: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/tests/register.test.ts:679: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/tests/register.test.ts:745: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/tests/register.test.ts:750: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/tests/register.test.ts:754: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/tests/register.test.ts:757: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/tests/register.test.ts:796: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/tests/register.test.ts:797: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/tests/register.test.ts:845: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/channel/claude-mod/tests/register.test.ts:868: no change: HTTP, log, bridge, queue or error text; not a stage status
+- ui/styles/kinds.css:102: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/styles/kinds.css:118: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/styles/kinds.css:766: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/styles/kinds.css:770: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/styles/kinds.css:889: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- hub/channel/claude-mod/types/index.d.ts:6: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/hub.ts:158: no change: not a stage status (message, roster, composer, theme or generic text)
+- hub/features/streams.ts:93: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/transcript.ts:186: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:8: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:39: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:73: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:76: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:82: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:88: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:122: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:125: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:132: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:144: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:152: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:161: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:170: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:187: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:188: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:195: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:196: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:198: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:200: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:204: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:215: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:221: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory.ts:226: no change: HTTP, log, bridge, queue or error text; not a stage status
+- ui/styles/terminal.css:185: no change: not a stage status (message, roster, composer, theme or generic text)
+- hub/features/factory-skills.ts:259: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory-skills.ts:265: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/features/factory-skills.ts:271: no change: HTTP, log, bridge, queue or error text; not a stage status
+- ui/main.js:24: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/main.js:40: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/main.js:89: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/main.js:107: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/main.js:111: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/main.js:115: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/main.js:137: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/main.js:158: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/main.js:184: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/main.js:200: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/main.js:216: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/main.js:232: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/main.js:284: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/main.js:289: no change: not a stage status (message, roster, composer, theme or generic text)
+- hub/kinds/ticket.ts:1: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:2: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:31: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:45: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:46: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:48: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:70: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:295: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:303: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:356: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:360: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:362: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:384: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:395: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:422: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:454: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:480: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:482: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:503: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:504: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:505: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:515: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:569: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:593: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:595: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:620: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:628: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:643: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:659: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:660: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:662: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:663: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:664: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:665: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:669: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:670: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:673: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:679: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:685: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:686: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:688: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:711: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:712: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:719: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:722: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:750: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:762: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:838: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:879: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:880: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:985: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:987: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:994: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:997: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:998: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:1001: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:1002: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:1100: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:1101: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:1222: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:1345: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:1346: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:1347: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:1348: changed: calls onTicketCancelled after the ticket.cancelled commit; tests (a)-(c2), (f)
+- hub/kinds/ticket.ts:1456: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:1479: no change: comment; liveStageOf reads any stage status, a cancelled stage keeps its session until the close
+- hub/kinds/ticket.ts:1505: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:1509: no change: ticket status or comment on a ticket, not a stage status
+- hub/kinds/ticket.ts:1535: no change: ticket status or comment on a ticket, not a stage status
+- ui/terminal/pty.js:71: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal/pty.js:76: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/index.html:204: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/index.html:245: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- hub/kinds/stage.ts:2: no change: comment text, no behaviour
+- hub/kinds/stage.ts:31: changed: cancelled added to the status set or move table; tests (a)-(c2), (f), (i)
+- hub/kinds/stage.ts:44: no change: comment text, no behaviour
+- hub/kinds/stage.ts:50: changed: cancelled added to the status set or move table; tests (a)-(c2), (f), (i)
+- hub/kinds/stage.ts:70: changed: cancelled added to the status set or move table; tests (a)-(c2), (f), (i)
+- hub/kinds/stage.ts:109: no change: comment text, no behaviour
+- hub/kinds/stage.ts:113: changed: reason read from the last stage.cancelled event; tests (a), (c)
+- hub/kinds/stage.ts:115: changed: reason read from the last stage.cancelled event; tests (a), (c)
+- hub/kinds/stage.ts:126: no change: comment text, no behaviour
+- hub/kinds/stage.ts:127: no change: comment text, no behaviour
+- hub/kinds/stage.ts:129: changed: cancelled added to the status set or move table; tests (a)-(c2), (f), (i)
+- hub/kinds/stage.ts:130: changed: cancelled added to the status set or move table; tests (a)-(c2), (f), (i)
+- hub/kinds/stage.ts:131: changed: cancelled added to the status set or move table; tests (a)-(c2), (f), (i)
+- hub/kinds/stage.ts:132: changed: cancelled added to the status set or move table; tests (a)-(c2), (f), (i)
+- hub/kinds/stage.ts:133: changed: cancelled added to the status set or move table; tests (a)-(c2), (f), (i)
+- hub/kinds/stage.ts:134: changed: cancelled added to the status set or move table; tests (a)-(c2), (f), (i)
+- hub/kinds/stage.ts:135: changed: cancelled added to the status set or move table; tests (a)-(c2), (f), (i)
+- hub/kinds/stage.ts:138: changed: cancelled added to the status set or move table; tests (a)-(c2), (f), (i)
+- hub/kinds/stage.ts:149: no change: comment text, no behaviour
+- hub/kinds/stage.ts:152: no change: comment text, no behaviour
+- hub/kinds/stage.ts:154: no change: comment text, no behaviour
+- hub/kinds/stage.ts:186: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:195: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:197: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:210: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:211: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:213: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:217: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:220: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:222: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:229: changed: cancelled added to the status set or move table; tests (a)-(c2), (f), (i)
+- hub/kinds/stage.ts:238: no change: comment text, no behaviour
+- hub/kinds/stage.ts:288: no change: comment text, no behaviour
+- hub/kinds/stage.ts:289: no change: comment text, no behaviour
+- hub/kinds/stage.ts:290: no change: only passed or failed re-evaluates the ticket; a cancelled ticket must not restart a stage; tests (a)-(f)
+- hub/kinds/stage.ts:291: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:302: no change: comment text, no behaviour
+- hub/kinds/stage.ts:329: no change: comment text, no behaviour
+- hub/kinds/stage.ts:341: no change: comment text, no behaviour
+- hub/kinds/stage.ts:344: no change: comment text, no behaviour
+- hub/kinds/stage.ts:345: no change: comment text, no behaviour
+- hub/kinds/stage.ts:348: no change: comment text, no behaviour
+- hub/kinds/stage.ts:351: no change: comment text, no behaviour
+- hub/kinds/stage.ts:353: no change: comment text, no behaviour
+- hub/kinds/stage.ts:356: no change: comment text, no behaviour
+- hub/kinds/stage.ts:358: no change: comment text, no behaviour
+- hub/kinds/stage.ts:361: no change: comment text, no behaviour
+- hub/kinds/stage.ts:366: no change: comment text, no behaviour
+- hub/kinds/stage.ts:393: no change: comment text, no behaviour
+- hub/kinds/stage.ts:394: no change: comment text, no behaviour
+- hub/kinds/stage.ts:395: no change: comment text, no behaviour
+- hub/kinds/stage.ts:399: no change: comment text, no behaviour
+- hub/kinds/stage.ts:403: no change: comment text, no behaviour
+- hub/kinds/stage.ts:412: no change: comment text, no behaviour
+- hub/kinds/stage.ts:413: no change: comment text, no behaviour
+- hub/kinds/stage.ts:419: no change: comment text, no behaviour
+- hub/kinds/stage.ts:420: no change: comment text, no behaviour
+- hub/kinds/stage.ts:421: no change: comment text, no behaviour
+- hub/kinds/stage.ts:422: no change: comment text, no behaviour
+- hub/kinds/stage.ts:423: no change: comment text, no behaviour
+- hub/kinds/stage.ts:425: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:427: no change: comment text, no behaviour
+- hub/kinds/stage.ts:428: no change: comment text, no behaviour
+- hub/kinds/stage.ts:451: no change: comment text, no behaviour
+- hub/kinds/stage.ts:454: no change: writes a status other than cancelled (launch error, no-folder, spec FAIL, PASS); existing stage tests; cancelled never enters this path (expectNoFailureTrail)
+- hub/kinds/stage.ts:455: no change: writes a status other than cancelled (launch error, no-folder, spec FAIL, PASS); existing stage tests; cancelled never enters this path (expectNoFailureTrail)
+- hub/kinds/stage.ts:456: no change: writes a status other than cancelled (launch error, no-folder, spec FAIL, PASS); existing stage tests; cancelled never enters this path (expectNoFailureTrail)
+- hub/kinds/stage.ts:470: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:499: no change: comment text, no behaviour
+- hub/kinds/stage.ts:560: no change: comment text, no behaviour
+- hub/kinds/stage.ts:566: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:567: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:573: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:580: no change: comment text, no behaviour
+- hub/kinds/stage.ts:607: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:632: no change: comment text, no behaviour
+- hub/kinds/stage.ts:634: no change: comment text, no behaviour
+- hub/kinds/stage.ts:636: no change: comment text, no behaviour
+- hub/kinds/stage.ts:647: no change: comment text, no behaviour
+- hub/kinds/stage.ts:650: no change: comment text, no behaviour
+- hub/kinds/stage.ts:651: no change: comment text, no behaviour
+- hub/kinds/stage.ts:667: no change: comment text, no behaviour
+- hub/kinds/stage.ts:670: no change: comment text, no behaviour
+- hub/kinds/stage.ts:671: no change: comment text, no behaviour
+- hub/kinds/stage.ts:674: changed: cancelled added to the worktree-at-close rule; test (g)
+- hub/kinds/stage.ts:676: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:685: changed: G4 cancel path; tests (a), (b), (b1), (b2), (b3), (c), (c2), (f)
+- hub/kinds/stage.ts:686: changed: G4 cancel path; tests (a), (b), (b1), (b2), (b3), (c), (c2), (f)
+- hub/kinds/stage.ts:687: no change: comment text, no behaviour
+- hub/kinds/stage.ts:688: no change: comment text, no behaviour
+- hub/kinds/stage.ts:698: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:713: no change: comment text, no behaviour
+- hub/kinds/stage.ts:728: no change: comment text, no behaviour
+- hub/kinds/stage.ts:742: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:767: no change: comment text, no behaviour
+- hub/kinds/stage.ts:769: no change: comment text, no behaviour
+- hub/kinds/stage.ts:774: no change: comment text, no behaviour
+- hub/kinds/stage.ts:776: no change: comment text, no behaviour
+- hub/kinds/stage.ts:779: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:788: no change: comment text, no behaviour
+- hub/kinds/stage.ts:790: no change: comment text, no behaviour
+- hub/kinds/stage.ts:791: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:801: no change: onFinalFailure fires on failed only; a cancelled stage never reaches it; expectNoFailureTrail in tests (a)-(f)
+- hub/kinds/stage.ts:808: no change: comment text, no behaviour
+- hub/kinds/stage.ts:809: no change: comment text, no behaviour
+- hub/kinds/stage.ts:814: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:817: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:822: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:827: no change: comment text, no behaviour
+- hub/kinds/stage.ts:834: changed: G4 cancel path; tests (a), (b), (b1), (b2), (b3), (c), (c2), (f)
+- hub/kinds/stage.ts:837: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:840: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:845: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:846: no change: comment text, no behaviour
+- hub/kinds/stage.ts:847: no change: comment text, no behaviour
+- hub/kinds/stage.ts:848: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:849: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:852: changed: G4 cancel path; tests (a), (b), (b1), (b2), (b3), (c), (c2), (f)
+- hub/kinds/stage.ts:856: changed: G4 cancel path; tests (a), (b), (b1), (b2), (b3), (c), (c2), (f)
+- hub/kinds/stage.ts:862: changed: G4 cancel path; tests (a), (b), (b1), (b2), (b3), (c), (c2), (f)
+- hub/kinds/stage.ts:868: changed: G4 cancel path; tests (a), (b), (b1), (b2), (b3), (c), (c2), (f)
+- hub/kinds/stage.ts:870: changed: G4 cancel path; tests (a), (b), (b1), (b2), (b3), (c), (c2), (f)
+- hub/kinds/stage.ts:874: no change: comment text, no behaviour
+- hub/kinds/stage.ts:883: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:884: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:885: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:886: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:889: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:890: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:891: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:897: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:983: no change: comment text, no behaviour
+- hub/kinds/stage.ts:989: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:995: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1004: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1014: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1027: changed: cancelled counts as ended in the role-handoff rule; test (a) (no relaunch)
+- hub/kinds/stage.ts:1033: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1037: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1055: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1070: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1072: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1080: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1082: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1085: no change: only passed or failed re-evaluates the ticket; a cancelled ticket must not restart a stage; tests (a)-(f)
+- hub/kinds/stage.ts:1087: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1091: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1096: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1097: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1098: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1103: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1106: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1109: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1116: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1123: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1131: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1135: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1145: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1157: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1168: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1169: no change: writes a status other than cancelled (launch error, no-folder, spec FAIL, PASS); existing stage tests; cancelled never enters this path (expectNoFailureTrail)
+- hub/kinds/stage.ts:1170: no change: writes a status other than cancelled (launch error, no-folder, spec FAIL, PASS); existing stage tests; cancelled never enters this path (expectNoFailureTrail)
+- hub/kinds/stage.ts:1190: no change: writes a status other than cancelled (launch error, no-folder, spec FAIL, PASS); existing stage tests; cancelled never enters this path (expectNoFailureTrail)
+- hub/kinds/stage.ts:1195: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1215: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1280: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1292: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1297: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1298: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1302: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1304: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1308: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1318: no change: writes a status other than cancelled (launch error, no-folder, spec FAIL, PASS); existing stage tests; cancelled never enters this path (expectNoFailureTrail)
+- hub/kinds/stage.ts:1322: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1325: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1335: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1338: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1342: no change: writes a status other than cancelled (launch error, no-folder, spec FAIL, PASS); existing stage tests; cancelled never enters this path (expectNoFailureTrail)
+- hub/kinds/stage.ts:1350: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1354: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1355: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1359: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1363: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1366: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1370: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1375: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1381: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1413: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1443: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1538: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1539: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1541: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1544: changed: G4 cancel path; tests (a), (b), (b1), (b2), (b3), (c), (c2), (f)
+- hub/kinds/stage.ts:1547: changed: G4 cancel path; tests (a), (b), (b1), (b2), (b3), (c), (c2), (f)
+- hub/kinds/stage.ts:1548: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1557: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1558: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1560: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1562: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1563: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1567: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1571: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1573: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1612: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1622: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1623: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1627: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1650: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1658: changed: cancelled refused as a completed stage; test (i)
+- hub/kinds/stage.ts:1660: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1662: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1668: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1673: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1749: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1760: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1764: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1770: no change: writes a status other than cancelled (launch error, no-folder, spec FAIL, PASS); existing stage tests; cancelled never enters this path (expectNoFailureTrail)
+- hub/kinds/stage.ts:1780: no change: writes a status other than cancelled (launch error, no-folder, spec FAIL, PASS); existing stage tests; cancelled never enters this path (expectNoFailureTrail)
+- hub/kinds/stage.ts:1800: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1811: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1817: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1824: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1828: no change: comment text, no behaviour
+- hub/kinds/stage.ts:1831: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/stage.ts:1839: no change: live-work or non-cancelled status check; a cancelled stage is not live and never matches; covered by expectNoFailureTrail and no-launch checks in tests (a)-(f)
+- hub/kinds/index.ts:22: no change: onFinalFailure for failed stages only; a cancelled stage never reaches it; expectNoFailureTrail
+- hub/kinds/index.ts:27: no change: onFinalFailure for failed stages only; a cancelled stage never reaches it; expectNoFailureTrail
+- hub/kinds/index.ts:33: no change: onFinalFailure for failed stages only; a cancelled stage never reaches it; expectNoFailureTrail
+- hub/core/agents.ts:174: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/core/agents.ts:175: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/core/agents.ts:219: no change: HTTP, log, bridge, queue or error text; not a stage status
+- ui/terminal/role-memory.js:21: no change: terminal tab or spawn state (launching, running), not a stage status
+- hub/core/dispatcher.ts:21: no change: HTTP, log, bridge, queue or error text; not a stage status
+- ui/terminal/grid-view.js:4: no change: terminal tab or spawn state (launching, running), not a stage status
+- hub/core/attachments.ts:98: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/core/attachments.ts:99: no change: HTTP, log, bridge, queue or error text; not a stage status
+- ui/terminal/factory-room.js:56: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:1: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:251: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:252: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:260: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:277: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:590: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:715: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:716: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:717: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:773: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:777: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:790: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:815: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:864: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:870: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:878: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:893: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:939: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:969: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:987: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:1194: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:1211: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:1212: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:1227: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:1229: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:1231: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:1247: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:1254: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:1280: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:1298: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:1362: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:1590: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:1686: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:1735: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:1759: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:1762: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:1773: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:1777: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal.js:1778: no change: terminal tab or spawn state (launching, running), not a stage status
+- hub/core/launch-queue.ts:41: no change: launch request and stage-change failure text; the cancelled-stage path is LaunchQueue.drop, tests (b3)
+- hub/core/launch-queue.ts:115: no change: launch request and stage-change failure text; the cancelled-stage path is LaunchQueue.drop, tests (b3)
+- hub/core/launch-queue.ts:116: no change: launch request and stage-change failure text; the cancelled-stage path is LaunchQueue.drop, tests (b3)
+- hub/core/launch-queue.ts:185: no change: launch request and stage-change failure text; the cancelled-stage path is LaunchQueue.drop, tests (b3)
+- hub/core/launch-queue.ts:186: no change: launch request and stage-change failure text; the cancelled-stage path is LaunchQueue.drop, tests (b3)
+- hub/core/launch-queue.ts:192: no change: launch request and stage-change failure text; the cancelled-stage path is LaunchQueue.drop, tests (b3)
+- hub/core/launch-queue.ts:193: no change: launch request and stage-change failure text; the cancelled-stage path is LaunchQueue.drop, tests (b3)
+- hub/core/launch-queue.ts:200: no change: launch request and stage-change failure text; the cancelled-stage path is LaunchQueue.drop, tests (b3)
+- hub/kinds/handoff.ts:1: no change: handoff status or comment, not a stage status
+- hub/kinds/handoff.ts:29: no change: handoff status or comment, not a stage status
+- hub/kinds/handoff.ts:34: no change: handoff status or comment, not a stage status
+- hub/kinds/handoff.ts:39: no change: handoff status or comment, not a stage status
+- hub/kinds/handoff.ts:55: no change: handoff status or comment, not a stage status
+- hub/kinds/handoff.ts:73: no change: handoff status or comment, not a stage status
+- hub/kinds/handoff.ts:103: no change: handoff status or comment, not a stage status
+- hub/kinds/handoff.ts:127: no change: handoff status or comment, not a stage status
+- hub/kinds/handoff.ts:148: no change: handoff status or comment, not a stage status
+- hub/kinds/handoff.ts:208: no change: handoff status or comment, not a stage status
+- hub/kinds/handoff.ts:295: no change: handoff status or comment, not a stage status
+- hub/kinds/handoff.ts:303: no change: handoff status or comment, not a stage status
+- hub/kinds/handoff.ts:305: no change: handoff status or comment, not a stage status
+- hub/kinds/handoff.ts:308: no change: handoff status or comment, not a stage status
+- hub/kinds/handoff.ts:363: no change: handoff status or comment, not a stage status
+- hub/kinds/handoff.ts:438: no change: handoff status or comment, not a stage status
+- hub/kinds/handoff.ts:545: no change in this line: completedStage (stage.ts:1658) now includes cancelled; test (i)
+- hub/kinds/handoff.ts:752: no change: handoff status or comment, not a stage status
+- hub/core/ledger.ts:42: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/core/ledger.ts:59: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/core/ledger.ts:66: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/core/ledger.ts:115: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/core/ledger.ts:119: no change: HTTP, log, bridge, queue or error text; not a stage status
+- ui/core/http.js:49: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/core/http.js:59: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/core/http.js:60: no change: not a stage status (message, roster, composer, theme or generic text)
+- hub/core/room-summariser.ts:16: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/core/room-summariser.ts:109: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/core/room-summariser.ts:154: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/core/room-summariser.ts:200: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/core/room-summariser.ts:246: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/core/room-hydrator.ts:63: no change: HTTP, log, bridge, queue or error text; not a stage status
+- ui/kinds/stage.js:2: no change: comment text
+- ui/kinds/stage.js:3: no change: comment text
+- ui/kinds/stage.js:23: changed or checked: finished-sessions list shows cancelled with reason; tests/unit/finished-sessions.test.ts
+- ui/kinds/stage.js:33: changed or checked: finished-sessions list shows cancelled with reason; tests/unit/finished-sessions.test.ts
+- ui/kinds/stage.js:36: changed or checked: finished-sessions list shows cancelled with reason; tests/unit/finished-sessions.test.ts
+- ui/kinds/stage.js:101: changed or checked: finished-sessions list shows cancelled with reason; tests/unit/finished-sessions.test.ts
+- ui/kinds/stage.js:102: changed or checked: finished-sessions list shows cancelled with reason; tests/unit/finished-sessions.test.ts
+- ui/kinds/stage.js:103: changed or checked: finished-sessions list shows cancelled with reason; tests/unit/finished-sessions.test.ts
+- ui/kinds/stage.js:106: changed or checked: finished-sessions list shows cancelled with reason; tests/unit/finished-sessions.test.ts
+- ui/kinds/stage.js:107: changed or checked: finished-sessions list shows cancelled with reason; tests/unit/finished-sessions.test.ts
+- ui/kinds/stage.js:114: changed or checked: finished-sessions list shows cancelled with reason; tests/unit/finished-sessions.test.ts
+- ui/kinds/stage.js:116: changed or checked: finished-sessions list shows cancelled with reason; tests/unit/finished-sessions.test.ts
+- hub/core/types.ts:12: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/core/types.ts:129: no change: HTTP, log, bridge, queue or error text; not a stage status
+- ui/features/messages.js:82: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/terminal/spawn-form.js:50: no change: terminal tab or spawn state (launching, running), not a stage status
+- ui/terminal/spawn-form.js:60: no change: terminal tab or spawn state (launching, running), not a stage status
+- hub/core/briefing.ts:87: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/core/worktrees.ts:65: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/core/worktrees.ts:102: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/core/summariser/claude.ts:109: no change: HTTP, log, bridge, queue or error text; not a stage status
+- ui/kinds/kind-renderer.js:53: no change: not a stage status (message, roster, composer, theme or generic text)
+- hub/core/fanout.ts:17: no change: HTTP, log, bridge, queue or error text; not a stage status
+- hub/core/fanout.ts:49: no change: HTTP, log, bridge, queue or error text; not a stage status
+- ui/kinds/handoff.js:73: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/handoff.js:74: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/handoff.js:75: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/handoff.js:76: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/handoff.js:142: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/features/attachments.js:33: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/kinds/permission.js:128: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/permission.js:144: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- hub/core/summariser/ollama.ts:72: no change: HTTP, log, bridge, queue or error text; not a stage status
+- ui/features/composer.js:174: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/features/composer.js:212: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/features/composer.js:213: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/features/slash-command.js:256: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/features/slash-command.js:648: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/features/plan-approval.js:1: no change: spec FAIL and passed text; specFailState reads verdict, a cancelled stage has none
+- ui/features/plan-approval.js:5: no change: spec FAIL and passed text; specFailState reads verdict, a cancelled stage has none
+- ui/features/plan-approval.js:25: no change: spec FAIL and passed text; specFailState reads verdict, a cancelled stage has none
+- ui/features/plan-approval.js:91: no change: spec FAIL and passed text; specFailState reads verdict, a cancelled stage has none
+- ui/features/plan-approval.js:101: no change: spec FAIL and passed text; specFailState reads verdict, a cancelled stage has none
+- ui/features/plan-approval.js:216: no change: spec FAIL and passed text; specFailState reads verdict, a cancelled stage has none
+- ui/features/plan-approval.js:233: no change: spec FAIL and passed text; specFailState reads verdict, a cancelled stage has none
+- ui/features/plan-approval.js:236: no change: spec FAIL and passed text; specFailState reads verdict, a cancelled stage has none
+- ui/features/plan-approval.js:243: no change: spec FAIL and passed text; specFailState reads verdict, a cancelled stage has none
+- ui/features/mentions.js:25: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/kinds/ticket.js:16: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:26: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:56: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:57: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:60: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:80: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:145: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:223: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:233: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:235: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:267: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:271: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:272: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:273: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:389: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:393: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:397: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:400: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:406: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:407: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:420: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:423: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:427: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:437: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:464: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:533: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:538: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:542: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:545: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:550: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:551: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:559: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:563: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:573: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:664: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:675: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:685: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:719: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:743: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:750: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:751: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:754: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:800: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:811: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:812: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:828: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:841: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:973: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:1005: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:1019: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:1037: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:1102: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:1130: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:1257: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:1290: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:1331: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:1341: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:1344: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:1415: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:1635: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:1650: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:1763: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:1767: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:1848: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:1922: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/ticket.js:1925: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/kinds/interrupt.js:85: no change: ticket, handoff, interrupt or permission status or style, not a stage status
+- ui/features/room-persistence.js:103: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/features/room-persistence.js:122: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/features/room-persistence.js:141: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/features/room-persistence.js:166: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/features/nutshell.js:111: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/features/orchestrator-lead.js:2: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/features/rooms.js:164: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/features/theme.js:69: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/features/roster.js:38: no change: not a stage status (message, roster, composer, theme or generic text)
+- ui/features/roster.js:42: no change: not a stage status (message, roster, composer, theme or generic text)
