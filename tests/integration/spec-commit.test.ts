@@ -79,7 +79,7 @@ describe("spec stage commit", () => {
     open.push(await registerAgent(hub, launchesOnly()[0].session, { room: "sc" }));
     const pass = await postJson(hub, "/handoffs", {
       from: launchesOnly()[0].session, to: "Orchestrator", task: "result",
-      context: { stage_id: launchesOnly()[0].stage_id, review: "spec", request_id: "req-1", verdict: "PASS", findings: [], suggestions: [], questions_for_human: [] },
+      context: { notes: "n", stage_id: launchesOnly()[0].stage_id, review: "spec", request_id: "req-1", verdict: "PASS", findings: [], suggestions: [], questions_for_human: [] },
     });
     expect(pass.status, JSON.stringify(pass.json)).toBe(201);
     await endSession(launchesOnly()[0].stage_id, launchesOnly()[0].session);
@@ -107,7 +107,7 @@ describe("spec stage commit", () => {
     expect((await postJson(hub, `/launches/${second.id}/ack`, { result: "spawned" })).status).toBe(200);
     const pass = await postJson(hub, "/handoffs", {
       from: second.session, to: "Orchestrator", task: "result",
-      context: { stage_id: second.stage_id, review: "spec", request_id: "req-1", verdict: "PASS", findings: [], suggestions: [], questions_for_human: [] },
+      context: { notes: "n", stage_id: second.stage_id, review: "spec", request_id: "req-1", verdict: "PASS", findings: [], suggestions: [], questions_for_human: [] },
     });
     expect(pass.status, JSON.stringify(pass.json)).toBe(201);
     await endSession(second.stage_id, second.session);

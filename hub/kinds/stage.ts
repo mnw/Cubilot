@@ -25,7 +25,7 @@ import { LedgerConflict } from "../core/types";
 import { createLaunchQueue, type LaunchEnd, type LaunchQueue, type LaunchRequest } from "../core/launch-queue";
 import { roleHarness } from "../core/role-harness";
 import { roleModelFor } from "../core/role-models";
-import { metricsByRole, recordStageMetrics, type Launch } from "../core/stage-metrics";
+import { metricsByRole, recordStageMetrics, stagesMissingMetrics, type Launch } from "../core/stage-metrics";
 import { makeSSE } from "../core/sse";
 import { assignBySystemInTx, closeReviewedBySystemInTx, notifyHeldDrafts, queueBySystemInTx, type HeldDraft } from "./ticket";
 
@@ -350,6 +350,8 @@ export type StageHooks = {
   onTicketChanged(ticketId: string, cap: HubCapabilities): void;
   /** The ticket kind calls this after the commit of `ticket.cancelled`: every open stage of the ticket is cancelled (G4). It never throws. */
   onTicketCancelled(ticketId: string, cap: HubCapabilities): void;
+  /** G10: the ticket kind calls this after the commit of a move to draft or done: each queued stage of the ticket is cancelled. It never throws. */
+  onTicketParked(ticketId: string, to: "draft" | "done", cap: HubCapabilities): void;
   /**
    * The schema check of a result handoff (5.1; spec stages 3.1). A handoff from the session of a `running` stage is a result.
    * Returns null when `from` is no such session, else the list of errors (empty = valid). Errors also go to the same
@@ -379,6 +381,35 @@ export type StageHooks = {
 
 const VERDICTS = new Set(["PASS", "FAIL"]);
 const REVIEW_ROLES = new Set(["validator", "reviewer"]);
+const NOTES_WORD_LIMIT = 400;
+
+/** Error for `context.notes` of a stage result (context-pack 1.3): required, non-empty, at most 400 words. */
+export function notesError(notes: unknown): string | null {
+  if (typeof notes !== "string" || !notes.trim()) return "context.notes must be a non-empty string (target 300 words, limit 400)";
+  const words = notes.trim().split(/\s+/).length;
+  return words > NOTES_WORD_LIMIT ? `context.notes has ${words} words; the limit is ${NOTES_WORD_LIMIT}` : null;
+}
+
+export type EarlierNote = { source: "planning" | "spec" | "stage"; stage_id: string | null; role: string | null; notes: string };
+
+/** Earlier notes of a ticket (context-pack 1.4): the planning note, then spec-result notes through stage_scope, then stage result notes, each by stage created_seq. */
+export function earlierNotes(db: Database, ticketId: string): EarlierNote[] {
+  const out: EarlierNote[] = [];
+  const planning = db.query<{ n: string | null }, [string]>("SELECT planning_note AS n FROM tickets WHERE id = ?").get(ticketId)?.n;
+  if (planning) out.push({ source: "planning", stage_id: null, role: null, notes: planning });
+  const fromResults = (source: "spec" | "stage", sql: string) => {
+    for (const r of db.query<{ id: string; role: string; c: string | null }, [string]>(sql).all(ticketId)) {
+      let notes: unknown;
+      try { notes = r.c ? (JSON.parse(r.c) as { notes?: unknown }).notes : undefined; } catch { /* an unreadable result has no notes */ }
+      if (typeof notes === "string" && notes.trim()) out.push({ source, stage_id: r.id, role: r.role, notes });
+    }
+  };
+  // A stage result is the handoff its own session sent; a named-agent handoff that only quotes the stage_id is not one.
+  const join = `JOIN handoffs h ON json_extract(h.context_json, '$.stage_id') = s.id AND h.from_agent = s.session`;
+  fromResults("spec", `SELECT s.id, s.role, h.context_json AS c FROM stage s ${join} WHERE s.review = 'spec' AND s.id IN (SELECT stage_id FROM stage_scope WHERE ticket_id = ?) ORDER BY s.created_seq, h.rowid`);
+  fromResults("stage", `SELECT s.id, s.role, h.context_json AS c FROM stage s ${join} WHERE s.review IS NULL AND s.ticket_id = ? ORDER BY s.created_seq, h.rowid`);
+  return out;
+}
 
 /** The recipient name stored for a handoff to a role. validName() refuses ':', so no agent can ever have it. */
 export const ROLE_RECIPIENT_PREFIX = "role:";
@@ -646,6 +677,8 @@ export function createStageRuntime(
     claudeProjectsDir?: string;
     /** Replaces the metrics writer (tests only). */
     recordMetrics?: typeof recordStageMetrics;
+    /** Replaces the start repair's selection query (tests only). */
+    findMissingMetrics?: typeof stagesMissingMetrics;
   } = {},
 ): StageRuntime {
   const entity = createLedgerEntity({ decl: stageDecl, db });
@@ -895,6 +928,12 @@ export function createStageRuntime(
     for (const { id } of open) cancelStage(id, "ticket cancelled", cap, atStart);
   }
 
+  /** G10: cancels the queued stages of a ticket that is draft or done. Launching, running and retrying stages do not change. */
+  function cancelQueuedStagesOfTicket(ticketId: string, to: "draft" | "done", cap: HubCapabilities, atStart = false): void {
+    const queued = db.query<{ id: string }, [string]>("SELECT id FROM stage WHERE ticket_id = ? AND status = 'queued' ORDER BY rowid").all(ticketId);
+    for (const { id } of queued) cancelStage(id, `ticket moved to ${to}`, cap, atStart);
+  }
+
   function sweep(cap: HubCapabilities, now: number = Date.now()): void {
     // A passed stage whose turn-end report never came (5.3b): after the grace, queue its close anyway.
     for (const session of [...awaitingClose]) {
@@ -1057,7 +1096,7 @@ export function createStageRuntime(
     // The ticket's own role starts once: only while no stage of the ticket and that role exists. Its ready seq is the
     // newest ticket.queued event, else the ticket.created event of a ticket created as queued.
     if (t.role && isRole(t.role)) {
-      if (!stages.some((s) => s.role === t.role)) {
+      if (!stages.some((s) => s.role === t.role && s.status !== "cancelled")) {
         const q = db
           .query<{ seq: number | null }, [string]>("SELECT MAX(seq) AS seq FROM events WHERE entity_id = ? AND kind = 'ticket.queued'")
           .get(ticketId)!.seq;
@@ -1582,6 +1621,13 @@ export function createStageRuntime(
         )
         .all();
       for (const { id } of ofCancelled) cancelStage(id, "ticket cancelled", cap, true);
+      // G10: the queued stages of a draft or done ticket, the same way.
+      const ofParked = db
+        .query<{ id: string; status: string }, []>(
+          "SELECT s.id, t.status FROM stage s JOIN tickets t ON t.id = s.ticket_id WHERE t.status IN ('draft', 'done') AND s.status = 'queued' ORDER BY s.rowid",
+        )
+        .all();
+      for (const { id, status } of ofParked) cancelStage(id, `ticket moved to ${status}`, cap, true);
       const stuck = db.query<{ id: string }, []>("SELECT id FROM stage WHERE status = 'launching' ORDER BY rowid").all();
       for (const { id } of stuck) {
         try {
@@ -1613,6 +1659,29 @@ export function createStageRuntime(
         const [role, room] = w.split("\u0000");
         if (room) startWaiting(role, room, cap);
       }
+      // A hub exit between the commit of stage.passed/failed and the deferred metrics write lost that row: write it now, after start returns.
+      // The selection query and the writer both run in the deferred step. The same writer; it skips attempts that have a row or no
+      // launch metadata. A failure logs and changes nothing else.
+      const repair = new Promise<void>((resolve) =>
+        setImmediate(async () => {
+          let missing: Array<{ id: string; seq: number }> = [];
+          try {
+            missing = (opts.findMissingMetrics ?? stagesMissingMetrics)(db);
+          } catch (e) {
+            console.error(`[stage-metrics] finding the missing rows at start failed: ${(e as Error).message}`);
+          }
+          for (const m of missing) {
+            try {
+              await (opts.recordMetrics ?? recordStageMetrics)(db, m.id, m.seq, console.error, opts.claudeProjectsDir, true);
+            } catch (e) {
+              console.error(`[stage-metrics] ${m.id}: ${(e as Error).message}`);
+            }
+          }
+          resolve();
+        }),
+      );
+      pendingMetrics.add(repair);
+      void repair.then(() => pendingMetrics.delete(repair));
       sweepTimer = setInterval(() => sweep(cap), opts.sweepMs ?? 30_000);
       (sweepTimer as { unref?: () => void }).unref?.();
     },
@@ -1715,6 +1784,8 @@ export function createStageRuntime(
       const c = context && typeof context === "object" && !Array.isArray(context) ? (context as Record<string, unknown>) : null;
       if (!c) errors.push("context must be an object");
       else if (stage.review === "spec") {
+        const notes = notesError(c.notes);
+        if (notes) errors.push(notes);
         // The result goes to the Orchestrator of the room (spec-review-stage 4.1b); the error goes back to this session.
         if (to !== undefined) {
           const lead = leadOfRoom(roomOfStage(stage.id));
@@ -1745,6 +1816,8 @@ export function createStageRuntime(
         if (c.verdict === "PASS" && blocking) errors.push("a PASS must not have a blocking finding");
       } else {
         if (c.stage_id !== stage.id) errors.push(`context.stage_id must be ${stage.id}`);
+        const notes = notesError(c.notes);
+        if (notes) errors.push(notes);
         if (stage.role === "worker") {
           // G2: every worker result problem, a wrong ticket included, gets the one worker refusal.
           const refusal = checkWorkerResult(stage, c, to);
@@ -1827,6 +1900,8 @@ export function createStageRuntime(
           // A ticket that became done frees the tickets that wait for it.
           const done = closed as ReturnType<typeof closeReviewedBySystemInTx>;
           if (done?.snapshot.status === "done") {
+            // G10: after the commit of stage.passed and the ticket change; the stage of this PASS is passed, not queued.
+            cancelQueuedStagesOfTicket(done.snapshot.id, "done", cap);
             const waiting = db.query<{ ticket_id: string }, [string]>("SELECT ticket_id FROM ticket_blockers WHERE blocker_id = ? ORDER BY rowid").all(done.snapshot.id);
             for (const w of waiting) hooks.onTicketChanged(w.ticket_id, cap);
           }
@@ -1839,6 +1914,9 @@ export function createStageRuntime(
     },
     onTicketCancelled(ticketId, cap) {
       cancelStagesOfTicket(ticketId, cap);
+    },
+    onTicketParked(ticketId, to, cap) {
+      cancelQueuedStagesOfTicket(ticketId, to, cap);
     },
     onTicketChanged(ticketId, cap) {
       try {

@@ -165,9 +165,9 @@ export async function readUsage(file: string): Promise<Usage | null> {
 export type Launch = { role: string; harness: string; cwd: string | null; bytes: number };
 
 /** The `stage.launching` events of a stage, oldest first. The Nth is attempt N; its window ends at the (N+1)th. */
-export function launchEvents(db: Database, stageId: string): Array<{ at_ms: number; launch: Launch | null }> {
+export function launchEvents(db: Database, stageId: string): Array<{ seq: number; at_ms: number; launch: Launch | null }> {
   return db
-    .query<{ at_ms: number; payload_json: string }, [string]>("SELECT at_ms, payload_json FROM events WHERE entity_id = ? AND kind = 'stage.launching' ORDER BY seq")
+    .query<{ seq: number; at_ms: number; payload_json: string }, [string]>("SELECT seq, at_ms, payload_json FROM events WHERE entity_id = ? AND kind = 'stage.launching' ORDER BY seq")
     .all(stageId)
     .map((r) => {
       let l: any = null;
@@ -177,8 +177,22 @@ export function launchEvents(db: Database, stageId: string): Array<{ at_ms: numb
         // an unreadable payload is an event without launch metadata
       }
       const ok = l && typeof l.role === "string" && typeof l.harness === "string" && Number.isInteger(l.bytes) && l.bytes >= 0 && (l.cwd === null || typeof l.cwd === "string");
-      return { at_ms: r.at_ms, launch: ok ? (l as Launch) : null };
+      return { seq: r.seq, at_ms: r.at_ms, launch: ok ? (l as Launch) : null };
     });
+}
+
+/**
+ * The seq of the event that ends an attempt: the first stage.passed, stage.failed or stage.retrying after its launch event
+ * and before the next launch event. Null when there is none.
+ */
+function attemptEndSeq(db: Database, stageId: string, launchSeq: number, nextLaunchSeq: number | null): number | null {
+  return (
+    db
+      .query<{ n: number | null }, [string, number, number]>(
+        "SELECT MIN(seq) AS n FROM events WHERE entity_id = ? AND kind IN ('stage.passed', 'stage.failed', 'stage.retrying') AND seq > ? AND seq < ?",
+      )
+      .get(stageId, launchSeq, nextLaunchSeq ?? Number.MAX_SAFE_INTEGER)?.n ?? null
+  );
 }
 
 /**
@@ -191,9 +205,10 @@ export function launchEvents(db: Database, stageId: string): Array<{ at_ms: numb
 export async function recordStageMetrics(
   db: Database,
   stageId: string,
-  createdSeq: number,
+  createdSeq: number, // fallback only: each row stores the seq of its own attempt's terminal event
   log: (line: string) => void,
   projectsRoot = claudeProjectsDir(),
+  repair = false,
 ): Promise<void> {
   let events: ReturnType<typeof launchEvents>;
   try {
@@ -206,6 +221,8 @@ export async function recordStageMetrics(
     const ev = events[i]!;
     const attempt = i + 1;
     const l = ev.launch;
+    // Start repair: only the attempts that lack a row and have launch metadata; the others are left alone and not logged.
+    if (repair && (!l || db.query("SELECT 1 FROM stage_metrics WHERE stage_id = ? AND attempt = ?").get(stageId, attempt))) continue;
     if (!l) {
       log(`[stage-metrics] ${stageId} attempt ${attempt}: launched before stage metrics; no row`);
       continue;
@@ -229,17 +246,45 @@ export async function recordStageMetrics(
       }
     }
     const bytes = l.bytes;
+    // created_seq: the seq of this attempt's own terminal event. `createdSeq` is the fallback for a ledger without one.
+    let endSeq = createdSeq;
+    try {
+      endSeq = attemptEndSeq(db, stageId, ev.seq, events[i + 1]?.seq ?? null) ?? createdSeq;
+    } catch {
+      // keep the fallback; the insert below reports a failing ledger
+    }
     try {
       db.run(
         `INSERT OR IGNORE INTO stage_metrics (stage_id, attempt, role, first_message_bytes, first_message_tokens_est, prompt_tokens_first, cache_read_tokens, tokens_before_action, source, created_seq)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [stageId, attempt, l.role, bytes, tokensEst(bytes), usage?.prompt_tokens_first ?? null, usage?.cache_read_tokens ?? null, usage?.tokens_before_action ?? null, usage ? "claude" : "none", createdSeq],
+        [stageId, attempt, l.role, bytes, tokensEst(bytes), usage?.prompt_tokens_first ?? null, usage?.cache_read_tokens ?? null, usage?.tokens_before_action ?? null, usage ? "claude" : "none", endSeq],
       );
       if (why) log(`[stage-metrics] ${stageId} attempt ${attempt}: ${why}; stored as source none`);
     } catch (e) {
       log(`[stage-metrics] ${stageId} attempt ${attempt}: writing the row failed: ${(e as Error).message}`);
     }
   }
+}
+
+/**
+ * Ended stages (passed or failed) with at least one attempt that has launch metadata and no stage_metrics row, with the seq of
+ * their last terminal event (what the deferred write stores as created_seq). Attempt N is the Nth `stage.launching` event.
+ */
+export function stagesMissingMetrics(db: Database): Array<{ id: string; seq: number }> {
+  return db
+    .query<{ id: string; seq: number }, []>(
+      `SELECT s.id AS id, (SELECT MAX(t.seq) FROM events t WHERE t.entity_id = s.id AND t.kind IN ('stage.passed', 'stage.failed')) AS seq
+       FROM stage s
+       WHERE s.status IN ('passed', 'failed')
+         AND EXISTS (
+           SELECT 1 FROM (SELECT payload_json, ROW_NUMBER() OVER (PARTITION BY entity_id ORDER BY seq) AS attempt
+                          FROM events WHERE entity_id = s.id AND kind = 'stage.launching') e
+           WHERE json_extract(e.payload_json, '$.launch') IS NOT NULL
+             AND NOT EXISTS (SELECT 1 FROM stage_metrics m WHERE m.stage_id = s.id AND m.attempt = e.attempt))
+       ORDER BY s.rowid`,
+    )
+    .all()
+    .filter((r) => r.seq != null);
 }
 
 /** The stored rows of a room, grouped by role. `roomSql` selects the room of stage alias `s`. */

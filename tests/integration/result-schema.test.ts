@@ -42,12 +42,12 @@ describe("result handoff schema", () => {
   test("an invalid verdict is refused with the errors; the stage stays running; no handoff is recorded", async () => {
     const before = await handoffCount();
     for (const context of [
-      { stage_id: stageId, ticket_id: ticketId, verdict: "pass", findings: [] },
-      { stage_id: stageId, ticket_id: ticketId, findings: [] },
-      { stage_id: stageId, ticket_id: ticketId, verdict: "FAIL" },
-      { stage_id: stageId, ticket_id: ticketId, verdict: "FAIL", findings: [{ text: "x" }] },
-      { stage_id: "s_0000000000000000", ticket_id: ticketId, verdict: "PASS", findings: [] },
-      { stage_id: stageId, ticket_id: "t_0000000000000000", verdict: "PASS", findings: [] },
+      { notes: "n", stage_id: stageId, ticket_id: ticketId, verdict: "pass", findings: [] },
+      { notes: "n", stage_id: stageId, ticket_id: ticketId, findings: [] },
+      { notes: "n", stage_id: stageId, ticket_id: ticketId, verdict: "FAIL" },
+      { notes: "n", stage_id: stageId, ticket_id: ticketId, verdict: "FAIL", findings: [{ text: "x" }] },
+      { notes: "n", stage_id: "s_0000000000000000", ticket_id: ticketId, verdict: "PASS", findings: [] },
+      { notes: "n", stage_id: stageId, ticket_id: "t_0000000000000000", verdict: "PASS", findings: [] },
       null,
     ]) {
       const r = await send(context);
@@ -63,7 +63,7 @@ describe("result handoff schema", () => {
     const seen: any[] = [];
     void (async () => { try { for await (const e of sse.events) seen.push(e); } catch { /* closed */ } })();
     await new Promise((r) => setTimeout(r, 150));
-    await send({ stage_id: stageId, ticket_id: ticketId, verdict: "maybe", findings: [] });
+    await send({ notes: "n", stage_id: stageId, ticket_id: ticketId, verdict: "maybe", findings: [] });
     await new Promise((r) => setTimeout(r, 300));
     sse.close();
     const rej = seen.find((e) => e.kind === "stage.rejected");
@@ -73,7 +73,7 @@ describe("result handoff schema", () => {
 
   test("a valid result is recorded", async () => {
     const before = await handoffCount();
-    const r = await send({ stage_id: stageId, ticket_id: ticketId, verdict: "PASS", findings: [{ ticket_id: ticketId, text: "ok" }] });
+    const r = await send({ notes: "n", stage_id: stageId, ticket_id: ticketId, verdict: "PASS", findings: [{ ticket_id: ticketId, text: "ok" }] });
     expect(r.status).toBe(201);
     expect(await handoffCount()).toBe(before + 1);
   });

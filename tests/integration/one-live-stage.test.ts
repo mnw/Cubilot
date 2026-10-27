@@ -109,13 +109,13 @@ describe("one live stage per ticket", () => {
   };
   /** Ends a tester or writer stage with a result to a named agent (not to_role). */
   const finish = async (stage: Stage, session: string, h: HubHandle = hub, to = "ols-alice") => {
-    const r = await postJson(h, "/handoffs", { from: session, to, task: "result", context: { stage_id: stage.id, ticket_id: stage.ticket_id } });
+    const r = await postJson(h, "/handoffs", { from: session, to, task: "result", context: { notes: "n", stage_id: stage.id, ticket_id: stage.ticket_id } });
     expect(r.status).toBe(201);
   };
   const finishReview = async (stage: Stage, session: string, verdict: "PASS" | "FAIL") => {
     const r = await postJson(hub, "/handoffs", {
       from: session, to: "ols-alice", task: "result",
-      context: { stage_id: stage.id, ticket_id: stage.ticket_id, verdict, findings: [], suggestions: [] },
+      context: { notes: "n", stage_id: stage.id, ticket_id: stage.ticket_id, verdict, findings: [], suggestions: [] },
     });
     expect(r.status).toBe(201);
   };
@@ -160,7 +160,7 @@ describe("one live stage per ticket", () => {
       expect((await roleHandoff(t, "worker")).status).toBe(201); // recorded while the worker stage is live: spent by it
       if (end === "passed") {
         // the worker result is the tester handoff
-        const r = await postJson(hub, "/handoffs", { from: session, to_role: "tester", task: "result", context: { stage_id: worker.id, ticket_id: t, commit: newCommit(t) } });
+        const r = await postJson(hub, "/handoffs", { from: session, to_role: "tester", task: "result", context: { notes: "n", stage_id: worker.id, ticket_id: t, commit: newCommit(t) } });
         expect(r.status).toBe(201);
       } else {
         expect((await roleHandoff(t, "tester")).status).toBe(201); // recorded while the worker stage is live

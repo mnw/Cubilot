@@ -39,8 +39,8 @@ function makeEnv() {
     const res = await route.handler(new Request("http://x/", { method: "POST", body: JSON.stringify({ agent: "worker-1" }) }), cap, { id: s.id });
     return ((await res.json()) as { action?: string }).action;
   };
-  const bad = { stage_id: s.id }; // no ticket_id: refused
-  const good = { stage_id: s.id, ticket_id: "t_0000000000000001" };
+  const bad = { notes: "n", stage_id: s.id }; // no ticket_id: refused
+  const good = { notes: "n", stage_id: s.id, ticket_id: "t_0000000000000001" };
   const kinds = (k: string) => emitted.filter((x) => x.e.kind === k);
   return { rt, cap, stage: s.id, turnEnd, bad, good, kinds, load: () => rt.api.load(s.id)! };
 }
