@@ -347,6 +347,8 @@ export type StageHooks = {
   onTicketChanged(ticketId: string, cap: HubCapabilities): void;
   /** The ticket kind calls this after the commit of `ticket.cancelled`: every open stage of the ticket is cancelled (G4). It never throws. */
   onTicketCancelled(ticketId: string, cap: HubCapabilities): void;
+  /** G10: the ticket kind calls this after the commit of a move to draft or done: each queued stage of the ticket is cancelled. It never throws. */
+  onTicketParked(ticketId: string, to: "draft" | "done", cap: HubCapabilities): void;
   /**
    * The schema check of a result handoff (5.1; spec stages 3.1). A handoff from the session of a `running` stage is a result.
    * Returns null when `from` is no such session, else the list of errors (empty = valid). Errors also go to the same
@@ -870,6 +872,12 @@ export function createStageRuntime(
     for (const { id } of open) cancelStage(id, "ticket cancelled", cap, atStart);
   }
 
+  /** G10: cancels the queued stages of a ticket that is draft or done. Launching, running and retrying stages do not change. */
+  function cancelQueuedStagesOfTicket(ticketId: string, to: "draft" | "done", cap: HubCapabilities, atStart = false): void {
+    const queued = db.query<{ id: string }, [string]>("SELECT id FROM stage WHERE ticket_id = ? AND status = 'queued' ORDER BY rowid").all(ticketId);
+    for (const { id } of queued) cancelStage(id, `ticket moved to ${to}`, cap, atStart);
+  }
+
   function sweep(cap: HubCapabilities, now: number = Date.now()): void {
     // A passed stage whose turn-end report never came (5.3b): after the grace, queue its close anyway.
     for (const session of [...awaitingClose]) {
@@ -1032,7 +1040,7 @@ export function createStageRuntime(
     // The ticket's own role starts once: only while no stage of the ticket and that role exists. Its ready seq is the
     // newest ticket.queued event, else the ticket.created event of a ticket created as queued.
     if (t.role && isRole(t.role)) {
-      if (!stages.some((s) => s.role === t.role)) {
+      if (!stages.some((s) => s.role === t.role && s.status !== "cancelled")) {
         const q = db
           .query<{ seq: number | null }, [string]>("SELECT MAX(seq) AS seq FROM events WHERE entity_id = ? AND kind = 'ticket.queued'")
           .get(ticketId)!.seq;
@@ -1545,6 +1553,13 @@ export function createStageRuntime(
         )
         .all();
       for (const { id } of ofCancelled) cancelStage(id, "ticket cancelled", cap, true);
+      // G10: the queued stages of a draft or done ticket, the same way.
+      const ofParked = db
+        .query<{ id: string; status: string }, []>(
+          "SELECT s.id, t.status FROM stage s JOIN tickets t ON t.id = s.ticket_id WHERE t.status IN ('draft', 'done') AND s.status = 'queued' ORDER BY s.rowid",
+        )
+        .all();
+      for (const { id, status } of ofParked) cancelStage(id, `ticket moved to ${status}`, cap, true);
       const stuck = db.query<{ id: string }, []>("SELECT id FROM stage WHERE status = 'launching' ORDER BY rowid").all();
       for (const { id } of stuck) {
         try {
@@ -1790,6 +1805,8 @@ export function createStageRuntime(
           // A ticket that became done frees the tickets that wait for it.
           const done = closed as ReturnType<typeof closeReviewedBySystemInTx>;
           if (done?.snapshot.status === "done") {
+            // G10: after the commit of stage.passed and the ticket change; the stage of this PASS is passed, not queued.
+            cancelQueuedStagesOfTicket(done.snapshot.id, "done", cap);
             const waiting = db.query<{ ticket_id: string }, [string]>("SELECT ticket_id FROM ticket_blockers WHERE blocker_id = ? ORDER BY rowid").all(done.snapshot.id);
             for (const w of waiting) hooks.onTicketChanged(w.ticket_id, cap);
           }
@@ -1802,6 +1819,9 @@ export function createStageRuntime(
     },
     onTicketCancelled(ticketId, cap) {
       cancelStagesOfTicket(ticketId, cap);
+    },
+    onTicketParked(ticketId, to, cap) {
+      cancelQueuedStagesOfTicket(ticketId, to, cap);
     },
     onTicketChanged(ticketId, cap) {
       try {
