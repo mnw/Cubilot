@@ -384,8 +384,6 @@ When a `validator` or `reviewer` stage of a ticket passes with verdict `PASS` an
 
 A stage SHALL end with a result handoff that names `context.stage_id` and `context.ticket_id`. A Validator or Reviewer result SHALL also contain `context.verdict` (`PASS` or `FAIL`, uppercase, for code and spec reviews alike) and `context.findings` (a list of objects with `ticket_id` and `text`). The hub SHALL check the result when it arrives. A result that fails the check SHALL NOT change the stage. The hub SHALL send the errors to the same session and the session SHALL stay open.
 
-A Worker result SHALL be a handoff with `to_role: "tester"`, the stage's own `context.stage_id`, and a `context.commit` that is a full 40-character lowercase hex hash. The commit SHALL resolve to a commit, SHALL be reachable from `ticket/<ticket_id>`, and SHALL be new work. New work means that the base is an ancestor of the commit and that the two hashes differ. The base is the `context.commit` of the newest earlier passed Worker result of the same ticket that has a valid commit, ordered by the creation event of the handoff. When no such result exists, the base is `git merge-base ticket/<ticket_id> staging`. Any other handoff that carries the stage_id of a running Worker stage SHALL be refused with 400. The refusal text is: "A worker result needs to_role tester and a new commit on ticket/<id>. To report a block, post to the Orchestrator without stage_id." A missing project folder, ticket branch or staging branch (first result), or a failed git command, SHALL give the same refusal with the git error text. A refusal records no handoff and leaves the stage `running`. The rules for the other roles do not change.
-
 #### Scenario: Invalid verdict
 
 - **WHEN** a Validator sends a result with `verdict: "maybe"`
@@ -397,11 +395,19 @@ A Worker result SHALL be a handoff with `to_role: "tester"`, the stage's own `co
 - **WHEN** a Validator sends a result with `verdict: "PASS"` and an empty findings list
 - **THEN** the stage moves to `passed`
 
+### Requirement: A Worker result names a new commit
+
+A Worker result SHALL be a handoff with `to_role: "tester"`, the stage's own `context.stage_id`, and a `context.commit` that is a full 40-character lowercase hex hash. The commit SHALL resolve to a commit, SHALL be reachable from `ticket/<ticket_id>`, and SHALL be new work.
+
 #### Scenario: Worker result with a new commit
 
 - **GIVEN** the ticket branch has a commit that is not in the base
 - **WHEN** a Worker sends a handoff with `to_role: "tester"`, its stage_id and that commit
 - **THEN** the stage moves to `passed`
+
+### Requirement: New work is measured from a base commit
+
+New work SHALL mean that the base is an ancestor of the commit and that the two hashes differ. The base is the `context.commit` of the newest earlier passed Worker result of the same ticket that has a valid commit, ordered by the creation event of the handoff. When no such result exists, the base is `git merge-base ticket/<ticket_id> staging`.
 
 #### Scenario: Worker fix loop
 
@@ -410,11 +416,25 @@ A Worker result SHALL be a handoff with `to_role: "tester"`, the stage's own `co
 - **THEN** the hub refuses the result with 400 and the stage stays `running`
 - **AND** a commit that descends from `c2` passes
 
+### Requirement: Any other handoff with a Worker stage id is refused
+
+Any other handoff that carries the stage_id of a running Worker stage SHALL be refused with 400. The refusal text is: "A worker result needs to_role tester and a new commit on ticket/<id>. To report a block, post to the Orchestrator without stage_id."
+
 #### Scenario: Worker block report
 
 - **WHEN** a Worker sends a handoff to the Orchestrator with its own stage_id, or a handoff without a valid commit
 - **THEN** the hub refuses it with 400 and records no handoff
 - **AND** the stage stays `running` and the session gets `stage.rejected`
+
+### Requirement: A refused Worker result leaves the stage running
+
+A missing project folder, ticket branch or staging branch (first result), or a failed git command, SHALL give the same refusal with the git error text. A refusal records no handoff and leaves the stage `running`. The rules for the other roles do not change.
+
+#### Scenario: Missing ticket branch
+
+- **WHEN** a Worker sends a result and the ticket branch does not exist
+- **THEN** the hub refuses it with the refusal text and the git error text
+- **AND** the stage stays `running` and the hub records no handoff
 
 ### Requirement: A passed stage closes its session at the end of the turn
 

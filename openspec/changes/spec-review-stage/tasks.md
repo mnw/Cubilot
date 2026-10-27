@@ -70,7 +70,6 @@
       3. Spec PASS with hold for a high ticket: PASS (per Orchestrator; third review, both tickets stay draft at the hold). Hub showed A and B `in_progress` after the human moved them by hand.
       4. Approval step (human Allow on B): not tested. The human moved A and B to `in_progress` by hand, so the Approve path did not run.
     - A and B not changed after the third review, per Orchestrator. Waiting for next Orchestrator message.
-    - The checkbox stays open.
 
 ## Brief tests
 
