@@ -26,7 +26,7 @@ import { createLaunchQueue, type LaunchEnd, type LaunchQueue, type LaunchRequest
 import { roleHarness } from "../core/role-harness";
 import { roleModelFor } from "../core/role-models";
 import { makeSSE } from "../core/sse";
-import { assignBySystemInTx, closeReviewedBySystemInTx, queueBySystemInTx } from "./ticket";
+import { assignBySystemInTx, closeReviewedBySystemInTx, notifyHeldDrafts, queueBySystemInTx, type HeldDraft } from "./ticket";
 
 export type StageStatus = "queued" | "launching" | "running" | "retrying" | "passed" | "failed";
 
@@ -1187,6 +1187,7 @@ export function createStageRuntime(
         ).get(prior.request_id ?? "", room)!.n > 0
       : false;
     const queuedNow: Array<NonNullable<ReturnType<typeof queueBySystemInTx>>> = [];
+    const held: HeldDraft[] = [];
     const stage = api.move(
       stageId,
       { to: "passed", verdict: "PASS" },
@@ -1196,13 +1197,14 @@ export function createStageRuntime(
         // A ticket that left `draft` meanwhile is skipped. With a high ticket in the request nothing moves.
         if (high) return;
         for (const { ticket_id } of scope) {
-          const q = queueBySystemInTx(db, cap, ticket_id, prior.request_id);
+          const q = queueBySystemInTx(db, cap, ticket_id, prior.request_id, held);
           if (q) queuedNow.push(q);
         }
       },
       () => {
         for (const q of queuedNow) cap.sse.emit(q.entry, { kind: "room", room: q.snapshot.room });
         if (queuedNow.length) cap.briefing.refresh();
+        if (room) notifyHeldDrafts(cap, room, held);
       },
     );
     for (const q of queuedNow) {
