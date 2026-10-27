@@ -24,6 +24,7 @@ import { getRoomSettings, DEFAULT_ROLE_LIMITS, DEFAULT_STAGE_TIMEOUT_MIN, STAGE_
 import { LedgerConflict } from "../core/types";
 import { createLaunchQueue, type LaunchEnd, type LaunchQueue, type LaunchRequest } from "../core/launch-queue";
 import { roleHarness } from "../core/role-harness";
+import { roleModelFor } from "../core/role-models";
 import { makeSSE } from "../core/sse";
 import { assignBySystemInTx, closeReviewedBySystemInTx, queueBySystemInTx } from "./ticket";
 
@@ -352,6 +353,8 @@ const workerRefusal = (ticketId: string) =>
 
 export type StageRuntime = {
   module: KindModule;
+  /** How many launch requests wait with values from role_models (tests: the set empties when a launch ends). */
+  pendingRoleModelLaunches(): number;
   api: StageApi;
   /**
    * Creates the stages a ticket is ready for (each as `queued`, one `stage.queued` event each) and returns them.
@@ -552,6 +555,9 @@ export function waitingRequests(db: Database, room: string): WaitingRequest[] {
   return out;
 }
 
+/** The texts of the checks in `launch_choice` and `check_role_harness` (src-tauri/src/factory.rs). Cargo tests pin them. */
+const VALUE_REFUSAL = /^(invalid (model|provider|effort|thinking level)\b|a provider \(|role '.*' runs on \S+ by default; to launch it on)/;
+
 export function createStageRuntime(
   db: Database,
   opts: {
@@ -573,6 +579,9 @@ export function createStageRuntime(
   const entity = createLedgerEntity({ decl: stageDecl, db });
   const api = createStageApi(db, (freed, cap) => drainQueue(freed, cap));
 
+  /** Launch ids whose request carries role_models values: a refusal of the shell is stored with the prefix. */
+  const roleModelLaunches = new Set<string>();
+
   const queue = createLaunchQueue({
     ackMs: opts.ackMs ?? DEFAULT_LAUNCH_ACK_MS,
     retainMs: opts.retainMs,
@@ -592,12 +601,16 @@ export function createStageRuntime(
     },
     onLaunchEnd(req, end: LaunchEnd, cap) {
       if (req.kind !== "launch") return;
+      const fromRoleModels = roleModelLaunches.delete(req.id);
       try {
         if (end.by === "ack" && end.outcome.result === "spawned") {
           const stage = api.load(req.stage_id);
           if (stage?.status === "launching") api.move(req.stage_id, { to: "running" }, "system", cap);
         } else {
-          const why = end.by === "timeout" ? "no ack in time" : (end.outcome as { error: string }).error;
+          const raw = end.by === "timeout" ? "no ack in time" : (end.outcome as { error: string }).error;
+          // A value that came from role_models and was refused by pty_spawn names its source (role-models 4). A later
+          // tmux or filesystem error does not: the value was fine.
+          const why = end.by === "ack" && fromRoleModels && VALUE_REFUSAL.test(raw) ? `role_models.${req.role}: ${raw}` : raw;
           endLaunchAttempt(api, req.stage_id, cap, why);
           reportFinalFailure(req.stage_id, `the launch did not start: ${why}`, cap);
         }
@@ -984,12 +997,16 @@ export function createStageRuntime(
     const closingNow = [...closing.values()].filter((c) => c.role === stage.role && c.room === input.room).length;
     if (live + closingNow >= limit) return { ok: false, reason: `role ${stage.role} is at its limit (${limit}) in room ${input.room}` };
 
+    // role_models in config.yml, read now so an edit applies to this launch. A shape error of this role fails the attempt
+    // below, after the stage is `launching`, through the same path as a refused ack (retry, then final failure).
+    const models = roleModelFor(stage.role, STAGE_ROLES);
+
     // 4.5: the hub makes the worktree; the shell only starts in it. A spec stage gets a detached read-only one at the
     // commit of its handoff, or HEAD (spec-review 2.4), under the request instead of a ticket.
     let cwd = input.cwd;
     let branch: string | null = null;
     const wtKey = worktreeKey(stage);
-    if (wtKey && cwd === null) {
+    if (wtKey && cwd === null && !("error" in models)) {
       const project = getRoomSettings(db, input.room)?.project_folder;
       if (!project) {
         // No attempt is counted: queued -> failed without going through launching.
@@ -1034,6 +1051,11 @@ export function createStageRuntime(
       if (e instanceof LedgerConflict) return { ok: false, reason: e.message };
       throw e;
     }
+    if ("error" in models) {
+      endLaunchAttempt(api, input.stage_id, cap, models.error);
+      reportFinalFailure(input.stage_id, `the launch did not start: ${models.error}`, cap);
+      return { ok: false, reason: models.error };
+    }
     // 4.3: the ticket part of the first message; the role prompt is a separate file passed by the launch command.
     let prompt = input.prompt;
     if (prompt === "" && stage.ticket_id && cwd) {
@@ -1053,7 +1075,10 @@ export function createStageRuntime(
       session: input.session,
       role: stage.role,
       room: input.room,
-      harness: input.harness,
+      harness: models.entry?.harness ?? input.harness,
+      ...(models.entry?.model ? { model: models.entry.model } : {}),
+      ...(models.entry?.provider ? { provider: models.entry.provider } : {}),
+      ...(models.entry?.effort ? { effort: models.entry.effort } : {}),
       cwd,
       prompt,
       env: {
@@ -1063,6 +1088,7 @@ export function createStageRuntime(
         CUBILOT_STAGE_ID: input.stage_id,
       },
     };
+    if (models.entry) roleModelLaunches.add(req.id);
     queue.push(req);
     return { ok: true, request_id: req.id };
   }
@@ -1602,7 +1628,7 @@ export function createStageRuntime(
       }
     },
   };
-  return { module, api, evaluateStages, hooks, enqueueLaunch, queue, passSpecStage, sweep };
+  return { module, api, evaluateStages, hooks, enqueueLaunch, queue, passSpecStage, sweep, pendingRoleModelLaunches: () => roleModelLaunches.size };
 }
 
 export function createStageKind(db: Database): KindModule {

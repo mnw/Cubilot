@@ -43,7 +43,7 @@ A skill can be in two role folders (for example `documentation-lookup`). The cop
 
 ## Roles
 
-The Validator and the Reviewer challenge the work. They run on OpenAI through the Pi harness. The agents that produce the work run on Anthropic through Claude Code. They do not share the same blind spots. The model for each role is in the role file frontmatter.
+The Validator and the Reviewer challenge the work. They run on OpenAI through the Pi harness. The agents that produce the work run on Anthropic through Claude Code. They do not share the same blind spots. The model for each role is in the role file frontmatter. The human can override the harness, model, provider and effort of a stage role in `config.yml` under `role_models`. The hub reads it at each stage launch (see `docs/GUIDE.md`).
 
 | Role | Track | Model | What it does | What it never does |
 |---|---|---|---|---|
