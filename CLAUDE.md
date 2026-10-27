@@ -27,7 +27,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **/interrupts: pending to acknowledged only.** rules/kinds.md
 - **Briefings re-send on roster change.** Context mode only. rules/bridge.md
 - **Raw PTY only.** Never tmux -C or send-keys. rules/terminal.md
-- **pty.rs plumbing helper changes need an integration test.** rules/terminal.md
+- **pty.rs plumbing helper changes need an integration test.** Cover resolve_utf8_locale, configure_existing_session, attach_and_stream. rules/terminal.md
 - **tmux needs UTF-8 locale env.** LANG and LC_ALL on new-session and attach. rules/terminal.md
 - **tmux uses tmux.sock; new-session -d -x 80 -y 24.** Wrap in $SHELL -ic as ONE argv element. rules/terminal.md
 - **tmux sessions survive Cubilot restart.** Never kill on exit; remain-on-exit off. rules/terminal.md
@@ -54,17 +54,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **<private>...</private> stripped at persistence, never at delivery.** Every request bounded. rules/transcripts.md
 - **Permission relay is a hub-first wait in the PermissionRequest hook.** No kind branches in hub.ts. rules/permissions.md
 - **Permissions have no TTL.** rules/permissions.md
-- **State-machine kinds live in hub/kinds/<kind>.ts (KindModule).** Open blocker stops a claim. rules/kinds.md
-- **Broadcast with cap.sse.emit(entry, scope).** rules/kinds.md
-- **Tickets need acceptance criteria.** Max two attempts. rules/kinds.md
-- **A draft ticket starts nothing.** rules/kinds.md
+- **State-machine kinds live in hub/kinds/<kind>.ts (KindModule).** Never add kind branches to hub.ts. rules/kinds.md
+- **Broadcast with cap.sse.emit(entry, scope).** Never enumerate agent queues in a kind. rules/kinds.md
+- **Tickets need acceptance criteria.** An agent moves a high blast_radius ticket to done only after the human's Allow. rules/kinds.md
+- **A draft ticket starts nothing.** An open blocker stops a claim. rules/kinds.md
 - **Hub decides launches; Rust shell only executes.** Hub refuses a writable one. rules/kinds.md
-- **Stage state changes only via createStageApi.** rules/kinds.md
-- **system is the hub's own actor.** rules/kinds.md
+- **Stage state changes only via createStageApi.** No endpoint takes a stage-create command. rules/kinds.md
+- **system is the hub's own actor, never a caller's.** Hub returns 400 when a body names system. rules/kinds.md
 - **Validator and Reviewer worktrees are read-only.** Detached; hub refuses a writable one. rules/kinds.md
 - **CUBILOT_STAGE_ID marks a hub-launched session.** Bulk interrupt human-only. rules/kinds.md
-- **Nutshell is a document, not a kind.** rules/kinds.md
-- **Rooms are immutable per agent.** Never remove it. rules/kinds.md
+- **Nutshell is a document, not a kind.** Lives in hub/nutshell.ts. rules/kinds.md
+- **Rooms are immutable per agent.** Never add a route that changes an agent's room. rules/kinds.md
 - **Cross-room mutations are 403 for non-human senders.** Review BUILTIN/DESTRUCTIVE_SLASH_COMMANDS each release. rules/kinds.md
 - **Human target "all" needs a room body field.** Else 400. rules/kinds.md
 - **Nutshell is per-room.** rules/kinds.md
@@ -91,7 +91,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Editing notes
 
 - **Adding a Tauri command.** #[tauri::command] in lib.rs plus generate_handler![]. rules/core.md
-- **Icons are generated.** rules/core.md
+- **Icons are generated.** Do not hand-edit generated icon files. rules/core.md
 
 Architecture, data flow, resource paths: rules/core.md. Research-preview caveat: rules/bridge.md. Index: rules/README.md.
 
