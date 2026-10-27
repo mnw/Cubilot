@@ -2,12 +2,11 @@
 // Temporary: the writing chain (t_922581db0beb6fe4) removes the gate. Real hub, HTTP only.
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { Database } from "bun:sqlite";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnHub, type HubHandle } from "../helpers/hub";
-import { authedFetch, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const NO_CHAIN = ["writer", "editor", "reviewer"];
@@ -21,13 +20,16 @@ describe("role chain gate", () => {
   let launchStream: ReturnType<typeof openSSE>;
   let n = 0;
 
-  const rows = (sql: string, ...p: any[]) => {
-    const db = new Database(hub.ledgerPath, { readonly: true });
-    try { return db.query(sql).all(...p) as any[]; } finally { db.close(); }
-  };
-  const status = (id: string) => rows("SELECT status FROM tickets WHERE id = ?", id)[0].status;
-  const events = () => rows("SELECT COUNT(*) AS n FROM events")[0].n;
-  const tickets = () => rows("SELECT COUNT(*) AS n FROM tickets")[0].n;
+  // The board observer: every ticket.* entry the hub broadcasts. A refused call must add none.
+  const seen: any[] = [];
+  let ui: ReturnType<typeof openSSE>;
+  const list = async () => (await getJson(hub, "/tickets?room=rc&status=all&archived=1")).json as any[];
+  const find = async (id: string) => (await list()).find((t) => t.id === id);
+  const status = async (id: string) => (await find(id)).status as string;
+  const version = async (id: string) => (await find(id)).version as number;
+  const tickets = async () => (await list()).length;
+  const marker = async () => { await sleep(300); return seen.length; };
+  const quiet = async (mark: number) => { await sleep(300); expect(seen.slice(mark).map((e) => e.kind)).toEqual([]); };
   const mk = async (over: Record<string, unknown> = {}, by = "rc-alice") => {
     const r = await postJson(hub, "/tickets", { by, title: "T", acceptance_criteria: "c", blast_radius: "low", ...over });
     return { r, id: (r.json as any)?.snapshot?.id as string };
@@ -60,6 +62,9 @@ describe("role chain gate", () => {
     const lead = openSSE(hub, `/agent-stream?agent=${LEAD}&room=rc`);
     open.push(lead);
     void (async () => { try { for await (const e of lead.events) held.push(e); } catch { /* closed */ } })();
+    ui = openSSE(hub, "/stream");
+    open.push(ui);
+    void (async () => { try { for await (const e of ui.events) if (typeof e.kind === "string" && e.kind.startsWith("ticket.")) seen.push(e); } catch { /* closed */ } })();
     launchStream = openSSE(hub, "/launches/stream");
     void (async () => { try { for await (const e of launchStream.events) launches.push(e); } catch { /* closed */ } })();
     expect((await postJson(hub, "/rooms/rc/lead", { by: hub.humanName, agent: LEAD })).status).toBe(200);
@@ -73,28 +78,30 @@ describe("role chain gate", () => {
 
   for (const role of NO_CHAIN) {
     test(`${role}: create as queued (default and explicit) is 409, no row; draft is 201`, async () => {
-      const before = tickets();
-      const events0 = events();
+      const before = await tickets();
+      const mark = await marker();
       for (const extra of [{}, { status: "queued" }]) {
         const { r } = await mk({ role, ...extra });
         expect(r.status).toBe(409);
         expect((r.json as any).error).toBe(`role ${role} has no hub stage chain: create the ticket as draft`);
       }
-      expect(tickets()).toBe(before);
-      expect(events()).toBe(events0);
+      expect(await tickets()).toBe(before);
+      await quiet(mark);
       expect((await mk({ role, status: "draft" })).r.status).toBe(201);
     });
 
     test(`${role}: a move to queued is 409 for the human and the lead; the row and the events do not change`, async () => {
       const id = await draft(`rq-move-${role}`, role);
-      const events0 = events();
+      const v0 = await version(id);
+      const mark = await marker();
       for (const by of [hub.humanName, LEAD]) {
         const r = await move(id, by);
         expect(r.status).toBe(409);
         expect((r.json as any).error).toBe(`role ${role} has no hub stage chain: ticket ${id} cannot enter queued`);
       }
-      expect(status(id)).toBe("draft");
-      expect(events()).toBe(events0);
+      expect(await status(id)).toBe("draft");
+      expect(await version(id)).toBe(v0);
+      await quiet(mark);
       // A non-lead agent keeps its 403.
       expect((await move(id, "rc-bob")).status).toBe(403);
     });
@@ -114,7 +121,7 @@ describe("role chain gate", () => {
       expect((await mk(extra)).r.status).toBe(201);
       const id = await draft(`rq-ok-${role}`, role);
       expect((await move(id, LEAD)).status).toBe(200);
-      expect(status(id)).toBe("queued");
+      expect(await status(id)).toBe("queued");
     }
   });
 
@@ -133,8 +140,8 @@ describe("role chain gate", () => {
     expect([...body.not_queued].sort((a: any, b: any) => a.id.localeCompare(b.id))).toEqual(
       [...stuck].map(([id, role]) => ({ id, role, reason: `role ${role} has no hub stage chain` })).sort((a, b) => a.id.localeCompare(b.id)),
     );
-    expect([status(ok), status(none)]).toEqual(["queued", "queued"]);
-    for (const id of stuck.keys()) expect(status(id)).toBe("draft");
+    expect([await status(ok), await status(none)]).toEqual(["queued", "queued"]);
+    for (const id of stuck.keys()) expect(await status(id)).toBe("draft");
     await sleep(300);
     const msgs = heldMessages().slice(before);
     expect(msgs).toHaveLength(1);
@@ -184,8 +191,8 @@ describe("role chain gate", () => {
       context: { stage_id: l.stage_id, review: "spec", request_id: request, verdict: "PASS", findings: [], suggestions: [], questions_for_human: [] },
     });
     expect(pass.status, JSON.stringify(pass.json)).toBe(201);
-    expect([status(ok), status(none)]).toEqual(["queued", "queued"]);
-    for (const id of stuck.keys()) expect(status(id)).toBe("draft");
+    expect([await status(ok), await status(none)]).toEqual(["queued", "queued"]);
+    for (const id of stuck.keys()) expect(await status(id)).toBe("draft");
     await sleep(300);
     const msgs = heldMessages().slice(before);
     expect(msgs).toHaveLength(1);
