@@ -301,6 +301,17 @@ describe("restart, old events and unreadable usage", () => {
     ["a negative token field", { input_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: -4, output_tokens: 1 }],
     ["a non-integer token field", { input_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 2.5, output_tokens: 1 }],
   ];
+  test("valid usage plus one cut-off JSON line: source none, NULL token fields, one log line, stage passed", async () => {
+    capture();
+    const e = makeEnv();
+    const l = e.spawn();
+    e.pinLaunchTimes(1000);
+    transcript(e.folder(l), "s1", 1500, e.stageId, asst("a", usage(1, 0, 5, 1)), '{"type":"assistant","message":{"id":"b","usa');
+    expect((await e.pass()).status).toBe("passed");
+    expect(e.rows()[0]).toMatchObject({ source: "none", prompt_tokens_first: null, cache_read_tokens: null, tokens_before_action: null });
+    expect(logged).toHaveLength(1);
+  });
+
   for (const [name, u] of unreadable) {
     test(`${name}: source none, NULL token fields, one log line`, async () => {
       capture();

@@ -126,7 +126,7 @@ const readable = (u: any): boolean => TOKEN_FIELDS.every((k) => Number.isInteger
 const sum = (u: any): number => TOKEN_FIELDS.reduce((a, k) => a + u[k], 0);
 
 /**
- * The three numbers of design.md:46 from one transcript. Returns null when no assistant line has `message.usage`, or when
+ * The three numbers of design.md:46 from one transcript. Returns null when no assistant line has `message.usage`, when a non-empty line is not valid JSON, or when
  * a usage object it counts is not readable (a missing, string, negative or non-integer field): never a 0 for a bad field.
  * A request can span several lines with one `message.id`: the last line of an id holds its final usage.
  */
@@ -141,7 +141,7 @@ export async function readUsage(file: string): Promise<Usage | null> {
     try {
       d = JSON.parse(line);
     } catch {
-      continue;
+      return null; // a non-empty line that is not JSON (cut off): the usage is not readable (human msg 1587)
     }
     const m = d?.message;
     if (d?.type !== "assistant" || !m?.usage) continue;
