@@ -3,7 +3,7 @@
 // POST /requests/<room>/<request_id>/approve, which queues every draft ticket of the request.
 // The rows come from GET /requests/<room>/waiting and are read again on ticket.* and stage.* events.
 // The same area also holds "Needs you" (spec-review-stage 4.3): a request whose spec review failed twice or more shows the
-// open findings of its latest FAIL (GET /requests/<room>/needs-you), above the approvals.
+// open findings of its latest FAIL (GET /requests/<room>/needs-you), below the approvals.
 // Loaded AFTER kind-renderer.js; shares main.js lexical scope (authedFetch, HUMAN_NAME, SELECTED_ROOM, ROOM_ALL).
 
 const PlanApproval = (() => {
@@ -78,7 +78,7 @@ const PlanApproval = (() => {
   function render() {
     const r = root();
     if (!r) return;
-    r.replaceChildren(...needs.map(needsRow), ...waiting.map(row));
+    r.replaceChildren(...waiting.map(row), ...needs.map(needsRow));
     r.hidden = waiting.length === 0 && needs.length === 0;
   }
 

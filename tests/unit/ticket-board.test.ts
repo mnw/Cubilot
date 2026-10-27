@@ -3469,10 +3469,12 @@ describe("request label and blockers (6.2, 6.3)", () => {
     expect(c).toContain('<span class="ticket-id" title="t_&lt;b&gt;&amp;">t_&lt;b&gt;&amp;</span>');
   });
 
-  test("the card id truncates with an ellipsis; the tag and priority do not shrink; the view header does not show it twice", async () => {
+  test("the card id is never cut: the top row wraps and the id does not shrink; the tag and priority do not shrink; the view header does not show it twice", async () => {
     const css = readFileSync("ui/styles/kinds.css", "utf8");
     expect(css).toContain(".ticket-card-top .ticket-id { font-family: var(--mono); color: var(--text-meta); white-space: nowrap; }");
-    expect(css).toContain(".ticket-card-top .ticket-id { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }");
+    expect(css).toContain(".ticket-card-top .ticket-id { flex: none; }");
+    expect(css).not.toMatch(/\.ticket-card-top \.ticket-id \{[^}]*text-overflow/);
+    expect(css).toMatch(/\.ticket-card-top \{[^}]*flex-wrap: wrap;/);
     expect(css).toContain(".ticket-card-top .ticket-tag, .ticket-card-top .ticket-prio { flex-shrink: 0; }");
     await show(mk("a", "in_review", { title: "[code] 8.3b Hot reload", assignee: "alice" }));
     ctx.TicketBoard.openView("a");
