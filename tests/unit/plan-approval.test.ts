@@ -27,12 +27,12 @@ class El {
 }
 
 // A Storage stand-in. `fail` makes every call throw, as a blocked or full store does.
-function fakeStore(initial: Record<string, string> = {}, fail = false) {
+function fakeStore(initial: Record<string, string> = {}, fail = false, failSet = false) {
   const m = new Map(Object.entries(initial));
   return {
     m,
     getItem: (k: string) => { if (fail) throw new Error("blocked"); return m.has(k) ? m.get(k)! : null; },
-    setItem: (k: string, v: string) => { if (fail) throw new Error("blocked"); m.set(k, v); },
+    setItem: (k: string, v: string) => { if (fail || failSet) throw new Error("blocked"); m.set(k, v); },
   };
 }
 
@@ -319,6 +319,15 @@ describe("Needs you collapse and clear", () => {
       expect(e.api._visibleNeeds("r1", list)).toEqual(list);
       expect(e.api._isCollapsed("r1", list[0])).toBe(false);
     }
+  });
+
+  test("only setItem throws, a cleared id is stored: every block shown", async () => {
+    const e = setup([], "r1", 200, [need("a", "s_1"), need("b", "s_2")],
+      fakeStore({ "cubilot.needs.cleared.r1": JSON.stringify(["s_1"]) }, false, true));
+    await flush();
+    expect(rows(e)).toEqual(["b"]);
+    btn(e, "Clear b").handlers.click();
+    expect(rows(e)).toEqual(["a", "b"]);
   });
 
   test("getItem and setItem that throw: every block shown, Clear and Collapse do not break", async () => {

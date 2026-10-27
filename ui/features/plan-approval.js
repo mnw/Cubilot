@@ -22,6 +22,7 @@ const PlanApproval = (() => {
   const COLLAPSED_KEY = (r) => `cubilot.needs.collapsed.${r}`;
   const CLEARED_KEY = (r) => `cubilot.needs.cleared.${r}`;
   const collapseButtons = new Map();   // request id -> its Collapse button of the last render, for the focus after Clear
+  let storeBroken = false;             // a write failed: stored filtering is unreliable, show every block
   let pendingFocus = null;             // request id whose Collapse button gets focus after the next render
 
   // Parsed storage value of the wanted shape, else null (missing, malformed, wrong shape, or storage throws).
@@ -50,7 +51,7 @@ const PlanApproval = (() => {
   }
   // The blocks whose latest FAIL stage was not cleared. A malformed or unreadable list shows every block.
   function visibleNeeds(r, list) {
-    const cleared = readStore(CLEARED_KEY(r), isIdList);
+    const cleared = storeBroken ? null : readStore(CLEARED_KEY(r), isIdList);
     return cleared ? list.filter((n) => !cleared.includes(n.latest_fail_stage_id)) : list;
   }
   function clearNeed(r, n) {
@@ -58,7 +59,7 @@ const PlanApproval = (() => {
       const cleared = readStore(CLEARED_KEY(r), isIdList) ?? [];
       if (!cleared.includes(n.latest_fail_stage_id)) cleared.push(n.latest_fail_stage_id);
       localStorage.setItem(CLEARED_KEY(r), JSON.stringify(cleared));
-    } catch { /* storage unavailable: the block stays */ }
+    } catch { storeBroken = true; /* storage unavailable: show every block */ }
   }
 
   function row(w) {
