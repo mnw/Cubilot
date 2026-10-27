@@ -88,11 +88,14 @@ export function selectTranscript(folder: string, stageId: string, from: number, 
   return best?.file ?? null;
 }
 
-const sum = (u: any): number =>
-  ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"].reduce((a, k) => a + (Number(u?.[k]) || 0), 0);
+const TOKEN_FIELDS = ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"] as const;
+/** A usage object is readable only when every field the writer uses is a finite integer >= 0. */
+const readable = (u: any): boolean => TOKEN_FIELDS.every((k) => Number.isInteger(u?.[k]) && u[k] >= 0);
+const sum = (u: any): number => TOKEN_FIELDS.reduce((a, k) => a + u[k], 0);
 
 /**
- * The three numbers of design.md:46 from one transcript. Returns null when no assistant line has `message.usage`.
+ * The three numbers of design.md:46 from one transcript. Returns null when no assistant line has `message.usage`, or when
+ * a usage object it counts is not readable (a missing, string, negative or non-integer field): never a 0 for a bad field.
  * A request can span several lines with one `message.id`: the last line of an id holds its final usage.
  */
 export function readUsage(file: string): Usage | null {
@@ -116,49 +119,64 @@ export function readUsage(file: string): Usage | null {
     if (actionAt === null && Array.isArray(m.content) && m.content.some((c: any) => c?.type === "tool_use" && typeof c.name === "string" && (ACTION_TOOLS.has(c.name) || isResultTool(c.name)))) actionAt = id;
   }
   if (!order.length) return null;
-  const first = usage.get(order[0]);
   const upto = actionAt === null ? order.length : order.indexOf(actionAt) + 1;
+  const counted = order.slice(0, upto).map((id) => usage.get(id));
+  if (!counted.every(readable)) return null;
+  const first = counted[0];
   return {
-    prompt_tokens_first: (Number(first.input_tokens) || 0) + (Number(first.cache_creation_input_tokens) || 0) + (Number(first.cache_read_input_tokens) || 0),
-    cache_read_tokens: Number(first.cache_read_input_tokens) || 0,
-    tokens_before_action: order.slice(0, upto).reduce((a, id) => a + sum(usage.get(id)), 0),
+    prompt_tokens_first: first.input_tokens + first.cache_creation_input_tokens + first.cache_read_input_tokens,
+    cache_read_tokens: first.cache_read_input_tokens,
+    tokens_before_action: counted.reduce((a, u) => a + sum(u), 0),
   };
 }
 
+export type Launch = { role: string; harness: string; cwd: string | null; bytes: number };
+
 /** The `stage.launching` events of a stage, oldest first. The Nth is attempt N; its window ends at the (N+1)th. */
-export function launchTimes(db: Database, stageId: string): number[] {
+export function launchEvents(db: Database, stageId: string): Array<{ at_ms: number; launch: Launch | null }> {
   return db
-    .query<{ at_ms: number }, [string]>("SELECT at_ms FROM events WHERE entity_id = ? AND kind = 'stage.launching' ORDER BY seq")
+    .query<{ at_ms: number; payload_json: string }, [string]>("SELECT at_ms, payload_json FROM events WHERE entity_id = ? AND kind = 'stage.launching' ORDER BY seq")
     .all(stageId)
-    .map((r) => r.at_ms);
+    .map((r) => {
+      let l: any = null;
+      try {
+        l = JSON.parse(r.payload_json)?.launch;
+      } catch {
+        // an unreadable payload is an event without launch metadata
+      }
+      const ok = l && typeof l.role === "string" && typeof l.harness === "string" && Number.isInteger(l.bytes) && l.bytes >= 0 && (l.cwd === null || typeof l.cwd === "string");
+      return { at_ms: r.at_ms, launch: ok ? (l as Launch) : null };
+    });
 }
 
-export type Launched = { role: string; harness: string; cwd: string | null; bytes: number };
-
 /**
- * One row per attempt of an ended stage. `launched` is what the hub remembered of each launch (attempt number to its first
- * message size, harness and cwd). An attempt the hub did not see launch gets no row. A pi attempt is `source = 'none'` (5.3).
- * Every attempt logs at most one line through `log`; a write failure of one attempt does not stop the next.
+ * One row per attempt of an ended stage. The launch metadata (harness, cwd, role, first message size) is read from the
+ * payload of the attempt's `stage.launching` event, so a hub restart loses nothing. An event without it (written before
+ * this change) gets no row and one log line.
+ * A pi attempt is `source = 'none'` (5.3). Every attempt logs at most one line through `log`; a write failure of one
+ * attempt does not stop the next.
  */
 export function recordStageMetrics(
   db: Database,
   stageId: string,
   createdSeq: number,
-  launched: Map<number, Launched>,
   log: (line: string) => void,
   projectsRoot = claudeProjectsDir(),
 ): void {
-  let times: number[];
+  let events: ReturnType<typeof launchEvents>;
   try {
-    times = launchTimes(db, stageId);
+    events = launchEvents(db, stageId);
   } catch (e) {
     log(`[stage-metrics] ${stageId}: reading the launch events failed: ${(e as Error).message}`);
     return;
   }
-  times.forEach((from, i) => {
+  events.forEach((ev, i) => {
     const attempt = i + 1;
-    const l = launched.get(attempt);
-    if (!l) return;
+    const l = ev.launch;
+    if (!l) {
+      log(`[stage-metrics] ${stageId} attempt ${attempt}: launched before stage metrics; no row`);
+      return;
+    }
     let usage: Usage | null = null;
     let why: string | null = null;
     if (l.harness === "pi") {
@@ -167,21 +185,22 @@ export function recordStageMetrics(
       why = "no worktree cwd";
     } else {
       try {
-        const file = selectTranscript(claudeProjectFolder(l.cwd, projectsRoot), stageId, from, times[i + 1] ?? null);
+        const file = selectTranscript(claudeProjectFolder(l.cwd, projectsRoot), stageId, ev.at_ms, events[i + 1]?.at_ms ?? null);
         if (!file) why = "no transcript matched";
         else {
           usage = readUsage(file);
-          if (!usage) why = "the transcript has no usage";
+          if (!usage) why = "the transcript usage is not readable";
         }
       } catch (e) {
         why = `reading the transcript failed: ${(e as Error).message}`;
       }
     }
+    const bytes = l.bytes;
     try {
       db.run(
         `INSERT OR IGNORE INTO stage_metrics (stage_id, attempt, role, first_message_bytes, first_message_tokens_est, prompt_tokens_first, cache_read_tokens, tokens_before_action, source, created_seq)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [stageId, attempt, l.role, l.bytes, tokensEst(l.bytes), usage?.prompt_tokens_first ?? null, usage?.cache_read_tokens ?? null, usage?.tokens_before_action ?? null, usage ? "claude" : "none", createdSeq],
+        [stageId, attempt, l.role, bytes, tokensEst(bytes), usage?.prompt_tokens_first ?? null, usage?.cache_read_tokens ?? null, usage?.tokens_before_action ?? null, usage ? "claude" : "none", createdSeq],
       );
       if (why) log(`[stage-metrics] ${stageId} attempt ${attempt}: ${why}; stored as source none`);
     } catch (e) {

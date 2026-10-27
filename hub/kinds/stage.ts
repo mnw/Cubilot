@@ -25,7 +25,7 @@ import { LedgerConflict } from "../core/types";
 import { createLaunchQueue, type LaunchEnd, type LaunchQueue, type LaunchRequest } from "../core/launch-queue";
 import { roleHarness } from "../core/role-harness";
 import { roleModelFor } from "../core/role-models";
-import { metricsByRole, recordStageMetrics, type Launched } from "../core/stage-metrics";
+import { metricsByRole, recordStageMetrics, type Launch } from "../core/stage-metrics";
 import { makeSSE } from "../core/sse";
 import { assignBySystemInTx, closeReviewedBySystemInTx, notifyHeldDrafts, queueBySystemInTx, type HeldDraft } from "./ticket";
 
@@ -135,6 +135,8 @@ export type StageMoveInput = {
   verdict?: string | null;
   /** Why an attempt ended (`retrying`, `failed`): kept in the event, so a restart can still give it to the relaunch (5.3b). */
   reason?: string;
+  /** Set on `launching`: what the metrics row of this attempt needs. It goes into the event payload (context-pack 5.1). */
+  launch?: Launch;
 };
 
 function mintStageId(): string {
@@ -206,7 +208,7 @@ const moveVerb: VerbDecl<StageSnapshot, StageMoveInput & { id: string }> = {
       kind: "transition",
       next,
       eventKind,
-      payload: (post) => ({ from: prior.status, to: post.status, attempt: post.attempt, session: post.session, verdict: post.verdict, reason: p.reason ?? null }),
+      payload: (post) => ({ from: prior.status, to: post.status, attempt: post.attempt, session: post.session, verdict: post.verdict, reason: p.reason ?? null, ...(p.to === "launching" && p.launch ? { launch: p.launch } : {}) }),
       entry: (post) => stageEntry(post, eventKind, null),
     };
   },
@@ -621,18 +623,14 @@ export function createStageRuntime(
   } = {},
 ): StageRuntime {
   const entity = createLedgerEntity({ decl: stageDecl, db });
-  // What the hub knows of each launch (stage id -> attempt -> first message size, harness, cwd), for the metrics row (context-pack 5.1).
-  // Memory only: a hub restart loses it, and an attempt it did not see launch gets no row.
-  const launched = new Map<string, Map<number, Launched>>();
   const api = createStageApi(db, (freed, cap) => {
     if (freed.status === "passed" || freed.status === "failed") {
       // After the commit of stage.passed/failed, outside its transaction. recordStageMetrics logs its own failures; this guards the rest.
       try {
-        recordStageMetrics(db, freed.id, freed.version, launched.get(freed.id) ?? new Map(), console.error, opts.claudeProjectsDir);
+        recordStageMetrics(db, freed.id, freed.version, console.error, opts.claudeProjectsDir);
       } catch (e) {
         console.error(`[stage-metrics] ${freed.id}: ${(e as Error).message}`);
       }
-      launched.delete(freed.id);
     }
     drainQueue(freed, cap);
   });
@@ -1103,10 +1101,23 @@ export function createStageRuntime(
       }
     }
 
+    // 4.3 (computed before the move: its size goes into the stage.launching payload, 5.1): the ticket part of the first message; the role prompt is a separate file passed by the launch command.
+    let prompt = input.prompt;
+    if (prompt === "" && stage.ticket_id && cwd) {
+      const t = db
+        .query<{ id: string; title: string; acceptance_criteria: string; blast_radius: string; request_id: string | null }, [string]>(
+          "SELECT id, title, acceptance_criteria, blast_radius, request_id FROM tickets WHERE id = ?",
+        )
+        .get(stage.ticket_id);
+      if (t) prompt = renderFirstMessage({ stageId: input.stage_id, role: stage.role, ticket: t, branch, worktree: cwd, reason: input.reason, recipient: leadOfRoom(input.room), handoff: startingHandoff(stage.id, stage.ticket_id, stage.role) ?? undefined });
+    } else if (prompt === "" && stage.review === "spec" && cwd) {
+      prompt = specFirstMessage(stage, input.room, cwd, input.reason) ?? "";
+    }
+    const harness = "error" in models ? input.harness : (models.entry?.harness ?? input.harness);
     try {
       api.move(
         input.stage_id,
-        { to: "launching", session: input.session, slot_seq: input.slot_seq ?? null },
+        { to: "launching", session: input.session, slot_seq: input.slot_seq ?? null, launch: { role: stage.role, harness, cwd, bytes: Buffer.byteLength(prompt) } },
         "system",
         cap,
         (ctx) => {
@@ -1131,26 +1142,6 @@ export function createStageRuntime(
       reportFinalFailure(input.stage_id, `the launch did not start: ${models.error}`, cap);
       return { ok: false, reason: models.error };
     }
-    // 4.3: the ticket part of the first message; the role prompt is a separate file passed by the launch command.
-    let prompt = input.prompt;
-    if (prompt === "" && stage.ticket_id && cwd) {
-      const t = db
-        .query<{ id: string; title: string; acceptance_criteria: string; blast_radius: string; request_id: string | null }, [string]>(
-          "SELECT id, title, acceptance_criteria, blast_radius, request_id FROM tickets WHERE id = ?",
-        )
-        .get(stage.ticket_id);
-      if (t) prompt = renderFirstMessage({ stageId: input.stage_id, role: stage.role, ticket: t, branch, worktree: cwd, reason: input.reason, recipient: leadOfRoom(input.room), handoff: startingHandoff(stage.id, stage.ticket_id, stage.role) ?? undefined });
-    } else if (prompt === "" && stage.review === "spec" && cwd) {
-      prompt = specFirstMessage(stage, input.room, cwd, input.reason) ?? "";
-    }
-    if (prompt !== "") {
-      const attempt = api.load(input.stage_id)?.attempt;
-      if (attempt) {
-        const m = launched.get(input.stage_id) ?? new Map<number, Launched>();
-        m.set(attempt, { role: stage.role, harness: models.entry?.harness ?? input.harness, cwd, bytes: Buffer.byteLength(prompt) });
-        launched.set(input.stage_id, m);
-      }
-    }
     const req: LaunchRequest = {
       id: mintLaunchId(),
       kind: "launch",
@@ -1158,7 +1149,7 @@ export function createStageRuntime(
       session: input.session,
       role: stage.role,
       room: input.room,
-      harness: models.entry?.harness ?? input.harness,
+      harness,
       ...(models.entry?.model ? { model: models.entry.model } : {}),
       ...(models.entry?.provider ? { provider: models.entry.provider } : {}),
       ...(models.entry?.effort ? { effort: models.entry.effort } : {}),

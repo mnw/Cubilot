@@ -219,6 +219,68 @@ describe("stage metrics writer", () => {
   });
 });
 
+describe("restart, old events and unreadable usage", () => {
+  /** A new runtime on the same ledger: the hub restarted between the launch and the end of the stage. */
+  const restarted = (e: ReturnType<typeof makeEnv>) => {
+    const rt2 = createStageRuntime(e.db, { ackMs: 60_000, bootGraceMs: 1000, claudeProjectsDir: e.projects });
+    return () => rt2.api.move(e.stageId, { to: "passed" }, "system", e.cap);
+  };
+
+  test("a hub restart keeps the row: one row, first_message_bytes set, transcript values read", () => {
+    capture();
+    const e = makeEnv();
+    const l = e.spawn();
+    e.pinLaunchTimes(1000);
+    transcript(e.folder(l), "s1", 1500, e.stageId, asst("m1", usage(1, 2, 30, 4)));
+    restarted(e)();
+    expect(e.rows()).toHaveLength(1);
+    expect(e.rows()[0]).toMatchObject({ source: "claude", first_message_bytes: Buffer.byteLength(l.prompt), cache_read_tokens: 30, prompt_tokens_first: 33 });
+    expect(logged).toEqual([]);
+  });
+
+  test("a hub restart with no transcript: one row, source none, NULL token fields", () => {
+    capture();
+    const e = makeEnv();
+    const l = e.spawn();
+    restarted(e)();
+    expect(e.rows()).toHaveLength(1);
+    expect(e.rows()[0]).toMatchObject({ source: "none", first_message_bytes: Buffer.byteLength(l.prompt), prompt_tokens_first: null, cache_read_tokens: null, tokens_before_action: null });
+    expect(logged).toHaveLength(1);
+  });
+
+  test("an old stage.launching event without launch metadata: no row, one log line", () => {
+    capture();
+    const e = makeEnv();
+    e.spawn();
+    e.db.run("UPDATE events SET payload_json = json_remove(payload_json, '$.launch') WHERE entity_id = ? AND kind = 'stage.launching'", [e.stageId]);
+    e.pass();
+    expect(e.rows()).toHaveLength(0);
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toContain(e.stageId);
+    expect(logged[0]).toContain("attempt 1");
+    expect(logged[0]).toContain("launched before stage metrics");
+  });
+
+  const unreadable: Array<[string, unknown]> = [
+    ["an empty usage object", {}],
+    ["a string token field", { input_tokens: "5", cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 1 }],
+    ["a negative token field", { input_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: -4, output_tokens: 1 }],
+    ["a non-integer token field", { input_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 2.5, output_tokens: 1 }],
+  ];
+  for (const [name, u] of unreadable) {
+    test(`${name}: source none, NULL token fields, one log line`, () => {
+      capture();
+      const e = makeEnv();
+      const l = e.spawn();
+      e.pinLaunchTimes(1000);
+      transcript(e.folder(l), "s1", 1500, e.stageId, line({ type: "assistant", message: { id: "m1", usage: u, content: [] } }));
+      e.pass();
+      expect(e.rows()[0]).toMatchObject({ source: "none", prompt_tokens_first: null, cache_read_tokens: null, tokens_before_action: null });
+      expect(logged).toHaveLength(1);
+    });
+  }
+});
+
 describe("pi usage source (5.3)", () => {
   test("a pi stage row has source none and three NULLs, even when a matching Claude transcript exists", () => {
     capture();
@@ -226,9 +288,10 @@ describe("pi usage source (5.3)", () => {
     migrateLedger(db);
     const projects = mkdtempSync(join(tmpdir(), "sm-pi-"));
     const cwd = "/tmp/wt/pi-case";
-    db.run("INSERT INTO events (entity_id, kind, actor, payload_json, at_ms) VALUES ('s_1', 'stage.launching', 'system', '{}', 1000)");
+    const payload = JSON.stringify({ launch: { role: "worker", harness: "pi", cwd, bytes: 400 } });
+    db.run("INSERT INTO events (entity_id, kind, actor, payload_json, at_ms) VALUES ('s_1', 'stage.launching', 'system', ?, 1000)", [payload]);
     transcript(claudeProjectFolder(cwd, projects), "s1", 1500, "Stage: s_1", asst("a", usage(1, 0, 5, 1)));
-    recordStageMetrics(db, "s_1", 7, new Map([[1, { role: "worker", harness: "pi", cwd, bytes: 400 }]]), console.error, projects);
+    recordStageMetrics(db, "s_1", 7, console.error, projects);
     const r = db.query<Record<string, unknown>, []>("SELECT * FROM stage_metrics").get()!;
     expect(r).toMatchObject({
       source: "none", prompt_tokens_first: null, cache_read_tokens: null, tokens_before_action: null,
