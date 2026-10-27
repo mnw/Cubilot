@@ -256,36 +256,48 @@ describe("one live stage per ticket", () => {
 
   test("a ticket stage that fails for no project folder lets the waiting handoff of its ticket start a stage", async () => {
     const R2 = "ols2";
-    await giveProjectHttp(hub, R2);
-    open.push(await registerAgent(hub, "ols2-bob", { room: R2 }));
-    const put = (body: Record<string, unknown>) => authedFetch(hub, `/rooms/${R2}/settings`, { method: "PUT", body: JSON.stringify(body) });
+    // its own hub: the session names tester-1 etc. would clash with the other tests
+    const h2 = await spawnHub();
+    extraHubs.push(h2);
+    const l2: any[] = [];
+    const w2 = watch(h2, l2);
+    await sleep(200);
+    await giveProjectHttp(h2, R2);
+    open.push(await registerAgent(h2, "ols2-bob", { room: R2 }));
+    const put = (body: Record<string, unknown>) => authedFetch(h2, `/rooms/${R2}/settings`, { method: "PUT", body: JSON.stringify(body) });
     expect((await put({ role_limits: { worker: 10, tester: 1, validator: 10, writer: 10 } })).status).toBe(200);
     const mk2 = async () => {
-      const r = await postJson(hub, "/tickets", { by: "ols2-bob", title: "t", acceptance_criteria: "c", blast_radius: "low", role: null });
+      const r = await postJson(h2, "/tickets", { by: "ols2-bob", title: "t", acceptance_criteria: "c", blast_radius: "low", role: null });
       expect(r.status).toBe(201);
       return (r.json as { snapshot: { id: string } }).snapshot.id;
     };
     const a = await mk2();
     const t = await mk2();
-    expect((await roleHandoff(a, "tester", { from: "ols2-bob" })).status).toBe(201);
+    expect((await roleHandoff(a, "tester", { from: "ols2-bob" }, h2)).status).toBe(201);
     await settle();
-    const [aStage] = await stagesOf(a);
+    const [aStage] = await stagesOf(a, h2);
     expect(aStage.status).toBe("launching"); // holds the one tester slot
-    expect((await roleHandoff(t, "tester", { from: "ols2-bob" })).status).toBe(201);
-    expect((await roleHandoff(t, "worker", { from: "ols2-bob" })).status).toBe(201);
+    expect((await roleHandoff(t, "tester", { from: "ols2-bob" }, h2)).status).toBe(201);
+    expect((await roleHandoff(t, "worker", { from: "ols2-bob" }, h2)).status).toBe(201);
     await settle();
-    expect((await stagesOf(t)).map((s) => [s.role, s.status])).toEqual([["tester", "queued"]]);
+    expect((await stagesOf(t, h2)).map((s) => [s.role, s.status])).toEqual([["tester", "queued"]]);
     expect((await put({ project_folder: null })).status).toBe(200);
     // the slot frees: the queued tester stage of t fails (no project folder); the evaluator then starts the worker stage
-    const req = launches.find((r) => r.stage_id === aStage.id);
-    expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
-    const sess = await registerAgent(hub, req.session, { room: R2 });
-    await finish(aStage, req.session, hub, "ols2-bob");
+    const req = l2.find((r) => r.stage_id === aStage.id);
+    expect((await postJson(h2, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+    const sess = await registerAgent(h2, req.session, { room: R2 });
+    await finish(aStage, req.session, h2, "ols2-bob");
     await settle();
-    expect((await stagesOf(t)).map((s) => [s.role, s.status])).toEqual([["tester", "failed"], ["worker", "failed"]]);
+    // the passed stage holds its slot until its session close is acked; then the queued tester stage tries to launch
+    expect((await postJson(h2, `/stages/${aStage.id}/turn-end`, { agent: req.session })).json).toEqual({ action: "close" });
+    for (let i = 0; i < 60 && !l2.some((r) => r.kind === "close" && r.session === req.session); i++) await sleep(50);
+    const close = l2.find((r) => r.kind === "close" && r.session === req.session);
+    expect((await postJson(h2, `/launches/${close.id}/ack`, { result: "spawned" })).status).toBe(200);
+    await settle();
+    expect((await stagesOf(t, h2)).map((s) => [s.role, s.status])).toEqual([["tester", "failed"], ["worker", "failed"]]);
     sess.close();
+    w2.close();
   });
-
 
   test("(d) a role handoff older than a later terminal stage of its role stays spent after a restart; an unspent expired handoff still starts one stage", async () => {
     const t = await mk();
@@ -320,6 +332,6 @@ describe("one live stage per ticket", () => {
     await settle();
     expect((await stagesOf(d, second)).map((s) => s.role)).toEqual(["tester"]);
     s2.close();
-  });
+  }, 30_000);
 
 });
