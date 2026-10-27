@@ -1,5 +1,6 @@
 // Finished sessions — the closed stage sessions of the selected Room, listed at the foot of the terminal tab rail.
-// A stage session is closed when its stage is `passed` or `failed` and it had a session name. The list is read from the
+// A stage session is closed when its stage is `passed` or `failed` and it had a session name. A `cancelled` stage is listed
+// with its reason, session or not (a queued stage never had one). The list is read from the
 // ledger (GET /stages and GET /tickets), so a reload shows it again; stage.* events update it live.
 // Loaded AFTER kind-renderer.js; shares main.js lexical scope (authedFetch, SELECTED_ROOM, ROOM_ALL).
 //
@@ -19,7 +20,7 @@ const FinishedSessions = (() => {
   const listEl = () => document.getElementById('terminal-finished-list');
   const countEl = () => document.getElementById('terminal-finished-count');
 
-  const isClosed = (s) => (s.status === 'passed' || s.status === 'failed') && typeof s.session === 'string' && s.session !== '';
+  const isClosed = (s) => s.status === 'cancelled' || ((s.status === 'passed' || s.status === 'failed') && typeof s.session === 'string' && s.session !== '');
   const inRoom = (s) => (s.ticket_id ? ticketTitles.has(s.ticket_id) : requestIds.has(s.request_id));
 
   function titleOf(s) {
@@ -29,6 +30,7 @@ const FinishedSessions = (() => {
 
   // The outcome shown on a row: a verdict (spec review) wins over the stage status.
   function outcomeOf(s) {
+    if (s.status === 'cancelled') return { label: s.reason ? `cancelled: ${s.reason}` : 'cancelled', ok: false };
     const v = typeof s.verdict === 'string' && s.verdict ? s.verdict.toUpperCase() : null;
     if (v === 'PASS' || v === 'FAIL') return { label: v, ok: v === 'PASS' };
     return { label: s.status, ok: s.status === 'passed' };
@@ -64,7 +66,7 @@ const FinishedSessions = (() => {
       head.className = 'finished-head';
       const name = document.createElement('span');
       name.className = 'finished-name';
-      name.textContent = s.session;
+      name.textContent = s.session || `${s.role} (no session)`;
       const state = document.createElement('span');
       state.className = `finished-state ${out.ok ? 'ok' : 'bad'}`;
       state.textContent = out.label;
@@ -94,21 +96,22 @@ const FinishedSessions = (() => {
     if (!room) { render(); return; }
     const seq = ++loadSeq;
     try {
-      const [t, p, f] = await Promise.all([
+      const [t, p, f, c] = await Promise.all([
         authedFetch(`/tickets?room=${encodeURIComponent(room)}&status=all&archived=1`),
         authedFetch(`/stages?status=passed&limit=${LIST_LIMIT}`),
         authedFetch(`/stages?status=failed&limit=${LIST_LIMIT}`),
+        authedFetch(`/stages?status=cancelled&limit=${LIST_LIMIT}`),
       ]);
-      if (!t.ok || !p.ok || !f.ok || seq !== loadSeq) return;
-      const [tickets, passed, failed] = await Promise.all([t.json(), p.json(), f.json()]);
-      if (seq !== loadSeq || !Array.isArray(tickets) || !Array.isArray(passed) || !Array.isArray(failed)) return;
+      if (!t.ok || !p.ok || !f.ok || !c.ok || seq !== loadSeq) return;
+      const [tickets, passed, failed, cancelled] = await Promise.all([t.json(), p.json(), f.json(), c.json()]);
+      if (seq !== loadSeq || !Array.isArray(tickets) || !Array.isArray(passed) || !Array.isArray(failed) || !Array.isArray(cancelled)) return;
       ticketTitles.clear();
       requestIds.clear();
       for (const x of tickets) {
         ticketTitles.set(x.id, x.title);
         if (x.request_id) requestIds.add(x.request_id);
       }
-      for (const s of [...passed, ...failed]) keep(s);
+      for (const s of [...passed, ...failed, ...cancelled]) keep(s);
     } catch (e) {
       console.warn('[finished-sessions] load failed:', e);
     }

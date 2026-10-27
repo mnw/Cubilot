@@ -65,6 +65,16 @@ pending ───────┼──► declined     (terminal)
 - A handoff created with `ttl_seconds=3600` (the default) will therefore
   expire between 3600 s and 3605 s after creation.
 
+### Cancelled stages
+
+`cancelled` is terminal and has no retry. A cancelled stage is not a failure: it has no final-failure handoff to the Orchestrator, no Needs-you line, no FAIL count (`specFailState` reads `verdict` only), no failure record and no input to a diagnosis.
+
+1. **Ticket cancel.** After the commit of `ticket.cancelled`, the hub moves each `queued`, `launching`, `running` or `retrying` stage of the ticket to `cancelled` with the reason `ticket cancelled` and actor `system`. It does this through the stage API, one transaction per stage, after the ticket transaction. This adds no cross-kind transaction. A live stage (`launching`, `running`, or `retrying` with a session) first gets one close request. A `queued` stage gets none. A `passed` or `failed` stage does not change.
+2. **Release rule.** The session name, the role slot and the worktree of a cancelled stage stay reserved until a close ack arrives while no launch of that stage is in flight. A close ack (`absent` included) while its launch is in flight releases nothing. When the launch ends later (`spawned`, `error` or no ack), the hub queues one more close and only the ack of that close releases. The stage never moves to `running` and is never retried. A launch the shell never received is dropped, with no close, and releases at once.
+3. **Worktree.** A `ticket/<id>` worktree (worker, writer) stays. A temporary worktree goes at the releasing close ack (or at once for a dropped launch).
+4. **Hub start.** Before the sweep of `launching` stages, each open stage of a cancelled ticket moves to `cancelled` with the reason `ticket cancelled` and each live one gets one close request. The sweep then skips them.
+5. **Limits.** A time-out race on a launch (`t_b073b26136e9cf61`) and a shell restart (`t_81bfa8a84ecc06e5`) are out of scope. A launch ack lost in a shell restart holds the reservation until the hub restarts. The human closes an orphan pane.
+
 ### Snapshot schema
 
 Every broadcast, list result, and idempotent/conflict response includes a
@@ -587,6 +597,7 @@ queued ──► launching ──► running ──► passed     (terminal)
   │            └──► retrying
   └──► failed  (no project folder: no attempt counted)
 launching / running / retrying ──► failed       (terminal, after attempt 2)
+queued / launching / running / retrying ──► cancelled   (terminal, a ticket cancel)
 ```
 
 | Status | Meaning |
@@ -597,8 +608,9 @@ launching / running / retrying ──► failed       (terminal, after attempt 2
 | `retrying` | Attempt 1 ended without a result. The stage waits for its relaunch. |
 | `passed` | A valid result arrived. A `FAIL` verdict also gives `passed`: the stage is a record and the verdict goes to the Orchestrator in the result handoff. |
 | `failed` | Attempt 2 ended without a result, or the room has no project folder. |
+| `cancelled` | The ticket of the stage was cancelled. Terminal. The stage is never retried and never reported as a failure. See "Cancelled stages". |
 
-A stage has at most two attempts (`attempt` 1 and 2). Each transition writes one ledger event (`stage.queued`, `stage.launching`, `stage.running`, `stage.retrying`, `stage.passed`, `stage.failed`) and one `stage` row update in one transaction. The actor of every stage event is `system`.
+A stage has at most two attempts (`attempt` 1 and 2). Each transition writes one ledger event (`stage.queued`, `stage.launching`, `stage.running`, `stage.retrying`, `stage.passed`, `stage.failed`, `stage.cancelled`) and one `stage` row update in one transaction. The actor of every stage event is `system`.
 
 ### Snapshot schema
 
@@ -614,6 +626,7 @@ A stage has at most two attempts (`attempt` 1 and 2). Each transition writes one
 | `status` | `string` | See "Lifecycle". |
 | `session` | `string \| null` | `<role>-<n>`. Set on `launching`. |
 | `slot_seq` | `number \| null` | |
+| `reason` | `string \| null` | The reason of the last `stage.cancelled` event of a `cancelled` stage, else null. Read from the event, not stored in a column. `GET /stages`, `GET /stages/<id>` and the SSE stage entry carry it. Old clients ignore it. |
 | `version` | `number` | `events.seq` of the last stage event. |
 
 The table also has `created_seq` (the queue order) and `updated_seq`. They are not in the snapshot.

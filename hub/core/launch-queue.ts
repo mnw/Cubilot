@@ -44,7 +44,7 @@ export type LaunchQueueOpts = {
   retainMs?: number;
   onLaunchEnd(req: Extract<LaunchRequest, { kind: "launch" }>, end: LaunchEnd, cap: HubCapabilities): void;
   /** A close is done: the shell closed the session, or reported that it does not exist. Never throws into the ack. */
-  onCloseEnd?(session: string, cap: HubCapabilities): void;
+  onCloseEnd?(session: string, cap: HubCapabilities, id: string): void;
 };
 
 export type AckStatus = "ok" | "idempotent" | "unknown" | "conflict" | "error" | "pending";
@@ -58,6 +58,8 @@ export type LaunchQueue = {
   push(req: LaunchRequest): void;
   /** Session names that have a close without an ack. */
   pendingCloses(): string[];
+  /** Removes a request the shell never received. True when it was dropped; false when it was delivered (or is unknown). */
+  drop(id: string): boolean;
   /**
    * Called by the stream route for one shell connection; the newest connection replaces the older one.
    * Requests that were never delivered are sent, and so is every `close` that has no ack yet.
@@ -143,6 +145,13 @@ export function createLaunchQueue(opts: LaunchQueueOpts): LaunchQueue {
 
     pendingCloses,
 
+    drop(id) {
+      const i = undelivered.findIndex((r) => r.id === id);
+      if (i < 0) return false;
+      undelivered.splice(i, 1);
+      return true;
+    },
+
     attach(send, signal, cap) {
       const me = { send, cap };
       active = me;
@@ -186,7 +195,7 @@ export function createLaunchQueue(opts: LaunchQueueOpts): LaunchQueue {
       finish(id, entry, outcome);
       if (entry.req.kind === "close") {
         try {
-          opts.onCloseEnd?.(entry.req.session, cap);
+          opts.onCloseEnd?.(entry.req.session, cap, id);
         } catch (e) {
           console.error("[launch-queue] close-done handler failed:", e);
         }
