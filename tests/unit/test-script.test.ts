@@ -274,6 +274,100 @@ describe("scripts/test.sh", () => {
     expect(readFileSync(join(lock, "owner"), "utf8")).toBe("other 1 1\n");
   }, 30000);
 
+  // Owner liveness (t_3493000837a2eb27). A dead pid is that of a child that has exited.
+  async function deadPid() {
+    const p = Bun.spawn(["true"]);
+    await p.exited;
+    return p.pid;
+  }
+  const seedLock = (name: string, owner: string) => {
+    const lock = join(dir, `lock-${name}-${n++}`);
+    mkdirSync(lock);
+    writeFileSync(join(lock, "owner"), owner);
+    return lock;
+  };
+  const takeovers = (out: string) => out.split("\n").filter((l) => l.startsWith("stale heavy lock from "));
+
+  test("a lock whose owner pid is dead is taken over within 5 s, with one takeover line", async () => {
+    const pid = await deadPid();
+    const lock = seedLock("dead", `other ${pid} 1\n`);
+    const r = await run([join(dir, "ok.test.ts")], { CUBILOT_LOCK_RETRY_S: "1" }, lock);
+    expect(r.code).toBe(0);
+    expect(takeovers(r.out)).toEqual([`stale heavy lock from other ${pid} taken over`]);
+    expect(existsSync(lock)).toBe(false);
+  }, 30000);
+
+  test("a lock whose owner pid is alive is waited for, then the run exits 3 and the lock is unchanged", async () => {
+    const live = Bun.spawn(["sleep", "300"]);
+    try {
+      const lock = seedLock("live", `other ${live.pid} 1\n`);
+      const r = await run([join(dir, "ok.test.ts")], { CUBILOT_LOCK_RETRY_S: "1", CUBILOT_LOCK_WAIT_S: "2" }, lock);
+      expect(r.code).toBe(3);
+      expect(takeovers(r.out)).toHaveLength(0);
+      expect(readFileSync(join(lock, "owner"), "utf8")).toBe(`other ${live.pid} 1\n`);
+    } finally {
+      live.kill();
+    }
+  }, 30000);
+
+  test("an owner file that is missing or has no pid is waited for, never taken over", async () => {
+    for (const owner of [null, "garbage\n", "other abc 1\n", "other 0 1\n"]) {
+      const lock = seedLock("odd", owner ?? "");
+      if (owner === null) rmSync(join(lock, "owner"));
+      const r = await run([join(dir, "ok.test.ts")], { CUBILOT_LOCK_RETRY_S: "1", CUBILOT_LOCK_WAIT_S: "1" }, lock);
+      expect(r.code).toBe(3);
+      expect(takeovers(r.out)).toHaveLength(0);
+      expect(existsSync(lock)).toBe(true);
+    }
+  }, 30000);
+
+  test("a HUP to a run that holds the lock stops it with exit 129 and removes the lock", async () => {
+    const pidfile = join(dir, "hup.pid");
+    const lock = join(dir, "lock-hup");
+    const proc = Bun.spawn(["bash", SCRIPT, join(dir, "hang.test.ts")], {
+      cwd: dir,
+      env: { ...process.env, PATH: `${stubCargo}:${dirname(process.execPath)}:${process.env.PATH}`, CUBILOT_HEAVY_LOCK: lock, PIDFILE: pidfile },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    for (let t = 0; t < 10000 && !existsSync(pidfile); t += 50) await Bun.sleep(50);
+    expect(existsSync(lock)).toBe(true);
+    proc.kill("SIGHUP");
+    expect(await proc.exited).toBe(129);
+    expect(await gone(Number(readFileSync(pidfile, "utf8")))).toBe(true);
+    expect(existsSync(lock)).toBe(false);
+  }, 30000);
+
+  test("an owner name with inner spaces: a live owner is kept, a dead owner is taken over, the own lock is released", async () => {
+    const live = Bun.spawn(["sleep", "300"]);
+    try {
+      const liveLock = seedLock("sp-live", `worker one ${live.pid} 1\n`);
+      const a = await run([join(dir, "ok.test.ts")], { CUBILOT_LOCK_RETRY_S: "1", CUBILOT_LOCK_WAIT_S: "1" }, liveLock);
+      expect(a.code).toBe(3);
+      expect(takeovers(a.out)).toHaveLength(0);
+      expect(readFileSync(join(liveLock, "owner"), "utf8")).toBe(`worker one ${live.pid} 1\n`);
+    } finally {
+      live.kill();
+    }
+    const pid = await deadPid();
+    const deadLock = seedLock("sp-dead", `worker one ${pid} 1\n`);
+    const b = await run([join(dir, "ok.test.ts")], { CUBILOT_LOCK_RETRY_S: "1", CHATBRIDGE_AGENT: "worker one" }, deadLock);
+    expect(b.code).toBe(0);
+    expect(takeovers(b.out)).toEqual([`stale heavy lock from worker one ${pid} taken over`]);
+    expect(existsSync(deadLock)).toBe(false); // released by the run whose owner name has a space
+  }, 30000);
+
+  test("two runs on the same stale lock: one takes it over, the other waits for it, both pass", async () => {
+    const pid = await deadPid();
+    const lock = seedLock("race", `other ${pid} 1\n`);
+    const [a, b] = await Promise.all([1, 2].map(() => run([join(dir, "ok.test.ts")], { CUBILOT_LOCK_RETRY_S: "1", CUBILOT_LOCK_WAIT_S: "60" }, lock)));
+    expect(a.code).toBe(0);
+    expect(b.code).toBe(0);
+    expect(takeovers(a.out).length + takeovers(b.out).length).toBe(1);
+    expect(existsSync(lock)).toBe(false);
+    expect(existsSync(`${lock}.takeover`)).toBe(false);
+  }, 60000);
+
   test("a nested run never touches /tmp/cubilot-heavy.lock", () => {
     expect(lockState()).toBe(realLockBefore);
   });

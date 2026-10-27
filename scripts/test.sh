@@ -18,7 +18,7 @@
 #
 # Exit: the exit code of bun test; 1 wrapper error (also a failing ps: the run is stopped, not left unchecked);
 # 2 bad setting; 3 lock not obtained; 124 time limit; 125 memory limit;
-# 130 INT; 143 TERM. bun test runs as the leader of its own process group; only that group is ever signalled.
+# 129 HUP; 130 INT; 143 TERM. bun test runs as the leader of its own process group; only that group is ever signalled.
 set -u
 
 usage_error() { echo "scripts/test.sh: $1" >&2; exit 2; }
@@ -54,11 +54,44 @@ group_rss_kb() {
   printf '%s\n' "$out" | awk -v g="$PGID" '$1 == g { s += $2 } END { print s + 0 }'
 }
 
+# The owner line is "<name> <pid> <epoch>". A name may hold spaces (AGENT_NAME_RE), so the pid is the second field from
+# the END. Prints nothing when the file is missing, unreadable or has fewer than three fields.
+owner_pid() { awk 'NR == 1 && NF >= 3 { print $(NF - 1) }' "$1/owner" 2> /dev/null; }
+owner_name() { sed -n '1s/ [^ ]* [^ ]*$//p' "$1/owner" 2> /dev/null; }
+# Dead = kill -0 fails for a reason other than a permission error (a live process of another user is alive).
+pid_dead() {
+  local out
+  out=$(kill -0 "$1" 2>&1) && return 1
+  case "$out" in *[Nn]"ot permitted"*) return 1 ;; esac
+  return 0
+}
+
 release_lock() {
   [ "$LOCK_HELD" = 1 ] || return 0
   # Only the lock this process took: the owner line names this pid.
-  if [ "$(awk '{ print $2 }' "$LOCK/owner" 2> /dev/null)" = "$$" ]; then rm -r "$LOCK" 2> /dev/null; fi
+  if [ "$(owner_pid "$LOCK")" = "$$" ]; then rm -r "$LOCK" 2> /dev/null; fi
   LOCK_HELD=0
+}
+
+# Remove the lock when its owner process is dead. The check and the removal run under a second mkdir mutex
+# ($LOCK.takeover), and the owner is read again under it: a run that lost the race sees the new live owner and removes
+# nothing. A removal is followed at once by a normal mkdir attempt. Returns 0 only when it removed a stale lock.
+TAKEOVER_HELD=0
+takeover_stale() {
+  local pid name rc=1
+  mkdir "$LOCK.takeover" 2> /dev/null || return 1
+  TAKEOVER_HELD=1
+  pid=$(owner_pid "$LOCK")
+  if positive_int "$pid" && pid_dead "$pid"; then
+    name=$(owner_name "$LOCK")
+    if rm -r "$LOCK" 2> /dev/null; then
+      echo "stale heavy lock from $name $pid taken over" >&2
+      rc=0
+    fi
+  fi
+  rmdir "$LOCK.takeover" 2> /dev/null
+  TAKEOVER_HELD=0
+  return $rc
 }
 
 # TERM, wait up to 5 s, KILL, wait up to 2 s. Every wait is bounded, and only the child this script started (its group,
@@ -89,18 +122,20 @@ stop_run() {
 }
 
 # Any exit path, also a wrapper error: nothing of the run stays alive, and the lock goes.
-on_exit() { kill_group; release_lock; }
+on_exit() { kill_group; release_lock; [ "$TAKEOVER_HELD" = 1 ] && rmdir "$LOCK.takeover" 2> /dev/null; return 0; }
 on_signal() {
   [ -n "$NAP_PID" ] && kill "$NAP_PID" 2> /dev/null
   if [ -n "$CHILD" ]; then stop_run "received $1" "$2"; fi
   exit "$2"
 }
 trap on_exit EXIT
+trap 'on_signal HUP 129' HUP
 trap 'on_signal INT 130' INT
 trap 'on_signal TERM 143' TERM
 
 waited=0
 while ! mkdir "$LOCK" 2> /dev/null; do
+  takeover_stale && continue
   if [ "$waited" -ge "$LOCK_WAIT_S" ]; then
     echo "scripts/test.sh: the heavy lock $LOCK is held; owner: $(cat "$LOCK/owner" 2> /dev/null || echo unknown)" >&2
     exit 3
