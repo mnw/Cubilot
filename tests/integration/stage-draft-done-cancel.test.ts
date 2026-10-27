@@ -214,7 +214,7 @@ describe("a move to draft or done cancels the queued stages", () => {
       const seq = (seed.query("SELECT MAX(seq) AS s FROM events").get() as { s: number }).s;
       seed.run("INSERT INTO stage (id, ticket_id, role, attempt, status, created_seq, updated_seq, version) VALUES ('s_00000000000000aa', ?, 'tester', 1, 'queued', ?, ?, ?)", [id, seq, seq, seq]);
     } finally { seed.close(); }
-    const r = await postJson(hub, "/handoffs", { from: l.session, to: "Orchestrator", task: "result", context: { stage_id: v.id, ticket_id: id, verdict: "PASS", findings: [], suggestions: [] } });
+    const r = await postJson(hub, "/handoffs", { from: l.session, to: "Orchestrator", task: "result", context: { notes: "n", stage_id: v.id, ticket_id: id, verdict: "PASS", findings: [], suggestions: [] } });
     expect(r.status).toBe(201);
     await sleep(300);
     const all = rows(hub, id);
