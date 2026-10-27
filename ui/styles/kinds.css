@@ -902,3 +902,16 @@ label[for="ticket-filter-request"] { color: var(--text); }
 .needs-finding.blocking .needs-sev::before { color: var(--red-strong); }
 .needs-finding.suggestion .needs-sev::before { color: var(--text-muted); }
 .needs-text { min-width: 0; overflow-wrap: anywhere; }
+
+/* Board filters: the ticket id field looks like the request select (inset field, mono) and shows a ring on keyboard focus. */
+#ticket-filter-id {
+  width: 100%; min-height: 28px; box-sizing: border-box;
+  background: var(--bg-inset); border: var(--border-1) solid var(--line); border-radius: var(--radius-md);
+  color: var(--text); font-family: var(--mono); font-size: var(--fs-base);
+  padding: var(--sp-8) var(--sp-12); outline: none;
+  transition: border-color var(--motion-fast);
+}
+#ticket-filter-id:hover { border-color: var(--line-hover); }
+#ticket-filter-id:focus-visible { border-color: var(--line-hover); outline: 2px solid var(--text); outline-offset: 1px; }
+#ticket-filter-id::placeholder { color: var(--text-muted); }
+label[for="ticket-filter-id"] { color: var(--text); }
