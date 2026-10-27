@@ -35,6 +35,7 @@ function makeEnv() {
   rt.api.move(stage.id, { to: "launching", session: "validator-1" }, "system", cap);
   rt.api.move(stage.id, { to: "running" }, "system", cap);
   const valid = (over: Record<string, unknown> = {}) => ({
+    notes: "n",
     stage_id: stage.id,
     review: "spec",
     request_id: "req-1",

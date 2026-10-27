@@ -188,7 +188,7 @@ describe("role chain gate", () => {
     open.push(await registerAgent(hub, l.session, { room: "rc" }));
     const pass = await postJson(hub, "/handoffs", {
       from: l.session, to: LEAD, task: "result",
-      context: { stage_id: l.stage_id, review: "spec", request_id: request, verdict: "PASS", findings: [], suggestions: [], questions_for_human: [] },
+      context: { notes: "n", stage_id: l.stage_id, review: "spec", request_id: request, verdict: "PASS", findings: [], suggestions: [], questions_for_human: [] },
     });
     expect(pass.status, JSON.stringify(pass.json)).toBe(201);
     expect([await status(ok), await status(none)]).toEqual(["queued", "queued"]);

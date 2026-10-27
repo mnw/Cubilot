@@ -82,14 +82,14 @@ describe("the same request id in two rooms", () => {
     open.push(await registerAgent(hub, b.session, { room: "tb" }));
     const fail = await postJson(hub, "/handoffs", {
       from: b.session, to: "tb-lead", task: "verdict",
-      context: { stage_id: b.stage_id, review: "spec", request_id: "req-1", verdict: "FAIL", findings: [{ ticket_id: tb, severity: "blocking", text: "FINDING-OF-B" }], questions_for_human: [] },
+      context: { notes: "n", stage_id: b.stage_id, review: "spec", request_id: "req-1", verdict: "FAIL", findings: [{ ticket_id: tb, severity: "blocking", text: "FINDING-OF-B" }], questions_for_human: [] },
     });
     expect(fail.status, JSON.stringify(fail.json)).toBe(201);
     expect((await postJson(hub, `/launches/${a.id}/ack`, { result: "spawned" })).status).toBe(200);
     open.push(await registerAgent(hub, a.session, { room: "ta" }));
     const pass = await postJson(hub, "/handoffs", {
       from: a.session, to: "ta-lead", task: "verdict",
-      context: { stage_id: a.stage_id, review: "spec", request_id: "req-1", verdict: "PASS", findings: [], suggestions: [], questions_for_human: [] },
+      context: { notes: "n", stage_id: a.stage_id, review: "spec", request_id: "req-1", verdict: "PASS", findings: [], suggestions: [], questions_for_human: [] },
     });
     expect(pass.status, JSON.stringify(pass.json)).toBe(201);
   });

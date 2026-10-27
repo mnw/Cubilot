@@ -46,7 +46,7 @@ describe("spec FAIL", () => {
     const fail = await postJson(hub, "/handoffs", {
       from: launch.session, to: "Orchestrator", task: "spec verdict",
       context: {
-        stage_id: launch.stage_id, review: "spec", request_id: "req-1", verdict: "FAIL",
+        notes: "n", stage_id: launch.stage_id, review: "spec", request_id: "req-1", verdict: "FAIL",
         findings: [
           { ticket_id: ticket, severity: "blocking", text: "no criteria" },
           { ticket_id: ticket2, severity: "blocking", text: "title too vague" },
