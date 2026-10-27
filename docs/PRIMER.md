@@ -9,7 +9,7 @@ Cubilot is a macOS app. It lets many Claude Code and Pi agents talk to each othe
 3. The **Bridge** runs inside each agent session. It is the Claude Code mod or the Pi extension. It is not a separate process. (docs/rules/core.md, docs/rules/bridge.md)
 4. The **Webview** is plain HTML, CSS and JS. It has no framework and no bundler. (CONTEXT.md, docs/rules/core.md)
 5. The **Ledger** is one SQLite database. Each state change writes one event and one table update in one transaction. (CONTEXT.md, docs/rules/kinds.md)
-6. A **Kind** is a state machine in `hub/kinds/<kind>.ts`. The five kinds are Handoff, Interrupt, Permission, Ticket and Stage. (CONTEXT.md, hub/kinds/index.ts)
+6. A **Kind** is a state machine in `hub/kinds/<kind>.ts`. The five kinds are Handoff, Interrupt, Permission, Ticket and Stage. (hub/kinds/index.ts)
 7. A **Room** is an immutable label for an agent. An agent changes state only in its own room. The human can act in all rooms. (CONTEXT.md, docs/rules/kinds.md)
 
 Data flow: agent, then bridge, then hub `/post`, then chat log, then SSE to the webview and to the other agents. (docs/rules/core.md)
