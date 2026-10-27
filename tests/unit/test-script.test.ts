@@ -44,8 +44,9 @@ beforeAll(() => {
 test("a fake clock that never ends", () => { const tick = stepLimit("endless clock"); const log: number[] = []; for (;;) { tick(); log.push(1); } });`);
   // A synchronous loop: bun's own per-test time-out cannot interrupt it. The sleep is an owned descendant.
   f("hang.test.ts", `test("hang", () => { const p = Bun.spawn(["sleep", "300"]); writeFileSync(process.env.PIDFILE!, String(p.pid)); for (;;) {} });`);
-  // The same loop, but the process ignores TERM: the wrapper must go on to KILL.
-  f("ignore-term.test.ts", `test("ignore term", () => { process.on("SIGTERM", () => {}); const p = Bun.spawn(["sleep", "300"]); writeFileSync(process.env.PIDFILE!, String(p.pid)); for (;;) {} });`);
+  // The same loop, but the process ignores TERM: the wrapper must go on to KILL. The descendant is a shell that writes
+  // TERMFILE when the group gets TERM: the test reads the moment of TERM from it. It runs until the KILL.
+  f("ignore-term.test.ts", `test("ignore term", () => { process.on("SIGTERM", () => {}); const p = Bun.spawn(["sh", "-c", "trap 'echo > $TERMFILE' TERM; while :; do sleep 0.05; done"]); writeFileSync(process.env.PIDFILE!, String(p.pid)); for (;;) {} });`);
   f("memory.test.ts", `test("memory", async () => {
   const p = Bun.spawn(["sleep", "300"]); writeFileSync(process.env.PIDFILE!, String(p.pid));
   const keep: Buffer[] = [];
@@ -238,9 +239,25 @@ describe("scripts/test.sh", () => {
 
   test("a test process that ignores TERM is killed after the 5 s wait, and its descendant is gone", async () => {
     const pidfile = join(dir, "ignore-term.pid");
-    const r = await run([join(dir, "ignore-term.test.ts")], { CUBILOT_TEST_TIMEOUT_S: "2", PIDFILE: pidfile });
+    const termfile = join(dir, "ignore-term.term");
+    // The wait starts at the TERM, not at the start of the run: scripts/test.sh counts the time limit in whole seconds
+    // (date +%s), so TERM comes between 1 and 2 s after the start for a 2 s limit. The test times the wait from the
+    // moment the descendant sees the TERM, and the run from there to its end. The poll is 20 ms, the trap is up to 50 ms.
+    const running = run([join(dir, "ignore-term.test.ts")], { CUBILOT_TEST_TIMEOUT_S: "2", PIDFILE: pidfile, TERMFILE: termfile });
+    let termAt = 0;
+    let ended = false;
+    const end = running.then((r) => ((ended = true), { r, endAt: Date.now() }));
+    while (!ended && !termAt) {
+      if (existsSync(termfile)) termAt = Date.now();
+      else await Bun.sleep(20);
+    }
+    const { r, endAt } = await end;
+    console.log(`TIMES total=${r.ms} term_to_end=${endAt - termAt}`);
+    expect(termAt).toBeGreaterThan(0);
     expect(r.code).toBe(124);
-    expect(r.ms).toBeGreaterThanOrEqual(6500);
+    // The kill follows the TERM by the 5 s wait (50 polls of 0.1 s) less the 70 ms of the observation.
+    expect(endAt - termAt).toBeGreaterThanOrEqual(4900);
+    expect(endAt - termAt).toBeLessThan(13000);
     expect(r.ms).toBeLessThan(15000);
     expect(await gone(Number(readFileSync(pidfile, "utf8")))).toBe(true);
     expect(existsSync(r.lock)).toBe(false);
