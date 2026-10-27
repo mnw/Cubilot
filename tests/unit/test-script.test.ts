@@ -12,6 +12,7 @@ const BOUNDED = join(ROOT, "tests/helpers/bounded.ts");
 const REAL_LOCK = "/tmp/cubilot-heavy.lock";
 
 let dir: string;
+let stubCargo: string;
 const sentinels: Array<ReturnType<typeof Bun.spawn>> = [];
 let realLockBefore: string | null;
 
@@ -32,8 +33,13 @@ async function gone(pid: number, ms = 3000) {
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), "cubilot-test-script-"));
   realLockBefore = lockState();
-  const f = (name: string, body: string) => writeFileSync(join(dir, name), `import { test } from "bun:test";\nimport { writeFileSync } from "node:fs";\n${body}\n`);
+  const f = (name: string, body: string) => writeFileSync(join(dir, name), `import { test } from "bun:test";\nimport { appendFileSync, writeFileSync } from "node:fs";\n${body}\n`);
   f("ok.test.ts", `test("ok", () => {});`);
+  f("mark.test.ts", `test("mark", () => { appendFileSync(process.env.CARGO_LOG!, "bun\\n"); });`);
+  // A stub cargo first on PATH: no nested run compiles Rust. It logs its call and exits with STUB_CARGO_EXIT.
+  stubCargo = join(dir, "stub-cargo");
+  mkdirSync(stubCargo);
+  writeFileSync(join(stubCargo, "cargo"), `#!/bin/sh\necho "cargo $*" >> "\${CARGO_LOG:-/dev/null}"\n[ "\${STUB_CARGO_EXIT:-0}" = 0 ] || echo "error: stub cargo failed" >&2\nexit \${STUB_CARGO_EXIT:-0}\n`, { mode: 0o755 });
   f("endless-clock.test.ts", `import { stepLimit } from ${JSON.stringify(BOUNDED)};
 test("a fake clock that never ends", () => { const tick = stepLimit("endless clock"); const log: number[] = []; for (;;) { tick(); log.push(1); } });`);
   // A synchronous loop: bun's own per-test time-out cannot interrupt it. The sleep is an owned descendant.
@@ -66,7 +72,7 @@ async function run(args: string[], env: Record<string, string> = {}, lock = join
   const started = Date.now();
   const proc = Bun.spawn(["bash", SCRIPT, ...args], {
     cwd: dir,
-    env: { ...process.env, PATH: `${dirname(process.execPath)}:${process.env.PATH}`, CUBILOT_HEAVY_LOCK: lock, ...env },
+    env: { ...process.env, PATH: `${stubCargo}:${dirname(process.execPath)}:${process.env.PATH}`, CUBILOT_HEAVY_LOCK: lock, ...env },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -91,22 +97,48 @@ describe("scripts/test.sh", () => {
     expect(existsSync(r.lock)).toBe(false);
   }, 30000);
 
-  test("it prints the effective memory limit at start: 3072 MB by default, the override when set", async () => {
+  test("it prints the effective memory limit at start: 2048 MB by default, the override when set", async () => {
     const env = { ...process.env } as Record<string, string>;
     delete env.CUBILOT_TEST_MAX_RSS_MB;
     const base = await Bun.spawn(["bash", SCRIPT, join(dir, "ok.test.ts")], {
       cwd: dir,
-      env: { ...env, PATH: `${dirname(process.execPath)}:${process.env.PATH}`, CUBILOT_HEAVY_LOCK: join(dir, `lock-${n++}`) },
+      env: { ...env, PATH: `${stubCargo}:${dirname(process.execPath)}:${process.env.PATH}`, CUBILOT_HEAVY_LOCK: join(dir, `lock-${n++}`) },
       stdout: "pipe",
       stderr: "pipe",
     });
     const [o, e, c] = await Promise.all([new Response(base.stdout).text(), new Response(base.stderr).text(), base.exited]);
     expect(c).toBe(0);
-    expect(o + e).toContain("memory limit 3072 MB");
-    const r = await run([join(dir, "ok.test.ts")], { CUBILOT_TEST_MAX_RSS_MB: "2048" });
+    expect(o + e).toContain("memory limit 2048 MB");
+    const r = await run([join(dir, "ok.test.ts")], { CUBILOT_TEST_MAX_RSS_MB: "1024" });
     expect(r.code).toBe(0);
-    expect(r.out).toContain("memory limit 2048 MB");
-    expect(r.out).not.toContain("memory limit 3072 MB");
+    expect(r.out).toContain("memory limit 1024 MB");
+    expect(r.out).not.toContain("memory limit 2048 MB");
+  }, 30000);
+
+  test("it builds the Rust tests once, before the bun run, and prints the build time", async () => {
+    const log = join(dir, "order.log");
+    const r = await run([join(dir, "mark.test.ts")], { CARGO_LOG: log });
+    expect(r.code).toBe(0);
+    const lines = readFileSync(log, "utf8").trim().split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^cargo test --manifest-path .+src-tauri\/Cargo\.toml --lib --no-run$/);
+    expect(lines[1]).toBe("bun");
+    expect(r.out).toMatch(/rust pre-build: \d+ s/);
+  }, 30000);
+
+  test("a failing pre-build stops the run with a non-zero exit, the cargo error and no bun run", async () => {
+    const log = join(dir, "fail.log");
+    const r = await run([join(dir, "mark.test.ts")], { CARGO_LOG: log, STUB_CARGO_EXIT: "7" });
+    expect(r.code).toBe(7);
+    expect(r.out).toContain("error: stub cargo failed");
+    expect(readFileSync(log, "utf8")).not.toContain("bun");
+    expect(existsSync(r.lock)).toBe(false);
+  }, 30000);
+
+  test("CUBILOT_TEST_PEAK=1 prints the peak RSS on success", async () => {
+    const r = await run([join(dir, "ok.test.ts")], { CUBILOT_TEST_PEAK: "1" });
+    expect(r.code).toBe(0);
+    expect(r.out).toMatch(/peak RSS \d+ MB/);
   }, 30000);
 
   test("a bad setting exits 2 with a message and takes no lock", async () => {
@@ -150,7 +182,7 @@ describe("scripts/test.sh", () => {
     const lock = join(dir, "lock-term");
     const proc = Bun.spawn(["bash", SCRIPT, join(dir, "hang.test.ts")], {
       cwd: dir,
-      env: { ...process.env, PATH: `${dirname(process.execPath)}:${process.env.PATH}`, CUBILOT_HEAVY_LOCK: lock, PIDFILE: pidfile },
+      env: { ...process.env, PATH: `${stubCargo}:${dirname(process.execPath)}:${process.env.PATH}`, CUBILOT_HEAVY_LOCK: lock, PIDFILE: pidfile },
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -171,7 +203,7 @@ describe("scripts/test.sh", () => {
       sentinels.push(sentinel);
       const pidfile = join(dir, `ps-${label.replace(/\W+/g, "-")}.pid`);
       const shim = psShim(`ps-${label.replace(/\W+/g, "-")}`, body);
-      const r = await run([join(dir, "hang.test.ts")], { CUBILOT_TEST_TIMEOUT_S: "120", PIDFILE: pidfile, PATH: `${shim}:${dirname(process.execPath)}:${process.env.PATH}` });
+      const r = await run([join(dir, "hang.test.ts")], { CUBILOT_TEST_TIMEOUT_S: "120", PIDFILE: pidfile, PATH: `${shim}:${stubCargo}:${dirname(process.execPath)}:${process.env.PATH}` });
       expect(r.code).toBe(1);
       expect(r.ms).toBeLessThan(12000);
       expect(r.out).toContain("process query (ps)");

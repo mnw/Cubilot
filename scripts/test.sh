@@ -2,13 +2,19 @@
 # The default full test run: `bun test "$@"` under the heavy-process lock, a time limit and a memory limit.
 # A run that hangs or grows without end is stopped, and nothing it started stays alive.
 #
-#   CUBILOT_TEST_TIMEOUT_S    seconds from the start of bun test until it is stopped (default 300)
-#   CUBILOT_TEST_MAX_RSS_MB   total RSS of the test process group in MB (default 3072). Checked every second:
+#   CUBILOT_TEST_TIMEOUT_S    seconds from the start of bun test until it is stopped (default 300). The Rust pre-build
+#                             (see below) is not counted.
+#   CUBILOT_TEST_MAX_RSS_MB   total RSS of the test process group in MB (default 2048). Checked every second:
 #                             a mitigation, not a strict ceiling. A process that leaves the group is not counted.
+#   CUBILOT_TEST_PEAK         set to 1 to print the peak group RSS in MB when the run ends (default: not printed)
 #   CUBILOT_HEAVY_LOCK        lock directory (default /tmp/cubilot-heavy.lock). The script takes it itself and it is
 #                             not reentrant: do not take the lock before you call the script.
 #   CUBILOT_LOCK_RETRY_S      seconds between lock attempts (default 30)
 #   CUBILOT_LOCK_WAIT_S       seconds to wait for the lock before exit 3 (default 600)
+#
+# Before bun test starts, with the lock held, the script compiles the Rust code that tests/unit/role-harness.test.ts
+# runs (`cargo test --lib --no-run`). That compile is then outside the measured process group. It uses the
+# CARGO_TARGET_DIR of the caller. A failed build exits with the cargo exit code and no bun run.
 #
 # Exit: the exit code of bun test; 1 wrapper error (also a failing ps: the run is stopped, not left unchecked);
 # 2 bad setting; 3 lock not obtained; 124 time limit; 125 memory limit;
@@ -19,7 +25,7 @@ usage_error() { echo "scripts/test.sh: $1" >&2; exit 2; }
 positive_int() { case "$1" in '' | *[!0-9]*) return 1 ;; esac; [ "$1" -gt 0 ]; }
 
 TIMEOUT_S=${CUBILOT_TEST_TIMEOUT_S:-300}
-MAX_RSS_MB=${CUBILOT_TEST_MAX_RSS_MB:-3072}
+MAX_RSS_MB=${CUBILOT_TEST_MAX_RSS_MB:-2048}
 LOCK=${CUBILOT_HEAVY_LOCK:-/tmp/cubilot-heavy.lock}
 LOCK_RETRY_S=${CUBILOT_LOCK_RETRY_S:-30}
 LOCK_WAIT_S=${CUBILOT_LOCK_WAIT_S:-600}
@@ -107,6 +113,19 @@ echo "$OWNER_NAME $$ $(date +%s)" > "$LOCK/owner"
 
 echo "memory limit ${MAX_RSS_MB} MB"
 
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+BUILD_START=$(date +%s)
+cargo test --manifest-path "$ROOT/src-tauri/Cargo.toml" --lib --no-run &
+CHILD=$!
+wait "$CHILD"
+build_code=$?
+CHILD=""
+if [ "$build_code" -ne 0 ]; then
+  echo "scripts/test.sh: the Rust pre-build failed (exit $build_code); bun test not started" >&2
+  exit "$build_code"
+fi
+echo "rust pre-build: $(($(date +%s) - BUILD_START)) s"
+
 set -m # job control: the background job leads a new process group
 bun test "$@" &
 CHILD=$!
@@ -117,12 +136,15 @@ if target_alive "-$CHILD"; then PGID=$CHILD; else PGID=""; fi
 if [ -z "$PGID" ] && target_alive "$CHILD"; then stop_run "bun test has no process group of its own" 1; fi
 
 START=$(date +%s)
+PEAK_KB=0
 while kill -0 "$CHILD" 2> /dev/null; do
   if [ $(($(date +%s) - START)) -ge "$TIMEOUT_S" ]; then stop_run "time limit of ${TIMEOUT_S}s reached" 124; fi
   rss_kb=$(group_rss_kb) || stop_run "the process query (ps) failed or gave nothing, so the memory limit cannot be checked" 1
+  [ "$rss_kb" -gt "$PEAK_KB" ] && PEAK_KB=$rss_kb
   if [ "$rss_kb" -gt $((MAX_RSS_MB * 1024)) ]; then stop_run "memory limit reached ($((rss_kb / 1024)) MB, limit ${MAX_RSS_MB} MB)" 125; fi
   nap 1
 done
 wait "$CHILD"
 code=$?
+[ "${CUBILOT_TEST_PEAK:-}" = 1 ] && echo "peak RSS $((PEAK_KB / 1024)) MB"
 exit "$code"
