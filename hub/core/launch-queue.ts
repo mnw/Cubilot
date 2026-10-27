@@ -17,6 +17,10 @@ export type LaunchRequest =
       role: string;
       room: string;
       harness: string;
+      /** From role_models in config.yml (hub/core/role-models.ts). Present only when the role's entry sets them. */
+      model?: string;
+      provider?: string;
+      effort?: string;
       cwd: string | null;
       prompt: string;
       env: Record<string, string>;
