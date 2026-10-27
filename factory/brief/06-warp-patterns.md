@@ -1,4 +1,23 @@
-# Part 6: patterns from the Warp cloud factory, model routing and the Orchestrator checkpoint
+# Part 6: patterns from the Warp cloud factory, model routing, the Orchestrator checkpoint and process guards
+
+Status: planned. Build order inside this part (decision 2026-10-27): item 7 (Orchestrator checkpoint), then items 8 to 10 (process guards), then item 6 (model routing), then items 1 to 5. Part 12 comes directly after this part.
+
+## Findings from real use (2026-10-27)
+
+On 2026-10-27 the factory ran real work through Part 4 and stopped many times. The record of each stop is in `factory/orchestrator/unblocking.md`. The stops have three causes:
+
+1. **The process lives in text, and code enforces little of it.** Rules in role files ("stop after two FAILs", "the role must run on the hub") were not followed, and a memory note overrode the role file. Examples: six spec-review FAILs without a stop; `[doc]` tickets with the role writer that could never start; a stage that stayed queued after its ticket went back to draft; a cancel that does not stop a running stage.
+2. **Too much goes through two points: the Orchestrator and the human.** The Orchestrator plans, sets dependencies, reports status and judges findings in one context. Results: 18 queued tickets in one chain of 17 links with one Worker slot idle; contradictory acceptance criteria; a status report that named merges that were not on staging. The human is the only one who can queue, change a radius or give an Allow, on a board that could not find a ticket by id.
+3. **Nobody measures the process.** The stops became visible only when the human asked.
+
+The response, in this part:
+- Item 3 and item 5 get rules from the findings (mechanical findings, the FAIL count).
+- Item 7 keeps the Orchestrator's context small, so the hub, not the Orchestrator's memory, holds the state.
+- Item 8 checks each plan with code before the spec review.
+- Item 9 gives a flow report from the hub.
+- Item 10 moves the stop rules into the hub.
+
+Rule for all items: a fact about the work ("done", "merged", "archived", "blocked") comes from the hub or from git. A report that states such a fact without a commit hash or a hub record does not count.
 
 Source: https://github.com/warpdotdev-demos/cloud-factory-demo (MIT, Warp, last commit 2026-08-12). Read on 2026-10-18.
 
@@ -35,6 +54,7 @@ For the factory:
 - Use OpenSpec instead of `PRODUCT.md` and `TECH.md` where the project already uses it. This repo uses OpenSpec (`openspec/`).
 - The Validator checks the diff against the spec, not only against the acceptance criteria. Warp uses a skill `validate-changes-match-specs` from `warpdotdev/common-skills` for this. Read it before you write ours.
 - Decision (2026-10-19): the Writer writes the spec, on a `[spec]` ticket, with the skill `spec-driven-development` (addyosmani/agent-skills). The Validator does the spec review. Then the human approves the spec.
+- Interim (2026-10-27): the writing chain does not run on the hub yet. Until it does, a Worker writes the spec and the Validator reviews it (as for `[doc]` tickets).
 
 ### 3. A structured review format
 
@@ -59,6 +79,8 @@ For the factory:
 - Map our verdicts: PASS and APPROVE to `APPROVE`. FAIL and CHANGES to `REJECT`. Map our `blocking` to CRITICAL or IMPORTANT, and `suggestion` to SUGGESTION or NIT.
 - Copy `annotate_diff.py` and `validate_review_json.py` into `validator/skills/`. They do not depend on GitHub.
 - The Tester attaches `pr_diff.txt` (annotated) to the handoff, so that the Validator reviews the same lines.
+- Finding type (2026-10-27): each blocking finding is `mechanical` or `judgment`. A mechanical finding names a command that checks it (validate, grep, a test, a character count). Its fix is accepted when the command passes. It does not need a new review. A judgment finding follows item 5.
+- The hub writes the FAIL count of the request or the ticket into each FAIL result (`fail_count`). The Validator does not count.
 
 ### 4. The trust boundary for reviewers
 
@@ -78,6 +100,8 @@ From `review-pr/SKILL.md`. On a second review of the same ticket:
 3. Review only the change since the last review. Use the full diff for context only.
 
 This makes the FAIL and CHANGES loops shorter and less expensive. The `review` kind stores the earlier findings, so the Validator can compare.
+
+Limit (2026-10-27): after the second FAIL or CHANGES on one plan or one ticket, there is no third review unless the human starts it. The hub enforces this (item 10). When acceptance criteria contradict each other on a ticket in review, the human rules which reading applies. The ruling is a ticket note, and no new ticket is necessary unless the ruling changes the scope.
 
 ### 6. Model routing for Workers
 
@@ -198,26 +222,99 @@ The Orchestrator stays open for the whole room (Part 4). Its context must stay s
 5. A ticket event that needs no decision reaches the room lead only in the digest.
 6. The agent column shows the context percentage of the Orchestrator.
 
+Note (2026-10-27): the Orchestrator's own note (design step 5) and its memory are not a source of rules. The role file and `factory/orchestrator/unblocking.md` are. The state summary of design step 4 is also the base of the flow report (item 9).
+
 #### Open questions
 
 1. Pi has no `SessionStart` hook. The Orchestrator is a Claude role, so this item covers Claude only. Check this again if the Orchestrator ever runs on Pi.
 2. Is 60 % the right threshold? Use the records of item 9 to tune it.
 
+### 8. Plan check before the spec review
+
+Status: decision 2026-10-27 (human). Build it after item 7.
+
+#### Goal
+
+Find the faults that code can find before a plan goes to spec review. The spec review then judges only what needs judgment. On 2026-10-27, most review loops came from faults that a command could find.
+
+#### Design
+
+1. **A hub command and a route.** `GET /requests/<id>/check` returns a list of findings for the draft tickets of one request. The Orchestrator runs it before it sends the plan to spec review. The hub also runs it when the spec review starts, and puts the result in the Validator's first message.
+2. **Checks.** Each check gives `error` or `warning`:
+   - The role of each ticket runs on the hub (today: not writer, editor, reviewer). `error`.
+   - Each `blocked_by` names a ticket of the room that is open or done, and gives a reason: the output it needs, or the file that both tickets edit. `error` without a reason.
+   - The longest chain of `blocked_by` links. More than 5 links without a reason in the request: `warning`.
+   - The number of tickets that can start now, compared with the free slots of each role. Fewer than the free slots: `warning`, with the links that block them.
+   - Each acceptance criterion has a verify line that names a test file or a command. A human-only check is marked `[human]` and is in one final live-check ticket. `error`.
+   - The radius follows the radius rule (high for launch, ownership, permissions, read-only worktrees, data). A ticket that names one of these areas with radius low: `warning` for the human.
+   - The OpenSpec change of the request passes `openspec validate --strict` with the pinned version. `error`.
+   - The same term with two different numbers in one ticket (for example two limits for one value). `warning`.
+3. **Effect.** A plan with an `error` does not go to spec review. The Orchestrator fixes the tickets. A `warning` goes to the Validator and to the human with the plan.
+4. **No model.** The check is code only. It reads the ledger, the files and the output of commands.
+
+#### Tests
+
+1. A ticket with the role writer gives an `error`.
+2. A `blocked_by` without a reason gives an `error`. A chain of 6 links gives a `warning`.
+3. A plan where 1 ticket can start and 2 Worker slots are free gives a `warning` that names the blocking links.
+4. A criterion without a verify line gives an `error`.
+5. A plan with an `error` cannot start a spec review.
+
+### 9. Flow report
+
+Status: decision 2026-10-27 (human). Build it after item 8. It is the first part of the dashboard (Part 11), in a form without a new screen.
+
+#### Goal
+
+The human and the Orchestrator see where the work waits, without a question to the Orchestrator and without a check by hand.
+
+#### Design
+
+1. **`GET /rooms/<room>/flow`** returns, from the ledger only:
+   - per role: queued tickets, tickets that can start, live stages, free slots;
+   - each queued ticket that can start but has no stage (a stall);
+   - each ticket without movement for more than a set time (setting in `config.yml`);
+   - the FAIL count of each open request and ticket;
+   - the longest chain of open tickets;
+   - time in each status, as the median of the last 7 days.
+2. **Show it.** One line in "Needs you" when a stall, a FAIL count of 2 or more, or an idle slot with startable work exists. The state summary of item 7 includes the flow report.
+3. **Status reports.** When the Orchestrator reports work as done, merged or archived, it gives the commit hash or the hub record. The flow report lists tickets that are `done` in the ledger with no merge commit on staging.
+
+#### Tests
+
+1. A queued ticket with no open blocker and no stage appears as a stall.
+2. A free Worker slot and a startable Worker ticket give a "Needs you" line.
+3. A ticket `done` in the ledger with no merge commit on staging appears in the report.
+
+### 10. Stop rules in the hub
+
+Status: decision 2026-10-27 (human). Several of these are open tickets already. This item collects them, so that each rule in a role file that protects the flow has a check in code.
+
+| Rule | Code | Ticket |
+|---|---|---|
+| No third review after two FAILs, unless the human starts it. The hub writes `fail_count`. The "Needs you" row shows the request while a newer review is open. | Spec review start refuses (409); result gets `fail_count` | t_65a8 |
+| A ticket that goes back to draft cancels its queued stage. New stage status `cancelled`, with no retry, no FAIL count and no failure handling. | Stage kind | G10 t_d232 |
+| A cancel of a ticket stops its running stage. | Stage kind, launch | G5 |
+| A ticket whose role has no stage chain on the hub cannot be queued. | Ticket transition refuses with the role name | draft ticket (2026-10-27) |
+| A plan with a plan-check `error` cannot start a spec review. | Spec review start | item 8 |
+
+Rule for new role-file rules: when a rule protects the flow (a limit, a stop, an order), add the check in code or add a row to this table with the reason why code cannot check it.
+
 ## Ideas for later
 
-### 8. Learning from the human's corrections
+### 11. Learning from the human's corrections
 
 Skill: `.agents/skills/improve-review-pr/SKILL.md`. A daily job reads how humans reacted to automated review comments. It opens a change to the review skill when it finds knowledge that the reviewer must keep.
 
 For the factory: when the human overrules a Validator or Reviewer verdict, record it with the reason. A scheduled job proposes changes to the role file or the skills. The human approves each change.
 
-### 9. Video evidence of UI behaviour
+### 12. Video evidence of UI behaviour
 
 Skill: `.agents/skills/verify-behavior/SKILL.md`. It checks each user story in a separate run, and records video and screenshots. It uses the Oz platform.
 
 For the factory: the Tester records Playwright video for UI tickets and attaches it to the ticket. One check for each user story in the spec, in parallel. This is useful for Drupal UI changes and for accessibility checks.
 
-### 10. Tests for skills
+### 13. Tests for skills
 
 File: `.agents/skills/triage/evals/evals.json`. Each entry has a prompt and the expected behaviour. Skill descriptions decide when skills load (Part 2, finding 4), so test the important skills with prompts like these. The `skill-creator` skill can run such tests.
 
