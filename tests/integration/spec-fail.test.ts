@@ -13,6 +13,8 @@ describe("spec FAIL", () => {
   const open: Array<{ close: () => void }> = [];
   const reqs: Req[] = [];
   let stream: ReturnType<typeof openSSE>;
+  let ticket1 = "";
+  let ticket2 = "";
 
   beforeAll(async () => {
     hub = await spawnHub();
@@ -31,6 +33,9 @@ describe("spec FAIL", () => {
   test("the stage passes with verdict FAIL, the tickets stay draft, no new launch; the close comes at the turn end", async () => {
     const t = await postJson(hub, "/tickets", { by: "Orchestrator", title: "T", acceptance_criteria: "c", blast_radius: "low", request_id: "req-1", status: "draft" });
     const ticket = (t.json as { snapshot: { id: string } }).snapshot.id;
+    const t2 = await postJson(hub, "/tickets", { by: "Orchestrator", title: "T2", acceptance_criteria: "c", blast_radius: "low", request_id: "req-1", status: "draft" });
+    ticket2 = (t2.json as { snapshot: { id: string } }).snapshot.id;
+    ticket1 = ticket;
     expect((await postJson(hub, "/handoffs", { from: "Orchestrator", to_role: "validator", review: "spec", request_id: "req-1", task: "review", context: { request_text: "X" } })).status).toBe(201);
     for (let i = 0; i < 60 && reqs.length < 1; i++) await sleep(50);
     const launch = reqs[0];
@@ -42,7 +47,10 @@ describe("spec FAIL", () => {
       from: launch.session, to: "Orchestrator", task: "spec verdict",
       context: {
         stage_id: launch.stage_id, review: "spec", request_id: "req-1", verdict: "FAIL",
-        findings: [{ ticket_id: ticket, severity: "blocking", text: "no criteria" }], questions_for_human: [],
+        findings: [
+          { ticket_id: ticket, severity: "blocking", text: "no criteria" },
+          { ticket_id: ticket2, severity: "blocking", text: "title too vague" },
+        ], questions_for_human: [],
       },
     });
     expect(fail.status, JSON.stringify(fail.json)).toBe(201);
@@ -69,7 +77,9 @@ describe("spec FAIL", () => {
     const second = reqs.filter((r) => r.kind === "launch")[1];
     expect(second.stage_id).not.toBe(first.stage_id);
     expect(second.prompt).toContain("## Findings of earlier reviews of this request");
-    expect(second.prompt).toContain("(blocking): no criteria");
+    expect(second.prompt).toContain(`- ${ticket1} (blocking): no criteria`);
+    expect(second.prompt).toContain(`- ${ticket2} (blocking): title too vague`);
+    expect(ticket1).not.toBe(ticket2);
     expect(second.prompt).toContain("Blocked by: none");
     expect(second.prompt).not.toContain("software factory"); // no role prompt text
   });
