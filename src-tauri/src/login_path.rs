@@ -130,8 +130,8 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
-    // macOS checks a new executable file at its first run, one file after the other (about 115 ms each, measured): 32
-    // new files at once take about 3.8 s, and that time falls between spawn and exit of the call under test. The fixture
+    // A new executable file is slow at its first run (measured: about 115 ms per file, more when many files start at
+    // once). That time falls between spawn and exit of the call under test. Why macOS is slow is not proven. The fixture
     // runs once here with a flag it answers at once, so that cost is not inside the timed call.
     fn script(dir: &std::path::Path, name: &str, body: &str) -> String {
         let p = dir.join(name);
