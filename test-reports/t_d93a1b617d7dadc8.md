@@ -28,5 +28,20 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 196 filtered out
 
 Full run: `cargo test --manifest-path src-tauri/Cargo.toml`: 196 passed, 0 failed, 1 ignored.
 
+## Tester run (stage s_296220fae63c031b, tester-1)
+
+Cited file:line check: pty.rs:3873, launches.rs:383, pty.rs:3921-3923 and lib.rs:1553 match the code.
+
+| Command | Result |
+|---|---|
+| `cargo test --manifest-path src-tauri/Cargo.toml close_kills_only_the_named_session` | 1 passed, 0 failed, 196 filtered out |
+| `cargo test --manifest-path src-tauri/Cargo.toml launch_hands_the_role_to_the_spawn_call` | 1 passed, 0 failed, 196 filtered out |
+| `cargo test --manifest-path src-tauri/Cargo.toml stage_ids_and_the_session_env` | 1 passed, 0 failed, 196 filtered out |
+| `cargo test --manifest-path src-tauri/Cargo.toml` | 196 passed, 0 failed, 1 ignored |
+
+Not run: `./scripts/test.sh`, `bun x tsc --noEmit`, `./scripts/check-mod.sh`. Only the report changed, so the ticket does not require them.
+Item 3 (live tester launch): not run again here. The 6.5 live record covers it.
+Not covered by an automated test: app exit keeps tmux sessions (lib.rs:1553, code reading only).
+
 ## Setup note
 A fresh worktree needed `bun install`, `./scripts/build-sidecars.sh` and `./scripts/stage-prep.sh` (builds src-tauri/resources/tmux) before cargo could build. These outputs are git-ignored.
