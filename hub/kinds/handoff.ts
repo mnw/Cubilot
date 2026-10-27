@@ -474,6 +474,19 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
             return Response.json({ error: "context.commit must be a commit hash" }, { status: 400 });
           }
           handoffRoom = fromAgent.room ?? cap.config.defaultRoom;
+          // The human has no room: the review takes the room of its named tickets (spec-fail-gate 1). They must exist and share one room.
+          if (from === cap.config.humanName) {
+            const ids = c.ticket_ids as string[] | undefined;
+            if (!ids?.length) return Response.json({ error: "a spec review from the human needs context.ticket_ids" }, { status: 400 });
+            const rooms = new Set<string>();
+            for (const id of new Set(ids)) {
+              const t = db.query<{ room: string }, [string]>("SELECT room FROM tickets WHERE id = ?").get(id);
+              if (!t) return Response.json({ error: `unknown ticket ${id}` }, { status: 400 });
+              rooms.add(t.room);
+            }
+            if (rooms.size !== 1) return Response.json({ error: `context.ticket_ids must be in one room, found: ${[...rooms].sort().join(", ")}` }, { status: 400 });
+            handoffRoom = [...rooms][0];
+          }
           // The FAIL limit (spec-fail-gate 1): after two FAILs since the last PASS only the human sends this review.
           if (from !== cap.config.humanName) {
             const { fails } = specFailState(db, handoffRoom, specRequestId);

@@ -29,8 +29,19 @@ describe("spec FAIL gate", () => {
     postJson(hub, "/tickets", { by: room === "gh" ? "obs-gh" : "Orchestrator", title: "T", acceptance_criteria: "c", blast_radius: "low", request_id, status: "draft" }).then(
       (r) => (r.json as { snapshot: { id: string } }).snapshot.id,
     );
-  const spec = (from: string, request_id: string) =>
-    postJson(hub, "/handoffs", { from, to_role: "validator", review: "spec", request_id, task: "review", context: { request_text: "Build X" } });
+  const spec = (from: string, request_id: string, ticket_ids?: unknown) =>
+    postJson(hub, "/handoffs", {
+      from, to_role: "validator", review: "spec", request_id, task: "review",
+      context: { request_text: "Build X", ...(ticket_ids !== undefined ? { ticket_ids } : {}) },
+    });
+  const handoffRoom = (id: string) => {
+    const db = new Database(hub.ledgerPath, { readonly: true });
+    try {
+      return db.query<{ room: string }, [string]>("SELECT room FROM handoffs WHERE id = ?").get(id)!.room;
+    } finally {
+      db.close();
+    }
+  };
   const stages = async () => (await getJson(hub, "/stages?status=all")).json as Stage[];
   const counts = () => {
     const db = new Database(hub.ledgerPath, { readonly: true });
@@ -155,7 +166,8 @@ describe("spec FAIL gate", () => {
 
   test("(g, c) Needs-you lists the request while the human's newer review is open; the human's review starts a stage", async () => {
     const n = launchCount();
-    expect((await spec(hub.humanName, "req-a")).status).toBe(201);
+    const named = await draft("gf", "req-a");
+    expect((await spec(hub.humanName, "req-a", [named])).status).toBe(201);
     await until(() => launchCount() === n + 1);
     const l = await startLaunch("gf");
     expect((await stages()).find((s) => s.id === l.stage_id)!.status).toBe("running");
@@ -213,7 +225,7 @@ describe("spec FAIL gate", () => {
     expect((await spec("Orchestrator", "req-c")).status).toBe(201);
     await until(() => launchCount() === n + 1);
     const running = await startLaunch("gf");
-    expect((await spec(hub.humanName, "req-c")).status).toBe(201); // queued
+    expect((await spec(hub.humanName, "req-c", [ticket])).status).toBe(201); // queued
     const queued = (await stages()).find((s) => s.request_id === "req-c" && s.status === "queued")!;
     expect((await result(running, "req-c", "FAIL", ticket)).status).toBe(201);
     expect((await stages()).find((s) => s.id === queued.id)!.status).toBe("queued");
@@ -235,5 +247,58 @@ describe("spec FAIL gate", () => {
   test("the count is per room: the same request id in another room is not gated", async () => {
     await draft("gf", "req-h");
     expect((await spec("Orchestrator", "req-h")).status).toBe(201);
+  });
+
+  test("human-review-room (a) the human's review after two FAILs takes the room of its ticket (not the human's default room); N = 3", async () => {
+    await review("gh", "obs-gh", "req-hr", "FAIL");
+    await review("gh", "obs-gh", "req-hr", "FAIL");
+    const ticket = await draft("gh", "req-hr");
+    const n = launchCount();
+    const stagesBefore = (await stages()).filter((s) => s.request_id === "req-hr").length;
+    const r = await spec(hub.humanName, "req-hr", [ticket]);
+    expect(r.status, JSON.stringify(r.json)).toBe(201);
+    expect(handoffRoom((r.json as { id: string }).id)).toBe("gh");
+    await until(() => launchCount() === n + 1);
+    expect((await stages()).filter((s) => s.request_id === "req-hr")).toHaveLength(stagesBefore + 1);
+    const l = await startLaunch("gh");
+    expect(l.room).toBe("gh");
+    expect(l.prompt).toContain("This is spec review 3 of this request since its last PASS.");
+    expect((await result(l, "req-hr", "PASS", "")).status).toBe(201);
+    await endSession(l);
+  });
+
+  test("human-review-room (b) the human names tickets of two rooms: 400, nothing recorded", async () => {
+    const a = await draft("gf", "req-two");
+    const b = await draft("gh", "req-two");
+    const before = counts();
+    const r = await spec(hub.humanName, "req-two", [a, b]);
+    expect(r.status).toBe(400);
+    expect((r.json as { error: string }).error).toContain("one room");
+    expect(counts()).toEqual(before);
+  });
+
+  test("human-review-room (c, c2) the human names no tickets, or an empty list: 400 naming ticket_ids, nothing recorded", async () => {
+    await draft("gf", "req-none");
+    const before = counts();
+    for (const ids of [undefined, []]) {
+      const r = await spec(hub.humanName, "req-none", ids);
+      expect(r.status).toBe(400);
+      expect((r.json as { error: string }).error).toContain("ticket_ids");
+      expect(counts()).toEqual(before);
+    }
+  });
+
+  test("human-review-room: an unknown ticket from the human is 400, nothing recorded", async () => {
+    const before = counts();
+    const r = await spec(hub.humanName, "req-none", ["t_0000000000000000"]);
+    expect(r.status).toBe(400);
+    expect(counts()).toEqual(before);
+  });
+
+  test("human-review-room (e) an agent with fewer than two FAILs and no ticket_ids: its own room, default scope", async () => {
+    await draft("gh", "req-e");
+    const r = await spec("obs-gh", "req-e");
+    expect(r.status).toBe(201);
+    expect(handoffRoom((r.json as { id: string }).id)).toBe("gh");
   });
 });
