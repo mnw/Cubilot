@@ -113,6 +113,8 @@ When the request has two spec verdicts of FAIL since its last PASS, the hub SHAL
 
 The hub SHALL leave a request out of the "Needs you" area while a newer spec review of the same request and room is open. A newer review is created after the latest FAIL stage. It is open in status `queued`, `launching`, `running` or `retrying`. The row SHALL return when no newer review is open. A newer review that ends with a FAIL verdict becomes the latest FAIL. A newer review that ends with a PASS removes the row. A newer review that ends `failed` with no verdict SHALL NOT count as a FAIL.
 
+The hub SHALL leave a finding out of the list when its ticket was answered after the latest FAIL stage ended. The ticket is answered when it has, with an event `seq` greater than the `stage.passed` event of that FAIL stage, a `ticket.done`, a `ticket.cancelled`, or a `ticket.edited` whose `fields` include `acceptance_criteria` or `title`. It is also answered when it is `done` or `cancelled` now. The kinds `ticket.assigned`, `ticket.noted`, `ticket.attached`, `ticket.archived` and any other edit SHALL NOT answer it. The hub SHALL leave the request out when every finding of a FAIL that listed findings is left out. The hub SHALL also leave the request out when it has one or more tickets in the room and all are `done` or `cancelled`. A request with no ticket left in it stays listed. Each item SHALL carry `latest_fail_stage_id`, the newest FAIL stage of the request.
+
 #### Scenario: Second FAIL
 
 - **GIVEN** the request `r-1` has one FAIL verdict

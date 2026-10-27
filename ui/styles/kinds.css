@@ -888,6 +888,12 @@ label[for="ticket-filter-request"] { color: var(--text); }
 
 /* Needs you: the open findings of a request whose spec review failed twice or more, above the approvals. */
 .needs-row { padding: var(--sp-8) var(--sp-10); border: 1px solid var(--red); border-radius: var(--radius-md); background: var(--bg-raised); }
+.needs-head { display: flex; align-items: center; gap: var(--sp-6); }
+.needs-head .plan-title { flex: 1; min-width: 0; }
+.needs-count { flex: none; font-size: var(--fs-xs); color: var(--text-muted); }
+.needs-btn { flex: none; min-width: 24px; min-height: 24px; padding: var(--sp-2) var(--sp-8); border: var(--border-1) solid var(--line); border-radius: var(--radius-md); background: transparent; color: var(--text); font-size: var(--fs-xs); }
+.needs-btn:hover { background: var(--bg-inset); }
+.needs-btn:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
 .needs-findings { margin: var(--sp-4) 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--sp-3); }
 .needs-finding { display: flex; gap: var(--sp-8); font-size: var(--fs-xs); color: var(--text); }
 .needs-sev { flex: none; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }

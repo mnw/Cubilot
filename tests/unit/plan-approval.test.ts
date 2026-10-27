@@ -13,6 +13,10 @@ class El {
   type = "";
   dataset: Record<string, string> = {};
   handlers: Record<string, () => void> = {};
+  attrs: Record<string, string> = {};
+  focused = false;
+  setAttribute(k: string, v: string) { this.attrs[k] = v; }
+  focus() { this.focused = true; }
   constructor(public tag = "div") {}
   append(...c: El[]) { this.children.push(...c); }
   appendChild(c: El) { this.children.push(c); return c; }
@@ -22,13 +26,24 @@ class El {
   text(): string { return this.textContent + this.children.map((c) => c.text()).join(" "); }
 }
 
+// A Storage stand-in. `fail` makes every call throw, as a blocked or full store does.
+function fakeStore(initial: Record<string, string> = {}, fail = false, failSet = false) {
+  const m = new Map(Object.entries(initial));
+  return {
+    m,
+    getItem: (k: string) => { if (fail) throw new Error("blocked"); return m.has(k) ? m.get(k)! : null; },
+    setItem: (k: string, v: string) => { if (fail || failSet) throw new Error("blocked"); m.set(k, v); },
+  };
+}
+
 const plan = (id: string, drafts: string[], high: string[]) => ({
   request_id: id, stage_id: "s_0123456789abcdef",
   high_tickets: high.map((t, i) => ({ id: `t_${i}`, title: t, status: "queued" })), draft_tickets: drafts,
 });
 
-function setup(first: any[], room = "r1", postStatus = 200, firstNeeds: any[] = []) {
+function setup(first: any[], room = "r1", postStatus = 200, firstNeeds: any[] = [], store: any = fakeStore()) {
   const root = new El();
+  const heading = new El("h3");
   root.hidden = true;
   let waiting = first;
   let needs = firstNeeds;
@@ -37,8 +52,8 @@ function setup(first: any[], room = "r1", postStatus = 200, firstNeeds: any[] = 
   const observers: Record<string, () => void> = {};
   const held = { hold: false, queue: [] as Array<() => void> };
   const g: any = {
-    document: { getElementById: (id: string) => (id === "plan-waiting" ? root : null), createElement: (t: string) => new El(t), addEventListener() {} },
-    SELECTED_ROOM: room, ROOM_ALL: "__ALL__", HUMAN_NAME: "human",
+    document: { getElementById: (id: string) => (id === "plan-waiting" ? root : null), querySelector: () => heading, createElement: (t: string) => new El(t), addEventListener() {} },
+    localStorage: store, SELECTED_ROOM: room, ROOM_ALL: "__ALL__", HUMAN_NAME: "human",
     KindCardRenderer: { observe: (p: string, fn: () => void) => { observers[p] = fn; } },
     addMessage: (m: any) => messages.push(m),
     authedFetch: async (path: string, init?: any) => {
@@ -57,7 +72,7 @@ function setup(first: any[], room = "r1", postStatus = 200, firstNeeds: any[] = 
   };
   // `with (g)`: the file's free names (SELECTED_ROOM ...) are looked up on g at each use, so a test can change the room.
   const api = new Function("g", "with (g) {" + readFileSync("ui/features/plan-approval.js", "utf8") + "\nreturn PlanApproval; }")(g);
-  return { api, root, calls, messages, observers, setWaiting: (w: any[]) => { waiting = w; }, setNeeds: (n: any[]) => { needs = n; }, held, release: () => { const q = held.queue.splice(0); for (const r of q) r(); }, g };
+  return { api, root, heading, store, calls, messages, observers, setWaiting: (w: any[]) => { waiting = w; }, setNeeds: (n: any[]) => { needs = n; }, held, release: () => { const q = held.queue.splice(0); for (const r of q) r(); }, g };
 }
 const flush = () => new Promise((r) => setTimeout(r, 5));
 
@@ -209,5 +224,119 @@ describe("plan waits for your approval (spec-review 4.4)", () => {
     const two = setup([plan("req-2", ["t_a", "t_b"], ["Big one"])]);
     await flush();
     expect(two.root.text()).toContain("2 draft tickets wait.");
+  });
+});
+
+// Needs you: Collapse and Clear (state in localStorage per room).
+describe("Needs you collapse and clear", () => {
+  const need = (id: string, stage: string) => ({
+    request_id: id, fail_count: 2, latest_fail_stage_id: stage,
+    findings: [
+      { ticket_id: "t_a", title: "A", severity: "blocking", text: "one" },
+      { ticket_id: "t_b", title: "B", severity: "suggestion", text: "two" },
+    ],
+  });
+  const btn = (e: any, label: string) => e.root.all().find((x: El) => x.tag === "button" && x.attrs["aria-label"] === label);
+  const rows = (e: any) => e.root.all().filter((x: El) => x.className === "needs-row").map((x: El) => x.dataset.request);
+
+  test("Collapse: aria-expanded and name flip, the title and the count stay, the findings go; Expand reverses", async () => {
+    const e = setup([], "r1", 200, [need("req-1", "s_1")]);
+    await flush();
+    const c = btn(e, "Collapse req-1");
+    expect(c.attrs["aria-expanded"]).toBe("true");
+    c.handlers.click();
+    const x = btn(e, "Expand req-1");
+    expect(x.attrs["aria-expanded"]).toBe("false");
+    expect(x.focused).toBe(true);
+    expect(e.root.text()).toContain("req-1 failed its spec review 2 times");
+    expect(e.root.text()).toContain("2 open findings");
+    expect(e.root.all().filter((n: El) => /^needs-finding( |$)/.test(n.className))).toHaveLength(0);
+    expect(JSON.parse(e.store.m.get("cubilot.needs.collapsed.r1"))).toEqual({ "req-1": "s_1" });
+    x.handlers.click();
+    expect(btn(e, "Collapse req-1").attrs["aria-expanded"]).toBe("true");
+    expect(e.root.all().filter((n: El) => /^needs-finding( |$)/.test(n.className))).toHaveLength(2);
+  });
+
+  test("a collapse is kept per room and request, and a newer FAIL (new stage id) expands the block again", async () => {
+    const store = fakeStore({ "cubilot.needs.collapsed.r1": JSON.stringify({ "req-1": "s_1" }) });
+    const same = setup([], "r1", 200, [need("req-1", "s_1")], store);
+    await flush();
+    expect(btn(same, "Expand req-1")).toBeTruthy();
+    const newer = setup([], "r1", 200, [need("req-1", "s_2")], store);
+    await flush();
+    expect(btn(newer, "Collapse req-1")).toBeTruthy();
+    const other = setup([], "r2", 200, [need("req-1", "s_1")], store);
+    await flush();
+    expect(btn(other, "Collapse req-1")).toBeTruthy();
+  });
+
+  test("Clear hides the block, keeps it hidden after a reload, and a newer FAIL shows it again", async () => {
+    const store = fakeStore();
+    const e = setup([], "r1", 200, [need("req-1", "s_1")], store);
+    await flush();
+    expect(btn(e, "Clear req-1").textContent).toBe("Clear");
+    btn(e, "Clear req-1").handlers.click();
+    expect(e.root.hidden).toBe(true);
+    expect(JSON.parse(store.m.get("cubilot.needs.cleared.r1")!)).toEqual(["s_1"]);
+    const again = setup([], "r1", 200, [need("req-1", "s_1")], store);
+    await flush();
+    expect(again.root.hidden).toBe(true);
+    const newer = setup([], "r1", 200, [need("req-1", "s_2")], store);
+    await flush();
+    expect(rows(newer)).toEqual(["req-1"]);
+  });
+
+  test("focus after Clear: the next block's Collapse button, else the previous one's, else the first column heading", async () => {
+    const e = setup([], "r1", 200, [need("a", "s_a"), need("b", "s_b"), need("c", "s_c")]);
+    await flush();
+    btn(e, "Clear b").handlers.click();
+    expect(rows(e)).toEqual(["a", "c"]);
+    expect(btn(e, "Collapse c").focused).toBe(true);
+    btn(e, "Clear c").handlers.click();
+    expect(btn(e, "Collapse a").focused).toBe(true);
+    expect(e.heading.focused).toBe(false);
+    btn(e, "Clear a").handlers.click();
+    expect(e.heading.focused).toBe(true);
+    expect(e.heading.attrs.tabindex).toBe("-1");
+  });
+
+  test("clear filter: a cleared id hides, a newer id shows; the collapse map resets on a new id", () => {
+    const e = setup([]);
+    const store = e.store;
+    store.m.set("cubilot.needs.cleared.r1", JSON.stringify(["s_1"]));
+    const list = [need("a", "s_1"), need("b", "s_2")];
+    expect(e.api._visibleNeeds("r1", list).map((n: any) => n.request_id)).toEqual(["b"]);
+    expect(e.api._visibleNeeds("r2", list)).toHaveLength(2);
+    e.api._setCollapsed("r1", list[0], true);
+    expect(e.api._isCollapsed("r1", list[0])).toBe(true);
+    expect(e.api._isCollapsed("r1", need("a", "s_9"))).toBe(false);
+  });
+
+  test("malformed storage shows every block, expanded", () => {
+    for (const bad of ["{not json", "42", '{"a":1}', '[1,2]', '"x"']) {
+      const e = setup([], "r1", 200, [], fakeStore({ "cubilot.needs.cleared.r1": bad, "cubilot.needs.collapsed.r1": bad }));
+      const list = [need("a", "s_1")];
+      expect(e.api._visibleNeeds("r1", list)).toEqual(list);
+      expect(e.api._isCollapsed("r1", list[0])).toBe(false);
+    }
+  });
+
+  test("only setItem throws, a cleared id is stored: every block shown", async () => {
+    const e = setup([], "r1", 200, [need("a", "s_1"), need("b", "s_2")],
+      fakeStore({ "cubilot.needs.cleared.r1": JSON.stringify(["s_1"]) }, false, true));
+    await flush();
+    expect(rows(e)).toEqual(["b"]);
+    btn(e, "Clear b").handlers.click();
+    expect(rows(e)).toEqual(["a", "b"]);
+  });
+
+  test("getItem and setItem that throw: every block shown, Clear and Collapse do not break", async () => {
+    const e = setup([], "r1", 200, [need("a", "s_1")], fakeStore({}, true));
+    await flush();
+    expect(rows(e)).toEqual(["a"]);
+    btn(e, "Clear a").handlers.click();
+    expect(rows(e)).toEqual(["a"]);
+    btn(e, "Collapse a").handlers.click();
+    expect(btn(e, "Collapse a")).toBeTruthy();
   });
 });

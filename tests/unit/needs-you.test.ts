@@ -41,7 +41,13 @@ function makeEnv() {
     db.run("INSERT INTO handoffs (id, from_agent, to_agent, task, context_json, status, created_at_ms, expires_at_ms, room) VALUES (?, ?, 'Orchestrator', 'r', ?, 'pending', 1, 2, 'r1')", [hid, session, context]);
     db.run("INSERT INTO events (entity_id, kind, actor, payload_json, at_ms, room) VALUES (?, 'handoff.created', ?, '{}', 1, 'r1')", [hid, session]);
     rt.hooks.onResult(session, JSON.parse(context), cap);
+    return s.id;
   };
+  /** A ticket ledger event, as the ticket kind writes it. */
+  const event = (ticketId: string, kind: string, payload: unknown = {}, room = "r1") =>
+    db.run("INSERT INTO events (entity_id, kind, actor, payload_json, at_ms, room) VALUES (?, ?, 'a', ?, 1, ?)", [ticketId, kind, JSON.stringify(payload), room]);
+  const setStatus = (id: string, status: string) => db.run("UPDATE tickets SET status = ? WHERE id = ?", [status, id]);
+  const setRequest = (id: string, request: string) => db.run("UPDATE tickets SET request_id = ? WHERE id = ?", [request, id]);
   /** A newer spec stage that is not ended: moved to the asked open status. */
   const openStage = (request: string, scope: string[], status: "queued" | "launching" | "running" | "retrying") => {
     const s = rt.api.create({ request_id: request, review: "spec", role: "validator" }, "system", cap, (ctx) => {
@@ -71,7 +77,7 @@ function makeEnv() {
     db.run("INSERT INTO events (entity_id, kind, actor, payload_json, at_ms, room) VALUES (?, 'handoff.created', ?, '{}', 1, 'r1')", [hid, session]);
     rt.hooks.onResult(session, JSON.parse(context), cap);
   };
-  return { db, ticket, review, openStage, endStage };
+  return { db, ticket, review, openStage, endStage, event, setStatus, setRequest };
 }
 
 describe("needsYouRequests", () => {
@@ -191,7 +197,7 @@ describe("needsYouRequests", () => {
     test("2 FAILs show the row with today's fields", () => {
       const { e, a } = failed2();
       expect(needsYouRequests(e.db, "r1")).toEqual([
-        { request_id: "req-1", fail_count: 2, findings: [{ ticket_id: a, title: "Plan A", severity: "blocking", text: "two" }] },
+        { request_id: "req-1", fail_count: 2, latest_fail_stage_id: expect.any(String), findings: [{ ticket_id: a, title: "Plan A", severity: "blocking", text: "two" }] },
       ]);
     });
 
@@ -268,5 +274,97 @@ describe("needsYouRequests", () => {
       e.endStage(s1, "req-1", "failed");
       expect(needsYouRequests(e.db, "r1")).toEqual([]);
     });
+  });
+});
+
+// Board "Needs you" clear: answered findings and finished requests are not listed.
+describe("needsYouRequests hides answered findings", () => {
+  const f = (...ts: string[]) => ts.map((t) => ({ ticket_id: t, severity: "blocking", text: `fix ${t}` }));
+  /** Two FAILs naming the tickets; returns the env, the tickets and the newest FAIL stage. */
+  const setup = (n = 2) => {
+    const e = makeEnv();
+    const ts = Array.from({ length: n }, (_, i) => e.ticket("req-1", `T${i}`));
+    e.review("req-1", ts, "FAIL", f(...ts));
+    const last = e.review("req-1", ts, "FAIL", f(...ts));
+    return { e, ts, last };
+  };
+  const lines = (e: ReturnType<typeof makeEnv>) => needsYouRequests(e.db, "r1").flatMap((r) => r.findings.map((x) => x.ticket_id));
+
+  test("latest_fail_stage_id is the newest FAIL; a newer FAIL changes it", () => {
+    const { e, ts, last } = setup();
+    expect(needsYouRequests(e.db, "r1")[0].latest_fail_stage_id).toBe(last);
+    const newer = e.review("req-1", ts, "FAIL", f(...ts));
+    expect(needsYouRequests(e.db, "r1")[0].latest_fail_stage_id).toBe(newer);
+  });
+
+  test("all tickets cancelled, all done, mixed: the block is not listed", () => {
+    for (const statuses of [["cancelled", "cancelled"], ["done", "done"], ["done", "cancelled"]]) {
+      const { e, ts } = setup();
+      ts.forEach((t, i) => e.setStatus(t, statuses[i]));
+      expect(needsYouRequests(e.db, "r1")).toEqual([]);
+    }
+  });
+
+  test("one finding ticket done and one draft: one line left", () => {
+    const { e, ts } = setup();
+    e.setStatus(ts[0], "done");
+    expect(lines(e)).toEqual([ts[1]]);
+  });
+
+  test("a done or cancelled event after the FAIL hides the line; the status alone also hides", () => {
+    for (const kind of ["ticket.done", "ticket.cancelled"]) {
+      const { e, ts } = setup();
+      e.event(ts[0], kind);
+      expect(lines(e)).toEqual([ts[1]]);
+    }
+  });
+
+  test("a done event before the FAIL keeps the line", () => {
+    const e = makeEnv();
+    const ts = [e.ticket("req-1", "A"), e.ticket("req-1", "B")];
+    e.event(ts[0], "ticket.done");
+    e.review("req-1", ts, "FAIL", f(...ts));
+    e.review("req-1", ts, "FAIL", f(...ts));
+    expect(lines(e)).toEqual(ts);
+  });
+
+  test("an acceptance_criteria or title edit after the FAIL hides the line; before it keeps", () => {
+    for (const field of ["acceptance_criteria", "title"]) {
+      const { e, ts } = setup();
+      e.event(ts[0], "ticket.edited", { fields: ["priority", field] });
+      expect(lines(e)).toEqual([ts[1]]);
+    }
+    const e = makeEnv();
+    const ts = [e.ticket("req-1", "A"), e.ticket("req-1", "B")];
+    e.event(ts[0], "ticket.edited", { fields: ["title"] });
+    e.review("req-1", ts, "FAIL", f(...ts));
+    e.review("req-1", ts, "FAIL", f(...ts));
+    expect(lines(e)).toEqual(ts);
+  });
+
+  test("an edit of only priority, role or blocked_by keeps the line", () => {
+    const { e, ts } = setup();
+    e.event(ts[0], "ticket.edited", { fields: ["priority"] });
+    e.event(ts[0], "ticket.edited", { fields: ["role", "blocked_by"] });
+    expect(lines(e)).toEqual(ts);
+  });
+
+  test("assigned, noted, attached, archived and claimed after the FAIL keep the line", () => {
+    const { e, ts } = setup();
+    for (const k of ["ticket.assigned", "ticket.noted", "ticket.attached", "ticket.archived", "ticket.claimed"]) e.event(ts[0], k);
+    expect(lines(e)).toEqual(ts);
+  });
+
+  test("a request_id edit that moves the last ticket out keeps line and block", () => {
+    const { e, ts } = setup(1);
+    e.setRequest(ts[0], "req-other");
+    expect(lines(e)).toEqual(ts);
+  });
+
+  test("all findings hidden hides the block while an unrelated open ticket is in the request", () => {
+    const { e, ts } = setup();
+    e.ticket("req-1", "Extra");
+    ts.forEach((t) => e.event(t, "ticket.cancelled"));
+    expect(needsYouRequests(e.db, "r1")).toEqual([]);
   });
 });
