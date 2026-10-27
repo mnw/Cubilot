@@ -207,6 +207,7 @@ describe("a hub restart between the retry and the relaunch (5.3b)", () => {
     expect(launches).toHaveLength(1);
     expect(launches[0].prompt).toContain("second end of turn without a result");
     expect(rt2.api.load(e.stageId)).toMatchObject({ status: "launching", attempt: 2 });
+    rt2.module.dispose!(); // a second start() would overwrite sweepTimer and leak the first interval
     rt2.module.start!(e.cap); // a second start: the launching stage counts as an unacked launch, nothing else relaunches
     rt2.module.dispose!();
   });
