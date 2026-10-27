@@ -30,6 +30,14 @@ For each blocking finding, write one of these:
 - **Not blocking:** use the decision tree in `factory/validator/validator.md`. A finding outside the ticket is a suggestion.
 - **Implementation details are not yours to rule on.** A value, a limit, a write order or an API choice comes from the Worker, with evidence from the code (file and line, or a named constant), and the Validator checks it. If you must rule on one, cite the code that supports it. On 2026-10-27, two of four FAILs on t_46fd came from rulings that were not checked against the code.
 
+### Standing rule: mechanical FAILs (human, 2026-10-27)
+
+When every blocking finding of a FAIL is mechanical, fix it and continue without asking the human. Mechanical means: a missing or wrong risk line, a spec or `tasks.md` sync, counts or evidence in a note, a rename, a path or line reference, a command that must be added to a check. The check after the fix is the command output or the changed lines only, not a new full review.
+
+Ask the human when any finding changes behaviour, scope, a test assertion, an acceptance criterion's meaning, or the radius. Ask also when the hub refuses the next step (for example a third spec review, or a queue of a request with a high-radius ticket).
+
+After a merge conflict on a high-radius ticket that the human has allowed, the Allow stays valid if the conflict commit changes only the merge with staging. The Validator confirms this, and the merge message names the approval and the conflict commit.
+
 ### 3. Check facts against the repository
 
 - A ticket is done only if its commit is on staging. Name the hash.
