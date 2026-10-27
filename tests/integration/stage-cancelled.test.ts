@@ -60,17 +60,24 @@ const cancel = async (hub: HubHandle, id: string) => (await postJson(hub, `/tick
 const stagesOf = async (hub: HubHandle): Promise<Stage[]> => (await getJson(hub, "/stages?status=all")).json as Stage[];
 const stageOf = async (hub: HubHandle, ticketId: string) => (await stagesOf(hub)).find((s) => s.ticket_id === ticketId)!;
 
-/** Item 9 (d): no lead handoff, no retry, no FAIL count, no Needs-you line, no failure record, no diagnosis input. */
-async function expectNoFailureTrail(hub: HubHandle, room: string) {
+/**
+ * Item 9 (d): no lead handoff, no retry, no FAIL count, no Needs-you line, no failure record, no diagnosis input.
+ * `handoffs` and `retries` count what the case itself caused before the cancel (a passed stage's result, a launch error).
+ * The hub has no diagnosis feature yet (planned: stage-diagnosis): its input is a failure record, so any failure or
+ * diagnosis event or a stage.failed row is a diagnosis input.
+ */
+async function expectNoFailureTrail(hub: HubHandle, room: string, opts: { handoffs?: number; retries?: number } = {}) {
   const hand = (await getJson(hub, "/handoffs?for=Orchestrator")).json as unknown[];
-  expect(hand).toHaveLength(0);
+  expect(hand).toHaveLength(opts.handoffs ?? 0);
   const needs = (await getJson(hub, `/requests/${room}/needs-you`)).json as { requests: unknown[] };
   expect(needs.requests).toHaveLength(0);
   const db = new Database(hub.ledgerPath, { readonly: true });
   try {
     const kinds = (db.query("SELECT kind FROM events WHERE kind IN ('stage.failed', 'stage.retrying')").all() as Array<{ kind: string }>).map((r) => r.kind);
-    expect(kinds).toEqual([]);
+    expect(kinds).toEqual(Array(opts.retries ?? 0).fill("stage.retrying"));
     expect((db.query("SELECT COUNT(*) AS n FROM stage WHERE verdict = 'FAIL' OR status IN ('failed', 'retrying')").get() as { n: number }).n).toBe(0);
+    // no diagnosis input: no failure record, no diagnosis event
+    expect((db.query("SELECT COUNT(*) AS n FROM events WHERE kind LIKE '%diagnos%' OR kind LIKE '%failure%'").get() as { n: number }).n).toBe(0);
   } finally {
     db.close();
   }
@@ -254,6 +261,7 @@ describe("a ticket cancel cancels its open stages", () => {
     expect((await stageOf(hub, t2)).reason).toBeNull();
     // the close ack releases the slot: acked once, idempotent
     expect(await shell.ack(shell.closes(shell.launches()[0].session)[0].id, { result: "spawned" })).toBe(200);
+    await expectNoFailureTrail(hub, "cc", { handoffs: 1 }); // the one handoff is t2's passed result
     const db = new Database(hub.ledgerPath, { readonly: true });
     try {
       expect((db.query("SELECT COUNT(*) AS n FROM events WHERE kind = 'stage.cancelled'").get() as { n: number }).n).toBe(1);
@@ -276,7 +284,7 @@ describe("a ticket cancel cancels its open stages", () => {
     expect(s).toMatchObject({ status: "cancelled", attempt: 2 });
     expect(shell.closes(s.session!)).toHaveLength(1);
     // no final failure: attempt 1 ended as retrying (one event), nothing was reported
-    expect(((await getJson(hub, "/handoffs?for=Orchestrator")).json as unknown[])).toHaveLength(0);
+    await expectNoFailureTrail(hub, "cr", { retries: 1 });
   });
 
   test("(c2) two roles on two tickets: both are cancelled", async () => {
@@ -292,6 +300,25 @@ describe("a ticket cancel cancels its open stages", () => {
     expect((await stageOf(hub, v)).status).toBe("cancelled");
     expect(shell.reqs.filter((r) => r.kind === "close")).toHaveLength(2);
     await expectNoFailureTrail(hub, "cc2");
+  });
+
+  test("(i) a result for a cancelled stage is refused and the stage stays cancelled", async () => {
+    const { hub, shell } = await boot("ci");
+    const t = await ticket(hub, "tester", "one");
+    await until(() => shell.launches().length >= 1);
+    const l = shell.launches()[0];
+    expect(await shell.ack(l.id, { result: "spawned" })).toBe(200);
+    const reg = await registerAgent(hub, l.session, { room: "ci" });
+    cleanup.push(() => reg.close());
+    expect(await cancel(hub, t)).toBe(200);
+    await sleep(150);
+    const s = await stageOf(hub, t);
+    expect(s.status).toBe("cancelled");
+    const r = await postJson(hub, "/handoffs", { from: l.session, to: "Orchestrator", task: "result", context: { stage_id: s.id, ticket_id: t } });
+    expect(r.status).toBeGreaterThanOrEqual(400);
+    expect(r.status).toBeLessThan(500);
+    expect(await stageOf(hub, t)).toMatchObject({ status: "cancelled", reason: "ticket cancelled" });
+    await expectNoFailureTrail(hub, "ci");
   });
 
   test("(g) the worker worktree (ticket branch) stays at the releasing ack; the validator worktree goes", async () => {
@@ -358,13 +385,8 @@ describe("hub start", () => {
     expect(shell2.launches()).toHaveLength(0);
     const liveWithSession = after.filter((s) => s.session);
     expect(shell2.reqs.filter((r) => r.kind === "close").map((r) => r.session).sort()).toEqual(liveWithSession.map((s) => s.session!).sort());
-    const rd = new Database(second.hub.ledgerPath, { readonly: true });
-    try {
-      expect((rd.query("SELECT COUNT(*) AS n FROM events WHERE kind = 'stage.failed'").get() as { n: number }).n).toBe(0);
-    } finally {
-      rd.close();
-    }
-    expect(((await getJson(second.hub, "/handoffs?for=Orchestrator")).json as unknown[])).toHaveLength(0);
+    // the one stage.retrying event is the tester's launch error before the seed
+    await expectNoFailureTrail(second.hub, "cf", { retries: 1 });
   });
 });
 

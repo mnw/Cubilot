@@ -11,15 +11,16 @@
 ## 2. UI
 
 - [x] 2.1 `ui/kinds/stage.js` (finished sessions): lists cancelled stages, reads `/stages?status=cancelled`, shows `cancelled: <reason>` as text → verify: `tests/unit/finished-sessions.test.ts`
+- [x] 2.0 Ruling (Orchestrator, note YJT4tT2hUPqGnH_8, 2026-10-27): the finished-sessions list is the only UI surface that shows stage status. `ui/kinds/ticket.js` has no stage match, the agent column shows tab states, `ui/index.html` shows stage data only in terminal-finished-list. Criterion 2 and test 9(h) apply to that list only; no new stage surface is added.
 - [ ] 2.2 Browser check of the finished list and the cancelled row before the install (Orchestrator)
 
 ## 3. Status audit (item 3)
 
-`rg -n "queued|launching|running|retrying|passed|failed|cancelled" hub ui` was run (command of the criteria note, msgs 1476 and 1479) on the stage-status uses. Every stage-status use outside `hub/kinds/stage.ts`:
+`rg -n "queued|launching|running|retrying|passed|failed|cancelled" hub ui` was run (command of the criteria note, msgs 1476 and 1479). Every match, one line each with a test or a reason, is in `audit.md`. Summary of the groups outside `hub/kinds/stage.ts`:
 
 | Place | Use | Result |
 |---|---|---|
-| `hub/kinds/handoff.ts` 545 (calls `completedStage`) | refusal for a result of a completed stage | `cancelled` added to `completedStage` in `stage.ts`; `tsc` passes; the passed case is covered by `completed-stage-result.test.ts`; a cancelled-stage refusal has no own test (not verified by a test) |
+| `hub/kinds/handoff.ts` 545 (calls `completedStage`) | refusal for a result of a completed stage | `cancelled` added to `completedStage` in `stage.ts`; `tsc` passes; the passed case is covered by `completed-stage-result.test.ts`; the cancelled refusal is covered by test (i) |
 | `hub/kinds/ticket.ts` 1478 `liveStageOf` | newest stage of a session, any status | no change: a cancelled stage keeps its session until the close, like a passed one |
 | `hub/kinds/ticket.ts` ticket statuses (`queued`, `claimed`, ...) | ticket status, not stage status | not a stage status |
 | `hub/kinds/index.ts` `onFinalFailure` | `failed` only | no change: a cancelled stage never reaches it (test (d) checks no handoff) |
