@@ -101,15 +101,45 @@ The ticket's `role` SHALL start a stage only when no stage exists for the ticket
 - **WHEN** a handoff to role `tester` arrives for that ticket
 - **THEN** the hub creates one new `tester` stage
 
-### Requirement: One live stage per ticket and role
+### Requirement: One live stage per ticket
 
-While a stage for a ticket and role is `queued`, `launching`, `running` or `retrying`, the hub SHALL NOT create another stage for that ticket and role.
+While a stage of a ticket is `queued`, `launching`, `running` or `retrying`, the hub SHALL NOT create another stage for that ticket, of any role. A spec-review stage has no ticket and SHALL NOT count. A handoff that arrives during a live stage SHALL wait. When no stage of the ticket is live, the hub SHALL start one stage for the oldest ready item: an unspent role handoff or the ticket's own role. A handoff recorded during a live stage of its own role is spent by that stage.
 
 #### Scenario: Second stage refused while live
 
-- **GIVEN** a `worker` stage for ticket `t42` is `running`
-- **WHEN** the hub evaluates ticket `t42`
-- **THEN** the hub creates no second `worker` stage
+- **GIVEN** a `tester` stage for ticket `t42` is `running`
+- **WHEN** a handoff to role `worker` arrives for `t42`
+- **THEN** the hub creates no `worker` stage
+
+#### Scenario: The waiting handoff starts when the stage ends
+
+- **GIVEN** a `worker` handoff waited during a `tester` stage of ticket `t42`
+- **WHEN** the `tester` stage ends
+- **THEN** the hub creates exactly one `worker` stage
+
+#### Scenario: Waiting items start in creation order
+
+- **GIVEN** a `validator` handoff and then a `writer` handoff waited during a live stage
+- **WHEN** the live stage ends, and then the `validator` stage ends
+- **THEN** the hub starts the `validator` stage first and the `writer` stage second, one at a time
+
+#### Scenario: A new rework handoff starts one new stage
+
+- **GIVEN** the last stage of ticket `t42` has ended
+- **WHEN** a new handoff to role `worker` arrives
+- **THEN** the hub creates one new `worker` stage
+
+#### Scenario: A spec review is not blocked
+
+- **GIVEN** a stage of ticket `t42` is `running`
+- **WHEN** a spec-review handoff arrives
+- **THEN** the hub creates the spec-review stage
+
+#### Scenario: A handoff recorded during a live same-role stage is spent
+
+- **GIVEN** a `tester` stage of ticket `t42` is live, and two more `tester` handoffs arrive for `t42`
+- **WHEN** the `tester` stage ends
+- **THEN** the hub creates no new `tester` stage
 
 ### Requirement: A handoff can name a role
 

@@ -27,13 +27,15 @@ Tickets live in `hub/kinds/ticket.ts` (a `KindModule`). Handoffs live in `hub/ki
 
    This is one of three transactions that write events of two kinds (`stage` and `ticket`). The others are the spec-review PASS and the final PASS of a ticket review. They break the one-kind-per-transaction pattern of the other kinds, so CLAUDE.md names all three. In each one, both events and both row updates commit or roll back together.
 
-4. **Ready-stage evaluation.** One function, `evaluateStages(ticket)`, called in the same dispatch as each ticket event (`ticket.queued`, `ticket.edited`, `ticket.update`), each `handoff` to a role, and each blocker status change. A stage is created for `(ticket, role)` when all hold:
+4. **Ready-stage evaluation.** One function, `evaluateStages(ticket)`, called in the same dispatch as each ticket event (`ticket.queued`, `ticket.edited`, `ticket.update`), each `handoff` to a role, each blocker status change, and each end of a ticket stage. The hub creates at most one stage per call, when all hold:
    - the ticket is not `draft`, `done` or `cancelled`,
    - no `ticket_blockers` row points to a ticket that is not `done`,
-   - no stage for `(ticket, role)` is `queued`, `launching`, `running` or `retrying`,
-   - and either (a) `role` equals `ticket.role` and no stage exists for `(ticket, role)`, or (b) a `to_role` handoff for that role and ticket exists, and, when a `(ticket, role)` stage already exists, the handoff was created after the last such stage's `created_seq`.
+   - no stage of the ticket, of any role, is `queued`, `launching`, `running` or `retrying` (G9: one live stage per ticket; spec-review stages have no ticket and do not count),
+   - and an item is ready. The hub starts the oldest ready item, of any role. The items are the unspent `to_role` handoffs of the ticket (by creation seq) and the ticket's own role.
 
-   `ticket.role` selects only the first stage. Every later stage, of the same role or another role, comes from a `to_role` handoff (human, 2026-10-23).
+   A `to_role` handoff H (ticket T, role R) is spent when a stage of (T, R) has `created_seq` above the seq of H, or a stage of (T, R) was live when H was recorded (`created_seq` below the seq of H, and not terminal or `updated_seq` above the seq of H). A cancelled or declined handoff is withdrawn. An unspent expired handoff still asks for a stage. The rule reads existing rows only.
+
+   `ticket.role` is ready only while no stage of (T, `ticket.role`) exists. Its ready seq is the `ticket.queued` event, or the `ticket.created` event of a ticket created as `queued`. After one stage of that role, the role starts again only through a new handoff (human, 2026-10-23).
 
    Creating a stage writes `stage.queued`. The handoff keeps its own single event.
 

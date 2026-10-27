@@ -622,14 +622,16 @@ The table also has `created_seq` (the queue order) and `updated_seq`. They are n
 
 The ticket field `role` (one of the six roles, or null) names the role of the first stage. `create_ticket` and `edit_ticket` set it. An unknown role → 400 and nothing is stored. The human, the ticket's creator and the room lead change `role`, with the same rule as `request_id`.
 
-The hub evaluates a ticket (`evaluateStages`) after each change that can make it ready. These changes are a ticket created as `queued`, a draft moved to `queued`, a blocker moved to `done`, and a `to_role` handoff. The hub creates a stage for a role when all of these conditions are true:
+The hub evaluates a ticket (`evaluateStages`) after each change that can make it ready. These changes are a ticket created as `queued`, a draft moved to `queued`, a blocker moved to `done`, a `to_role` handoff, and the end of a stage of the ticket. The hub creates at most one stage per evaluation, when all of these conditions are true:
 
 1. The ticket is not `draft`, `done` or `cancelled`.
 2. No ticket in its `blocked_by` list has a status other than `done`.
-3. No stage of that ticket and role is `queued`, `launching`, `running` or `retrying`.
-4. One of these is true:
-   - The role is the ticket's `role` and the ticket has no stage of that role yet.
-   - A `to_role` handoff for that ticket and role is newer than the last stage of that role. A `cancelled` or `declined` handoff does not count.
+3. No stage of that ticket, of any role, is `queued`, `launching`, `running` or `retrying`. A spec-review stage has no ticket and does not count. A handoff that arrives during a live stage waits.
+4. An item is ready. The hub starts the oldest ready item, of any role. The items are:
+   - The unspent `to_role` handoffs of the ticket, by creation seq. A `cancelled` or `declined` handoff does not count. An expired handoff that is not spent still counts.
+   - The ticket's `role`, only while the ticket has no stage of that role. Its ready seq is the `ticket.queued` event, or the `ticket.created` event of a ticket created as `queued`.
+
+A `to_role` handoff H (ticket T, role R) is spent when a stage of (T, R) was created after H, or when a stage of (T, R) was live when H was recorded. A handoff recorded during a live stage of its own role is spent by that stage. The rule reads the existing stage rows. It adds no column.
 
 The ticket's `role` starts only the first stage. Every later stage, of the same role or another role, comes from a `to_role` handoff.
 

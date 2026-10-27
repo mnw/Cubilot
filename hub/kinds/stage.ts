@@ -265,7 +265,9 @@ export function createStageApi(db: Database, onSlotFree?: (freed: StageSnapshot,
       });
       afterCommit?.(r.sideEffectResult);
       // A stage that leaves launching/running frees a slot of its role: the queue may start the oldest waiting stage.
-      if ((was === "launching" || was === "running") && r.snapshot.status !== "launching" && r.snapshot.status !== "running") {
+      // G9: a ticket stage that ends from queued or retrying (no project folder, final failure) frees its ticket too.
+      const ended = r.snapshot.status === "passed" || r.snapshot.status === "failed";
+      if (((was === "launching" || was === "running") && r.snapshot.status !== "launching" && r.snapshot.status !== "running") || (ended && was !== r.snapshot.status)) {
         onSlotFree?.(r.snapshot, cap);
       }
       return r.snapshot;
@@ -358,10 +360,12 @@ export type StageRuntime = {
   api: StageApi;
   /**
    * Creates the stages a ticket is ready for (each as `queued`, one `stage.queued` event each) and returns them.
-   * A stage is created for a role when the ticket is not draft/done/cancelled, no blocker is open, no stage of that
-   * role for the ticket is live (queued, launching, running or retrying), and either the role is `ticket.role` with
-   * no stage of that role yet, or a `to_role` handoff for the role is newer than the last stage of that role.
-   * `ticket.role` selects only the first stage. It does not start a session: launching is enqueueLaunch.
+   * G9, one live stage per ticket of any role. Nothing is created when the ticket is draft/done/cancelled, a blocker is
+   * open, or a stage of the ticket is live (queued, launching, running or retrying). Spec-review stages have no ticket
+   * and are not counted. 1) A `to_role` handoff is spent when a stage of its ticket and role was created after it, or
+   * was live when it was recorded. 2) Otherwise the ready items are the unspent handoffs and the ticket's own role,
+   * the latter only while no stage of that role exists. 3) The oldest ready item (by seq) gets the one new stage.
+   * It does not start a session: launching is enqueueLaunch.
    * `handoffs` are the role handoffs of the current dispatch (the handoff route passes the new one); the ones stored
    * earlier come from the `roleHandoffs` reader of createStageRuntime (by default: the stored `to_role` handoffs).
    * With `launch: true` it then tries to start each stage it created (the launch conditions and the role limit
@@ -907,26 +911,41 @@ export function createStageRuntime(
       .get(ticketId);
     if (openBlocker) return [];
 
-    const all = [...(opts.roleHandoffs ?? storedRoleHandoffs)(ticketId), ...handoffs].filter((h) => isRole(h.role));
-    const roles = new Set<string>(all.map((h) => h.role));
-    if (t.role && isRole(t.role)) roles.add(t.role);
+    // G9: one live stage per ticket, of any role. Spec-review stages have no ticket_id and never count here.
+    const live = db
+      .query<{ id: string }, [string]>("SELECT id FROM stage WHERE ticket_id = ? AND status IN ('queued', 'launching', 'running', 'retrying') LIMIT 1")
+      .get(ticketId);
+    if (live) return [];
+
+    // A role handoff is spent by a stage of its ticket and role that was created after it, or that was live when it was
+    // recorded. Both come from the stage rows: no extra column. One query reads the ticket's stages for all handoffs.
+    const stages = db
+      .query<{ role: string; created_seq: number; updated_seq: number; status: string }, [string]>(
+        "SELECT role, created_seq, updated_seq, status FROM stage WHERE ticket_id = ?",
+      )
+      .all(ticketId);
+    const spent = (h: RoleHandoff): boolean =>
+      stages.some(
+        (s) => s.role === h.role && (s.created_seq > h.seq || (s.created_seq < h.seq && (s.status !== "passed" && s.status !== "failed" || s.updated_seq > h.seq))),
+      );
+    const ready: RoleHandoff[] = [...(opts.roleHandoffs ?? storedRoleHandoffs)(ticketId), ...handoffs]
+      .filter((h) => isRole(h.role) && !spent(h))
+      .sort((x, y) => x.seq - y.seq);
+    // The ticket's own role starts once: only while no stage of the ticket and that role exists. Its ready seq is the
+    // newest ticket.queued event, else the ticket.created event of a ticket created as queued.
+    if (t.role && isRole(t.role)) {
+      if (!stages.some((s) => s.role === t.role)) {
+        const q = db
+          .query<{ seq: number | null }, [string]>("SELECT MAX(seq) AS seq FROM events WHERE entity_id = ? AND kind = 'ticket.queued'")
+          .get(ticketId)!.seq;
+        const c = q ?? db.query<{ seq: number | null }, [string]>("SELECT MIN(seq) AS seq FROM events WHERE entity_id = ? AND kind = 'ticket.created'").get(ticketId)!.seq;
+        ready.push({ role: t.role, seq: c ?? 0 });
+        ready.sort((x, y) => x.seq - y.seq);
+      }
+    }
 
     const created: StageSnapshot[] = [];
-    for (const role of roles) {
-      const live = db
-        .query<{ id: string }, [string, string]>(
-          "SELECT id FROM stage WHERE ticket_id = ? AND role = ? AND status IN ('queued', 'launching', 'running', 'retrying') LIMIT 1",
-        )
-        .get(ticketId, role);
-      if (live) continue;
-      const last = db
-        .query<{ seq: number | null }, [string, string]>("SELECT MAX(created_seq) AS seq FROM stage WHERE ticket_id = ? AND role = ?")
-        .get(ticketId, role)!.seq;
-      const first = role === t.role && last === null;
-      const handed = all.some((h) => h.role === role && (last === null || h.seq > last));
-      if (!first && !handed) continue;
-      created.push(api.create({ ticket_id: ticketId, role }, "system", cap));
-    }
+    if (ready.length > 0) created.push(api.create({ ticket_id: ticketId, role: ready[0].role }, "system", cap));
     if (eopts.launch) {
       const room = db.query<{ room: string }, [string]>("SELECT room FROM tickets WHERE id = ?").get(ticketId)!.room;
       for (const stage of created) {
@@ -964,6 +983,8 @@ export function createStageRuntime(
       // stopped stage), the session may still run: the worktree goes at the close ack, in onCloseEnd (6.5 fix).
       if ((freed.status === "failed" || freed.status === "retrying") && !(freed.session && closing.has(freed.session))) removeTemporaryWorktree(freed, room);
       startWaiting(freed.role, room, cap);
+      // G9: the ticket's next waiting item (a handoff that came during this stage) starts when its stage ends.
+      if (freed.ticket_id && (freed.status === "passed" || freed.status === "failed")) evaluateStages(freed.ticket_id, cap, [], { launch: true });
     } catch (e) {
       console.error(`[stage] starting queued ${freed.role} stages failed:`, e);
     }
