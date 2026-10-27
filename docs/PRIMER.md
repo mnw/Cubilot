@@ -9,7 +9,7 @@ Cubilot is a macOS app. It lets many Claude Code and Pi agents talk to each othe
 3. The **Bridge** runs inside each agent session. It is the Claude Code mod or the Pi extension. It is not a separate process. (docs/rules/core.md, docs/rules/bridge.md)
 4. The **Webview** is plain HTML, CSS and JS. It has no framework and no bundler. (CONTEXT.md, docs/rules/core.md)
 5. The **Ledger** is one SQLite database. Each state change writes one event and one table update in one transaction. (CONTEXT.md, docs/rules/kinds.md)
-6. A **Kind** is a state machine in `hub/kinds/<kind>.ts`. The three kinds are Handoff, Interrupt and Permission. Ticket and Stage also live there. (CONTEXT.md, hub/kinds/)
+6. A **Kind** is a state machine in `hub/kinds/<kind>.ts`. The five kinds are Handoff, Interrupt, Permission, Ticket and Stage. (CONTEXT.md, hub/kinds/index.ts)
 7. A **Room** is an immutable label for an agent. An agent changes state only in its own room. The human can act in all rooms. (CONTEXT.md, docs/rules/kinds.md)
 
 Data flow: agent, then bridge, then hub `/post`, then chat log, then SSE to the webview and to the other agents. (docs/rules/core.md)
@@ -17,14 +17,14 @@ Data flow: agent, then bridge, then hub `/post`, then chat log, then SSE to the 
 ## Where the main parts are
 
 - `hub/hub.ts`, `hub/main.ts`: hub entry points. `CUBILOT_MODE` selects the mode. (docs/rules/core.md)
-- `hub/core/`: shared plumbing. Files: `agents.ts` (registry), `dispatcher.ts`, `ledger.ts`, `sse.ts`, `briefing.ts`, `worktrees.ts`. (docs/rules/core.md, hub/core/)
-- `hub/kinds/`: one file for each kind. Do not add kind branches to `hub.ts`. (docs/rules/kinds.md)
+- `hub/core/`: shared plumbing. `agents.ts` is the agent registry. `sse.ts` has the queues. `dispatcher.ts` rejects the actor `system` in request bodies. `briefing.ts` builds briefings. `worktrees.ts` creates stage worktrees. (docs/rules/core.md, docs/rules/kinds.md, docs/rules/bridge.md)
+- `hub/kinds/`: one file for each kind. Do not add kind branches to `hub.ts`. (CLAUDE.md, docs/rules/kinds.md)
 - `hub/channel/`: the Bridge. It has the core (`core.ts`), the Claude mod (`claude-mod/`) and the Pi extension (`pi-extension.ts`). (docs/rules/core.md, docs/rules/bridge.md)
-- `src-tauri/src/`: Rust shell (`lib.rs`, `pty.rs`, `factory.rs`, `launches.rs`). (src-tauri/src/)
-- `ui/`: webview (`index.html`, `main.js`, `terminal.js`). (ui/)
+- `src-tauri/src/`: Rust shell. `lib.rs` starts the hub. `pty.rs` builds the agent command. `launches.rs` reads the launch stream. (docs/rules/core.md, docs/rules/terminal.md, docs/rules/kinds.md)
+- `ui/index.html`: the webview. It has no framework. (CLAUDE.md, docs/rules/core.md)
 - `scripts/`: `install.sh`, `build-sidecars.sh`, `check-mod.sh`, `test.sh`. (CLAUDE.md)
-- `tests/`: `unit/`, `integration/`, `contract/`, `helpers/`. (tests/)
-- `docs/rules/`: detail for each rule in CLAUDE.md. Index: `docs/rules/README.md`.
+- `tests/`: unit tests in `tests/unit/`, integration tests in `tests/integration/`, helpers in `tests/helpers/`. (CLAUDE.md, docs/rules/terminal.md)
+- `docs/rules/`: detail for each rule in CLAUDE.md. Index: `docs/rules/README.md`. (docs/rules/README.md)
 - `CONTEXT.md`: domain vocabulary. Use its terms. (CONTEXT.md)
 
 ## Conventions
@@ -32,7 +32,7 @@ Data flow: agent, then bridge, then hub `/post`, then chat log, then SSE to the 
 - Only Worker and Writer stage sessions commit. They commit on their own `ticket/<id>` branch. Never commit on main. Never push. (CLAUDE.md, docs/rules/core.md)
 - Validator and Reviewer worktrees are read-only. The hub refuses a writable one. (CLAUDE.md, docs/rules/kinds.md)
 - Never hardcode the hub port. The shell picks it at run time. (CLAUDE.md)
-- Mutating hub routes need a bearer token. JSON bodies have a limit of 256 KiB. (docs/rules/core.md)
+- Mutating hub routes need a bearer token. The default JSON body limit is 256 KiB. `POST /handoffs` allows 1 MiB. `POST /permissions` allows 16 KiB. (docs/rules/core.md, hub/core/auth.ts)
 - Use `agents.ensure` and `agents.remove`. Never change `knownAgents`, `agentQueues`, `agentConnections` or `staleTimers` directly. (CLAUDE.md)
 - Broadcast with `cap.sse.emit(entry, scope)`. Never list agent queues in a kind. (CLAUDE.md)
 - Only the three cross-kind transactions exist. Add no fourth without a change to `docs/PROTOCOL.md`. (CLAUDE.md)
