@@ -124,6 +124,32 @@ describe("stage metrics writer", () => {
     expect(logged).toEqual([]);
   });
 
+  test("a failed stage gets one normal metrics row", async () => {
+    capture();
+    const e = makeEnv();
+    const l = e.spawn();
+    e.pinLaunchTimes(1000);
+    transcript(
+      e.folder(l), "s1", 1500, `You are the worker. Stage: ${e.stageId}`,
+      asst("m1", usage(10, 200, 3000, 50)),
+      asst("m2", usage(5, 0, 3200, 40), "Edit"),
+    );
+    const r = e.rt.api.move(e.stageId, { to: "failed", reason: "test" }, "system", e.cap);
+    await e.rt.metricsIdle();
+    expect(r.status).toBe("failed");
+    const rows = e.rows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      stage_id: e.stageId, attempt: 1, role: "worker", source: "claude",
+      first_message_bytes: Buffer.byteLength(l.prompt),
+      first_message_tokens_est: Math.ceil(Buffer.byteLength(l.prompt) / 4),
+      prompt_tokens_first: 10 + 200 + 3000,
+      cache_read_tokens: 3000,
+      tokens_before_action: 10 + 200 + 3000 + 50 + (5 + 0 + 3200 + 40),
+    });
+    expect(logged).toEqual([]);
+  });
+
   test("the result handoff is an action: a Tester that never edits counts up to its verdict", async () => {
     capture();
     const e = makeEnv();
