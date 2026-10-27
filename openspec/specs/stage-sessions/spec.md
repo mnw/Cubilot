@@ -1,7 +1,7 @@
 # stage-sessions Specification
 
 ## Purpose
-TBD - created by archiving change stage-sessions. Update Purpose after archive.
+This capability gives each ticket stage one new session. The hub launches the session, runs the retry rule and closes the session when the stage ends.
 
 ## Requirements
 
