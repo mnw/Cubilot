@@ -40,9 +40,9 @@ else
 fi
 if [ -z "$BUN" ]; then echo "stage-prep: bun not found" >&2; exit 4; fi
 BUN_DIR=$(dirname "$BUN")
-export PATH="$BUN_DIR:$PATH"
-
+# Source the cargo env first: it may prepend its own dirs. The chosen bun dir must stay first.
 if [ -f "$HOME/.cargo/env" ]; then . "$HOME/.cargo/env"; fi
+export PATH="$BUN_DIR:$PATH"
 TRIPLE=$(rustc -Vv 2> /dev/null | awk '/host:/{print $2}')
 TRIPLE=${TRIPLE:-aarch64-apple-darwin}
 SIDECAR="src-tauri/binaries/cubilot-bin-$TRIPLE"

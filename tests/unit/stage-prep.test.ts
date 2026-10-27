@@ -191,6 +191,24 @@ describe("stage-prep.sh", () => {
     expect(r2.err).toContain("bun not found");
   });
 
+  test("(j) a cargo env that prepends another bun does not displace the selected bun", () => {
+    const decoy = join(base, "decoy");
+    write(join(decoy, "bun"), '#!/bin/bash\necho decoy-bun >> "$LOG"\nexit 1\n');
+    const cargoEnv = join(base, "home", ".cargo", "env");
+    write(cargoEnv, `export PATH="${decoy}:$PATH"\n`, 0o644);
+    try {
+      const cand = join(base, "cand2");
+      write(join(cand, "bun"), readFileSync(join(stubBin, "bun"), "utf8"));
+      const r = run({ PATH: "/usr/bin:/bin", STAGE_PREP_BUN_CANDIDATES: cand });
+      expect(r.out).toContain("stage-prep exit 0");
+      const log2 = existsSync(log) ? readFileSync(log, "utf8") : "";
+      expect(log2).not.toContain("decoy-bun");
+      expect(steps()).toContain("build-sidecars");
+    } finally {
+      rmSync(join(base, "home", ".cargo"), { recursive: true, force: true });
+    }
+  });
+
   test("(h) a step that writes its output and then fails runs again", () => {
     expect(run({ FAIL_STEP: "sidecars" }).out).toMatch(/stage-prep exit [1-9]/);
     steps();
