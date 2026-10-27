@@ -20,7 +20,7 @@ The first message is rendered by `hub/core/first-message.ts` (`renderFirstMessag
 
 2. **Byte-identical stable block.** `renderStable` has no stage field, no time, no session name, no path of the worktree. A unit test renders it for two stages and compares bytes. The worktree path is in the ticket block only. Not checked: the Claude Code system prompt holds the working folder, which differs in each worktree, so the cache can stop before our text. Measurement (decision 8) answers this; the design does not depend on it.
 
-3. **Primer source and cap.** The primer is `docs/PRIMER.md` of the project folder plus the Nutshell (human decision, review of this change). The hub does not read `CONTEXT.md`. The cap is 2,000 tokens for `docs/PRIMER.md`, counted as `ceil(bytes / 4)` (an estimate, named as such). A file over the cap is cut at a heading boundary when it fits, else at a line, and one line says `[PRIMER.md cut at 2000 tokens]`. The Nutshell is never cut. A missing file gives the line `primer missing` and the launch continues. A Writer ticket writes `docs/PRIMER.md` (task 2.4). Alternative: summarise `CONTEXT.md` with a model. Rejected: the brief requires no model.
+3. **Primer source and cap.** The primer is `docs/PRIMER.md` of the project folder plus the Nutshell (human decision, review of this change). The hub does not read `CONTEXT.md`. The cap is 2,000 tokens for `docs/PRIMER.md`, counted as `ceil(bytes / 4)` (an estimate, named as such). A file over the cap is cut at a heading boundary when it fits, else at a line, and one line says `[PRIMER.md cut at 2000 tokens]`. The Nutshell is never cut. A missing file gives the line `primer missing` and the launch continues. A Writer ticket writes `docs/PRIMER.md` (task 2.4). (interim: see the Interim line below) Alternative: summarise `CONTEXT.md` with a model. Rejected: the brief requires no model.
 
 4. **Pack builder.** One module, `hub/core/context-pack.ts`, `buildPack(role, ticket, worktree)`. It runs, in the worktree and with a 20 s limit for each command:
    - `graphify query "<title> <criteria>" --budget 1500` (absolute path `/Users/mnw/.local/bin/graphify`, or PATH).
@@ -60,7 +60,8 @@ The first message is rendered by `hub/core/first-message.ts` (`renderFirstMessag
 - **Notes rule not in role prompts when the check ships** → every Worker result is rejected; task 4.3 and task 1.3 ship together, and task 6.3 checks both.
 - **Transcript path or format changes in a Claude Code release** → `source` and NULLs make the gap visible; no stage is affected. The format is read from Claude Code 2.1.296 (untested on later versions).
 - **Stale graph misleads** → status line says `stale`; the agent checks current source.
-- **No `docs/PRIMER.md` yet** → the first message says "primer missing" until the Writer ticket (task 2.4) lands. The file is written by the Writer, reviewed by the Reviewer, and kept current by the Orchestrator.
+- **No `docs/PRIMER.md` yet** → the first message says "primer missing" until the Writer ticket (task 2.4) lands. The file is written by the Writer, reviewed by the Reviewer, and kept current by the Orchestrator. (interim: see the Interim line below)
+- Interim: until the writing chain runs on the hub (draft ticket t_a2beebfe4fc002e1 for the gap), [doc] tasks run as Worker → Tester → Validator. The Validator does the Reviewer's checks.
 - **Long first message and the argv limit** → `stage-sessions` 4.3 owns the limit; this change adds about 8 KB at most (primer 8 KB, pack 6 KB), measured in task 2.3.
 
 ## Migration Plan

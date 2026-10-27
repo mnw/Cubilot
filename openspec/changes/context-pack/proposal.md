@@ -8,7 +8,7 @@ Depends on: `openspec/changes/stage-sessions` (first message, launch) and `opens
 ## What Changes
 
 - **Order of the first message:** stable text first, ticket part last. Two sessions of one role have the same stable part, byte for byte.
-- **Project primer:** `docs/PRIMER.md` (at most 2,000 tokens) plus the Nutshell, placed after the role text and before the ticket part. The hub does not read `CONTEXT.md`. A Writer ticket writes `docs/PRIMER.md`. When the file is missing, the first message says "primer missing".
+- **Project primer:** `docs/PRIMER.md` (at most 2,000 tokens) plus the Nutshell, placed after the role text and before the ticket part. The hub does not read `CONTEXT.md`. A Writer ticket (interim: Worker, Validator review; see design.md) writes `docs/PRIMER.md`. When the file is missing, the first message says "primer missing".
 - **Context pack:** the hub builds it before the launch, with no model. It holds a graphify query result (1,500-token budget), Serena symbol signatures of the files that the ticket and the spec name, and, for the Validator and the Testers, the diff stat and the changed files. When Serena has no CLI the hub can call, a real signature tool (universal-ctags) fills the section, labelled "signatures (ctags)". The depth for each role follows the table in brief item 5.
 - **Notes:** result handoffs carry a required `notes` field (about 300 words at most). The next stage of the ticket gets all earlier notes in its first message.
 - **Measurement:** for each session the hub records the first-message tokens, the cache read tokens, and the tokens before the first file change or the first verdict. The numbers are stored for Part 11 and for model routing (Part 6, item 6).
@@ -38,7 +38,7 @@ None. `stage-sessions` and `spec-review-stage` are in-flight changes, not archiv
 ## Impact
 
 - `hub/core/first-message.ts`, `factory/<role>/first-message.md`: section order, primer, pack, notes sections.
-- `docs/PRIMER.md` (new, written by the Writer).
+- `docs/PRIMER.md` (new, written by the Writer (interim: Worker, Validator review; see design.md)).
 - `hub/core/context-pack.ts` (new): runs the tools in the worktree.
 - `hub/kinds/stage.ts` (`checkResult`), `hub/kinds/handoff.ts`: `notes` check. Notes read for the next stage.
 - `hub/core/migrate`: new `stage_metrics` table. Snapshot first.

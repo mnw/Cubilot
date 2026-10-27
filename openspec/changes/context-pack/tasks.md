@@ -10,7 +10,7 @@
 - [ ] 2.1 `renderStable(room)` returns the primer only; no stage, time, session or worktree field; the ticket block follows it → verify: `bun test tests/unit/first-message-order.test.ts` (brief test 13): two Worker stages on two tickets give identical stable bytes; the ticket block is last; the stable block changes only when `docs/PRIMER.md` or the Nutshell changes
 - [ ] 2.2 Primer from `docs/PRIMER.md` plus the Nutshell; cap 2,000 tokens (`ceil(bytes / 4)`) on the file, the Nutshell is never cut, one cut line; a missing file gives the line `primer missing` and the Nutshell; `CONTEXT.md` is never read → verify: `bun test tests/unit/primer.test.ts`: short, long and missing file; a project with `CONTEXT.md` and no `docs/PRIMER.md` has no `CONTEXT.md` text in the primer
 - [ ] 2.3 Template changes for the six roles and the spec first message: `{{notes}}`, `{{pack}}`, `{{diff}}` placeholders; the depth table in code decides which parts fill → verify: `bun test tests/unit/first-message.test.ts tests/unit/spec-first-message.test.ts` still pass; `bun test tests/unit/pack-depth.test.ts`: Tester has no graph or signatures; code Validator has diff stat and changed files; Editor has neither; record the largest rendered first message in bytes in this file
-- [ ] 2.4 [doc] Writer writes `docs/PRIMER.md`: architecture, conventions, where the main parts are, how to run the tests; at most 2,000 tokens; source is `CONTEXT.md` and the repo, no new claims → verify: Writer and Reviewer pass (`[doc]` ticket); `bun test tests/unit/primer-file.test.ts` measures the file at or under the cap; record the token estimate in this file
+- [ ] 2.4 [doc] Writer (interim: Worker, Validator review; see design.md) writes `docs/PRIMER.md`: architecture, conventions, where the main parts are, how to run the tests; at most 2,000 tokens; source is `CONTEXT.md` and the repo, no new claims → verify: Writer and Reviewer (interim: Worker, Validator review; see design.md) pass (`[doc]` ticket); `bun test tests/unit/primer-file.test.ts` measures the file at or under the cap; record the token estimate in this file
 
 ## 3. Context pack
 
@@ -22,9 +22,9 @@
 
 ## 4. Role prompts
 
-- [ ] 4.1 Find the shared text file(s) in `factory/` and add the "Find before you read" paragraph for the six roles and the Orchestrator; Simplified Technical English → verify: `bun test tests/unit/role-prompts-tools.test.ts`: every staged role prompt names `graphify query`, `rg` and `find_symbol`; the Writer and Reviewer pass for text changes is a `[doc]` ticket
-- [ ] 4.2 Orchestrator text: write a planning note on each ticket; the note is the first note → verify: Writer and Reviewer pass (`[doc]` ticket); `rg -n "planning_note" factory/orchestrator/orchestrator.md` finds the line
-- [ ] 4.3 Result section of `worker.md`, `tester.md`, `validator.md`, `writer.md`, `editor.md` and `reviewer.md` tells the agent to include `context.notes` (target 300 words, limit 400); ships in the same release as 1.3 → verify: `bun test tests/unit/role-prompts-notes.test.ts`: each of the six staged role prompts contains the notes rule with both numbers; Writer and Reviewer pass (`[doc]` ticket)
+- [ ] 4.1 Find the shared text file(s) in `factory/` and add the "Find before you read" paragraph for the six roles and the Orchestrator; Simplified Technical English → verify: `bun test tests/unit/role-prompts-tools.test.ts`: every staged role prompt names `graphify query`, `rg` and `find_symbol`; the Writer and Reviewer (interim: Worker, Validator review; see design.md) pass for text changes is a `[doc]` ticket
+- [ ] 4.2 Orchestrator text: write a planning note on each ticket; the note is the first note → verify: Writer and Reviewer (interim: Worker, Validator review; see design.md) pass (`[doc]` ticket); `rg -n "planning_note" factory/orchestrator/orchestrator.md` finds the line
+- [ ] 4.3 Result section of `worker.md`, `tester.md`, `validator.md`, `writer.md`, `editor.md` and `reviewer.md` tells the agent to include `context.notes` (target 300 words, limit 400); ships in the same release as 1.3 → verify: `bun test tests/unit/role-prompts-notes.test.ts`: each of the six staged role prompts contains the notes rule with both numbers; Writer and Reviewer (interim: Worker, Validator review; see design.md) pass (`[doc]` ticket)
 
 ## 5. Measurement
 
@@ -35,7 +35,7 @@
 
 ## 6. Docs and checks
 
-- [ ] 6.1 `docs/PROTOCOL.md`: `notes` on results, `planning_note`, the metrics route, the pack parts → verify: Writer and Reviewer pass (`[doc]` ticket)
+- [ ] 6.1 `docs/PROTOCOL.md`: `notes` on results, `planning_note`, the metrics route, the pack parts → verify: Writer and Reviewer (interim: Worker, Validator review; see design.md) pass (`[doc]` ticket)
 - [ ] 6.2 `CLAUDE.md`: hard rule that the hub builds the pack with no model, that the stable block carries no per-stage field, and that a metrics failure never changes a stage → verify: review; `rg -n "context pack" CLAUDE.md` finds the line
 - [ ] 6.3 `CLAUDE.md` "Verified against" line: add the Claude Code version checked in 5.4 for the `usage.cache_read_input_tokens` field → verify: `rg -n "cache_read_input_tokens" CLAUDE.md` finds the version on that line
 - [ ] 6.4 Rebuild sidecars and run checks → verify: `./scripts/build-sidecars.sh`; `./scripts/test.sh` (it takes the heavy lock itself); `cargo test --manifest-path src-tauri/Cargo.toml`; `bun x tsc --noEmit`; all pass, and the staged role prompts hold the notes rule (4.3) before the notes check (1.3) is live; record the output in this file
