@@ -5,6 +5,8 @@
 
 import { join } from "node:path";
 import { renderFirstMessage, renderSpecFirstMessage } from "../core/first-message";
+import { renderStable } from "../core/primer";
+import { readNutshell } from "../nutshell";
 import { createWorktree, removeWorktree, worktreesRoot } from "../core/worktrees";
 import type { Database } from "bun:sqlite";
 import type {
@@ -980,6 +982,9 @@ export function createStageRuntime(
       .get(requestId, stageSeq, room)?.c ?? null;
 
   /** The room lead: where a spec result goes. Same default as the ticket kind. */
+  /** The stable block of a room (context-pack 2.1): docs/PRIMER.md of its project folder plus its Nutshell. One file read per launch. */
+  const stableFor = (room: string): string =>
+    renderStable({ projectFolder: getRoomSettings(db, room)?.project_folder ?? null, nutshell: readNutshell(db, room).text });
   const leadOfRoom = (room: string | null): string =>
     (room ? db.query<{ agent: string }, [string]>("SELECT agent FROM ticket_room_lead WHERE room = ?").get(room)?.agent : undefined) ?? "Orchestrator";
 
@@ -1030,6 +1035,7 @@ export function createStageRuntime(
       } catch { /* an unreadable result adds no finding */ }
     }
     return renderSpecFirstMessage({
+      stable: stableFor(room),
       stageId: stage.id,
       requestId: stage.request_id ?? "",
       worktree,
@@ -1256,7 +1262,7 @@ export function createStageRuntime(
           "SELECT id, title, acceptance_criteria, blast_radius, request_id FROM tickets WHERE id = ?",
         )
         .get(stage.ticket_id);
-      if (t) prompt = renderFirstMessage({ stageId: input.stage_id, role: stage.role, ticket: t, branch, worktree: cwd, reason: input.reason, recipient: leadOfRoom(input.room), handoff: startingHandoff(stage.id, stage.ticket_id, stage.role) ?? undefined });
+      if (t) prompt = renderFirstMessage({ stable: stableFor(input.room), notes: earlierNotes(db, t.id), stageId: input.stage_id, role: stage.role, ticket: t, branch, worktree: cwd, reason: input.reason, recipient: leadOfRoom(input.room), handoff: startingHandoff(stage.id, stage.ticket_id, stage.role) ?? undefined });
     } else if (prompt === "" && stage.review === "spec" && cwd) {
       prompt = specFirstMessage(stage, input.room, cwd, input.reason) ?? "";
     }

@@ -5,6 +5,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { packDepth, type PackPart } from "./pack-depth";
 
 export type FirstMessageInput = {
   stageId: string;
@@ -19,7 +20,46 @@ export type FirstMessageInput = {
   recipient?: string;
   /** The to_role handoff that started this stage, if any: its sender, task and context follow the ticket part. */
   handoff?: { id: string; from: string; task: string; context: unknown };
+  /** The stable block (renderStable): the first bytes of the message, the same for every stage of a room. Default: none. */
+  stable?: string;
+  /** Earlier notes of the ticket (earlierNotes), oldest first. Filled only when the depth table of the role allows notes. */
+  notes?: PackNote[];
+  /** Pack parts as text. Each is filled only when the depth table of the role allows it. Empty until the pack builder exists. */
+  pack?: PackText;
 };
+
+export type PackNote = { source: "planning" | "spec" | "stage"; role: string | null; notes: string };
+export type PackText = Partial<Record<Exclude<PackPart, "notes">, string>>;
+
+/** Section caps in bytes. They keep the largest first message bounded (hub/core/stage-metrics.ts). */
+export const NOTES_SECTION_MAX = 32 * 1024;
+export const PACK_SECTION_MAX = 16 * 1024;
+
+function cutBytes(text: string, max: number, what: string): string {
+  if (Buffer.byteLength(text, "utf8") <= max) return text;
+  const notice = `\n[${what} cut at ${max / 1024} KB]`;
+  const room = max - Buffer.byteLength(notice, "utf8");
+  return Buffer.from(text, "utf8").subarray(0, room).toString("utf8").replace(/\uFFFD+$/, "") + notice;
+}
+
+function renderNotes(notes: PackNote[] | undefined, depth: ReadonlySet<PackPart>): string {
+  if (!notes?.length || !depth.has("notes")) return "";
+  const label = (n: PackNote) => (n.source === "planning" ? "planning note" : n.source === "spec" ? "spec review" : n.role ?? "stage");
+  const body = notes.map((n) => `### ${label(n)}\n${n.notes.trim()}`).join("\n\n");
+  return cutBytes(`## Earlier notes\n${body}`, NOTES_SECTION_MAX, "Earlier notes");
+}
+
+const PACK_TITLES: Record<Exclude<PackPart, "notes">, string> = {
+  graph: "Graph query",
+  signatures: "Symbol signatures",
+  diffStat: "Diff stat",
+  changedFiles: "Changed files",
+};
+
+function renderPack(pack: PackText | undefined, depth: ReadonlySet<PackPart>, parts: Array<Exclude<PackPart, "notes">>): string {
+  const out = parts.filter((p) => depth.has(p) && pack?.[p]?.trim()).map((p) => `## ${PACK_TITLES[p]}\n${pack![p]!.trim()}`);
+  return out.length ? cutBytes(out.join("\n\n"), PACK_SECTION_MAX, "Pack") : "";
+}
 
 /** The most the handoff section holds, in bytes. */
 export const HANDOFF_SECTION_MAX = 64 * 1024;
@@ -57,6 +97,9 @@ Work in the worktree below. Report with a result handoff that names the stage id
 
 ## Acceptance criteria
 {{acceptance_criteria}}
+{{notes}}
+{{pack}}
+{{diff}}
 `;
 
 export function loadTemplate(role: string, factoryDir = process.env.CUBILOT_FACTORY_DIR, version = process.env.CUBILOT_FACTORY_VERSION): string {
@@ -71,6 +114,13 @@ export function loadTemplate(role: string, factoryDir = process.env.CUBILOT_FACT
 }
 
 export function renderFirstMessage(i: FirstMessageInput, template: string = loadTemplate(i.role)): string {
+  const depth = packDepth(i.role);
+  // {{notes}}, {{pack}} and {{diff}} stand alone on a line. A part that is empty removes its line.
+  const sections: Record<string, string> = {
+    notes: renderNotes(i.notes, depth),
+    pack: renderPack(i.pack, depth, ["graph", "signatures"]),
+    diff: renderPack(i.pack, depth, ["diffStat", "changedFiles"]),
+  };
   const v: Record<string, string> = {
     role: i.role,
     ticket_id: i.ticket.id,
@@ -83,12 +133,16 @@ export function renderFirstMessage(i: FirstMessageInput, template: string = load
     acceptance_criteria: i.ticket.acceptance_criteria.trim(),
     recipient: i.recipient ?? "Orchestrator",
   };
+  // One pass: a part line (a placeholder alone on its line) takes its section, or vanishes when the section is empty.
   // A name the template does not know stays as written.
-  let text = template.replace(/\{\{([a-z_]+)\}\}/g, (m, k: string) => (k in v ? v[k] : m));
+  let text = template.replace(/^\{\{(notes|pack|diff)\}\}[ \t]*(?:\n|$)|\{\{([a-z_]+)\}\}/gm, (m, part: string | undefined, k: string | undefined) => {
+    if (part) return sections[part] ? "\n" + sections[part] + "\n" : "";
+    return k! in v ? v[k!] : m;
+  });
   if (!text.endsWith("\n")) text += "\n";
   if (i.handoff) text += renderHandoffSection(i.handoff, i.stageId);
   if (i.reason) text += `\nNote: the earlier session of this stage stopped: ${oneLine(i.reason)}\n`;
-  return text;
+  return (i.stable ?? "") + text;
 }
 
 export type SpecFirstMessageInput = {
@@ -108,6 +162,10 @@ export type SpecFirstMessageInput = {
   /** The hub count of FAILs since the last PASS, plus one (spec-fail-gate 6). */
   reviewNumber?: number;
   reason?: string;
+  /** The stable block (renderStable): the first bytes of the message. Default: none. */
+  stable?: string;
+  /** Pack parts; the spec depth allows the graph query only. Empty until the pack builder exists. */
+  pack?: PackText;
 };
 
 /** The first message of a spec-review stage (spec-review-stage 4.1b): the request, the tickets in scope and where the result goes. */
@@ -149,6 +207,8 @@ export function renderSpecFirstMessage(i: SpecFirstMessageInput): string {
       : []),
   ];
   let text = lines.join("\n").replace(/\n+$/, "\n");
+  const pack = renderPack(i.pack, packDepth("validator", "spec"), ["graph"]);
+  if (pack) text += `\n${pack}\n`;
   if (i.reason) text += `\nNote: the earlier session of this stage stopped: ${oneLine(i.reason)}\n`;
-  return text;
+  return (i.stable ?? "") + text;
 }
