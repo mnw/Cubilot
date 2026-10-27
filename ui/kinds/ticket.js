@@ -23,15 +23,16 @@ const TicketBoard = (() => {
   const PRIORITIES = { highest: [5, 'Highest'], high: [4, 'High'], medium: [3, 'Medium'], low: [2, 'Low'], lowest: [1, 'Lowest'] };
   const prio = (t) => (Object.hasOwn(PRIORITIES, t.priority) ? PRIORITIES[t.priority] : PRIORITIES.medium);
 
-  // Board filters (blast radius, priority, request, show archived, show cancelled), kept per room in localStorage. No filter = all five
+  // Board filters (ticket id, blast radius, priority, request, show archived, show cancelled), kept per room in localStorage. No filter = all five
   // priorities ticked and radius "all". An unticked-everything choice is honoured: it shows nothing.
   const FILTER_KEY = (r) => `cubilot_board_filter:${r}`;
   const RADII = ['all', 'low', 'high'];
-  const defaultFilter = () => ({ radius: 'all', request: '', priorities: Object.keys(PRIORITIES), showArchived: false, showCancelled: false });
+  const defaultFilter = () => ({ id: '', radius: 'all', request: '', priorities: Object.keys(PRIORITIES), showArchived: false, showCancelled: false });
   function sanitizeFilter(f) {
     const d = defaultFilter();
     if (!f || typeof f !== 'object') return d;
     return {
+      id: typeof f.id === 'string' ? f.id : d.id,   // the raw text; only the match trims it
       radius: RADII.includes(f.radius) ? f.radius : d.radius,
       request: typeof f.request === 'string' ? f.request : d.request,
       priorities: Array.isArray(f.priorities) ? d.priorities.filter((k) => f.priorities.includes(k)) : d.priorities,
@@ -49,8 +50,9 @@ const TicketBoard = (() => {
   }
   // An unknown priority reads as medium (as everywhere on the board).
   const priorityKey = (t) => (Object.hasOwn(PRIORITIES, t.priority) ? t.priority : 'medium');
-  const matchesFilter = (t, f) => (f.radius === 'all' || t.blast_radius === f.radius) && (f.request === '' || t.request_id === f.request) && f.priorities.includes(priorityKey(t));
-  const isDefaultFilter = (f) => f.radius === 'all' && f.request === '' && f.priorities.length === Object.keys(PRIORITIES).length && !f.showArchived && !f.showCancelled;
+  const matchesIdText = (t, f) => { const q = (f.id ?? '').trim(); return q === '' || String(t.id).toLowerCase().includes(q.toLowerCase()); };
+  const matchesFilter = (t, f) => matchesIdText(t, f) && (f.radius === 'all' || t.blast_radius === f.radius) && (f.request === '' || t.request_id === f.request) && f.priorities.includes(priorityKey(t));
+  const isDefaultFilter = (f) => f.id.trim() === '' && f.radius === 'all' && f.request === '' && f.priorities.length === Object.keys(PRIORITIES).length && !f.showArchived && !f.showCancelled;
   // Hidden unless asked for: an archived ticket (archived_at_ms set) and a cancelled one.
   const isVisible = (t, f) => (f.showArchived || !t.archived_at_ms) && (f.showCancelled || t.status !== 'cancelled');
 
@@ -1023,6 +1025,8 @@ const TicketBoard = (() => {
 
   // The controls mirror `filter`: set them whenever the filter changes or the room does.
   function syncFilterControls() {
+    const idField = document.getElementById('ticket-filter-id');
+    if (idField && document.activeElement !== idField && idField.value !== filter.id) idField.value = filter.id;   // never under the caret
     for (const v of RADII) {
       const r = document.getElementById(`ticket-filter-radius-${v}`);
       if (r) r.checked = filter.radius === v;
@@ -1122,10 +1126,10 @@ const TicketBoard = (() => {
     renderLead();   // refused: the select goes back to the real lead
   }
 
-  // The "Filters" button: how many of the five filter dimensions are active (radius, request, priority, archived,
+  // The "Filters" button: how many of the six filter dimensions are active (ticket id, radius, request, priority, archived,
   // cancelled), and the "Showing N of M" summary beside it.
   const activeFilterCount = (f) =>
-    (f.radius !== 'all' ? 1 : 0) + (f.request !== '' ? 1 : 0) + (f.priorities.length !== Object.keys(PRIORITIES).length ? 1 : 0)
+    (f.id.trim() !== '' ? 1 : 0) + (f.radius !== 'all' ? 1 : 0) + (f.request !== '' ? 1 : 0) + (f.priorities.length !== Object.keys(PRIORITIES).length ? 1 : 0)
     + (f.showArchived ? 1 : 0) + (f.showCancelled ? 1 : 0);
 
   function updateFiltersButton(total, shown) {
@@ -1151,7 +1155,7 @@ const TicketBoard = (() => {
     filterPanelOpen = open;
     panel.hidden = !open;
     btn.setAttribute('aria-expanded', String(open));
-    if (open) document.getElementById(`ticket-filter-radius-${filter.radius}`)?.focus?.();
+    if (open) document.getElementById('ticket-filter-id')?.focus?.();
     else if (focusButton) btn.focus?.();
   }
 
@@ -1170,11 +1174,27 @@ const TicketBoard = (() => {
   function onDocumentKeydown(e) {
     if (e.key === 'Escape' && filterPanelOpen) {
       e.preventDefault?.();
+      const idField = document.getElementById('ticket-filter-id');
+      if (idField && idField.value !== '' && document.activeElement === idField) {   // first Escape clears the field, the next closes
+        idField.value = '';
+        setFilter({ ...filter, id: '' });
+        return;
+      }
       setFilterPanel(false, { focusButton: true });
     }
   }
 
+  // Typing in the id field renders after a 150 ms pause (a full render of a big board costs far more than one keystroke).
+  // A pending id is folded into the next filter change, so no other control can drop it.
+  const ID_DEBOUNCE_MS = 150;
+  let idTimer = null;
   function setFilter(next) {
+    if (idTimer !== null) {
+      clearTimeout(idTimer);
+      idTimer = null;
+      const idField = document.getElementById('ticket-filter-id');
+      if (idField && next.id === filter.id) next = { ...next, id: idField.value };
+    }
     const before = filter.showArchived;
     filter = sanitizeFilter(next);
     dropStaleRequest();
@@ -1893,13 +1913,17 @@ const TicketBoard = (() => {
         priorities: Object.keys(PRIORITIES).filter((k) => document.getElementById(`ticket-filter-p-${k}`)?.checked),
       }));
     }
+    document.getElementById('ticket-filter-id')?.addEventListener('input', (e) => {
+      clearTimeout(idTimer);
+      idTimer = setTimeout(() => setFilter({ ...filter, id: e.target.value }), ID_DEBOUNCE_MS);
+    });
     document.getElementById('ticket-filter-request')?.addEventListener('change', (e) => setFilter({ ...filter, request: e.target.value }));
     document.getElementById('ticket-show-archived')?.addEventListener('change', (e) => setFilter({ ...filter, showArchived: e.target.checked }));
     document.getElementById('ticket-show-cancelled')?.addEventListener('change', (e) => setFilter({ ...filter, showCancelled: e.target.checked }));
     document.getElementById('ticket-lead')?.addEventListener('change', (e) => setLead(e.target.value));
     loadLead();   // the selected room's lead, before the board is ever opened
     document.getElementById('ticket-new-btn')?.addEventListener('click', () => openNew('queued'));
-    document.getElementById('ticket-filter-reset')?.addEventListener('click', () => setFilter(defaultFilter()));
+    document.getElementById('ticket-filter-reset')?.addEventListener('click', () => { clearTimeout(idTimer); idTimer = null; setFilter(defaultFilter()); });   // a pending id dies with the reset
     document.getElementById('ticket-new-form')?.addEventListener('submit', (e) => {
       e.preventDefault();
       return submit(e.target);
