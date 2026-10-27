@@ -130,13 +130,14 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
-    // The OS checks a new executable file at its first run, and that can take seconds when many new files run at once
-    // (a full `cargo test`). The fixture runs once here, so that cost is not inside the time of the call under test.
+    // macOS checks a new executable file at its first run, one file after the other (about 115 ms each, measured): 32
+    // new files at once take about 3.8 s, and that time falls between spawn and exit of the call under test. The fixture
+    // runs once here with a flag it answers at once, so that cost is not inside the timed call.
     fn script(dir: &std::path::Path, name: &str, body: &str) -> String {
         let p = dir.join(name);
-        std::fs::write(&p, format!("#!/bin/sh\n[ -n \"$CUBILOT_FIXTURE_WARMUP\" ] && exit 0\n{body}\n")).unwrap();
+        std::fs::write(&p, format!("#!/bin/sh\n[ \"$1\" = --cubilot-warm ] && exit 0\n{body}\n")).unwrap();
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let warm = Command::new(&p).env("CUBILOT_FIXTURE_WARMUP", "1").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
+        let warm = Command::new(&p).arg("--cubilot-warm").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
         assert!(warm.unwrap().success(), "fixture warm-up run");
         p.to_string_lossy().to_string()
     }
