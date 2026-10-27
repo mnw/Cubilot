@@ -115,11 +115,17 @@ echo "memory limit ${MAX_RSS_MB} MB"
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 BUILD_START=$(date +%s)
+# The pre-build leads a process group of its own, so a signal to this script stops cargo and its children.
+set -m
 cargo test --manifest-path "$ROOT/src-tauri/Cargo.toml" --lib --no-run &
 CHILD=$!
+set +m
+if target_alive "-$CHILD"; then PGID=$CHILD; else PGID=""; fi
 wait "$CHILD"
 build_code=$?
+kill_group
 CHILD=""
+PGID=""
 if [ "$build_code" -ne 0 ]; then
   echo "scripts/test.sh: the Rust pre-build failed (exit $build_code); bun test not started" >&2
   exit "$build_code"

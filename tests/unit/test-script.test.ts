@@ -135,6 +135,29 @@ describe("scripts/test.sh", () => {
     expect(existsSync(r.lock)).toBe(false);
   }, 30000);
 
+  test("a TERM during the pre-build stops cargo and its child, and no bun run starts", async () => {
+    const slow = join(dir, "slow-cargo");
+    mkdirSync(slow, { recursive: true });
+    writeFileSync(join(slow, "cargo"), `#!/bin/sh\nsleep 300 &\necho $! > "$CHILD_PIDFILE"\nwait\n`, { mode: 0o755 });
+    const pidfile = join(dir, "build-child.pid");
+    const log = join(dir, "term-build.log");
+    const lock = join(dir, "lock-term-build");
+    const proc = Bun.spawn(["bash", SCRIPT, join(dir, "mark.test.ts")], {
+      cwd: dir,
+      env: { ...process.env, PATH: `${slow}:${dirname(process.execPath)}:${process.env.PATH}`, CUBILOT_HEAVY_LOCK: lock, CHILD_PIDFILE: pidfile, CARGO_LOG: log },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    for (let t = 0; t < 10000 && !existsSync(pidfile); t += 50) await Bun.sleep(50);
+    expect(existsSync(pidfile)).toBe(true);
+    await Bun.sleep(200);
+    proc.kill("SIGTERM");
+    expect(await proc.exited).toBe(143);
+    expect(await gone(Number(readFileSync(pidfile, "utf8").trim()))).toBe(true);
+    expect(existsSync(log)).toBe(false);
+    expect(existsSync(lock)).toBe(false);
+  }, 30000);
+
   test("CUBILOT_TEST_PEAK=1 prints the peak RSS on success", async () => {
     const r = await run([join(dir, "ok.test.ts")], { CUBILOT_TEST_PEAK: "1" });
     expect(r.code).toBe(0);
