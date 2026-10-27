@@ -17,7 +17,7 @@ import { insertEvent } from "../core/events";
 import { mintHandoffId, ts, validName, validRoomLabel } from "../core/ids";
 import { pausedRefusal } from "../core/auth";
 import { getRoomSettings, STAGE_ROLES } from "../core/ledger";
-import { ROLE_RECIPIENT_PREFIX, type StageHooks } from "./stage";
+import { ROLE_RECIPIENT_PREFIX, specFailState, type StageHooks } from "./stage";
 import {
   writeNutshellInTx,
   nutshellEntry,
@@ -474,6 +474,13 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
             return Response.json({ error: "context.commit must be a commit hash" }, { status: 400 });
           }
           handoffRoom = fromAgent.room ?? cap.config.defaultRoom;
+          // The FAIL limit (spec-fail-gate 1): after two FAILs since the last PASS only the human sends this review.
+          if (from !== cap.config.humanName) {
+            const { fails } = specFailState(db, handoffRoom, specRequestId);
+            if (fails >= 2) {
+              return Response.json({ error: `request ${specRequestId} has ${fails} spec FAILs since its last PASS: the human must send this review` }, { status: 409 });
+            }
+          }
           // The stored context names the request, so the launch finds the commit of this review (spec-review 2.4).
           // No commit named: pin HEAD of the room's project as it is now, so a later commit does not move this review (2.4b).
           let commit = c.commit;
@@ -545,15 +552,17 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
 
         const id = mintHandoffId();
         try {
+          // The stamp computes the spec FAIL count once; the stage result below reads it from the stamped context.
+          const storedContext = resultErrors ? (stage?.stampResult(from, body.context) ?? body.context) : body.context;
           const r = entity.apply(
             id,
             createHandoffVerb,
-            { id, from, to, task, context: body.context, ttl_seconds: ttl, room: handoffRoom },
+            { id, from, to, task, context: storedContext, ttl_seconds: ttl, room: handoffRoom },
             from,
             cap,
           );
           // A valid result passes the stage of the sender (stage-sessions 5.2); the session closes at its next end of turn.
-          if (resultErrors) stage?.onResult(from, body.context, cap);
+          if (resultErrors) stage?.onResult(from, storedContext, cap);
           // The evaluator runs in the same request, after the handoff is recorded (stage.ts logs its own failure).
           if (isSpec) stage?.onSpecHandoff({ request_id: specRequestId, scope: specScope }, cap);
           else if (toRole !== "" && ticketId && stage) {

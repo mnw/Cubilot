@@ -540,8 +540,8 @@ describe("only the stage logic queues launches", () => {
   test("inside stage.ts, a launch is queued only from enqueueLaunch (the other pushes are closes: 5.2, 5.3)", () => {
     const src = readFileSync(join(import.meta.dir, "../../hub/kinds/stage.ts"), "utf8");
     const pushes = [...src.matchAll(/queue\.push\(/g)].length;
-    expect(pushes).toBe(5);
-    expect([...src.matchAll(/queue\.push\(\{[^}]*kind: "close"/g)]).toHaveLength(4); // turn end (5.2), stop (5.3), lost turn end and start sweep (5.3b)
+    expect(pushes).toBe(7);
+    expect([...src.matchAll(/queue\.push\(\{[^}]*kind: "close"/g)]).toHaveLength(6); // turn end (5.2), stop (5.3), lost turn end and start sweep (5.3b), cancel and late launch end of a cancelled stage (G4)
     const fn = src.slice(src.indexOf("function enqueueLaunch("), src.indexOf("function passSpecStage("));
     expect(fn).toContain("queue.push(req)");
   });

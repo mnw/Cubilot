@@ -292,7 +292,7 @@ Status: decision 2026-10-27 (human). Several of these are open tickets already. 
 
 | Rule | Code | Ticket |
 |---|---|---|
-| No third review after two FAILs, unless the human starts it. The hub writes `fail_count`. The "Needs you" row shows the request while a newer review is open. | Spec review start refuses (409); result gets `fail_count` | t_65a8 |
+| No third review after two FAILs, unless the human starts it. The hub writes `fail_count`. The "Needs you" row shows the request while a newer review is open. | Spec review start refuses (409); result gets `fail_count` | t_65a8 (done 2026-10-27, 736040b) |
 | A ticket that goes back to draft cancels its queued stage. New stage status `cancelled`, with no retry, no FAIL count and no failure handling. | Stage kind | G10 t_d232 |
 | A cancel of a ticket stops its running stage. | Stage kind, launch | G5 |
 | A ticket whose role has no stage chain on the hub cannot be queued. | Ticket transition refuses with the role name | draft ticket (2026-10-27) |

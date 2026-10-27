@@ -744,7 +744,7 @@ function conflictResponse(e: LedgerConflict): Response {
   return Response.json(body, { status: e.httpStatus });
 }
 
-export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicketChanged">): KindModule {
+export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicketChanged"> & Partial<Pick<StageHooks, "onTicketCancelled">>): KindModule {
   const entity = createLedgerEntity({ decl: ticketDecl, db });
 
   // A paused agent's writes are refused (423) unless the route is one a running tool call may need
@@ -1345,6 +1345,7 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
               // Run the stage evaluator after the commit: a draft that became queued, and every ticket that was
               // waiting for this one when it became done. A cancelled ticket does not unblock anything.
               if (before?.status === "draft" && r.snapshot.status === "queued") stage.onTicketChanged(params.id, cap);
+              if (r.snapshot.status === "cancelled") stage.onTicketCancelled?.(params.id, cap);
               if (r.snapshot.status === "done") {
                 const waiting = db
                   .query<{ ticket_id: string }, [string]>("SELECT ticket_id FROM ticket_blockers WHERE blocker_id = ? ORDER BY rowid")

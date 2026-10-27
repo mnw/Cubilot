@@ -80,7 +80,7 @@ Verdict:
 Re-review, after a FAIL:
 - Check only the blocking findings of your last FAIL, and the lines that changed since.
 - Do not add new findings on lines that did not change. The exception is a new blocking finding of type 3 or 4.
-- This is your second FAIL on the same ticket or plan: add `escalate: "human"` to the context of the verdict. Do not review the same ticket or plan a third time.
+- The hub counts FAILs and escalates. Do not count them yourself.
 
 ## Rules
 - You run on a different model family than the Worker. Use that: do not accept a claim because it reads well.

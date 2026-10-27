@@ -28,6 +28,7 @@ For each blocking finding, write one of these:
 - **Mechanical:** a command can check it (validate, grep, a test, a character count). Fix it in a ticket. The acceptance is the command and its output. The Validator checks only that output. No spec review.
 - **Decision:** it needs a choice (design, scope, radius, waiver). Put it in the escalation with the options and your recommendation.
 - **Not blocking:** use the decision tree in `factory/validator/validator.md`. A finding outside the ticket is a suggestion.
+- **Implementation details are not yours to rule on.** A value, a limit, a write order or an API choice comes from the Worker, with evidence from the code (file and line, or a named constant), and the Validator checks it. If you must rule on one, cite the code that supports it. On 2026-10-27, two of four FAILs on t_46fd came from rulings that were not checked against the code.
 
 ### 3. Check facts against the repository
 
