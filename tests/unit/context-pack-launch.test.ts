@@ -85,8 +85,8 @@ describe("pack at the launch seam (3.5)", () => {
   });
 
   test("a tester gets the changed files and no graph; an editor-style role with no depth queues at once", async () => {
-    const { worktree } = repoWithBranch();
-    const e = makeEnv((i) => buildPack({ ...i, worktree }));
+    const { project, worktree } = repoWithBranch();
+    const e = makeEnv((i) => buildPack({ ...i, worktree, projectFolder: project }));
     const s = e.stage("tester");
     e.launch(s.id, "tester-1");
     await sleep(500);

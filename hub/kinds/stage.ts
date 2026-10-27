@@ -1358,7 +1358,7 @@ export function createStageRuntime(
     void (async () => {
       let pack: Pack = { text: {}, graphStatus: "missing" };
       try {
-        pack = await buildPackFor({ role: stage.role, review: stage.review, question: packQuestion, worktree: packWorktree });
+        pack = await buildPackFor({ role: stage.role, review: stage.review, question: packQuestion, worktree: packWorktree, projectFolder: getRoomSettings(db, input.room)?.project_folder ?? null });
       } catch (e) {
         console.error(`[stage] pack of ${req.stage_id} failed, launching without it:`, e);
       }

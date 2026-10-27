@@ -26,6 +26,8 @@ export type PackInput = {
   /** The text the graph query asks: ticket title and criteria, or the request text of a spec stage. */
   question: string;
   worktree: string;
+  /** The room's project folder. The room base is the branch that it has out. Without it, the first `git worktree list` entry. */
+  projectFolder?: string | null;
   /** Limit of each command in ms. Default COMMAND_LIMIT_MS; a test passes a small one. */
   limitMs?: number;
 };
@@ -79,7 +81,7 @@ export function packCommandCount(role: string, review?: string | null): number {
   const d = packDepth(role, review);
   let n = 0;
   if (d.has("graph")) n += 2; // git log (HEAD time), graphify query
-  if (d.has("diffStat") || d.has("changedFiles")) n += 1; // git worktree list (the room base)
+  if (d.has("diffStat") || d.has("changedFiles")) n += 1; // git symbolic-ref (the room base)
   if (d.has("diffStat")) n += 1;
   if (d.has("changedFiles")) n += 1;
   return n;
@@ -100,8 +102,16 @@ async function graphPart(question: string, worktree: string, run: Runner, limit:
   return { status, text: `Graph status: ${status}\n${cutBytes(r.stdout.trim(), GRAPH_BUDGET_TOKENS * 4)}` };
 }
 
-/** The room base: the branch that the main checkout has out. `git worktree list` names the main worktree first. */
-async function roomBase(worktree: string, run: Runner, limit: number): Promise<string | null> {
+/**
+ * The room base: the branch that the room's project folder has out. createWorktree branches the ticket from that HEAD
+ * (worktrees.ts), and the folder may be a linked worktree, so the first `git worktree list` entry is not always right.
+ */
+async function roomBase(worktree: string, projectFolder: string | null | undefined, run: Runner, limit: number): Promise<string | null> {
+  if (projectFolder) {
+    const r = await run(["git", "symbolic-ref", "--short", "-q", "HEAD"], projectFolder, limit);
+    const b = r.ok ? r.stdout.trim() : "";
+    return b && !b.startsWith("-") ? b : null;
+  }
   const r = await run(["git", "worktree", "list", "--porcelain"], worktree, limit);
   if (!r.ok) return null;
   const first = r.stdout.split("\n\n")[0] ?? "";
@@ -125,7 +135,7 @@ export async function buildPack(i: PackInput, run: Runner = runCommand): Promise
       if (g.text) text.graph = g.text;
     }
     if (depth.has("diffStat") || depth.has("changedFiles")) {
-      const base = await roomBase(i.worktree, run, limit);
+      const base = await roomBase(i.worktree, i.projectFolder, run, limit);
       if (base) {
         if (depth.has("diffStat")) {
           const r = await run(["git", "diff", "--stat", `${base}...HEAD`], i.worktree, limit);
