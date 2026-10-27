@@ -25,6 +25,7 @@ import { LedgerConflict } from "../core/types";
 import { createLaunchQueue, type LaunchEnd, type LaunchQueue, type LaunchRequest } from "../core/launch-queue";
 import { roleHarness } from "../core/role-harness";
 import { roleModelFor } from "../core/role-models";
+import { metricsByRole, recordStageMetrics, type Launch } from "../core/stage-metrics";
 import { makeSSE } from "../core/sse";
 import { assignBySystemInTx, closeReviewedBySystemInTx, notifyHeldDrafts, queueBySystemInTx, type HeldDraft } from "./ticket";
 
@@ -153,6 +154,8 @@ export type StageMoveInput = {
   verdict?: string | null;
   /** Why an attempt ended (`retrying`, `failed`): kept in the event, so a restart can still give it to the relaunch (5.3b). */
   reason?: string;
+  /** Set on `launching`: what the metrics row of this attempt needs. It goes into the event payload (context-pack 5.1). */
+  launch?: Launch;
 };
 
 function mintStageId(): string {
@@ -225,7 +228,7 @@ const moveVerb: VerbDecl<StageSnapshot, StageMoveInput & { id: string }> = {
       kind: "transition",
       next,
       eventKind,
-      payload: (post) => ({ from: prior.status, to: post.status, attempt: post.attempt, session: post.session, verdict: post.verdict, reason: p.reason ?? null }),
+      payload: (post) => ({ from: prior.status, to: post.status, attempt: post.attempt, session: post.session, verdict: post.verdict, reason: p.reason ?? null, ...(p.to === "launching" && p.launch ? { launch: p.launch } : {}) }),
       entry: (post) => stageEntry(p.to === "cancelled" ? { ...post, reason: p.reason ?? null } : post, eventKind, null),
     };
   },
@@ -388,6 +391,8 @@ export type StageRuntime = {
   module: KindModule;
   /** How many launch requests wait with values from role_models (tests: the set empties when a launch ends). */
   pendingRoleModelLaunches(): number;
+  /** Resolves when the deferred metrics writes of ended stages are done (tests). */
+  metricsIdle(): Promise<void>;
   api: StageApi;
   /**
    * Creates the stages a ticket is ready for (each as `queued`, one `stage.queued` event each) and returns them.
@@ -637,10 +642,30 @@ export function createStageRuntime(
     closeGraceMs?: number;
     /** A session younger than this is not "gone" yet: its bridge may still be starting (default 90 s). */
     bootGraceMs?: number;
+    /** Where Claude Code writes its transcripts (default `~/.claude/projects`). Tests point it at a temp folder. */
+    claudeProjectsDir?: string;
+    /** Replaces the metrics writer (tests only). */
+    recordMetrics?: typeof recordStageMetrics;
   } = {},
 ): StageRuntime {
   const entity = createLedgerEntity({ decl: stageDecl, db });
-  const api = createStageApi(db, (freed, cap) => drainQueue(freed, cap));
+  const pendingMetrics = new Set<Promise<void>>();
+  const api = createStageApi(db, (freed, cap) => {
+    if (freed.status === "passed" || freed.status === "failed") {
+      // After the commit of stage.passed/failed, outside its transaction and after this call returns: the reads must not delay the result.
+      // recordStageMetrics logs its own failures; the catch guards the rest.
+      const run = new Promise<void>((resolve) =>
+        setImmediate(() => {
+          (opts.recordMetrics ?? recordStageMetrics)(db, freed.id, freed.version, console.error, opts.claudeProjectsDir)
+            .catch((e) => console.error(`[stage-metrics] ${freed.id}: ${(e as Error).message}`))
+            .finally(resolve);
+        }),
+      );
+      pendingMetrics.add(run);
+      void run.then(() => pendingMetrics.delete(run));
+    }
+    drainQueue(freed, cap);
+  });
 
   /** Launch ids whose request carries role_models values: a refusal of the shell is stored with the prefix. */
   const roleModelLaunches = new Set<string>();
@@ -1184,10 +1209,23 @@ export function createStageRuntime(
       }
     }
 
+    // 4.3 (computed before the move: its size goes into the stage.launching payload, 5.1): the ticket part of the first message; the role prompt is a separate file passed by the launch command.
+    let prompt = input.prompt;
+    if (prompt === "" && stage.ticket_id && cwd) {
+      const t = db
+        .query<{ id: string; title: string; acceptance_criteria: string; blast_radius: string; request_id: string | null }, [string]>(
+          "SELECT id, title, acceptance_criteria, blast_radius, request_id FROM tickets WHERE id = ?",
+        )
+        .get(stage.ticket_id);
+      if (t) prompt = renderFirstMessage({ stageId: input.stage_id, role: stage.role, ticket: t, branch, worktree: cwd, reason: input.reason, recipient: leadOfRoom(input.room), handoff: startingHandoff(stage.id, stage.ticket_id, stage.role) ?? undefined });
+    } else if (prompt === "" && stage.review === "spec" && cwd) {
+      prompt = specFirstMessage(stage, input.room, cwd, input.reason) ?? "";
+    }
+    const harness = "error" in models ? input.harness : (models.entry?.harness ?? input.harness);
     try {
       api.move(
         input.stage_id,
-        { to: "launching", session: input.session, slot_seq: input.slot_seq ?? null },
+        { to: "launching", session: input.session, slot_seq: input.slot_seq ?? null, launch: { role: stage.role, harness, cwd, bytes: Buffer.byteLength(prompt) } },
         "system",
         cap,
         (ctx) => {
@@ -1212,18 +1250,6 @@ export function createStageRuntime(
       reportFinalFailure(input.stage_id, `the launch did not start: ${models.error}`, cap);
       return { ok: false, reason: models.error };
     }
-    // 4.3: the ticket part of the first message; the role prompt is a separate file passed by the launch command.
-    let prompt = input.prompt;
-    if (prompt === "" && stage.ticket_id && cwd) {
-      const t = db
-        .query<{ id: string; title: string; acceptance_criteria: string; blast_radius: string; request_id: string | null }, [string]>(
-          "SELECT id, title, acceptance_criteria, blast_radius, request_id FROM tickets WHERE id = ?",
-        )
-        .get(stage.ticket_id);
-      if (t) prompt = renderFirstMessage({ stageId: input.stage_id, role: stage.role, ticket: t, branch, worktree: cwd, reason: input.reason, recipient: leadOfRoom(input.room), handoff: startingHandoff(stage.id, stage.ticket_id, stage.role) ?? undefined });
-    } else if (prompt === "" && stage.review === "spec" && cwd) {
-      prompt = specFirstMessage(stage, input.room, cwd, input.reason) ?? "";
-    }
     const req: LaunchRequest = {
       id: mintLaunchId(),
       kind: "launch",
@@ -1231,7 +1257,7 @@ export function createStageRuntime(
       session: input.session,
       role: stage.role,
       room: input.room,
-      harness: models.entry?.harness ?? input.harness,
+      harness,
       ...(models.entry?.model ? { model: models.entry.model } : {}),
       ...(models.entry?.provider ? { provider: models.entry.provider } : {}),
       ...(models.entry?.effort ? { effort: models.entry.effort } : {}),
@@ -1448,6 +1474,17 @@ export function createStageRuntime(
         const room = decodeURIComponent(params.id);
         if (!validRoomLabel(room)) return Response.json({ error: "invalid room" }, { status: 400 });
         return Response.json({ room, requests: needsYouRequests(db, room) });
+      },
+    },
+    {
+      // Start-up numbers of the stage sessions of one room, grouped by role (context-pack 5.2). Read only.
+      method: "GET",
+      path: /^\/rooms\/([^/]+)\/stage-metrics$/,
+      auth: "read",
+      handler: (_req, _cap, params) => {
+        const room = decodeURIComponent(params.id);
+        if (!validRoomLabel(room)) return Response.json({ error: "invalid room" }, { status: 400 });
+        return Response.json({ room, roles: metricsByRole(db, room, STAGE_ROOM_SQL) });
       },
     },
     {
@@ -1840,7 +1877,7 @@ export function createStageRuntime(
       }
     },
   };
-  return { module, api, evaluateStages, hooks, enqueueLaunch, queue, passSpecStage, sweep, pendingRoleModelLaunches: () => roleModelLaunches.size };
+  return { module, api, evaluateStages, hooks, enqueueLaunch, queue, passSpecStage, sweep, pendingRoleModelLaunches: () => roleModelLaunches.size, metricsIdle: async () => void (await Promise.all([...pendingMetrics])) };
 }
 
 export function createStageKind(db: Database): KindModule {
