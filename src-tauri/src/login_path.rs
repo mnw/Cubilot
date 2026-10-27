@@ -130,10 +130,15 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
+    // A new executable file is slow at its first run (measured: about 115 ms per file, more when many files start at
+    // once). That time falls between spawn and exit of the call under test. Why macOS is slow is not proven. The fixture
+    // runs once here with a flag it answers at once, so that cost is not inside the timed call.
     fn script(dir: &std::path::Path, name: &str, body: &str) -> String {
         let p = dir.join(name);
-        std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::write(&p, format!("#!/bin/sh\n[ \"$1\" = --cubilot-warm ] && exit 0\n{body}\n")).unwrap();
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let warm = Command::new(&p).arg("--cubilot-warm").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
+        assert!(warm.unwrap().success(), "fixture warm-up run");
         p.to_string_lossy().to_string()
     }
 
@@ -172,19 +177,38 @@ mod tests {
     }
 
     #[test]
-    fn timeout_nonzero_exit_and_empty_output_are_errors() {
-        let d = tmp("err");
+    fn timeout_is_an_error() {
+        let d = tmp("err-hang");
         let hang = script(&d, "sh-hang", "sleep 30");
         let t0 = Instant::now();
         let e = resolve_with(&hang, Duration::from_millis(300)).unwrap_err();
         assert!(t0.elapsed() < Duration::from_secs(2), "killed at the limit, not after 30 s: {:?}", t0.elapsed());
         assert!(e.contains("took more than"), "{e}");
-        let bad = script(&d, "sh-bad", "echo '__CUBILOT_PATH__/x'; exit 3");
-        assert!(resolve_with(&bad, Duration::from_secs(5)).unwrap_err().contains("exited with"));
-        let empty = script(&d, "sh-empty", "exit 0");
-        assert!(resolve_with(&empty, Duration::from_secs(5)).unwrap_err().contains("printed no PATH"));
-        assert!(resolve_with("/nonexistent/sh", Duration::from_secs(5)).unwrap_err().contains("could not run"));
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn nonzero_exit_is_an_error() {
+        let d = tmp("err-bad");
+        let bad = script(&d, "sh-bad", "echo '__CUBILOT_PATH__/x'; exit 3");
+        let e = resolve_with(&bad, Duration::from_secs(5)).unwrap_err();
+        assert!(e.contains("exited with"), "{e}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn empty_output_is_an_error() {
+        let d = tmp("err-empty");
+        let empty = script(&d, "sh-empty", "exit 0");
+        let e = resolve_with(&empty, Duration::from_secs(5)).unwrap_err();
+        assert!(e.contains("printed no PATH"), "{e}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_missing_shell_is_an_error() {
+        let e = resolve_with("/nonexistent/sh", Duration::from_secs(5)).unwrap_err();
+        assert!(e.contains("could not run"), "{e}");
     }
 
     #[test]
@@ -223,6 +247,30 @@ mod tests {
         let e = resolve_with(&big, Duration::from_secs(5)).unwrap_err();
         assert!(e.contains("more than"), "{e}");
         assert!(t0.elapsed() < Duration::from_secs(3), "{:?}", t0.elapsed());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // T: many fresh script files run at once, as in a full `cargo test`. The call is timed from the moment the fixture
+    // exists, so the time the OS needs for the first run of a new file must not fall inside it.
+    #[test]
+    fn fresh_fixtures_run_at_once_stay_inside_the_call_limits() {
+        let d = tmp("fresh");
+        let handles: Vec<_> = (0..32)
+            .map(|i| {
+                let d = d.clone();
+                std::thread::spawn(move || {
+                    let sh = script(&d, &format!("sh-fresh{i}"), "echo '__CUBILOT_PATH__/y'; sleep 30 &\nexit 0");
+                    let t0 = Instant::now();
+                    let r = resolve_with(&sh, Duration::from_secs(5));
+                    (r, t0.elapsed())
+                })
+            })
+            .collect();
+        for h in handles {
+            let (r, took) = h.join().unwrap();
+            assert_eq!(r, Ok("/y".to_string()));
+            assert!(took < Duration::from_secs(2), "does not wait for the descendant: {took:?}");
+        }
         let _ = std::fs::remove_dir_all(&d);
     }
 
