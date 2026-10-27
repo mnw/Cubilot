@@ -1156,14 +1156,13 @@ export function createStageRuntime(
    * findings of THIS FAIL (spec-review-stage 4.2). The count is read from the spec stages of the request: the FAIL
    * stages created after the newest PASS stage. A PASS in between resets it. It never throws: the result is recorded.
    */
-  function noticeRepeatedFail(stageId: string, result: Record<string, unknown>, cap: HubCapabilities): void {
+  function noticeRepeatedFail(stageId: string, result: Record<string, unknown>, fails: number, cap: HubCapabilities): void {
     try {
       const stage = api.load(stageId);
       if (!stage || stage.review !== "spec" || !stage.request_id) return;
       // The count is the room's own: the same request id in another room is another request (4.3 review).
       const room = roomOfStage(stageId);
       if (!room) return;
-      const { fails } = specFailState(db, room, stage.request_id);
       if (fails < 2) return;
       const titles = new Map(
         db
@@ -1659,9 +1658,11 @@ export function createStageRuntime(
             // The queued stages fail first: the move to passed frees the slot and the queue would start them.
             const room = roomOfStage(stage.id);
             const request = db.query<{ r: string | null }, [string]>("SELECT request_id AS r FROM stage WHERE id = ?").get(stage.id)?.r;
-            if (room && request && specFailState(db, room, request).fails + 1 >= 2) failQueuedSpecStages(request, room, cap);
+            // The hub count was written into the result context by stampResult, once per spec result.
+            const fails = typeof c.fail_count === "number" ? c.fail_count : 0;
+            if (room && request && fails >= 2) failQueuedSpecStages(request, room, cap);
             api.move(stage.id, { to: "passed", verdict: "FAIL" }, "system", cap);
-            noticeRepeatedFail(stage.id, c, cap);
+            noticeRepeatedFail(stage.id, c, fails, cap);
           }
         } else {
           // A final PASS of a validator or reviewer closes its ticket in the same transaction (the third cross-kind one).

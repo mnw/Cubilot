@@ -552,15 +552,17 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
 
         const id = mintHandoffId();
         try {
+          // The stamp computes the spec FAIL count once; the stage result below reads it from the stamped context.
+          const storedContext = resultErrors ? (stage?.stampResult(from, body.context) ?? body.context) : body.context;
           const r = entity.apply(
             id,
             createHandoffVerb,
-            { id, from, to, task, context: resultErrors ? (stage?.stampResult(from, body.context) ?? body.context) : body.context, ttl_seconds: ttl, room: handoffRoom },
+            { id, from, to, task, context: storedContext, ttl_seconds: ttl, room: handoffRoom },
             from,
             cap,
           );
           // A valid result passes the stage of the sender (stage-sessions 5.2); the session closes at its next end of turn.
-          if (resultErrors) stage?.onResult(from, body.context, cap);
+          if (resultErrors) stage?.onResult(from, storedContext, cap);
           // The evaluator runs in the same request, after the handoff is recorded (stage.ts logs its own failure).
           if (isSpec) stage?.onSpecHandoff({ request_id: specRequestId, scope: specScope }, cap);
           else if (toRole !== "" && ticketId && stage) {

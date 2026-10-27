@@ -40,7 +40,7 @@ function makeEnv() {
     const context = JSON.stringify({ stage_id: s.id, review: "spec", request_id: request, verdict, findings });
     db.run("INSERT INTO handoffs (id, from_agent, to_agent, task, context_json, status, created_at_ms, expires_at_ms, room) VALUES (?, ?, 'Orchestrator', 'r', ?, 'pending', 1, 2, 'r1')", [hid, session, context]);
     db.run("INSERT INTO events (entity_id, kind, actor, payload_json, at_ms, room) VALUES (?, 'handoff.created', ?, '{}', 1, 'r1')", [hid, session]);
-    rt.hooks.onResult(session, JSON.parse(context), cap);
+    rt.hooks.onResult(session, rt.hooks.stampResult(session, JSON.parse(context)), cap); // the route stamps the hub count first
     return s.id;
   };
   /** A ticket ledger event, as the ticket kind writes it. */
@@ -75,7 +75,7 @@ function makeEnv() {
     const context = JSON.stringify({ stage_id: id, review: "spec", request_id: request, verdict: end, findings });
     db.run("INSERT INTO handoffs (id, from_agent, to_agent, task, context_json, status, created_at_ms, expires_at_ms, room) VALUES (?, ?, 'Orchestrator', 'r', ?, 'pending', 1, 2, 'r1')", [hid, session, context]);
     db.run("INSERT INTO events (entity_id, kind, actor, payload_json, at_ms, room) VALUES (?, 'handoff.created', ?, '{}', 1, 'r1')", [hid, session]);
-    rt.hooks.onResult(session, JSON.parse(context), cap);
+    rt.hooks.onResult(session, rt.hooks.stampResult(session, JSON.parse(context)), cap); // the route stamps the hub count first
   };
   const stageStatus = (id: string) => rt.api.load(id)!.status;
   return { db, ticket, review, openStage, endStage, event, setStatus, setRequest, stageStatus };
