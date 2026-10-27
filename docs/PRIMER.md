@@ -17,19 +17,20 @@ Data flow: agent, then bridge, then hub `/post`, then chat log, then SSE to the 
 ## Where the main parts are
 
 - `hub/hub.ts`, `hub/main.ts`: hub entry points. `CUBILOT_MODE` selects the mode. (docs/rules/core.md)
-- `hub/core/`: registry (`agents.ts`), dispatcher, ledger, SSE, briefing, worktrees.
+- `hub/core/`: shared plumbing. Files: `agents.ts` (registry), `dispatcher.ts`, `ledger.ts`, `sse.ts`, `briefing.ts`, `worktrees.ts`. (docs/rules/core.md, hub/core/)
 - `hub/kinds/`: one file for each kind. Do not add kind branches to `hub.ts`. (docs/rules/kinds.md)
-- `hub/channel/`: bridge core (`core.ts`), Claude mod (`claude-mod/`), Pi extension (`pi-extension.ts`). (docs/rules/bridge.md)
-- `src-tauri/src/`: Rust shell (`lib.rs`, `pty.rs`, `factory.rs`, `launches.rs`).
-- `ui/`: webview (`index.html`, `main.js`, `terminal.js`).
-- `scripts/`: `install.sh`, `build-sidecars.sh`, `check-mod.sh`, `test.sh`.
-- `tests/`: `unit/`, `integration/`, `contract/`, `helpers/`.
+- `hub/channel/`: the Bridge. It has the core (`core.ts`), the Claude mod (`claude-mod/`) and the Pi extension (`pi-extension.ts`). (docs/rules/core.md, docs/rules/bridge.md)
+- `src-tauri/src/`: Rust shell (`lib.rs`, `pty.rs`, `factory.rs`, `launches.rs`). (src-tauri/src/)
+- `ui/`: webview (`index.html`, `main.js`, `terminal.js`). (ui/)
+- `scripts/`: `install.sh`, `build-sidecars.sh`, `check-mod.sh`, `test.sh`. (CLAUDE.md)
+- `tests/`: `unit/`, `integration/`, `contract/`, `helpers/`. (tests/)
 - `docs/rules/`: detail for each rule in CLAUDE.md. Index: `docs/rules/README.md`.
 - `CONTEXT.md`: domain vocabulary. Use its terms. (CONTEXT.md)
 
 ## Conventions
 
-- Stage sessions commit only on `ticket/<id>`. Never commit on main. Never push. (CLAUDE.md)
+- Only Worker and Writer stage sessions commit. They commit on their own `ticket/<id>` branch. Never commit on main. Never push. (CLAUDE.md, docs/rules/core.md)
+- Validator and Reviewer worktrees are read-only. The hub refuses a writable one. (CLAUDE.md, docs/rules/kinds.md)
 - Never hardcode the hub port. The shell picks it at run time. (CLAUDE.md)
 - Mutating hub routes need a bearer token. JSON bodies have a limit of 256 KiB. (docs/rules/core.md)
 - Use `agents.ensure` and `agents.remove`. Never change `knownAgents`, `agentQueues`, `agentConnections` or `staleTimers` directly. (CLAUDE.md)
@@ -38,7 +39,7 @@ Data flow: agent, then bridge, then hub `/post`, then chat log, then SSE to the 
 - After a change to `hub/hub.ts`, run `./scripts/build-sidecars.sh`. After a change to `hub/channel/**`, run it and `./scripts/check-mod.sh`. (CLAUDE.md)
 - Rebuild the app only with `./scripts/install.sh`. Never use `pkill` and `cp`. (CLAUDE.md)
 - Target is macOS ARM64 only. (CLAUDE.md)
-- Use the words in CONTEXT.md. Avoid its "Avoid" words, for example "bridge" for the Channel sidecar. (CONTEXT.md)
+- The chatbridge is a Claude mod, not MCP. Never write a project `.mcp.json`. (CLAUDE.md)
 
 ## How to run the tests
 
