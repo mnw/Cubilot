@@ -451,6 +451,8 @@ export type NeedsYouRequest = {
   request_id: string;
   /** Spec FAIL verdicts since the last PASS of the request (always 2 or more here). */
   fail_count: number;
+  /** The newest FAIL stage of the request. The board keys Clear and Collapse on it: a newer FAIL changes it. */
+  latest_fail_stage_id: string;
   /** The findings of the latest FAIL, blocking first. */
   findings: NeedsYouFinding[];
 };
@@ -515,11 +517,46 @@ export function needsYouRequests(db: Database, room: string): NeedsYouRequest[] 
     const findings: NeedsYouFinding[] = raw.flatMap((f) => {
       const o = f && typeof f === "object" ? (f as Record<string, unknown>) : null;
       if (!o || typeof o.ticket_id !== "string" || typeof o.text !== "string") return [];
-      const title = db.query<{ title: string }, [string]>("SELECT title FROM tickets WHERE id = ?").get(o.ticket_id)?.title ?? null;
-      return [{ ticket_id: o.ticket_id, title, severity: o.severity === "suggestion" ? ("suggestion" as const) : ("blocking" as const), text: o.text }];
+      return [{ ticket_id: o.ticket_id, title: null, severity: o.severity === "suggestion" ? ("suggestion" as const) : ("blocking" as const), text: o.text }];
     });
     findings.sort((a, b) => Number(b.severity === "blocking") - Number(a.severity === "blocking"));
-    out.push({ request_id, fail_count: fails, findings });
+    // One room-scoped read: the finding tickets and every ticket of the request. Tickets of another room never count.
+    const ids = JSON.stringify(findings.map((f) => f.ticket_id));
+    const tickets = db
+      .query<{ id: string; title: string; status: string; request_id: string | null }, [string, string, string]>(
+        `SELECT id, title, status, request_id FROM tickets WHERE room = ?1 AND (request_id = ?2 OR id IN (SELECT value FROM json_each(?3)))`,
+      )
+      .all(room, request_id, ids);
+    const byId = new Map(tickets.map((t) => [t.id, t]));
+    // An answer event after the FAIL stage ended: done, cancelled, or an edit of the criteria or the title. Nothing else counts.
+    const answered = new Set(
+      db
+        .query<{ entity_id: string }, [string, string]>(
+          `SELECT DISTINCT e.entity_id FROM events e
+            WHERE e.entity_id IN (SELECT value FROM json_each(?2))
+              AND e.seq > COALESCE((SELECT MAX(p.seq) FROM events p WHERE p.entity_id = ?1 AND p.kind = 'stage.passed'), 9223372036854775807)
+              AND (e.kind IN ('ticket.done', 'ticket.cancelled')
+                OR (e.kind = 'ticket.edited' AND EXISTS (SELECT 1 FROM json_each(e.payload_json, '$.fields') f WHERE f.value IN ('acceptance_criteria', 'title'))))`,
+        )
+        .all(latestStage, ids)
+        .map((r) => r.entity_id),
+    );
+    const isClosed = (status: string) => status === "done" || status === "cancelled";
+    const listed = findings.filter((f) => {
+      const t = byId.get(f.ticket_id);
+      return !(answered.has(f.ticket_id) || (t && isClosed(t.status)));
+    });
+    // Every finding answered hides the block. A FAIL that listed no finding keeps its block (it shows its own note).
+    if (findings.length > 0 && listed.length === 0) continue;
+    // A request with tickets in this room that are all done or cancelled is finished. A request with no ticket left stays.
+    const inRequest = tickets.filter((t) => t.request_id === request_id);
+    if (inRequest.length > 0 && inRequest.every((t) => isClosed(t.status))) continue;
+    out.push({
+      request_id,
+      fail_count: fails,
+      latest_fail_stage_id: latestStage,
+      findings: listed.map((f) => ({ ...f, title: byId.get(f.ticket_id)?.title ?? null })),
+    });
   }
   return out;
 }
