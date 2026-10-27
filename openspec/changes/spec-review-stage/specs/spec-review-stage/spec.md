@@ -111,16 +111,52 @@ A spec-review FAIL SHALL be recorded as `stage.passed` with verdict `FAIL`. The 
 
 When the request has two spec verdicts of FAIL since its last PASS, the hub SHALL add a `ui-only` entry for the human that lists the open findings, and SHALL show the same list in the "Needs you" area with the approvals. The open findings SHALL be the findings of the latest FAIL.
 
-The hub SHALL leave a request out of the "Needs you" area while a newer spec review of the same request and room is open. A newer review is created after the latest FAIL stage. It is open in status `queued`, `launching`, `running` or `retrying`. The row SHALL return when no newer review is open. A newer review that ends with a FAIL verdict becomes the latest FAIL. A newer review that ends with a PASS removes the row. A newer review that ends `failed` with no verdict SHALL NOT count as a FAIL.
-
-The hub SHALL leave a finding out of the list when its ticket was answered after the latest FAIL stage ended. The ticket is answered when it has, with an event `seq` greater than the `stage.passed` event of that FAIL stage, a `ticket.done`, a `ticket.cancelled`, or a `ticket.edited` whose `fields` include `acceptance_criteria` or `title`. It is also answered when it is `done` or `cancelled` now. The kinds `ticket.assigned`, `ticket.noted`, `ticket.attached`, `ticket.archived` and any other edit SHALL NOT answer it. The hub SHALL leave the request out when every finding of a FAIL that listed findings is left out. The hub SHALL also leave the request out when it has one or more tickets in the room and all are `done` or `cancelled`. A request with no ticket left in it stays listed. Each item SHALL carry `latest_fail_stage_id`, the newest FAIL stage of the request.
-
 #### Scenario: Second FAIL
 
 - **GIVEN** the request `r-1` has one FAIL verdict
 - **WHEN** a second FAIL verdict arrives for `r-1`
 - **THEN** the human sees a system entry with the open findings of the second FAIL
 - **AND** the "Needs you" area lists the same findings
+
+### Requirement: A newer open spec review hides the request from the Needs-you area
+
+The hub SHALL leave a request out of the "Needs you" area while a newer spec review of the same request and room is open. A newer review is created after the latest FAIL stage. It is open in status `queued`, `launching`, `running` or `retrying`. The row SHALL return when no newer review is open. A newer review that ends with a FAIL verdict becomes the latest FAIL. A newer review that ends with a PASS removes the row. A newer review that ends `failed` with no verdict SHALL NOT count as a FAIL.
+
+#### Scenario: Newer review is open
+
+- **GIVEN** the request `r-1` has a FAIL verdict and a newer spec review of `r-1` in status `running`
+- **THEN** the "Needs you" area does not list `r-1`
+- **AND** the row returns when no newer review is open
+
+### Requirement: An answered finding leaves the Needs-you list
+
+The hub SHALL leave a finding out of the list when its ticket was answered after the latest FAIL stage ended. The ticket is also answered when it is `done` or `cancelled` now.
+
+#### Scenario: Answered finding
+
+- **GIVEN** a FAIL listed a finding for ticket `t-1`
+- **WHEN** `t-1` gets a `ticket.edited` event that includes `acceptance_criteria` after the FAIL stage
+- **THEN** the list leaves that finding out
+
+### Requirement: Only some ticket events answer a finding
+
+The ticket is answered when it has, with an event `seq` greater than the `stage.passed` event of that FAIL stage, a `ticket.done`, a `ticket.cancelled`, or a `ticket.edited` whose `fields` include `acceptance_criteria` or `title`. The kinds `ticket.assigned`, `ticket.noted`, `ticket.attached`, `ticket.archived` and any other edit SHALL NOT answer it.
+
+#### Scenario: Assigned ticket stays listed
+
+- **GIVEN** a FAIL listed a finding for ticket `t-1`
+- **WHEN** `t-1` gets a `ticket.assigned` event after the FAIL stage
+- **THEN** the list keeps that finding
+
+### Requirement: A fully answered or finished request leaves the Needs-you area
+
+The hub SHALL leave the request out when every finding of a FAIL that listed findings is left out. The hub SHALL also leave the request out when it has one or more tickets in the room and all are `done` or `cancelled`. A request with no ticket left in it stays listed. Each item SHALL carry `latest_fail_stage_id`, the newest FAIL stage of the request.
+
+#### Scenario: All tickets finished
+
+- **GIVEN** the request `r-1` has two tickets in the room
+- **WHEN** both tickets are `done` or `cancelled`
+- **THEN** the "Needs you" area does not list `r-1`
 
 ### Requirement: The system actor is refused on every mutating HTTP route
 
