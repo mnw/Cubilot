@@ -194,6 +194,7 @@ export async function recordStageMetrics(
   createdSeq: number,
   log: (line: string) => void,
   projectsRoot = claudeProjectsDir(),
+  repair = false,
 ): Promise<void> {
   let events: ReturnType<typeof launchEvents>;
   try {
@@ -206,6 +207,8 @@ export async function recordStageMetrics(
     const ev = events[i]!;
     const attempt = i + 1;
     const l = ev.launch;
+    // Start repair: only the attempts that lack a row and have launch metadata; the others are left alone and not logged.
+    if (repair && (!l || db.query("SELECT 1 FROM stage_metrics WHERE stage_id = ? AND attempt = ?").get(stageId, attempt))) continue;
     if (!l) {
       log(`[stage-metrics] ${stageId} attempt ${attempt}: launched before stage metrics; no row`);
       continue;
@@ -240,6 +243,27 @@ export async function recordStageMetrics(
       log(`[stage-metrics] ${stageId} attempt ${attempt}: writing the row failed: ${(e as Error).message}`);
     }
   }
+}
+
+/**
+ * Ended stages (passed or failed) with at least one attempt that has launch metadata and no stage_metrics row, with the seq of
+ * their last terminal event (what the deferred write stores as created_seq). Attempt N is the Nth `stage.launching` event.
+ */
+export function stagesMissingMetrics(db: Database): Array<{ id: string; seq: number }> {
+  return db
+    .query<{ id: string; seq: number }, []>(
+      `SELECT s.id AS id, (SELECT MAX(t.seq) FROM events t WHERE t.entity_id = s.id AND t.kind IN ('stage.passed', 'stage.failed')) AS seq
+       FROM stage s
+       WHERE s.status IN ('passed', 'failed')
+         AND EXISTS (
+           SELECT 1 FROM (SELECT payload_json, ROW_NUMBER() OVER (PARTITION BY entity_id ORDER BY seq) AS attempt
+                          FROM events WHERE entity_id = s.id AND kind = 'stage.launching') e
+           WHERE json_extract(e.payload_json, '$.launch') IS NOT NULL
+             AND NOT EXISTS (SELECT 1 FROM stage_metrics m WHERE m.stage_id = s.id AND m.attempt = e.attempt))
+       ORDER BY s.rowid`,
+    )
+    .all()
+    .filter((r) => r.seq != null);
 }
 
 /** The stored rows of a room, grouped by role. `roomSql` selects the room of stage alias `s`. */

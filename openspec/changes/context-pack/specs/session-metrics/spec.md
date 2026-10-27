@@ -36,6 +36,13 @@ A failure to read or store the numbers SHALL NOT change the stage status, delay 
 - **WHEN** the metrics write fails
 - **THEN** the stage still moves to `passed` and a log line records the failure
 
+#### Scenario: Hub exit before the metrics write
+
+- **WHEN** the hub exits after `stage.passed` or `stage.failed` commits and before the deferred metrics write, and the hub starts again
+- **THEN** after the start returns, the hub writes with the same writer the row of each ended attempt that has launch metadata and no row, with the values of its transcript
+- **AND** an existing row never changes, a second start writes no row, and an attempt without launch metadata gets no row and no log line
+- **AND** a failure of the repair logs one line per attempt and changes no stage, ticket or handoff
+
 ### Requirement: The numbers are readable by role
 
 The hub SHALL return the stored numbers for a room, grouped by role, so that a later dashboard can read them.

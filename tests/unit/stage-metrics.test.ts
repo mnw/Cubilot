@@ -434,3 +434,101 @@ describe("bounded candidate read", () => {
     console.log(`bytes read for 58 files: ${stats.bytes}`);
   });
 });
+
+describe("start repair of missing rows (t_8c328391ae299304)", () => {
+  /** The first runtime stops before the deferred write (a no-op writer); the second one starts on the same ledger. */
+  const noWrite = async () => {};
+  const startAgain = async (e: ReturnType<typeof makeEnv>, extra: { recordMetrics?: typeof recordStageMetrics } = {}) => {
+    const rt2 = createStageRuntime(e.db, { ackMs: 60_000, bootGraceMs: 1000, claudeProjectsDir: e.projects, ...extra });
+    rt2.module.start!(e.cap);
+    await rt2.metricsIdle();
+    rt2.module.dispose?.();
+  };
+
+  for (const to of ["passed", "failed"] as const) {
+    test(`stage.${to} commits, the runtime stops before the write, a new start writes exactly one row with the transcript values`, async () => {
+      capture();
+      const e = makeEnv({ recordMetrics: noWrite });
+      const l = e.spawn();
+      e.pinLaunchTimes(1000);
+      transcript(e.folder(l), "s1", 1500, e.stageId, asst("m1", usage(1, 2, 30, 4)));
+      e.rt.api.move(e.stageId, { to, ...(to === "failed" ? { reason: "x" } : {}) } as any, "system", e.cap);
+      await e.rt.metricsIdle();
+      expect(e.rows()).toHaveLength(0);
+      await startAgain(e);
+      expect(e.rows()).toHaveLength(1);
+      expect(e.rows()[0]).toMatchObject({ stage_id: e.stageId, attempt: 1, source: "claude", cache_read_tokens: 30, prompt_tokens_first: 33 });
+      expect(logged).toEqual([]);
+      // (c) a second start: the row count and the row are unchanged
+      const before = e.rows();
+      await startAgain(e);
+      expect(e.rows()).toEqual(before);
+      expect(logged).toEqual([]);
+    });
+  }
+
+  test("created_seq is the seq of the terminal event, for the deferred write and for the repair; rows sort in that order", async () => {
+    capture();
+    const e = makeEnv();
+    const l = e.spawn();
+    e.pinLaunchTimes(1000);
+    transcript(e.folder(l), "s1", 1500, e.stageId, asst("m1", usage(1, 2, 30, 4)));
+    await e.pass();
+    const term = e.db.query<{ seq: number }, [string]>("SELECT MAX(seq) AS seq FROM events WHERE entity_id = ? AND kind = 'stage.passed'").get(e.stageId)!.seq;
+    expect(e.rows()[0]!.created_seq).toBe(term);
+    e.db.run("DELETE FROM stage_metrics");
+    await startAgain(e);
+    expect(e.rows()[0]!.created_seq).toBe(term);
+    // a second ended stage sorts after the first
+    const second = "s_" + "0".repeat(16);
+    e.db.run("INSERT INTO stage_metrics (stage_id, attempt, role, first_message_bytes, first_message_tokens_est, source, created_seq) VALUES (?, 1, 'worker', 1, 1, 'none', ?)", [second, term + 1]);
+    const order = e.db.query<{ stage_id: string }, []>("SELECT stage_id FROM stage_metrics ORDER BY created_seq").all().map((r) => r.stage_id);
+    expect(order).toEqual([e.stageId, second]);
+  });
+
+  test("an attempt without launch metadata: no row, no log line at start", async () => {
+    capture();
+    const e = makeEnv({ recordMetrics: noWrite });
+    e.spawn();
+    e.db.run("UPDATE events SET payload_json = json_remove(payload_json, '$.launch') WHERE entity_id = ? AND kind = 'stage.launching'", [e.stageId]);
+    await e.pass();
+    await startAgain(e);
+    expect(e.rows()).toHaveLength(0);
+    expect(logged).toEqual([]);
+  });
+
+  test("the writer throws: one log line, the start returns, the stage row is unchanged", async () => {
+    capture();
+    const e = makeEnv({ recordMetrics: noWrite });
+    e.spawn();
+    await e.pass();
+    const stageBefore = e.db.query("SELECT * FROM stage WHERE id = ?").get(e.stageId);
+    await startAgain(e, { recordMetrics: async () => { throw new Error("boom"); } });
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toContain(e.stageId);
+    expect(e.rows()).toHaveLength(0);
+    expect(e.db.query("SELECT * FROM stage WHERE id = ?").get(e.stageId)).toEqual(stageBefore);
+  });
+
+  test("two attempts, attempt 1 has a row, attempt 2 has none: the repair inserts only attempt 2", async () => {
+    capture();
+    const e = makeEnv({ recordMetrics: noWrite });
+    const l1 = e.spawn();
+    await e.retry();
+    const l2 = e.spawn();
+    e.pinLaunchTimes(1000, 2000);
+    transcript(e.folder(l1), "a1", 1500, e.stageId, asst("m1", usage(1, 0, 5, 1)));
+    transcript(e.folder(l2), "a2", 2500, e.stageId, asst("m2", usage(7, 0, 9, 1)));
+    e.db.run(
+      "INSERT INTO stage_metrics (stage_id, attempt, role, first_message_bytes, first_message_tokens_est, source, created_seq) VALUES (?, 1, 'worker', 11, 3, 'none', 5)",
+      [e.stageId],
+    );
+    const row1 = e.rows()[0];
+    await e.pass();
+    await startAgain(e);
+    expect(e.rows()).toHaveLength(2);
+    expect(e.rows()[0]).toEqual(row1!);
+    expect(e.rows()[1]).toMatchObject({ attempt: 2, source: "claude", cache_read_tokens: 9 });
+    expect(logged).toEqual([]);
+  });
+});

@@ -25,7 +25,7 @@ import { LedgerConflict } from "../core/types";
 import { createLaunchQueue, type LaunchEnd, type LaunchQueue, type LaunchRequest } from "../core/launch-queue";
 import { roleHarness } from "../core/role-harness";
 import { roleModelFor } from "../core/role-models";
-import { metricsByRole, recordStageMetrics, type Launch } from "../core/stage-metrics";
+import { metricsByRole, recordStageMetrics, stagesMissingMetrics, type Launch } from "../core/stage-metrics";
 import { makeSSE } from "../core/sse";
 import { assignBySystemInTx, closeReviewedBySystemInTx, notifyHeldDrafts, queueBySystemInTx, type HeldDraft } from "./ticket";
 
@@ -1612,6 +1612,30 @@ export function createStageRuntime(
       for (const w of new Set(waitingRelaunch.map((r) => `${r.role}\u0000${roomOfStage(r.id) ?? ""}`))) {
         const [role, room] = w.split("\u0000");
         if (room) startWaiting(role, room, cap);
+      }
+      // A hub exit between the commit of stage.passed/failed and the deferred metrics write lost that row: write it now, after start returns.
+      // The same writer; it skips attempts that have a row or no launch metadata. A failure logs and changes nothing else.
+      let missing: Array<{ id: string; seq: number }> = [];
+      try {
+        missing = stagesMissingMetrics(db);
+      } catch (e) {
+        console.error(`[stage-metrics] finding the missing rows at start failed: ${(e as Error).message}`);
+      }
+      if (missing.length) {
+        const run = new Promise<void>((resolve) =>
+          setImmediate(async () => {
+            for (const m of missing) {
+              try {
+                await (opts.recordMetrics ?? recordStageMetrics)(db, m.id, m.seq, console.error, opts.claudeProjectsDir, true);
+              } catch (e) {
+                console.error(`[stage-metrics] ${m.id}: ${(e as Error).message}`);
+              }
+            }
+            resolve();
+          }),
+        );
+        pendingMetrics.add(run);
+        void run.then(() => pendingMetrics.delete(run));
       }
       sweepTimer = setInterval(() => sweep(cap), opts.sweepMs ?? 30_000);
       (sweepTimer as { unref?: () => void }).unref?.();
