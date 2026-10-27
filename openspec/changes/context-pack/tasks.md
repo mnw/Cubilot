@@ -1,0 +1,48 @@
+## 1. Data and notes
+
+- [ ] 1.1 `migrate()`: create `stage_metrics`, add `tickets.planning_note`; each guarded; snapshot first → verify: `bun test tests/unit/context-pack-migrate.test.ts`: twice on a fresh and on a current ledger gives the same schema; a forced snapshot failure leaves the schema unchanged
+- [ ] 1.2 `planning_note` in `create_ticket`, `edit_ticket`, `TicketSnapshot` and read routes; edit rule as `request_id` → verify: `bun test tests/unit/ticket-planning-note.test.ts`: creator stores it; an assignee who is not creator or lead gets 403 and nothing changes
+- [ ] 1.3 `checkResult`: require `context.notes` (non-empty, at most 400 words) on stage results, including spec results; errors go to the same session as `stage.rejected`; the stage stays `running` → verify: `bun test tests/unit/stage-notes-check.test.ts` (brief test 15, first half): missing, empty and 401-word notes are rejected with the field name; a valid result passes; a handoff to a named agent needs no notes
+- [ ] 1.4 Earlier notes query: result notes of the ticket by `created_seq`, plus spec-result notes through `stage_scope`, plus `planning_note` first → verify: `bun test tests/unit/stage-notes-query.test.ts` (brief test 15, second half): order is planning note, spec facts, then stages; a ticket with none returns an empty list
+
+## 2. First message order and primer
+
+- [ ] 2.1 `renderStable(room)` returns the primer only; no stage, time, session or worktree field; the ticket block follows it → verify: `bun test tests/unit/first-message-order.test.ts` (brief test 13): two Worker stages on two tickets give identical stable bytes; the ticket block is last; the stable block changes only when `docs/PRIMER.md` or the Nutshell changes
+- [ ] 2.2 Primer from `docs/PRIMER.md` plus the Nutshell; cap 2,000 tokens (`ceil(bytes / 4)`) on the file, the Nutshell is never cut, one cut line; a missing file gives the line `primer missing` and the Nutshell; `CONTEXT.md` is never read → verify: `bun test tests/unit/primer.test.ts`: short, long and missing file; a project with `CONTEXT.md` and no `docs/PRIMER.md` has no `CONTEXT.md` text in the primer
+- [ ] 2.3 Template changes for the six roles and the spec first message: `{{notes}}`, `{{pack}}`, `{{diff}}` placeholders; the depth table in code decides which parts fill → verify: `bun test tests/unit/first-message.test.ts tests/unit/spec-first-message.test.ts` still pass; `bun test tests/unit/pack-depth.test.ts`: Tester has no graph or signatures; code Validator has diff stat and changed files; Editor has neither; record the largest rendered first message in bytes in this file
+- [ ] 2.4 [doc] Writer writes `docs/PRIMER.md`: architecture, conventions, where the main parts are, how to run the tests; at most 2,000 tokens; source is `CONTEXT.md` and the repo, no new claims → verify: Writer and Reviewer pass (`[doc]` ticket); `bun test tests/unit/primer-file.test.ts` measures the file at or under the cap; record the token estimate in this file
+
+## 3. Context pack
+
+- [ ] 3.1 `hub/core/context-pack.ts`: `buildPack` runs `graphify query` with budget 1500 in the worktree, 20 s limit, no model → verify: `bun test tests/unit/context-pack.test.ts` (brief test 14, first half): a stub `graphify` on PATH returns text; the pack holds it and stays within the budget
+- [ ] 3.2 Graph status `fresh | stale | missing` from `graph.json` age against `HEAD` and from tool presence; `missing` adds no placeholder text → verify: `bun test tests/unit/graph-status.test.ts`: fresh, stale, absent file, tool not found, command timeout
+- [ ] 3.3 Symbol signatures of named files → verify: first find out whether a Serena CLI or a callable interface exists for the hub, and whether universal-ctags is installed (`ctags --version`); record both answers in this file. With Serena: `bun test tests/unit/context-pack.test.ts` (brief test 14, second half) shows signatures for a named file and `none` for a missing one. Without Serena, with ctags: same test, section labelled "signatures (ctags)". With neither: the part is `missing`, a test pins that the first message says so, no `rg` fallback exists (grep test), and the gap is listed here as unimplemented
+- [ ] 3.4 Diff stat and changed files for Validator and Tester (`git diff --stat` and `--name-only` against the room base) → verify: `bun test tests/unit/context-pack-diff.test.ts` on a temp repo with one commit on a branch
+- [ ] 3.5 Build before `enqueueLaunch`; one failing command marks only its part `missing`; the launch continues; no model call → verify: `bun test tests/unit/context-pack-launch.test.ts`: a failing graphify still launches; a grep test shows `context-pack.ts` imports no model adapter
+
+## 4. Role prompts
+
+- [ ] 4.1 Find the shared text file(s) in `factory/` and add the "Find before you read" paragraph for the six roles and the Orchestrator; Simplified Technical English → verify: `bun test tests/unit/role-prompts-tools.test.ts`: every staged role prompt names `graphify query`, `rg` and `find_symbol`; the Writer and Reviewer pass for text changes is a `[doc]` ticket
+- [ ] 4.2 Orchestrator text: write a planning note on each ticket; the note is the first note → verify: Writer and Reviewer pass (`[doc]` ticket); `rg -n "planning_note" factory/orchestrator/orchestrator.md` finds the line
+- [ ] 4.3 Result section of `worker.md`, `tester.md`, `validator.md`, `writer.md`, `editor.md` and `reviewer.md` tells the agent to include `context.notes` (target 300 words, limit 400); ships in the same release as 1.3 → verify: `bun test tests/unit/role-prompts-notes.test.ts`: each of the six staged role prompts contains the notes rule with both numbers; Writer and Reviewer pass (`[doc]` ticket)
+
+## 5. Measurement
+
+- [ ] 5.1 Metrics writer: after `stage.passed` or `stage.failed`, read the Claude transcript JSONL for the worktree cwd, compute the three numbers, write one row per attempt outside the stage transaction; any failure logs one line → verify: `bun test tests/unit/stage-metrics.test.ts` (brief test 16) with a fixture transcript: first-message estimate, cache read tokens of the first request, tokens before the first `Edit` or result; a retry has two rows; a missing transcript stores NULL; a forced write failure leaves the stage `passed`
+- [ ] 5.2 `GET /rooms/<room>/stage-metrics` grouped by role, bearer or `?token=` → verify: `bun test tests/integration/stage-metrics.test.ts`: rows by role; no token gets 401
+- [ ] 5.3 Pi usage source: find out where pi writes session usage and whether it holds cache read numbers → verify: record the result in this file; if unreadable, `source = 'none'` for pi and a test pins the NULLs; the gap is listed here as unimplemented
+- [ ] 5.4 Check the transcript fields on the installed Claude Code version (`claude --version`) → verify: record in this file the version and one real transcript line with `usage.cache_read_input_tokens`; compare the fixture of 5.1 with it
+
+## 6. Docs and checks
+
+- [ ] 6.1 `docs/PROTOCOL.md`: `notes` on results, `planning_note`, the metrics route, the pack parts → verify: Writer and Reviewer pass (`[doc]` ticket)
+- [ ] 6.2 `CLAUDE.md`: hard rule that the hub builds the pack with no model, that the stable block carries no per-stage field, and that a metrics failure never changes a stage → verify: review; `rg -n "context pack" CLAUDE.md` finds the line
+- [ ] 6.3 `CLAUDE.md` "Verified against" line: add the Claude Code version checked in 5.4 for the `usage.cache_read_input_tokens` field → verify: `rg -n "cache_read_input_tokens" CLAUDE.md` finds the version on that line
+- [ ] 6.4 Rebuild sidecars and run checks → verify: `./scripts/build-sidecars.sh`; `./scripts/test.sh` (it takes the heavy lock itself); `cargo test --manifest-path src-tauri/Cargo.toml`; `bun x tsc --noEmit`; all pass, and the staged role prompts hold the notes rule (4.3) before the notes check (1.3) is live; record the output in this file
+- [ ] 6.5 Validate the change → verify: `npx @fission-ai/openspec@1.14.3 validate context-pack --strict` passes
+
+## 7. Live check [human]
+
+One task for every check that only the human can do. Back up the ledger first. Install with `./scripts/install.sh`.
+
+- [ ] 7.1 [human] Launch a Worker stage and a Tester stage on one ticket with a planning note. Read the first message of each in its pane. Steps: (a) the Worker message shows the primer, then the ticket, notes and pack; (b) the Tester message shows the Worker's notes and no graph result; (c) `GET /rooms/<room>/stage-metrics` shows a row for each stage; (d) the cache read number of the second Worker session is above 0, or the row records that it is 0 → verify: record the values in this file

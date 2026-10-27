@@ -40,12 +40,12 @@ Cubilot is a macOS desktop app. It runs a team of coding agents (Claude Code, an
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/05-jev-dark.png">
-  <img alt="Jev decision points: narrow typed decisions, one planned and six ideas" src="docs/readme/05-jev-light.png" width="100%">
+  <img alt="Jev decision points: narrow typed decisions, two planned (model routing, mutation survivors) and five ideas" src="docs/readme/05-jev-light.png" width="100%">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/06-build-order-dark.png">
-  <img alt="Build order: migration, rebrand, roles and ticket grouping done, then Parts 4 to 15" src="docs/readme/06-build-order-light.png" width="100%">
+  <img alt="Build order: migration, rebrand, roles, ticket grouping the agent column (4a) and the ticket card and dialog (15) done; Part 4 in test; then Part 6 before Part 5, and Parts 7 to 15" src="docs/readme/06-build-order-light.png" width="100%">
 </picture>
 
 ## Build from source

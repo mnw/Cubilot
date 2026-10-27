@@ -1,4 +1,4 @@
-# Part 6: patterns from the Warp cloud factory
+# Part 6: patterns from the Warp cloud factory, and model routing
 
 Source: https://github.com/warpdotdev-demos/cloud-factory-demo (MIT, Warp, last commit 2026-08-12). Read on 2026-10-18.
 
@@ -79,21 +79,91 @@ From `review-pr/SKILL.md`. On a second review of the same ticket:
 
 This makes the FAIL and CHANGES loops shorter and less expensive. The `review` kind stores the earlier findings, so the Validator can compare.
 
+### 6. Model routing for Workers
+
+Status: decision 2026-10-26 (human). Build it with the other items of this part, after Part 4 is archived. The fixed rule (step A) comes first. Jev (step B) comes after the data shows how the rule performs.
+
+#### Goal
+
+For each Worker stage, the hub chooses the model (Haiku, Sonnet or Opus) and the effort (low, medium or high). Today the pair for each role comes from `config.yml`, and every Worker gets the same pair. A small or simple ticket does not need Opus. A high-risk ticket, or a ticket that failed before, needs more than the default.
+
+#### What exists
+
+- The hub launches each stage (Part 4, `stage-sessions`). The launch takes a model and an effort.
+- The launch accepts a model × effort pair for one launch (Part 2, the model × effort picker).
+- `config.yml` sets the pair for each role. Check before you build: name the exact key in this brief.
+- Tickets have a blast radius, acceptance criteria, a title tag such as `[code]`, and a request (Part 3).
+
+#### Design
+
+1. **Scope.** Worker stages only. The Validator and the Reviewer keep their OpenAI models, because they check the work of the Workers. The Tester, the Writer and the Editor keep the pair from `config.yml`. Add other roles later, one at a time, only when the data shows a gain.
+2. **The answer.** One of nine pairs: Haiku, Sonnet or Opus, each with low, medium or high effort.
+3. **The facts.** The hub computes these facts for the ticket. It sends no ticket text and no code:
+   - the length of the acceptance criteria, in characters,
+   - the number of files and symbols that the ticket and the spec name,
+   - the blast radius,
+   - the attempt number, and the verdict of the last Validator stage,
+   - the title tag.
+4. **Step A: the fixed rule.** The hub applies this rule to each Worker stage:
+
+   | Ticket | Pair |
+   |---|---|
+   | Test, rename or docs ticket, low radius | Haiku × medium |
+   | Small: low radius, short criteria, at most 2 files | Sonnet × low |
+   | Normal | Sonnet × medium |
+   | High radius, or more than 8 files | Opus × high |
+   | A new attempt after a FAIL | One step above the pair of the last attempt |
+
+   The thresholds are settings in `config.yml`. `config.yml` stays the fallback when a fact is missing.
+5. **Limits.** These limits apply to every choice, from the rule or from Jev:
+   - A high-radius ticket never gets less than Sonnet × medium.
+   - The human can pin a pair on a ticket. A pin wins over the rule and over Jev.
+   - A choice outside the limits is moved to the nearest pair that is inside them.
+6. **Record.** For each Worker stage, the hub records:
+   - the pair,
+   - its source: `config`, `rule`, `jev` or `pin`,
+   - the attempt number and the time from launch to result,
+   - the first verdict of the Validator,
+   - the tokens, when Part 4 `context-pack` records them.
+   The dashboard (Part 11) shows the first-pass rate and the cost for each pair.
+7. **Show.** The agent row in the agent column (Part 4a) and the ticket card show the pair and its source. The ticket dialog has the pin.
+8. **Step B: Jev.** After step A has run for at least 50 Worker stages:
+   - The hub asks Jev one typed question for each Worker stage: a choice of the nine pairs. The question contains only the facts in item 3.
+   - Without an OpenRouter key, or when Jev does not answer in 3 seconds, the rule decides.
+   - The limits in item 5 apply to the answer.
+   - The hub logs each answer next to the pair that the rule would give.
+   - Jev stays on only when its first-pass rate is at least the rate of the rule at the same or a lower cost. The human decides from the dashboard.
+9. **Jev access.** This part builds the shared Jev access. That is the OpenRouter client, the key in the Keychain, the typed question format, the time-out, the fallback and the log. The setup screen (Part 8) shows the key. Part 13 (`jtt` survivor triage) uses its own SDK settings and does not change. Item 1 of this part (triage) can use the same access for its Jev hint.
+
+#### Tests
+
+1. A test ticket with low radius gets Haiku × medium. A high-radius ticket with 2 files gets Opus × high.
+2. A second attempt after a FAIL gets one step more than the first attempt.
+3. A pinned pair wins over the rule. A pin below the high-radius limit is refused.
+4. Each Worker stage has a record with the pair and the source.
+5. The Validator and the Reviewer launch with the pair from `config.yml`, whatever the rule says.
+6. With Jev on: the question contains no ticket text. A Jev time-out uses the rule. An answer below a limit is moved inside it.
+
+#### Open questions
+
+1. Does the effort level apply to Pi models in the same way? Today the effort is for Claude only.
+2. Is 50 Worker stages enough data before step B? Check the spread of first-pass rates after 50.
+
 ## Ideas for later
 
-### 6. Learning from the human's corrections
+### 7. Learning from the human's corrections
 
 Skill: `.agents/skills/improve-review-pr/SKILL.md`. A daily job reads how humans reacted to automated review comments. It opens a change to the review skill when it finds knowledge that the reviewer must keep.
 
 For the factory: when the human overrules a Validator or Reviewer verdict, record it with the reason. A scheduled job proposes changes to the role file or the skills. The human approves each change.
 
-### 7. Video evidence of UI behaviour
+### 8. Video evidence of UI behaviour
 
 Skill: `.agents/skills/verify-behavior/SKILL.md`. It checks each user story in a separate run, and records video and screenshots. It uses the Oz platform.
 
 For the factory: the Tester records Playwright video for UI tickets and attaches it to the ticket. One check for each user story in the spec, in parallel. This is useful for Drupal UI changes and for accessibility checks.
 
-### 8. Tests for skills
+### 9. Tests for skills
 
 File: `.agents/skills/triage/evals/evals.json`. Each entry has a prompt and the expected behaviour. Skill descriptions decide when skills load (Part 2, finding 4), so test the important skills with prompts like these. The `skill-creator` skill can run such tests.
 
