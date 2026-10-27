@@ -3,7 +3,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { Database } from "bun:sqlite";
 import { spawnHub, type HubHandle } from "../helpers/hub";
-import { getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
 
 type Snap = { id: string; planning_note: string | null };
 type Seen = { kind?: string; snapshot?: Snap };
@@ -101,5 +101,42 @@ describe("ticket planning_note", () => {
     expect(edited).toEqual([["planning_note"], ["title"]]);
     const created = ledger<{ payload_json: string }>("SELECT payload_json FROM events WHERE kind = 'ticket.created' AND entity_id = ?", id);
     expect(Object.keys(JSON.parse(created[0]!.payload_json))).not.toContain("planning_note");
+  });
+
+  // Regression for validator FAIL h_0b441b3f0e2f4468: the length counts code points; the body cap fits worst-case JSON encoding.
+  test("4000 emoji are stored and 4001 get 400, on create and edit", async () => {
+    const id = snapOf(await make({ planning_note: "keep" })).id;
+    const ok = await make({ planning_note: "😀".repeat(4000) });
+    expect(ok.status).toBe(201);
+    expect(stored(snapOf(ok).id)).toBe("😀".repeat(4000));
+    expect((await edit(id, "alice", "😀".repeat(4000))).status).toBe(200);
+    expect(stored(id)).toBe("😀".repeat(4000));
+    expect((await make({ planning_note: "😀".repeat(4001) })).status).toBe(400);
+    expect((await edit(id, "alice", "😀".repeat(4001))).status).toBe(400);
+    expect(stored(id)).toBe("😀".repeat(4000));
+  });
+
+  test("4000 x U+0001 sent as escaped JSON (24000 bytes) is not 413: stored, since U+0001 is not trimmed", async () => {
+    const note = "\u0001".repeat(4000);
+    const esc = '"' + "\\u0001".repeat(4000) + '"';
+    const raw = (path: string, fields: string) =>
+      authedFetch(hub, path, { method: "POST", body: `{"by":"alice",${fields}}` });
+    const c = await raw("/tickets", `"title":"T","acceptance_criteria":"c","blast_radius":"low","planning_note":${esc}`);
+    expect(c.status).toBe(201);
+    const id = ((await c.json()) as { snapshot: Snap }).snapshot.id;
+    expect(stored(id)).toBe(note);
+    await edit(id, "alice", null);
+    const e = await raw(`/tickets/${id}/edit`, `"planning_note":${esc}`);
+    expect(e.status).toBe(200);
+    expect(stored(id)).toBe(note);
+  });
+
+  test("worst-case emoji escaped as surrogate pairs (48000 bytes) reaches validation", async () => {
+    const esc = '"' + "\\ud83d\\ude00".repeat(4000) + '"';
+    const c = await authedFetch(hub, "/tickets", {
+      method: "POST",
+      body: `{"by":"alice","title":"T","acceptance_criteria":"c","blast_radius":"low","planning_note":${esc}}`,
+    });
+    expect(c.status).toBe(201);
   });
 });

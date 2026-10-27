@@ -80,6 +80,12 @@ const TICKET_PLANNING_NOTE_MAX_CHARS = 4_000;
 const REQUEST_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
 const isStageRole = (v: unknown): v is StageRole => typeof v === "string" && (STAGE_ROLES as readonly string[]).includes(v);
 const TICKET_BODY_MAX = 16_384;
+// Body cap for POST /tickets and POST /tickets/<id>/edit: every capped field must reach validation in worst-case JSON encoding.
+// planning_note: 4000 code points, a non-BMP one escaped as two \uXXXX = 12 bytes -> 48000.
+// acceptance_criteria: 4000 UTF-16 units, each escaped \uXXXX = 6 bytes -> 24000.
+// title: 200 x 6 = 1200. external_ref: 200 x 6 = 1200. Sum 74400, leaving ~23.9 KiB for keys and short fields.
+// 98304 (96 KiB) stays below JSON_BODY_MAX (256 KiB).
+const TICKET_WRITE_BODY_MAX = 98_304;
 const TICKET_NOTE_MAX_BYTES = 4_096;
 // A 4 KiB note whose every byte is JSON-escaped (control characters) is 24 KiB: leave room.
 const TICKET_NOTE_BODY_MAX = 32_768;
@@ -167,11 +173,11 @@ const ticketDecl: StateMachineDecl<TicketSnapshot> = {
 
 // ---------- Entry projection ----------
 
-/** The trimmed planning note, or undefined when the value is not a string of 1-4000 characters after trim. */
+/** The trimmed planning note, or undefined when the value is not a string of 1-4000 code points after trim. */
 function planningNoteValue(v: unknown): string | undefined {
   if (typeof v !== "string") return undefined;
   const t = v.trim();
-  return t && t.length <= TICKET_PLANNING_NOTE_MAX_CHARS ? t : undefined;
+  return t && [...t].length <= TICKET_PLANNING_NOTE_MAX_CHARS ? t : undefined;
 }
 
 /** A ticket's blocker ids and the ones still open (status other than done: the claim gate's rule). */
@@ -769,7 +775,7 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
       method: "POST",
       path: "/tickets",
       auth: "mutating",
-      bodyMax: TICKET_BODY_MAX,
+      bodyMax: TICKET_WRITE_BODY_MAX,
       handler: async (req, cap) => {
         const body = await readBody(req);
         const a = actorOr400(body.by, cap);
@@ -1236,7 +1242,7 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
       method: "POST",
       path: /^\/tickets\/([^/]+)\/edit$/,
       auth: "mutating",
-      bodyMax: TICKET_BODY_MAX,
+      bodyMax: TICKET_WRITE_BODY_MAX,
       handler: async (req, cap, params) => {
         if (!TICKET_ID_RE.test(params.id)) return Response.json({ error: "invalid ticket id" }, { status: 400 });
         const body = await readBody(req);
