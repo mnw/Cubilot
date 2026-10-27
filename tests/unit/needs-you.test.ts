@@ -77,7 +77,8 @@ function makeEnv() {
     db.run("INSERT INTO events (entity_id, kind, actor, payload_json, at_ms, room) VALUES (?, 'handoff.created', ?, '{}', 1, 'r1')", [hid, session]);
     rt.hooks.onResult(session, JSON.parse(context), cap);
   };
-  return { db, ticket, review, openStage, endStage, event, setStatus, setRequest };
+  const stageStatus = (id: string) => rt.api.load(id)!.status;
+  return { db, ticket, review, openStage, endStage, event, setStatus, setRequest, stageStatus };
 }
 
 describe("needsYouRequests", () => {
@@ -184,7 +185,7 @@ describe("needsYouRequests", () => {
     });
   });
 
-  describe("a newer spec review of the request", () => {
+  describe("a newer spec review of the request keeps the row", () => {
     const f = (t: string, text: string) => [{ ticket_id: t, severity: "blocking", text }];
     const failed2 = () => {
       const e = makeEnv();
@@ -202,10 +203,12 @@ describe("needsYouRequests", () => {
     });
 
     for (const status of ["queued", "launching", "running", "retrying"] as const) {
-      test(`a newer stage in ${status} hides the row`, () => {
+      test(`a newer stage in ${status} keeps the row (spec-fail-gate 5)`, () => {
         const { e, a } = failed2();
         e.openStage("req-1", [a], status);
-        expect(needsYouRequests(e.db, "r1")).toEqual([]);
+        const r = needsYouRequests(e.db, "r1");
+        expect(r).toHaveLength(1);
+        expect(r[0].fail_count).toBe(2);
       });
     }
 
@@ -243,36 +246,23 @@ describe("needsYouRequests", () => {
       expect(needsYouRequests(e.db, "r1")).toHaveLength(1);
     });
 
-    test("two newer stages, one FAILs, the other queued: hidden; then the second FAILs: fail_count 4", () => {
+    test("two newer stages, one FAILs, the other queued: the gate fails the queued one (no human handoff); the row stays with fail_count 3", () => {
       const { e, a } = failed2();
       const s1 = e.openStage("req-1", [a], "running");
       const s2 = e.openStage("req-1", [a], "queued");
       e.endStage(s1, "req-1", "FAIL", f(a, "three"));
-      expect(needsYouRequests(e.db, "r1")).toEqual([]);
-      e.endStage(s2, "req-1", "FAIL", f(a, "four"));
-      const r = needsYouRequests(e.db, "r1");
-      expect(r[0].fail_count).toBe(4);
-      expect(r[0].findings.map((x) => x.text)).toEqual(["four"]);
-    });
-
-    test("two newer stages, one FAILs, the other queued then operational failed: fail_count 3 with the first newer FAIL", () => {
-      const { e, a } = failed2();
-      const s1 = e.openStage("req-1", [a], "running");
-      const s2 = e.openStage("req-1", [a], "queued");
-      e.endStage(s1, "req-1", "FAIL", f(a, "three"));
-      expect(needsYouRequests(e.db, "r1")).toEqual([]);
-      e.endStage(s2, "req-1", "failed");
+      expect(e.stageStatus(s2)).toBe("failed"); // spec-fail-gate 2: no handoff row, so the sender is not the human
       const r = needsYouRequests(e.db, "r1");
       expect(r[0].fail_count).toBe(3);
       expect(r[0].findings.map((x) => x.text)).toEqual(["three"]);
     });
 
-    test("two newer stages, one operational failed, the other queued: hidden", () => {
+    test("two newer stages, one operational failed, the other queued: listed with fail_count 2", () => {
       const { e, a } = failed2();
       const s1 = e.openStage("req-1", [a], "running");
       e.openStage("req-1", [a], "queued");
       e.endStage(s1, "req-1", "failed");
-      expect(needsYouRequests(e.db, "r1")).toEqual([]);
+      expect(needsYouRequests(e.db, "r1")[0].fail_count).toBe(2);
     });
   });
 });

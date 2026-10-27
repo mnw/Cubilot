@@ -278,6 +278,9 @@ export function createStageApi(db: Database, onSlotFree?: (freed: StageSnapshot,
 // ---------- Launches ----------
 
 const LAUNCH_ID_RE = /^l_[0-9a-f]{16}$/;
+/** The reason of a queued spec stage that the FAIL limit stops (spec-fail-gate 2). */
+export const SPEC_FAIL_LIMIT_REASON = "spec FAIL limit: the human must send this review";
+
 export const DEFAULT_LAUNCH_ACK_MS = 15_000;
 
 function mintLaunchId(): string {
@@ -341,6 +344,11 @@ export type StageHooks = {
    * stays open until its next end of turn (POST /stages/<id>/turn-end), which queues the close. It never throws.
    */
   onResult(from: string, context: unknown, cap: HubCapabilities): void;
+  /**
+   * The context that is stored for a valid result. A spec FAIL gets `fail_count`, the hub count after this FAIL, over any value
+   * the sender wrote (spec-fail-gate 3). Any other result is returned as it is.
+   */
+  stampResult(from: string, context: unknown): unknown;
 };
 
 const VERDICTS = new Set(["PASS", "FAIL"]);
@@ -467,7 +475,7 @@ export type NeedsYouRequest = {
 /**
  * The requests of one room that need the human because their spec review failed twice or more since its last PASS
  * (spec-review-stage 4.3). The open findings are the findings of the latest FAIL result. A PASS ends it: the count restarts.
- * A request is left out while a newer spec review of it (created after the latest FAIL) is still open.
+ * A newer open spec review of the request does not hide it: the human sent it, and the request stays listed until a PASS.
  */
 /**
  * The spec FAIL state of one request IN ONE ROOM: the FAIL stages created after the newest PASS stage, all read by room.
@@ -501,15 +509,6 @@ export function needsYouRequests(db: Database, room: string): NeedsYouRequest[] 
   for (const { request_id } of requests) {
     const { fails, latest: latestStage } = specFailState(db, room, request_id);
     if (fails < 2 || !latestStage) continue;
-    // A spec review of the same request and room, created after the latest FAIL and not ended, means the Orchestrator already answered.
-    const open = db
-      .query<{ id: string }, [string, string, string]>(
-        `SELECT s.id FROM stage s WHERE s.review = 'spec' AND s.request_id = ?1 AND ${STAGE_ROOM_SQL} = ?2
-          AND s.status IN ('queued', 'launching', 'running', 'retrying')
-          AND s.created_seq > (SELECT created_seq FROM stage WHERE id = ?3) LIMIT 1`,
-      )
-      .get(request_id, room, latestStage);
-    if (open) continue;
     // The findings of the latest FAIL STAGE of this room: its own result handoff names it in context.stage_id.
     const latest = db
       .query<{ c: string | null }, [string]>(
@@ -875,6 +874,7 @@ export function createStageRuntime(
       worktree,
       commit: typeof c.commit === "string" ? c.commit : null,
       earlierFindings,
+      reviewNumber: specFailState(db, room, stage.request_id ?? "").fails + 1,
       recipient: leadOfRoom(room),
       requestText: typeof c.request_text === "string" ? c.request_text : "",
       specPaths: Array.isArray(c.spec_paths) ? c.spec_paths.filter((x): x is string => typeof x === "string") : [],
@@ -1182,12 +1182,42 @@ export function createStageRuntime(
         `Spec review of ${stage.request_id} failed ${fails} times since its last PASS. Findings of the latest FAIL:`,
         ...(findings.length ? findings.map((f) => `- [${f.severity}] ${f.ticket_id}${titles.has(f.ticket_id) ? ` (${titles.get(f.ticket_id)})` : ""}: ${f.text}`) : ["- (no findings listed)"]),
       ];
-      cap.sse.emit(
-        { from: "system", to: cap.config.humanName, text: lines.join("\n"), ts: new Date().toISOString(), image: null, room } as Entry,
-        { kind: "ui-only" },
-      );
+      const text = lines.join("\n");
+      const ts = new Date().toISOString();
+      cap.sse.emit({ from: "system", to: cap.config.humanName, text, ts, image: null, room } as Entry, { kind: "ui-only" });
+      // The room lead gets the same text. One copy only when the lead is the human (spec-fail-gate 4).
+      const lead = leadOfRoom(room);
+      if (lead !== cap.config.humanName) {
+        cap.sse.emit({ from: "system", to: lead, text, ts, image: null, room } as Entry, { kind: "agents-ambient", agents: [lead] });
+      }
     } catch (e) {
       console.error(`[stage] the second-FAIL notice of ${stageId} failed:`, e);
+    }
+  }
+
+  /**
+   * The count reached 2 (spec-fail-gate 2): each queued spec stage of the request, made by a handoff of a non-human sender,
+   * fails and never launches. A stage from the human stays queued. The sender is read from the handoff that made the stage,
+   * found as specFirstMessage finds it: the newest one of the request before the stage's `created_seq`.
+   */
+  function failQueuedSpecStages(requestId: string, room: string, cap: HubCapabilities): void {
+    const queued = db
+      .query<{ id: string; seq: number }, [string, string]>(
+        `SELECT s.id, s.created_seq AS seq FROM stage s WHERE s.review = 'spec' AND s.request_id = ?1 AND s.status = 'queued' AND ${STAGE_ROOM_SQL} = ?2
+          ORDER BY s.created_seq`,
+      )
+      .all(requestId, room);
+    for (const q of queued) {
+      const sender = db
+        .query<{ f: string }, [string, number, string]>(
+          `SELECT h.from_agent AS f FROM handoffs h
+            WHERE h.to_agent = 'role:validator' AND json_extract(h.context_json, '$.request_id') = ?1 AND h.room = ?3
+              AND (SELECT MIN(e.seq) FROM events e WHERE e.entity_id = h.id) < ?2
+            ORDER BY (SELECT MIN(e.seq) FROM events e WHERE e.entity_id = h.id) DESC LIMIT 1`,
+        )
+        .get(requestId, q.seq, room)?.f;
+      if (sender === cap.config.humanName) continue;
+      api.move(q.id, { to: "failed", reason: SPEC_FAIL_LIMIT_REASON }, "system", cap);
     }
   }
 
@@ -1626,6 +1656,10 @@ export function createStageRuntime(
           // moves and nothing is relaunched; the findings stay in the result handoff, which the Validator sent to the Orchestrator.
           if (c.verdict === "PASS") passSpecStage(stage.id, cap);
           else {
+            // The queued stages fail first: the move to passed frees the slot and the queue would start them.
+            const room = roomOfStage(stage.id);
+            const request = db.query<{ r: string | null }, [string]>("SELECT request_id AS r FROM stage WHERE id = ?").get(stage.id)?.r;
+            if (room && request && specFailState(db, room, request).fails + 1 >= 2) failQueuedSpecStages(request, room, cap);
             api.move(stage.id, { to: "passed", verdict: "FAIL" }, "system", cap);
             noticeRepeatedFail(stage.id, c, cap);
           }
@@ -1666,6 +1700,14 @@ export function createStageRuntime(
         // The ticket change is already committed. A later event (or a role handoff) evaluates the ticket again.
         console.error(`[stage] evaluating ${ticketId} after a ticket change failed:`, e);
       }
+    },
+    stampResult(from, context) {
+      const c = context as Record<string, unknown> | null;
+      if (!c || typeof c !== "object" || c.review !== "spec" || c.verdict !== "FAIL") return context;
+      const stage = db.query<{ id: string; r: string | null }, [string]>("SELECT id, request_id AS r FROM stage WHERE session = ? AND status = 'running' AND review = 'spec' LIMIT 1").get(from);
+      const room = stage ? roomOfStage(stage.id) : null;
+      if (!stage?.r || !room) return context;
+      return { ...c, fail_count: specFailState(db, room, stage.r).fails + 1 };
     },
     onSpecHandoff(h, cap) {
       try {
