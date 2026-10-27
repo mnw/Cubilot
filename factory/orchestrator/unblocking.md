@@ -13,6 +13,7 @@ Read this file when work stops: a plan has two FAILs, a ticket has no movement, 
 | 5 | Time spent on test fixes | Fixes without a proven cause (t_7fd5). A flaky timing test (TERM-wait) failed other tickets. | No fix without a reproduced cause. A flaky test gets a named waiver with an end, and one fix ticket. |
 | 6 | A status report did not match the repository | Tickets were reported done, but no commit was on staging. | "Done" in a report names the commit on staging. |
 | 7 | A design used "failed" for a cancel | The status had effects in other code (FAIL count, retry, diagnosis). | A new or reused status lists every place that reads it. |
+| 8 | 18 queued tickets in one chain; one Worker slot idle | `blocked_by` was used for order and for caution ("after the archive", "same area"), not only for a real need. Each link added a full review cycle. | `blocked_by` only when a ticket needs the output of another, or both edit the same file. After planning, count the tickets that can start now against the free slots. |
 
 ## Procedure
 
@@ -51,6 +52,8 @@ When the work moves again, ask: will this block come back? If yes, open one draf
 
 - The role of each ticket runs on the hub.
 - Each `blocked_by` names an open ticket or a ticket that is done.
+- Each `blocked_by` has a reason: the ticket needs the other ticket's output (code, table, file), or both edit the same file. Name the file. Order, caution or "same area" is not a reason.
+- After you plan a request, count the tickets that can start now. If that number is lower than the free Worker slots, check each chain link again. A chain longer than 5 links needs a reason in the request.
 - The request needs the human to queue it if it has a high-radius ticket. Ask once, for the whole request, with all ticket ids.
 - A doc ticket says which roles do the work while the writing chain is not on the hub (Worker, then Validator).
 
