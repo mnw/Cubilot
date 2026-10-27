@@ -11,8 +11,8 @@
 ## 2. UI
 
 - [x] 2.1 `ui/kinds/stage.js` (finished sessions): lists cancelled stages, reads `/stages?status=cancelled`, shows `cancelled: <reason>` as text → verify: `tests/unit/finished-sessions.test.ts`
-- [x] 2.0 Ruling (Orchestrator, note YJT4tT2hUPqGnH_8, 2026-10-27): the finished-sessions list is the only UI surface that shows stage status. `ui/kinds/ticket.js` has no stage match, the agent column shows tab states, `ui/index.html` shows stage data only in terminal-finished-list. Criterion 2 and test 9(h) apply to that list only; no new stage surface is added.
-- [ ] 2.2 Browser check of the finished list and the cancelled row before the install (Orchestrator)
+- [x] 2.0 Human waiver (msg 1582, 2026-10-27; ticket note mQg8Yoba6In6_6Ck.md): criteria 2 and 9(h) mean the Finished list only. Card chips and agent-row stage lines do not exist and are not in scope. No new stage surface is added.
+- [x] 2.2 Browser check of the finished list and the cancelled row before the install (Orchestrator): PASS on cfcedab, report vd1xAs3p6XXFUs12.md
 
 ## 3. Status audit (item 3)
 
