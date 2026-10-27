@@ -6,6 +6,7 @@ import { open, readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
+import { HANDOFF_SECTION_MAX } from "./first-message";
 
 export type MetricsRow = {
   stage_id: string;
@@ -24,8 +25,22 @@ export type Usage = { prompt_tokens_first: number; cache_read_tokens: number; to
 
 /** A candidate file is read from the start in chunks of this size, up to the first user message line. */
 const CHUNK_BYTES = 4 * 1024;
-/** Hard cap per candidate. A candidate whose first user message is not complete by then does not match (no error, no log line). */
-export const HEAD_CAP_BYTES = 64 * 1024;
+/**
+ * The most bytes (UTF-8) renderFirstMessage can produce, from the bound of each part (3 bytes per UTF-16 unit, the worst case):
+ * - template: shipped factory/<role>/first-message.md is at most 448 bytes; no bound in code, so TEMPLATE_ALLOWANCE below is
+ *   pinned by a test over the shipped files (tests/unit/stage-metrics.test.ts)
+ * - title: TICKET_TITLE_MAX_CHARS = 200 (hub/kinds/ticket.ts:76) -> 600
+ * - acceptance_criteria: TICKET_CRITERIA_MAX_CHARS = 4000 (hub/kinds/ticket.ts:77) -> 12000
+ * - handoff section (from, task, context): HANDOFF_SECTION_MAX = 64 KiB (hub/core/first-message.ts:25), notice included
+ * - reason note: the launch ack error is cut at 500 units (hub/kinds/stage.ts:1418) -> 1500, plus 200 for prefix and note text;
+ *   every other reason is a fixed string
+ * - ids, branch, recipient and worktree path: 1500 together (worktree <= 1024 = macOS PATH_MAX, recipient <= 64 chars x 3,
+ *   ticket, stage and request ids, branch and blast radius under 150)
+ */
+const TEMPLATE_ALLOWANCE = 4 * 1024;
+export const MAX_FIRST_MESSAGE_BYTES = TEMPLATE_ALLOWANCE + 600 + 12_000 + HANDOFF_SECTION_MAX + 1_700 + 1_500;
+/** Hard cap per candidate: 2 x the largest renderable first message (human decision, msg 1505). A candidate whose first user message is not complete by then does not match (no error, no log line). */
+export const HEAD_CAP_BYTES = 2 * MAX_FIRST_MESSAGE_BYTES;
 /** A tool call that changes a file ends "before the first action"; so does the result handoff. */
 const ACTION_TOOLS = new Set(["Edit", "Write", "NotebookEdit"]);
 const isResultTool = (name: string) => name === "send_handoff" || name.endsWith("__send_handoff");
@@ -55,7 +70,7 @@ async function readHead(file: string, stats?: { bytes: number }): Promise<Head |
     let total = 0;
     let ts: number | null = null;
     while (total < HEAD_CAP_BYTES) {
-      const { bytesRead } = await fh.read(buf, 0, CHUNK_BYTES, total);
+      const { bytesRead } = await fh.read(buf, 0, Math.min(CHUNK_BYTES, HEAD_CAP_BYTES - total), total);
       if (!bytesRead) return null;
       total += bytesRead;
       if (stats) stats.bytes += bytesRead;

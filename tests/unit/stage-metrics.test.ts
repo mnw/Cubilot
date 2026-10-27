@@ -3,14 +3,15 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { giveProject } from "../helpers/repo";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createTicketKind } from "../../hub/kinds/ticket";
 import { createStageRuntime } from "../../hub/kinds/stage";
-import { HEAD_CAP_BYTES, claudeProjectFolder, recordStageMetrics, selectTranscript } from "../../hub/core/stage-metrics";
+import { HANDOFF_SECTION_MAX, renderFirstMessage } from "../../hub/core/first-message";
+import { HEAD_CAP_BYTES, MAX_FIRST_MESSAGE_BYTES, claudeProjectFolder, recordStageMetrics, selectTranscript } from "../../hub/core/stage-metrics";
 import type { Entry, HubCapabilities, RouteDef, Scope } from "../../hub/core/types";
 import type { LaunchRequest } from "../../hub/core/launch-queue";
 
@@ -372,6 +373,27 @@ describe("bounded candidate read", () => {
     expect(await selectTranscript(f, "s_x", 1000, null)).toBe(file);
   });
 
+  test("the largest renderable first message, JSONL-encoded, matches and gives source 'claude' with token values", async () => {
+    capture();
+    const e = makeEnv();
+    const l = e.spawn();
+    e.pinLaunchTimes(1000);
+    const max = renderFirstMessage({
+      stageId: e.stageId, role: "worker",
+      ticket: { id: "t_0000000000000001", title: "T".repeat(200), acceptance_criteria: "c".repeat(4000), blast_radius: "medium", request_id: "r".repeat(64) },
+      branch: "ticket/t_0000000000000001", worktree: "/" + "w".repeat(1023), reason: "r".repeat(1500), recipient: "Orchestrator",
+      handoff: { id: "h_0000000000000001", from: "Orchestrator", task: "x".repeat(500), context: { notes: "n".repeat(HANDOFF_SECTION_MAX * 2) } },
+    });
+    const line1 = user(1500, max);
+    expect(Buffer.byteLength(max)).toBeGreaterThan(HANDOFF_SECTION_MAX);
+    expect(Buffer.byteLength(max)).toBeLessThanOrEqual(MAX_FIRST_MESSAGE_BYTES);
+    expect(Buffer.byteLength(line1)).toBeLessThanOrEqual(HEAD_CAP_BYTES);
+    transcript(e.folder(l), "s1", 1500, max, asst("m1", usage(10, 200, 3000, 50)));
+    await e.pass();
+    expect(e.rows()[0]).toMatchObject({ source: "claude", prompt_tokens_first: 3210, cache_read_tokens: 3000 });
+    expect(logged).toEqual([]);
+  });
+
   test("a first user message over the cap does not match and logs nothing", async () => {
     capture();
     const f = dir();
@@ -382,6 +404,13 @@ describe("bounded candidate read", () => {
     expect(logged).toEqual([]);
   });
 
+  test("every shipped first-message template fits the template allowance of the cap", () => {
+    for (const d of readdirSync("factory")) {
+      const t = join("factory", d, "first-message.md");
+      if (existsSync(t)) expect(readFileSync(t).length).toBeLessThanOrEqual(4 * 1024);
+    }
+  });
+
   test("58 candidate files read under 58 x 64 KiB, in chunks of at most 4 KiB", async () => {
     const f = dir();
     for (let i = 0; i < 57; i++) writeFileSync(join(f, `c${i}.jsonl`), user(1500, "Stage: s_other " + "z".repeat(200 * 1024)) + "\n");
@@ -390,6 +419,7 @@ describe("bounded candidate read", () => {
     const stats = { bytes: 0 };
     expect(await selectTranscript(f, "s_x", 1000, null, stats)).toBe(hit);
     expect(stats.bytes).toBeLessThan(58 * HEAD_CAP_BYTES);
+    expect(stats.bytes).toBeLessThan(57 * 200 * 1024); // each 200 KiB candidate stops at the cap, not at its end
     console.log(`bytes read for 58 files: ${stats.bytes}`);
   });
 });
