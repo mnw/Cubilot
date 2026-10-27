@@ -568,3 +568,25 @@ describe("send_handoff takes to or to_role", () => {
     await expect(send(f, { to_role: "tester", task: "t" })).rejects.toThrow("context.ticket_id");
   });
 });
+
+describe("planning_note in create_ticket and edit_ticket", () => {
+  const props = (name: string) => (findTool(name)!.inputSchema as { properties: Record<string, unknown> }).properties;
+  test("create_ticket forwards planning_note only when given", async () => {
+    const f = fake({ "POST /tickets": { status: 201, body: { snapshot: { id: TID } } } });
+    await run("create_ticket", f.host, { title: "t", acceptance_criteria: "c", blast_radius: "low", planning_note: "plan" });
+    expect(f.calls[0].body).toMatchObject({ planning_note: "plan" });
+    await run("create_ticket", f.host, { title: "t", acceptance_criteria: "c", blast_radius: "low" });
+    expect("planning_note" in f.calls[1].body).toBe(false);
+    expect(Object.keys(props("create_ticket"))).toContain("planning_note");
+  });
+  test("edit_ticket forwards planning_note, including null, and omits it otherwise", async () => {
+    const f = fake({ [`POST /tickets/${TID}/edit`]: { status: 200, body: { snapshot: {} } } });
+    await run("edit_ticket", f.host, { ticket_id: TID, planning_note: "plan" });
+    expect(f.calls[0].body).toEqual({ by: "alice", planning_note: "plan" });
+    await run("edit_ticket", f.host, { ticket_id: TID, planning_note: null });
+    expect(f.calls[1].body).toEqual({ by: "alice", planning_note: null });
+    await run("edit_ticket", f.host, { ticket_id: TID, title: "x" });
+    expect("planning_note" in f.calls[2].body).toBe(false);
+    expect(Object.keys(props("edit_ticket"))).toContain("planning_note");
+  });
+});

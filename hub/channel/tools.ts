@@ -402,6 +402,7 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
         request_id: { type: "string", pattern: "^[A-Za-z0-9._-]{1,64}$", description: "Optional label that groups the tickets of one request." },
         role: { type: "string", enum: TICKET_ROLES, description: "Optional stage role that works the ticket first." },
         blocked_by: { type: "array", items: TICKET_ID_SCHEMA, maxItems: 20, description: "Optional ids of tickets of your room that must be done before this ticket can be claimed." },
+        planning_note: { type: "string", minLength: 1, maxLength: 4000, description: "Optional planning note for the stage sessions of this ticket." },
       },
       required: ["title", "acceptance_criteria", "blast_radius"],
     },
@@ -415,7 +416,7 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
       if (args.priority !== undefined) body.priority = args.priority;
       if (args.external_ref !== undefined) body.external_ref = args.external_ref;
       if (args.assignee !== undefined) body.assignee = args.assignee;
-      for (const k of ["status", "request_id", "role", "blocked_by"]) if (args[k] !== undefined) body[k] = args[k];
+      for (const k of ["status", "request_id", "role", "blocked_by", "planning_note"]) if (args[k] !== undefined) body[k] = args[k];
       const resp = await authedPost(ctx.host, ctx.hubEnv, "/tickets", body);
       if (resp.status !== 201) toolError(resp, "create_ticket");
       const id = (resp.json as { snapshot?: { id?: string } } | null)?.snapshot?.id ?? "";
@@ -521,13 +522,14 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
         request_id: { type: ["string", "null"], pattern: "^[A-Za-z0-9._-]{1,64}$", description: "The label that groups the tickets of one request." },
         role: { type: ["string", "null"], enum: [...TICKET_ROLES, null], description: "The stage role that works the ticket first. null clears it." },
         blocked_by: { type: ["array", "null"], items: TICKET_ID_SCHEMA, maxItems: 20, description: "Replaces the whole blocker list. null or [] clears it." },
+        planning_note: { type: ["string", "null"], minLength: 1, maxLength: 4000, description: "The planning note. The human, the creator and the room lead change it, not the assignee. null clears it." },
       },
       required: ["ticket_id"],
     },
     handler: async (ctx, args) => {
       const id = String(args.ticket_id ?? "");
       const body: Record<string, unknown> = { by: ctx.agent };
-      for (const k of ["title", "acceptance_criteria", "blast_radius", "request_id", "role", "blocked_by"]) if (args[k] !== undefined) body[k] = args[k];
+      for (const k of ["title", "acceptance_criteria", "blast_radius", "request_id", "role", "blocked_by", "planning_note"]) if (args[k] !== undefined) body[k] = args[k];
       const resp = await authedPost(ctx.host, ctx.hubEnv, `/tickets/${encodeURIComponent(id)}/edit`, body);
       if (resp.status !== 200) toolError(resp, "edit_ticket");
       const unchanged = (resp.json as { idempotent?: boolean } | undefined)?.idempotent;

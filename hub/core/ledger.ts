@@ -5,7 +5,7 @@ import { chmodSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomId } from "./ids";
 
-export const LEDGER_SCHEMA_VERSION = 16;
+export const LEDGER_SCHEMA_VERSION = 17;
 
 export type LedgerOpenResult =
   | { db: Database; enabled: true }
@@ -433,6 +433,29 @@ export function migrateLedger(db: Database): void {
       db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '16')");
     })();
     console.log(`[ledger] applied migration v16`);
+  }
+  if (current < 17) {
+    // v17: context-pack 1.1. Per-stage measurement of the first message and the first token use.
+    // tickets.planning_note is added by the ticket kind's migrate (the table belongs to that kind). Guarded.
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS stage_metrics (
+          stage_id                 TEXT    NOT NULL,
+          attempt                  INTEGER NOT NULL,
+          role                     TEXT    NOT NULL,
+          first_message_bytes      INTEGER NOT NULL,
+          first_message_tokens_est INTEGER NOT NULL,
+          prompt_tokens_first      INTEGER,
+          cache_read_tokens        INTEGER,
+          tokens_before_action     INTEGER,
+          source                   TEXT    NOT NULL,
+          created_seq              INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (stage_id, attempt)
+        );
+      `);
+      db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '17')");
+    })();
+    console.log(`[ledger] applied migration v17`);
   }
 }
 
