@@ -1,0 +1,11 @@
+# Rules: summariser
+
+Room summary generation and scope rules.
+
+## Phase 3 Room summary lives in `hub/core/room-summariser.ts`; the Summariser interface is in `hub/core/summariser/`; Briefing assembly is `hub/core/briefing.ts`
+
+- **Phase 3 Room summary lives in `hub/core/room-summariser.ts`; the Summariser interface is in `hub/core/summariser/`; Briefing assembly is `hub/core/briefing.ts`.** The summariser's prompt template lives ONLY in `room-summariser.ts` — adapters (`claude.ts`, future `llama-cpp.ts`, `ollama.ts`) take a fully-assembled prompt as a string and return text. **Never construct prompts inside an adapter** — the dedup-against-Nutshell-and-prior-summaries logic only works if there's one prompt template across all backends. Empty-summary detection is by **bullet count** — lines starting with `- ` only (asterisks rejected because models routinely emit them as markdown sub-list decoration `*   **Item:**` or PHP docblock prefixes ` * @var`, both of which are false positives that let prose / hallucinated code through). The "last summarised line" cache derives from `MAX(end_line) FROM room_summary WHERE room=? AND level=1` — single source of truth, no separate state table. Backfill is fire-and-forget from the Briefing path; the Briefing path itself is read-only. See `docs/adr/0002-pluggable-summariser.md` and `docs/adr/0003-hierarchical-room-summary.md`.
+
+## Room summary scope is the active JSONL chunk only — rotated chunks are forensic-only
+
+- **Room summary scope is the active JSONL chunk only — rotated chunks are forensic-only.** `RoomSummariser` reads from `activePath(room)`; once a chunk rotates to `<basename>.<seq>.jsonl` it stops being a candidate for new L1 generation. Existing L1 entries that referenced lines in the now-rotated chunk are still valid (line ranges are stable per chunk lifecycle), but content past the last L1 in the active chunk at rotation time is never summarised. v2 candidate: cross-chunk continuous line numbering so summarisation walks the entire transcript history. v1 limitation accepted because (a) most Rooms rotate rarely, (b) the human-curated Nutshell covers strategic history regardless, (c) active-chunk coverage is the high-signal recent-context layer the Briefing actually needs.
