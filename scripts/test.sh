@@ -73,24 +73,28 @@ release_lock() {
   LOCK_HELD=0
 }
 
-# Remove the lock when its owner process is dead. The check and the removal run under a second mkdir mutex
-# ($LOCK.takeover), and the owner is read again under it: a run that lost the race sees the new live owner and removes
-# nothing. A removal is followed at once by a normal mkdir attempt. Returns 0 only when it removed a stale lock.
-TAKEOVER_HELD=0
+# Remove the lock when its owner process is dead. The check and the removal run under an flock(2) mutex on the file
+# $LOCK.takeover (fd 9, taken with perl): the owner is read again under it, so a run that lost the race sees the new live
+# owner and removes nothing. The kernel drops the flock when the holder dies, so a crashed run cannot leave the mutex
+# held. An empty directory $LOCK.takeover from an older version is removed first. A removal is followed at once by a
+# normal mkdir attempt. Returns 0 only when it removed a stale lock. No perl or no mutex: returns 1 (wait as before).
 takeover_stale() {
   local pid name rc=1
-  mkdir "$LOCK.takeover" 2> /dev/null || return 1
-  TAKEOVER_HELD=1
-  pid=$(owner_pid "$LOCK")
-  if positive_int "$pid" && pid_dead "$pid"; then
-    name=$(owner_name "$LOCK")
-    if rm -r "$LOCK" 2> /dev/null; then
-      echo "stale heavy lock from $name $pid taken over" >&2
-      rc=0
+  rmdir "$LOCK.takeover" 2> /dev/null
+  command -v perl > /dev/null 2>&1 || return 1
+  : >> "$LOCK.takeover" 2> /dev/null || return 1
+  exec 9>> "$LOCK.takeover"
+  if perl -e 'open(F, ">&=9") or exit 2; flock(F, 6) or exit 1' 2> /dev/null; then
+    pid=$(owner_pid "$LOCK")
+    if positive_int "$pid" && pid_dead "$pid"; then
+      name=$(owner_name "$LOCK")
+      if rm -r "$LOCK" 2> /dev/null; then
+        echo "stale heavy lock from $name $pid taken over" >&2
+        rc=0
+      fi
     fi
   fi
-  rmdir "$LOCK.takeover" 2> /dev/null
-  TAKEOVER_HELD=0
+  exec 9>&-
   return $rc
 }
 
@@ -122,7 +126,7 @@ stop_run() {
 }
 
 # Any exit path, also a wrapper error: nothing of the run stays alive, and the lock goes.
-on_exit() { kill_group; release_lock; [ "$TAKEOVER_HELD" = 1 ] && rmdir "$LOCK.takeover" 2> /dev/null; return 0; }
+on_exit() { kill_group; release_lock; return 0; }
 on_signal() {
   [ -n "$NAP_PID" ] && kill "$NAP_PID" 2> /dev/null
   if [ -n "$CHILD" ]; then stop_run "received $1" "$2"; fi

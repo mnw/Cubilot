@@ -2,7 +2,7 @@
 // a temp folder outside tests/ and run as child processes, so the normal run never contains one. Every nested
 // scripts/test.sh run gets its own lock path: a nested run never touches /tmp/cubilot-heavy.lock.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -365,7 +365,20 @@ describe("scripts/test.sh", () => {
     expect(b.code).toBe(0);
     expect(takeovers(a.out).length + takeovers(b.out).length).toBe(1);
     expect(existsSync(lock)).toBe(false);
-    expect(existsSync(`${lock}.takeover`)).toBe(false);
+    expect(existsSync(`${lock}.takeover`) && statSync(`${lock}.takeover`).isDirectory()).toBe(false);
+  }, 60000);
+
+  test("a dead owner and a stale $LOCK.takeover directory: the run takes the lock, one takeover line, no directory stays", async () => {
+    const pid = await deadPid();
+    const lock = seedLock("stale-mutex", `other ${pid} 1\n`);
+    mkdirSync(`${lock}.takeover`);
+    const t0 = Date.now();
+    const r = await run([join(dir, "ok.test.ts")], { CUBILOT_LOCK_RETRY_S: "1" }, lock);
+    expect(r.code).toBe(0);
+    expect(Date.now() - t0).toBeLessThan(30000);
+    expect(takeovers(r.out)).toEqual([`stale heavy lock from other ${pid} taken over`]);
+    expect(existsSync(lock)).toBe(false);
+    expect(existsSync(`${lock}.takeover`) && statSync(`${lock}.takeover`).isDirectory()).toBe(false);
   }, 60000);
 
   test("a nested run never touches /tmp/cubilot-heavy.lock", () => {
