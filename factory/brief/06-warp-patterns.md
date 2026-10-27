@@ -1,4 +1,4 @@
-# Part 6: patterns from the Warp cloud factory, and model routing
+# Part 6: patterns from the Warp cloud factory, model routing and the Orchestrator checkpoint
 
 Source: https://github.com/warpdotdev-demos/cloud-factory-demo (MIT, Warp, last commit 2026-08-12). Read on 2026-10-18.
 
@@ -149,21 +149,75 @@ For each Worker stage, the hub chooses the model (Haiku, Sonnet or Opus) and the
 1. Does the effort level apply to Pi models in the same way? Today the effort is for Claude only.
 2. Is 50 Worker stages enough data before step B? Check the spread of first-pass rates after 50.
 
+### 7. Orchestrator checkpoint
+
+Status: decision 2026-10-27 (human). Build this item first in Part 6, before item 6 and items 1 to 5. Real use showed the problem: the Orchestrator's context filled to 77 % in one day. Messages used 66 % of the window. The work slowed down until the human cleared the context by hand.
+
+#### Goal
+
+The Orchestrator stays open for the whole room (Part 4). Its context must stay small. The board is the record of the factory, so the Orchestrator does not need to remember the work. At set points, the hub clears the Orchestrator's session and gives it a new state summary that code builds from the ledger.
+
+#### What exists
+
+- The manual checkpoint works (2026-10-27). The Orchestrator writes its open points into a ticket note. The human runs `/clear`. Then the Orchestrator reads the board, the note and `factory/work/README.md`.
+- Claude Code: `/clear` keeps `CLAUDE.md`. A `SessionStart` hook with matcher `clear` can return text as `additionalContext`.
+- Claude Code: the status line JSON has `context_window.used_percentage`. It counts input tokens only, and it can be empty early in a session and just after a compaction.
+- The agent column (Part 4a) shows each agent. It does not show the context percentage yet.
+
+#### Design
+
+1. **Measure first.** Count the entries that reach the Orchestrator, by kind (briefing, `ticket.*`, `handoff.*`, interrupt, chat, `stage.*`), with their size. Do the quick fixes in item 2 before the checkpoint, and measure again.
+2. **Quick fixes in the hub.**
+   - Do not send a new briefing to the room lead when a stage session joins or leaves the room. Stage sessions are short.
+   - Give the room lead a digest of ticket events instead of each event. Send at once only the events that need a decision: an escalation, a second FAIL, an approval.
+   - A handoff to the Orchestrator carries a summary and the ticket id. The Orchestrator reads the full findings from the ticket when it needs them.
+3. **Context data.** The role plugin of the Orchestrator sets a status line command. The command writes the status line JSON to `<app data>/context/<agent>.json`. The hub reads it. The agent column shows the percentage for each Claude agent.
+4. **State summary, built by code.** No model writes it. It has these parts, in this order:
+   - the open requests, with their tickets, statuses and blockers,
+   - the decisions that wait for the Orchestrator or for the human,
+   - the last 5 escalations and their state,
+   - the stage sessions that run now,
+   - the last note of the Orchestrator (item 5).
+   The size limit is 2,000 tokens. The summary names the tickets and the commands to read more.
+5. **The Orchestrator's own note.** Before a checkpoint, the hub asks the Orchestrator for a short note (at most 200 words): the open points that are not on the board. The hub stores it with the summary. If the Orchestrator does not answer in one turn, the checkpoint continues without the note.
+6. **When: the fixed rule (step A).**
+   - A checkpoint is due when a request is done, or when the context is at 60 % or more.
+   - It runs only when no decision is open: no approval that the Orchestrator waits for, no escalation in progress, no spec review that runs.
+   - It runs only at the end of a turn. Never in the middle of a tool call.
+   - The thresholds are settings in `config.yml`.
+7. **How.** The hub writes the summary to `<app data>/checkpoints/<agent>.md` and sends `/clear` to the Orchestrator's pane. A `SessionStart` hook (matcher `clear`) in the Orchestrator's role plugin reads the file, returns it as `additionalContext`, and removes the file.
+8. **When: Jev (step B).** Step A runs first for at least 20 checkpoints. Then, at each due point, the hub can ask Jev one typed question: "checkpoint now" or "wait". The question has only numbers and statuses. These are the context percentage, the minutes and tickets since the last checkpoint, and the open-decision flags. Code applies the limits of design step 6 to the answer. Jev uses the shared access of item 6 of this part. Jev stays on only when it gives fewer slowdowns than the rule and no lost thread.
+9. **Record.** For each checkpoint: the time, the trigger (rule, Jev or human), the context percentage before and after, and the size of the summary.
+
+#### Tests
+
+1. A request reaches `done` with no open decision. The checkpoint runs at the end of the Orchestrator's turn.
+2. A checkpoint is due while an approval is open: it waits until the approval is answered.
+3. After `/clear`, the Orchestrator's first context holds the summary. The summary is at most 2,000 tokens.
+4. A stage session that joins or leaves the room sends no new briefing to the room lead.
+5. A ticket event that needs no decision reaches the room lead only in the digest.
+6. The agent column shows the context percentage of the Orchestrator.
+
+#### Open questions
+
+1. Pi has no `SessionStart` hook. The Orchestrator is a Claude role, so this item covers Claude only. Check this again if the Orchestrator ever runs on Pi.
+2. Is 60 % the right threshold? Use the records of item 9 to tune it.
+
 ## Ideas for later
 
-### 7. Learning from the human's corrections
+### 8. Learning from the human's corrections
 
 Skill: `.agents/skills/improve-review-pr/SKILL.md`. A daily job reads how humans reacted to automated review comments. It opens a change to the review skill when it finds knowledge that the reviewer must keep.
 
 For the factory: when the human overrules a Validator or Reviewer verdict, record it with the reason. A scheduled job proposes changes to the role file or the skills. The human approves each change.
 
-### 8. Video evidence of UI behaviour
+### 9. Video evidence of UI behaviour
 
 Skill: `.agents/skills/verify-behavior/SKILL.md`. It checks each user story in a separate run, and records video and screenshots. It uses the Oz platform.
 
 For the factory: the Tester records Playwright video for UI tickets and attaches it to the ticket. One check for each user story in the spec, in parallel. This is useful for Drupal UI changes and for accessibility checks.
 
-### 9. Tests for skills
+### 10. Tests for skills
 
 File: `.agents/skills/triage/evals/evals.json`. Each entry has a prompt and the expected behaviour. Skill descriptions decide when skills load (Part 2, finding 4), so test the important skills with prompts like these. The `skill-creator` skill can run such tests.
 

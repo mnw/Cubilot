@@ -40,7 +40,7 @@ Cubilot is a macOS desktop app. It runs a team of coding agents (Claude Code, an
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/05-jev-dark.png">
-  <img alt="Jev decision points: narrow typed decisions, two planned (model routing, mutation survivors) and five ideas" src="docs/readme/05-jev-light.png" width="100%">
+  <img alt="Jev decision points: narrow typed decisions, three planned (Orchestrator checkpoint, model routing, mutation survivors) and four ideas" src="docs/readme/05-jev-light.png" width="100%">
 </picture>
 
 <picture>
