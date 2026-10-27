@@ -1,6 +1,6 @@
 # Part 4: visible sessions, one session for each ticket stage
 
-Status: decision 2026-10-18. Build it with Part 2.
+Status: stage sessions (`openspec/specs/stage-sessions`) and spec review are done, archived on 2026-10-27. Open: the context pack (`openspec/changes/context-pack`, in work) and stage diagnosis (`openspec/changes/stage-diagnosis`, proposed).
 
 ## Decision
 
