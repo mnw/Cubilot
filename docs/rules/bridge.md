@@ -50,7 +50,7 @@ Chatbridge mod, pi extension, skills, Claude Code version and hook rules.
 
 - **In the mod, `$` may only be passed to top-level function declarations.** `claude plugin validate` rejects anything else. The `Host` is built in a top-level `makeHost($)` that returns closures over `$`; the core never sees `$`.
 
-## After changing anything under `hub/channel/
+## After changing anything under `hub/channel/**`, rerun `./scripts/build-sidecars.sh` AND `./scripts/check-mod.sh`
 
 - **After changing anything under `hub/channel/**`, rerun `./scripts/build-sidecars.sh` AND `./scripts/check-mod.sh`.** The `.app` loads the bundles (`pi-extension.js`, `chatbridge-mod.js`), not the TypeScript; `check-mod.sh` runs `claude plugin validate` and type-checks `register.ts` against the Claude Code declarations (the root `tsconfig.json` excludes `hub/channel/claude-mod/**`).
 
