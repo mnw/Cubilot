@@ -25,6 +25,7 @@ import { LedgerConflict } from "../core/types";
 import { createLaunchQueue, type LaunchEnd, type LaunchQueue, type LaunchRequest } from "../core/launch-queue";
 import { roleHarness } from "../core/role-harness";
 import { roleModelFor } from "../core/role-models";
+import { metricsByRole, recordStageMetrics, type Launched } from "../core/stage-metrics";
 import { makeSSE } from "../core/sse";
 import { assignBySystemInTx, closeReviewedBySystemInTx, notifyHeldDrafts, queueBySystemInTx, type HeldDraft } from "./ticket";
 
@@ -615,10 +616,26 @@ export function createStageRuntime(
     closeGraceMs?: number;
     /** A session younger than this is not "gone" yet: its bridge may still be starting (default 90 s). */
     bootGraceMs?: number;
+    /** Where Claude Code writes its transcripts (default `~/.claude/projects`). Tests point it at a temp folder. */
+    claudeProjectsDir?: string;
   } = {},
 ): StageRuntime {
   const entity = createLedgerEntity({ decl: stageDecl, db });
-  const api = createStageApi(db, (freed, cap) => drainQueue(freed, cap));
+  // What the hub knows of each launch (stage id -> attempt -> first message size, harness, cwd), for the metrics row (context-pack 5.1).
+  // Memory only: a hub restart loses it, and an attempt it did not see launch gets no row.
+  const launched = new Map<string, Map<number, Launched>>();
+  const api = createStageApi(db, (freed, cap) => {
+    if (freed.status === "passed" || freed.status === "failed") {
+      // After the commit of stage.passed/failed, outside its transaction. recordStageMetrics logs its own failures; this guards the rest.
+      try {
+        recordStageMetrics(db, freed.id, freed.version, launched.get(freed.id) ?? new Map(), console.error, opts.claudeProjectsDir);
+      } catch (e) {
+        console.error(`[stage-metrics] ${freed.id}: ${(e as Error).message}`);
+      }
+      launched.delete(freed.id);
+    }
+    drainQueue(freed, cap);
+  });
 
   /** Launch ids whose request carries role_models values: a refusal of the shell is stored with the prefix. */
   const roleModelLaunches = new Set<string>();
@@ -1126,6 +1143,14 @@ export function createStageRuntime(
     } else if (prompt === "" && stage.review === "spec" && cwd) {
       prompt = specFirstMessage(stage, input.room, cwd, input.reason) ?? "";
     }
+    if (prompt !== "") {
+      const attempt = api.load(input.stage_id)?.attempt;
+      if (attempt) {
+        const m = launched.get(input.stage_id) ?? new Map<number, Launched>();
+        m.set(attempt, { role: stage.role, harness: models.entry?.harness ?? input.harness, cwd, bytes: Buffer.byteLength(prompt) });
+        launched.set(input.stage_id, m);
+      }
+    }
     const req: LaunchRequest = {
       id: mintLaunchId(),
       kind: "launch",
@@ -1320,6 +1345,17 @@ export function createStageRuntime(
         const room = decodeURIComponent(params.id);
         if (!validRoomLabel(room)) return Response.json({ error: "invalid room" }, { status: 400 });
         return Response.json({ room, requests: needsYouRequests(db, room) });
+      },
+    },
+    {
+      // Start-up numbers of the stage sessions of one room, grouped by role (context-pack 5.2). Read only.
+      method: "GET",
+      path: /^\/rooms\/([^/]+)\/stage-metrics$/,
+      auth: "read",
+      handler: (_req, _cap, params) => {
+        const room = decodeURIComponent(params.id);
+        if (!validRoomLabel(room)) return Response.json({ error: "invalid room" }, { status: 400 });
+        return Response.json({ room, roles: metricsByRole(db, room, STAGE_ROOM_SQL) });
       },
     },
     {
