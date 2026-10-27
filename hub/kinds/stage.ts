@@ -4,7 +4,8 @@
 // and the launch queue (4.1) are added by their own tickets; no route here writes a stage.
 
 import { join } from "node:path";
-import { renderFirstMessage, renderSpecFirstMessage } from "../core/first-message";
+import { renderFirstMessage, renderSpecFirstMessage, type PackText } from "../core/first-message";
+import { packCommandCount, type Pack, type PackInput } from "../core/context-pack";
 import { renderStable } from "../core/primer";
 import { readNutshell } from "../nutshell";
 import { createWorktree, removeWorktree, worktreesRoot } from "../core/worktrees";
@@ -673,6 +674,11 @@ export function createStageRuntime(
     sweepMs?: number;
     /** A passed stage whose session sent no turn-end report is closed after this time (default 120 s). */
     closeGraceMs?: number;
+    /**
+     * Builds the context pack of a launch (context-pack 3.5). Unset: no pack, and the launch is queued at once. The hub
+     * passes the real `buildPack`; a test passes it or a stub.
+     */
+    buildPack?: (i: PackInput) => Promise<Pack>;
     /** A session younger than this is not "gone" yet: its bridge may still be starting (default 90 s). */
     bootGraceMs?: number;
     /** Where Claude Code writes its transcripts (default `~/.claude/projects`). Tests point it at a temp folder. */
@@ -706,6 +712,8 @@ export function createStageRuntime(
   const roleModelLaunches = new Set<string>();
   /** Launches that have no end yet (queued, delivered, not acked, not timed out), by stage. Memory only. */
   const inflight = new Map<string, { id: string; session: string }>();
+  /** Launches whose context pack is being built (stage -> request id): launching, not queued yet. Memory only. */
+  const building = new Map<string, string>();
   /**
    * G4: a stage cancelled while its launch is in flight. Its session name, slot and worktree stay reserved until a close ack
    * arrives with no launch in flight (and, once a late launch end queued the last close, only that close's ack).
@@ -897,7 +905,11 @@ export function createStageRuntime(
       runningSeen.delete(stageId);
       const session = stage.session;
       let releaseAtOnce = false;
-      if (stage.status === "launching" && inflight.has(stageId) && queue.drop(inflight.get(stageId)!.id)) {
+      if (stage.status === "launching" && building.has(stageId)) {
+        // The pack is still being built: nothing was queued, so there is no session to close. The build ends without a push.
+        building.delete(stageId);
+        releaseAtOnce = true;
+      } else if (stage.status === "launching" && inflight.has(stageId) && queue.drop(inflight.get(stageId)!.id)) {
         // Never delivered: no session exists, nothing to close.
         roleModelLaunches.delete(inflight.get(stageId)!.id);
         inflight.delete(stageId);
@@ -989,7 +1001,7 @@ export function createStageRuntime(
     (room ? db.query<{ agent: string }, [string]>("SELECT agent FROM ticket_room_lead WHERE room = ?").get(room)?.agent : undefined) ?? "Orchestrator";
 
   /** The request text, spec paths and scope tickets of a spec stage, from its handoff and its scope. */
-  function specFirstMessage(stage: { id: string; request_id: string | null }, room: string, worktree: string, reason?: string): string | null {
+  function specFirstMessage(stage: { id: string; request_id: string | null }, room: string, worktree: string, reason?: string, pack?: PackText): string | null {
     const seq = db.query<{ n: number }, [string]>("SELECT created_seq AS n FROM stage WHERE id = ?").get(stage.id)?.n ?? 0;
     const ctx = db
       .query<{ c: string | null }, [string, number, string]>(
@@ -1047,6 +1059,7 @@ export function createStageRuntime(
       specPaths: Array.isArray(c.spec_paths) ? c.spec_paths.filter((x): x is string => typeof x === "string") : [],
       scope,
       reason,
+      pack,
     });
   }
 
@@ -1256,16 +1269,29 @@ export function createStageRuntime(
 
     // 4.3 (computed before the move: its size goes into the stage.launching payload, 5.1): the ticket part of the first message; the role prompt is a separate file passed by the launch command.
     let prompt = input.prompt;
+    // The same render with the pack text, run once the pack is built (context-pack 3.5). Null: nothing to add.
+    let renderWithPack: ((pack: PackText) => string) | null = null;
+    let packQuestion = "";
     if (prompt === "" && stage.ticket_id && cwd) {
       const t = db
         .query<{ id: string; title: string; acceptance_criteria: string; blast_radius: string; request_id: string | null }, [string]>(
           "SELECT id, title, acceptance_criteria, blast_radius, request_id FROM tickets WHERE id = ?",
         )
         .get(stage.ticket_id);
-      if (t) prompt = renderFirstMessage({ stable: stableFor(input.room), notes: earlierNotes(db, t.id), stageId: input.stage_id, role: stage.role, ticket: t, branch, worktree: cwd, reason: input.reason, recipient: leadOfRoom(input.room), handoff: startingHandoff(stage.id, stage.ticket_id, stage.role) ?? undefined });
+      if (t) {
+        const fm = { stable: stableFor(input.room), notes: earlierNotes(db, t.id), stageId: input.stage_id, role: stage.role, ticket: t, branch, worktree: cwd, reason: input.reason, recipient: leadOfRoom(input.room), handoff: startingHandoff(stage.id, stage.ticket_id, stage.role) ?? undefined };
+        prompt = renderFirstMessage(fm);
+        renderWithPack = (pack) => renderFirstMessage({ ...fm, pack });
+        packQuestion = `${t.title} ${t.acceptance_criteria}`;
+      }
     } else if (prompt === "" && stage.review === "spec" && cwd) {
-      prompt = specFirstMessage(stage, input.room, cwd, input.reason) ?? "";
+      const wt = cwd;
+      prompt = specFirstMessage(stage, input.room, wt, input.reason) ?? "";
+      renderWithPack = (pack) => specFirstMessage(stage, input.room, wt, input.reason, pack) ?? "";
+      packQuestion = db.query<{ title: string }, [string]>("SELECT t.title FROM stage_scope s JOIN tickets t ON t.id = s.ticket_id WHERE s.stage_id = ? ORDER BY t.id").all(stage.id).map((r) => r.title).join(" ");
     }
+    // The pack runs only in a worktree that the hub made for this launch.
+    const packWorktree = renderWithPack && wtKey && input.cwd === null && cwd && packCommandCount(stage.role, stage.review) > 0 ? cwd : null;
     const harness = "error" in models ? input.harness : (models.entry?.harness ?? input.harness);
     try {
       api.move(
@@ -1295,7 +1321,7 @@ export function createStageRuntime(
       reportFinalFailure(input.stage_id, `the launch did not start: ${models.error}`, cap);
       return { ok: false, reason: models.error };
     }
-    const req: LaunchRequest = {
+    const req: Extract<LaunchRequest, { kind: "launch" }> = {
       id: mintLaunchId(),
       kind: "launch",
       stage_id: input.stage_id,
@@ -1316,8 +1342,50 @@ export function createStageRuntime(
       },
     };
     if (models.entry) roleModelLaunches.add(req.id);
-    queue.push(req);
-    inflight.set(req.stage_id, { id: req.id, session: req.session });
+    const push = () => {
+      queue.push(req);
+      inflight.set(req.stage_id, { id: req.id, session: req.session });
+    };
+    const buildPackFor = opts.buildPack;
+    if (!packWorktree || !renderWithPack || !buildPackFor) {
+      push();
+      return { ok: true, request_id: req.id };
+    }
+    // context-pack 3.5: the stage is `launching`, the worktree exists. The pack runs without blocking the hub (async
+    // commands, one after another). The render and the push follow when it resolves; the ack time-out starts at the push.
+    building.set(req.stage_id, req.id);
+    const render = renderWithPack;
+    void (async () => {
+      let pack: Pack = { text: {}, graphStatus: "missing" };
+      try {
+        pack = await buildPackFor({ role: stage.role, review: stage.review, question: packQuestion, worktree: packWorktree });
+      } catch (e) {
+        console.error(`[stage] pack of ${req.stage_id} failed, launching without it:`, e);
+      }
+      try {
+        if (building.get(req.stage_id) !== req.id) return; // cancelled during the build: released by cancelStage
+        building.delete(req.stage_id);
+        const now = api.load(req.stage_id);
+        if (!now || now.status !== "launching" || now.session !== req.session) {
+          // The stage ended while the pack was built. Nothing was queued, so no session exists: free the temporary worktree.
+          roleModelLaunches.delete(req.id);
+          removeTemporaryWorktree(stage, input.room);
+          return;
+        }
+        req.prompt = render(pack.text);
+        push();
+      } catch (e) {
+        building.delete(req.stage_id);
+        roleModelLaunches.delete(req.id);
+        console.error(`[stage] queueing the launch of ${req.stage_id} failed:`, e);
+        try {
+          endLaunchAttempt(api, req.stage_id, cap, (e as Error).message);
+          reportFinalFailure(req.stage_id, `the launch did not start: ${(e as Error).message}`, cap);
+        } catch (e2) {
+          console.error(`[stage] ending the launch of ${req.stage_id} failed:`, e2);
+        }
+      }
+    })();
     return { ok: true, request_id: req.id };
   }
 

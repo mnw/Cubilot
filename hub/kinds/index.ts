@@ -8,6 +8,7 @@ import type { KindModule } from "../core/types";
 import { createHandoffKind, createSystemHandoff } from "./handoff";
 import { createInterruptKind } from "./interrupt";
 import { createPermissionKind } from "./permission";
+import { buildPack } from "../core/context-pack";
 import { createStageRuntime } from "./stage";
 import { createTicketKind } from "./ticket";
 
@@ -19,6 +20,8 @@ export function buildKinds(db: Database | null): readonly KindModule[] {
   // The handoff kind calls the stage runtime when a handoff names a role, so the two share one runtime.
   const stage = createStageRuntime(db, {
     ackMs: Number(process.env.CUBILOT_LAUNCH_ACK_MS) || undefined,
+    // The context pack is built before each launch is queued (context-pack 3.5).
+    buildPack,
     // A stage that failed twice goes to the room's Orchestrator (its lead) as a handoff from the hub (stage-sessions 5.3).
     onFinalFailure({ stage: s, room, reason }, cap) {
       if (!room) return;
