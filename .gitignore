@@ -54,3 +54,7 @@ src-tauri/icons/*.bak
 factory/_to_delete/
 factory/.obsidian
 .fuse_hidden*
+
+# stage-prep (scripts/stage-prep.sh)
+.stage-prep/
+.stage-prep.env
