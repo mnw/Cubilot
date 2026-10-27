@@ -62,6 +62,17 @@ function setup(first: any[], room = "r1", postStatus = 200, firstNeeds: any[] = 
 const flush = () => new Promise((r) => setTimeout(r, 5));
 
 describe("plan waits for your approval (spec-review 4.4)", () => {
+  test("the scroll area is a focusable named region with a height cap", () => {
+    const html = readFileSync("ui/index.html", "utf8");
+    const tag = html.match(/<div[^>]*id="plan-waiting"[^>]*>/)![0];
+    expect(tag).toContain('role="region"');
+    expect(tag).toContain('aria-label="Needs you and plans waiting"');
+    expect(tag).toContain('tabindex="0"');
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toContain("max-height: max(120px, 20vh); overflow-y: auto;");
+    expect(css).toContain(".plan-waiting:focus-visible { outline:");
+  });
+
   test("a waiting request shows its plan, what holds it and an Approve button; nothing waiting hides the strip", async () => {
     const e = setup([plan("req-1", ["t_a", "t_b"], ["Ship the release"])]);
     await flush();
@@ -132,13 +143,13 @@ describe("plan waits for your approval (spec-review 4.4)", () => {
     await flush();
     expect(e.root.hidden).toBe(false);
     const rows = e.root.children;
-    expect(rows[0].className).toBe("needs-row"); // above the approval row
-    expect(rows[1].className).toBe("plan-row");
-    const t = rows[0].text();
+    expect(rows[0].className).toBe("plan-row"); // the Approve row comes first, so its button shows without a scroll
+    expect(rows[1].className).toBe("needs-row");
+    const t = rows[1].text();
     expect(t).toContain("Needs you: req-7 failed its spec review 2 times");
     expect(t).toContain("Plan A: no criteria");
     expect(t).toContain("t_b: rename it"); // the id when the ticket has no title
-    expect(rows[0].all().filter((x) => /^needs-finding( |$)/.test(x.className))).toHaveLength(2);
+    expect(rows[1].all().filter((x) => /^needs-finding( |$)/.test(x.className))).toHaveLength(2);
     e.setNeeds([]);
     e.setWaiting([]);
     await e.api.load();
