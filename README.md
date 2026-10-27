@@ -25,12 +25,12 @@ Cubilot is a macOS desktop app. It runs a team of coding agents (Claude Code, an
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/02-roles-dark.png">
-  <img alt="Roles, models and skills: Orchestrator, Worker, Tester, Validator, Writer, Editor, Reviewer, and the SEO and accessibility councils" src="docs/readme/02-roles-light.png" width="100%">
+  <img alt="Roles, models and skills: Orchestrator, Worker, Tester, Validator, Writer, Editor, Reviewer, the planned Diagnostician, and the SEO and accessibility councils" src="docs/readme/02-roles-light.png" width="100%">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/03-workflows-dark.png">
-  <img alt="Workflows: intake with spec review, the technical, writing, SEO and accessibility tracks" src="docs/readme/03-workflows-light.png" width="100%">
+  <img alt="Workflows: intake with spec review, the technical and writing tracks, stage failure diagnosis, and the SEO and accessibility tracks" src="docs/readme/03-workflows-light.png" width="100%">
 </picture>
 
 <picture>

@@ -141,7 +141,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
 <div class="wrap">
 
 <header>
-  <div class="eyebrow">Cubilot · The Continuous Software Foundry · state on 21 October 2026</div>
+  <div class="eyebrow">Cubilot · The Continuous Software Foundry · state on 27 October 2026</div>
   <h1>Cubilot Factory Map</h1>
   <p class="sub">The whole factory on one page: what runs in the code today, what is defined in the <code>factory/</code> folder, what the implementation brief plans, and which ideas are only saved. Click a status to highlight it.</p>
   <div class="legend" role="group" aria-label="Highlight by status">
@@ -199,6 +199,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
         <div class="n planned"><span class="t">Triage states, spec stage</span><span class="d">Ready / spec / needs info / wait</span><span class="ref">§6</span></div>
         <div class="n planned"><span class="t">Dashboard route</span><span class="d">Read-only, per room</span><span class="ref">§11</span></div>
         <div class="n planned"><span class="t">Context pack</span><span class="d">Stable prefix first (cache), primer, graph query, signatures, stage notes; no model</span><span class="ref">§4</span></div>
+        <div class="n planned"><span class="t">Stage trace and diagnosis</span><span class="d">JSONL trace per stage, failure record, code rules first, then a Diagnostician tier chosen by a computed score; metrics on every stage; one ticket per cause</span><span class="ref">§4 stage-diagnosis</span></div>
         <div class="n planned"><span class="t">Model routing</span><span class="d">Model × effort per Worker stage: fixed rule first, then Jev; limits and human pin</span><span class="ref">§6</span></div>
         <div class="n built"><span class="t">Requests and tasks</span><span class="d">request_id, blocked_by, draft status</span><span class="ref">§3</span></div>
         <div class="n planned"><span class="t">Orchestrator checkpoint</span><span class="d">Clear and re-brief from a ledger summary at set points; never mid-decision; context % in the agent column</span><span class="ref">§6</span></div>
@@ -305,6 +306,16 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
       <dt>never</dt><dd>edits files</dd></dl>
     </article>
 
+    <article class="n planned role">
+      <div class="head"><h3>Diagnostician</h3><span class="model">Claude · tier</span></div>
+      <span class="track">All tracks · failed stages</span>
+      <p class="job">Reads the trace and the failure record of a failed stage. Returns cause, evidence, proven or probable, and one action. Code picks the tier from a score: 0 rules only, 1–3 sonnet low, 4–6 sonnet medium, 7+ and the daily pattern run opus high.</p>
+      <dl><dt>skills</dt><dd>debugging-and-error-recovery, silent-failure-hunter, evidence-collector, stage-failure-categories (new)</dd>
+      <dt>actions</dt><dd>retry, setup-fix-and-retry, gap-ticket, ticket-change, escalate</dd>
+      <dt>measured</dt><dd>share of actions that led to a PASS, per tier</dd>
+      <dt>never</dt><dd>edits files, commits, launches, diagnoses a diagnosis</dd></dl>
+    </article>
+
     <article class="n defined role">
       <div class="head"><h3>SEO council</h3><span class="model">Claude + OpenAI</span></div>
       <span class="track">SEO track · 4 seats</span>
@@ -365,6 +376,19 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
       </div>
       <p class="loop"><b>CHANGES</b> returns to the Writer, who sends large rewrites back through the Editor.</p>
     </div>
+  </div>
+
+  <div class="panel">
+    <h3>Stage failure</h3>
+    <div class="flow">
+      <div class="n built"><span class="t">Stage fails</span><span class="d">FAIL, time-out, crash or retry</span></div><span class="arrow">→</span>
+      <div class="n planned"><span class="t">Failure record</span><span class="d">trace, last 200 pane lines, exit status, worktree check, category</span></div><span class="arrow">→</span>
+      <div class="n planned"><span class="t">Code rules</span><span class="d">known category: run its action, no agent</span></div><span class="arrow">→</span>
+      <div class="n planned"><span class="t">Score and tier</span><span class="d">components, attempts, errors, trace gaps, repeats; same trace, same tier</span></div><span class="arrow">→</span>
+      <div class="n planned"><span class="t">Diagnostician</span><span class="d">cause, evidence, proven | probable, one action</span></div><span class="arrow">→</span>
+      <div class="n planned"><span class="t">Action</span><span class="d">retry once (proven); gap ticket per cause key, with a test that reproduces it; change to the Orchestrator</span><span class="gate">escalate: Needs you</span><span class="ref">§4 stage-diagnosis</span></div>
+    </div>
+    <p class="loop"><b>The Orchestrator</b> gets one line per failure: cause, evidence, action taken. The ticket shows <b>Why it failed</b> with a link to the trace. A repeat with the same cause key goes onto the open ticket; an ignored key stays quiet. A gap ticket is Done only when its fixture test and the full suite pass. <b>Patterns:</b> once a day, after 10 records, or when one category occurs 3 times in an hour, one opus run reads the new records, the metrics of every stage (also PASS: duration, turns, tokens, repeated tool calls) and your right/wrong marks from Needs you, and proposes gap tickets.</p>
   </div>
 
   <div class="panel">
@@ -439,7 +463,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
     <div class="n built"><span class="step">1</span><span class="t">Rebrand to Cubilot</span><span class="d">done: own identifier and data folder, side by side with the previous app</span><span class="ref">§1</span></div>
     <div class="n built"><span class="step">2</span><span class="t">Roles</span><span class="d">done: launch with a role, role plugins, no sub-agents</span><span class="ref">§2</span></div>
     <div class="n built"><span class="step">3</span><span class="t">Ticket grouping</span><span class="d">done: request_id, blocked_by, draft status</span><span class="ref">§3</span></div>
-    <div class="n planned"><span class="step">4</span><span class="t">Session per ticket stage</span><span class="d">in test: built and live-checked; open: 4 high-radius tests, waivers, context pack</span><span class="ref">§4</span></div>
+    <div class="n planned"><span class="step">4</span><span class="t">Session per ticket stage</span><span class="d">in test: built and live-checked; open: 4 high-radius tests, waivers, context pack, stage diagnosis (proposed)</span><span class="ref">§4</span></div>
     <div class="n built"><span class="step">4a</span><span class="t">Agent column</span><span class="d">done: built to test Part 4; reload one agent, skill switches</span><span class="ref">§4a</span></div>
     <div class="n planned"><span class="step">6</span><span class="t">Checkpoint, routing, Warp patterns</span><span class="d">next: Orchestrator checkpoint first; then model × effort per Worker; triage, spec stage, review.json</span><span class="ref">§6</span></div>
     <div class="n planned"><span class="step">5</span><span class="t">Delivery and backup</span><span class="d">after Part 6: internal remote, Deliver step, leak gate, hourly backup</span><span class="ref">§5</span></div>
