@@ -165,9 +165,9 @@ export async function readUsage(file: string): Promise<Usage | null> {
 export type Launch = { role: string; harness: string; cwd: string | null; bytes: number };
 
 /** The `stage.launching` events of a stage, oldest first. The Nth is attempt N; its window ends at the (N+1)th. */
-export function launchEvents(db: Database, stageId: string): Array<{ at_ms: number; launch: Launch | null }> {
+export function launchEvents(db: Database, stageId: string): Array<{ seq: number; at_ms: number; launch: Launch | null }> {
   return db
-    .query<{ at_ms: number; payload_json: string }, [string]>("SELECT at_ms, payload_json FROM events WHERE entity_id = ? AND kind = 'stage.launching' ORDER BY seq")
+    .query<{ seq: number; at_ms: number; payload_json: string }, [string]>("SELECT seq, at_ms, payload_json FROM events WHERE entity_id = ? AND kind = 'stage.launching' ORDER BY seq")
     .all(stageId)
     .map((r) => {
       let l: any = null;
@@ -177,8 +177,22 @@ export function launchEvents(db: Database, stageId: string): Array<{ at_ms: numb
         // an unreadable payload is an event without launch metadata
       }
       const ok = l && typeof l.role === "string" && typeof l.harness === "string" && Number.isInteger(l.bytes) && l.bytes >= 0 && (l.cwd === null || typeof l.cwd === "string");
-      return { at_ms: r.at_ms, launch: ok ? (l as Launch) : null };
+      return { seq: r.seq, at_ms: r.at_ms, launch: ok ? (l as Launch) : null };
     });
+}
+
+/**
+ * The seq of the event that ends an attempt: the first stage.passed, stage.failed or stage.retrying after its launch event
+ * and before the next launch event. Null when there is none.
+ */
+function attemptEndSeq(db: Database, stageId: string, launchSeq: number, nextLaunchSeq: number | null): number | null {
+  return (
+    db
+      .query<{ n: number | null }, [string, number, number]>(
+        "SELECT MIN(seq) AS n FROM events WHERE entity_id = ? AND kind IN ('stage.passed', 'stage.failed', 'stage.retrying') AND seq > ? AND seq < ?",
+      )
+      .get(stageId, launchSeq, nextLaunchSeq ?? Number.MAX_SAFE_INTEGER)?.n ?? null
+  );
 }
 
 /**
@@ -191,7 +205,7 @@ export function launchEvents(db: Database, stageId: string): Array<{ at_ms: numb
 export async function recordStageMetrics(
   db: Database,
   stageId: string,
-  createdSeq: number,
+  createdSeq: number, // fallback only: each row stores the seq of its own attempt's terminal event
   log: (line: string) => void,
   projectsRoot = claudeProjectsDir(),
   repair = false,
@@ -232,11 +246,18 @@ export async function recordStageMetrics(
       }
     }
     const bytes = l.bytes;
+    // created_seq: the seq of this attempt's own terminal event. `createdSeq` is the fallback for a ledger without one.
+    let endSeq = createdSeq;
+    try {
+      endSeq = attemptEndSeq(db, stageId, ev.seq, events[i + 1]?.seq ?? null) ?? createdSeq;
+    } catch {
+      // keep the fallback; the insert below reports a failing ledger
+    }
     try {
       db.run(
         `INSERT OR IGNORE INTO stage_metrics (stage_id, attempt, role, first_message_bytes, first_message_tokens_est, prompt_tokens_first, cache_read_tokens, tokens_before_action, source, created_seq)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [stageId, attempt, l.role, bytes, tokensEst(bytes), usage?.prompt_tokens_first ?? null, usage?.cache_read_tokens ?? null, usage?.tokens_before_action ?? null, usage ? "claude" : "none", createdSeq],
+        [stageId, attempt, l.role, bytes, tokensEst(bytes), usage?.prompt_tokens_first ?? null, usage?.cache_read_tokens ?? null, usage?.tokens_before_action ?? null, usage ? "claude" : "none", endSeq],
       );
       if (why) log(`[stage-metrics] ${stageId} attempt ${attempt}: ${why}; stored as source none`);
     } catch (e) {

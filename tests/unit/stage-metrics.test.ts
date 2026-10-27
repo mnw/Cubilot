@@ -11,7 +11,7 @@ import { migrateLedger } from "../../hub/core/ledger";
 import { createTicketKind } from "../../hub/kinds/ticket";
 import { createStageRuntime } from "../../hub/kinds/stage";
 import { HANDOFF_SECTION_MAX, renderFirstMessage } from "../../hub/core/first-message";
-import { HEAD_CAP_BYTES, MAX_FIRST_MESSAGE_BYTES, claudeProjectFolder, recordStageMetrics, selectTranscript } from "../../hub/core/stage-metrics";
+import { HEAD_CAP_BYTES, MAX_FIRST_MESSAGE_BYTES, claudeProjectFolder, metricsByRole, recordStageMetrics, selectTranscript, stagesMissingMetrics } from "../../hub/core/stage-metrics";
 import type { Entry, HubCapabilities, RouteDef, Scope } from "../../hub/core/types";
 import type { LaunchRequest } from "../../hub/core/launch-queue";
 
@@ -467,23 +467,80 @@ describe("start repair of missing rows (t_8c328391ae299304)", () => {
     });
   }
 
-  test("created_seq is the seq of the terminal event, for the deferred write and for the repair; rows sort in that order", async () => {
+  /** Stage A attempt 1 ends by retry, stage B passes, stage A attempt 2 passes: the order of the terminal events is A1, B, A2. */
+  async function interleave(e: ReturnType<typeof makeEnv>) {
+    const tidB = "t_0000000000000002";
+    e.db.run(
+      `INSERT INTO tickets (id, room, title, acceptance_criteria, blast_radius, priority, creator, status, role, created_at_ms, updated_at_ms, version)
+       VALUES (?, 'r1', 'T', 'c', 'low', 'medium', 'a', 'queued', 'tester', 1, 1, 1)`,
+      [tidB],
+    );
+    e.spawn(); // A attempt 1
+    e.rt.evaluateStages(tidB, e.cap, [], { launch: true });
+    const stageB = e.db.query<{ id: string }, [string]>("SELECT id FROM stage WHERE ticket_id = ?").get(tidB)!.id;
+    expect(stageB).not.toBe(e.stageId);
+    e.spawn(); // B
+    await e.retry(); // A attempt 1 ends by retry
+    e.spawn(); // A attempt 2
+    e.rt.api.move(stageB, { to: "passed" }, "system", e.cap);
+    e.rt.api.move(e.stageId, { to: "passed" }, "system", e.cap);
+    await e.rt.metricsIdle();
+    return stageB;
+  }
+  /** The route's source: rows by role (each role ordered by created_seq), merged by created_seq. */
+  const route = (e: ReturnType<typeof makeEnv>) =>
+    Object.values(metricsByRole(e.db, "r1", "(SELECT room FROM tickets WHERE id = s.ticket_id)"))
+      .flat()
+      .sort((x, y) => x.created_seq - y.created_seq)
+      .map((r) => `${r.stage_id}:${r.attempt}`);
+
+  for (const mode of ["deferred write", "repair"] as const) {
+    test(`created_seq is the seq of each attempt's own terminal event (${mode}); the route order is A1, B, A2`, async () => {
+      capture();
+      const e = makeEnv(mode === "repair" ? { recordMetrics: noWrite } : {});
+      const stageB = await interleave(e);
+      if (mode === "repair") {
+        expect(e.rows()).toHaveLength(0);
+        await startAgain(e);
+      }
+      const ends = e.db
+        .query<{ entity_id: string; kind: string; seq: number }, []>("SELECT entity_id, kind, seq FROM events WHERE kind IN ('stage.passed','stage.failed','stage.retrying') ORDER BY seq")
+        .all();
+      const [a1, b, a2] = ends;
+      expect([a1!.entity_id, a1!.kind, b!.entity_id, a2!.entity_id]).toEqual([e.stageId, "stage.retrying", stageB, e.stageId]);
+      const seqOf = (stage: string, attempt: number) => e.db.query<{ created_seq: number }, [string, number]>("SELECT created_seq FROM stage_metrics WHERE stage_id = ? AND attempt = ?").get(stage, attempt)?.created_seq;
+      expect([seqOf(e.stageId, 1), seqOf(stageB, 1), seqOf(e.stageId, 2)]).toEqual([a1!.seq, b!.seq, a2!.seq]);
+      const order = e.db
+        .query<{ stage_id: string; attempt: number }, []>("SELECT stage_id, attempt FROM stage_metrics ORDER BY created_seq, stage_id, attempt")
+        .all()
+        .map((r) => `${r.stage_id}:${r.attempt}`);
+      expect(order).toEqual([`${e.stageId}:1`, `${stageB}:1`, `${e.stageId}:2`]);
+      expect(route(e)).toEqual(order);
+    });
+  }
+
+  test("the selection query runs after start() returns, in the deferred step", async () => {
     capture();
-    const e = makeEnv();
-    const l = e.spawn();
-    e.pinLaunchTimes(1000);
-    transcript(e.folder(l), "s1", 1500, e.stageId, asst("m1", usage(1, 2, 30, 4)));
+    const e = makeEnv({ recordMetrics: noWrite });
+    e.spawn();
     await e.pass();
-    const term = e.db.query<{ seq: number }, [string]>("SELECT MAX(seq) AS seq FROM events WHERE entity_id = ? AND kind = 'stage.passed'").get(e.stageId)!.seq;
-    expect(e.rows()[0]!.created_seq).toBe(term);
-    e.db.run("DELETE FROM stage_metrics");
-    await startAgain(e);
-    expect(e.rows()[0]!.created_seq).toBe(term);
-    // a second ended stage sorts after the first
-    const second = "s_" + "0".repeat(16);
-    e.db.run("INSERT INTO stage_metrics (stage_id, attempt, role, first_message_bytes, first_message_tokens_est, source, created_seq) VALUES (?, 1, 'worker', 1, 1, 'none', ?)", [second, term + 1]);
-    const order = e.db.query<{ stage_id: string }, []>("SELECT stage_id FROM stage_metrics ORDER BY created_seq").all().map((r) => r.stage_id);
-    expect(order).toEqual([e.stageId, second]);
+    const steps: string[] = [];
+    const rt2 = createStageRuntime(e.db, {
+      ackMs: 60_000,
+      bootGraceMs: 1000,
+      claudeProjectsDir: e.projects,
+      findMissingMetrics: (db) => {
+        steps.push("select");
+        return stagesMissingMetrics(db);
+      },
+    });
+    rt2.module.start!(e.cap);
+    steps.push("start returned");
+    expect(steps).toEqual(["start returned"]);
+    await rt2.metricsIdle();
+    rt2.module.dispose?.();
+    expect(steps).toEqual(["start returned", "select"]);
+    expect(e.rows()).toHaveLength(1);
   });
 
   test("an attempt without launch metadata: no row, no log line at start", async () => {
