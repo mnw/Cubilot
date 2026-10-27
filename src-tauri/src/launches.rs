@@ -20,12 +20,16 @@ use crate::{pty, HubInfo, HubState};
 
 #[derive(Debug, PartialEq)]
 pub enum Request {
-    Launch { id: String, stage_id: String, session: String, role: String, room: String, harness: String, cwd: Option<String>, prompt: String },
+    Launch { id: String, stage_id: String, session: String, role: String, room: String, harness: String, model: Option<String>, provider: Option<String>, effort: Option<String>, cwd: Option<String>, prompt: String },
     Close { id: String, session: String },
 }
 
 fn str_field(v: &Value, k: &str) -> Result<String, String> {
     v.get(k).and_then(Value::as_str).map(str::to_string).ok_or_else(|| format!("missing {k}"))
+}
+
+fn opt_str_field(v: &Value, k: &str) -> Option<String> {
+    v.get(k).and_then(Value::as_str).map(str::to_string)
 }
 
 /// One `data:` payload of the stream. The prompt and env are not read here: 4.3 writes the prompt file, and the shell
@@ -41,6 +45,10 @@ pub fn parse_request(data: &str) -> Result<Request, String> {
             role: str_field(&v, "role")?,
             room: str_field(&v, "room")?,
             harness: str_field(&v, "harness")?,
+            // From role_models in config.yml; the hub sends them only when the role's entry sets them.
+            model: opt_str_field(&v, "model"),
+            provider: opt_str_field(&v, "provider"),
+            effort: opt_str_field(&v, "effort"),
             cwd: v.get("cwd").and_then(Value::as_str).map(str::to_string),
             // The ticket part of the first message (4.3). Empty for a launch that has none.
             prompt: v.get("prompt").and_then(Value::as_str).unwrap_or("").to_string(),
@@ -168,21 +176,21 @@ where
 
 /// What a hub launch hands to pty_spawn. The role always travels: pty_spawn refuses a new launch without one.
 #[derive(Debug, PartialEq)]
-struct SpawnArgs { session: String, cwd: String, room: String, harness: String, role: String, stage_id: String, prompt: String }
+struct SpawnArgs { session: String, cwd: String, room: String, harness: String, role: String, model: Option<String>, provider: Option<String>, effort: Option<String>, stage_id: String, prompt: String }
 
 fn spawn_args(r: Request) -> Result<SpawnArgs, String> {
-    let Request::Launch { stage_id, session, role, room, harness, cwd, prompt, .. } = r else { unreachable!() };
+    let Request::Launch { stage_id, session, role, room, harness, model, provider, effort, cwd, prompt, .. } = r else { unreachable!() };
     let cwd = cwd.ok_or("the launch has no working folder")?;
-    Ok(SpawnArgs { session, cwd, room, harness, role, stage_id, prompt })
+    Ok(SpawnArgs { session, cwd, room, harness, role, model, provider, effort, stage_id, prompt })
 }
 
 /// The arguments a hub launch hands to pty_spawn, in the order of its parameters that a launch sets.
 #[derive(Debug, PartialEq)]
-struct PtySpawnCall { agent: String, cwd: String, room: Option<String>, harness: Option<String>, role: Option<String>, stage_id: Option<String>, first_message: Option<String> }
+struct PtySpawnCall { agent: String, cwd: String, room: Option<String>, harness: Option<String>, role: Option<String>, model: Option<String>, provider: Option<String>, effort: Option<String>, stage_id: Option<String>, first_message: Option<String> }
 
 fn spawn_call(r: Request) -> Result<PtySpawnCall, String> {
     let a = spawn_args(r)?;
-    Ok(PtySpawnCall { agent: a.session, cwd: a.cwd, room: Some(a.room), harness: Some(a.harness), role: Some(a.role), stage_id: Some(a.stage_id), first_message: Some(a.prompt) })
+    Ok(PtySpawnCall { agent: a.session, cwd: a.cwd, room: Some(a.room), harness: Some(a.harness), role: Some(a.role), model: a.model, provider: a.provider, effort: a.effort, stage_id: Some(a.stage_id), first_message: Some(a.prompt) })
 }
 
 /// Builds the pty_spawn call of a launch and gives it to `spawn`. A test passes a recording `spawn`.
@@ -196,7 +204,7 @@ where
 
 async fn launch(app: &AppHandle, r: Request) -> Result<(), String> {
     launch_with(r, |c| {
-        let PtySpawnCall { agent, cwd, room, harness, role, stage_id, first_message } = c;
+        let PtySpawnCall { agent, cwd, room, harness, role, model, provider, effort, stage_id, first_message } = c;
         pty::pty_spawn(
             app.clone(),
             app.state::<pty::PtyRegistry>(),
@@ -206,9 +214,9 @@ async fn launch(app: &AppHandle, r: Request) -> Result<(), String> {
             room,
             harness,
             role,
-            None,
-            None,
-            None,
+            model,
+            effort,
+            provider,
             None,
             stage_id,
             first_message,
@@ -356,7 +364,7 @@ mod tests {
     #[test]
     fn parses_a_launch_and_a_close() {
         let l = parse_request(r#"{"id":"l_1","kind":"launch","stage_id":"s_0123456789abcdef","session":"worker-1","role":"worker","room":"cubilot","harness":"claude","cwd":"/w","prompt":"p","env":{}}"#).unwrap();
-        assert_eq!(l, Request::Launch { id: "l_1".into(), stage_id: "s_0123456789abcdef".into(), session: "worker-1".into(), role: "worker".into(), room: "cubilot".into(), harness: "claude".into(), cwd: Some("/w".into()), prompt: "p".into() });
+        assert_eq!(l, Request::Launch { id: "l_1".into(), stage_id: "s_0123456789abcdef".into(), session: "worker-1".into(), role: "worker".into(), room: "cubilot".into(), harness: "claude".into(), model: None, provider: None, effort: None, cwd: Some("/w".into()), prompt: "p".into() });
         let c = parse_request(r#"{"id":"l_2","kind":"close","session":"worker-1"}"#).unwrap();
         assert_eq!(c, Request::Close { id: "l_2".into(), session: "worker-1".into() });
         assert!(parse_request(r#"{"id":"l_3","kind":"nope"}"#).is_err());
@@ -368,7 +376,7 @@ mod tests {
         let l = parse_request(r#"{"id":"l_1","kind":"launch","stage_id":"s_0123456789abcdef","session":"worker-1","role":"worker","room":"cubilot","harness":"claude","cwd":"/w","prompt":"p","env":{}}"#).unwrap();
         let a = spawn_args(l).unwrap();
         assert_eq!(a.role, "worker");
-        assert_eq!(a, SpawnArgs { session: "worker-1".into(), cwd: "/w".into(), room: "cubilot".into(), harness: "claude".into(), role: "worker".into(), stage_id: "s_0123456789abcdef".into(), prompt: "p".into() });
+        assert_eq!(a, SpawnArgs { session: "worker-1".into(), cwd: "/w".into(), room: "cubilot".into(), harness: "claude".into(), role: "worker".into(), model: None, provider: None, effort: None, stage_id: "s_0123456789abcdef".into(), prompt: "p".into() });
     }
 
     #[test]
@@ -379,7 +387,27 @@ mod tests {
         assert_eq!(r, Ok(()));
         let c = got.into_inner().unwrap();
         assert_eq!(c.role.as_deref(), Some("worker"));
-        assert_eq!(c, PtySpawnCall { agent: "worker-1".into(), cwd: "/w".into(), room: Some("cubilot".into()), harness: Some("claude".into()), role: Some("worker".into()), stage_id: Some("s_0123456789abcdef".into()), first_message: Some("p".into()) });
+        assert_eq!(c, PtySpawnCall { agent: "worker-1".into(), cwd: "/w".into(), room: Some("cubilot".into()), harness: Some("claude".into()), role: Some("worker".into()), model: None, provider: None, effort: None, stage_id: Some("s_0123456789abcdef".into()), first_message: Some("p".into()) });
+    }
+
+    #[test]
+    fn role_model_fields_reach_the_spawn_call() {
+        let l = parse_request(r#"{"id":"l_1","kind":"launch","stage_id":"s_0123456789abcdef","session":"worker-1","role":"worker","room":"cubilot","harness":"pi","model":"m1","provider":"p1","effort":"high","cwd":"/w","prompt":"p","env":{}}"#).unwrap();
+        let Request::Launch { harness, model, provider, effort, .. } = &l else { panic!() };
+        assert_eq!((harness.as_str(), model.as_deref(), provider.as_deref(), effort.as_deref()), ("pi", Some("m1"), Some("p1"), Some("high")));
+        let got = std::cell::RefCell::new(None);
+        let r = tauri::async_runtime::block_on(launch_with(l, |c| { *got.borrow_mut() = Some(c); async { Ok(()) } }));
+        assert_eq!(r, Ok(()));
+        let c = got.into_inner().unwrap();
+        assert_eq!(c.harness.as_deref(), Some("pi"));
+        assert_eq!((c.model.as_deref(), c.provider.as_deref(), c.effort.as_deref()), (Some("m1"), Some("p1"), Some("high")));
+    }
+
+    #[test]
+    fn a_non_string_role_model_field_is_treated_as_absent() {
+        let l = parse_request(r#"{"id":"l_1","kind":"launch","stage_id":"s_0123456789abcdef","session":"worker-1","role":"worker","room":"cubilot","harness":"claude","model":5,"cwd":"/w","prompt":"p","env":{}}"#).unwrap();
+        let Request::Launch { model, .. } = l else { panic!() };
+        assert_eq!(model, None);
     }
 
     #[test]

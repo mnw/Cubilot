@@ -703,12 +703,12 @@ label[for="ticket-filter-request"] { color: var(--text); }
 
 /* ---- 15.3: the card ---- */
 .ticket-card { display: flex; flex-direction: column; gap: var(--sp-6); padding: var(--sp-10); background: var(--bg-raised); }
-.ticket-card-top { display: flex; align-items: center; gap: var(--sp-6); font-family: var(--mono); font-size: var(--fs-xs); min-width: 0; }
+.ticket-card-top { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-6); font-family: var(--mono); font-size: var(--fs-xs); min-width: 0; }
 .ticket-tag { text-transform: uppercase; letter-spacing: 0.04em; padding: 1px var(--sp-6); border-radius: var(--radius-sm, 4px); background: var(--bg-inset); color: var(--text); }
 .ticket-tag.tag-code { background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--text); }
 .ticket-code { color: var(--text-meta); }
 .ticket-card-top .ticket-id { font-family: var(--mono); color: var(--text-meta); white-space: nowrap; }
-.ticket-card-top .ticket-id { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ticket-card-top .ticket-id { flex: none; }
 .ticket-card-top .ticket-tag, .ticket-card-top .ticket-prio { flex-shrink: 0; }
 .ticket-prio { margin-left: auto; display: inline-flex; align-items: center; gap: var(--sp-4); color: var(--text); white-space: nowrap; }
 .ticket-bars { display: inline-flex; align-items: flex-end; gap: 1px; height: 10px; }
@@ -874,7 +874,8 @@ label[for="ticket-filter-request"] { color: var(--text); }
 .ticket-view-panel dd { overflow-wrap: anywhere; }
 
 /* Plan waits for your approval: one row per request above the board columns. */
-.plan-waiting { flex: none; display: flex; flex-direction: column; gap: var(--sp-6); }
+.plan-waiting { flex: none; display: flex; flex-direction: column; gap: var(--sp-6); max-height: max(120px, 20vh); overflow-y: auto; }
+.plan-waiting:focus-visible { outline: 2px solid var(--orange); outline-offset: -2px; }
 .plan-waiting[hidden] { display: none; }
 .plan-row { display: flex; align-items: center; gap: var(--sp-10); padding: var(--sp-8) var(--sp-10); border: 1px solid var(--orange); border-radius: var(--radius-md); background: var(--bg-raised); }
 .plan-text { flex: 1; min-width: 0; }
@@ -887,6 +888,12 @@ label[for="ticket-filter-request"] { color: var(--text); }
 
 /* Needs you: the open findings of a request whose spec review failed twice or more, above the approvals. */
 .needs-row { padding: var(--sp-8) var(--sp-10); border: 1px solid var(--red); border-radius: var(--radius-md); background: var(--bg-raised); }
+.needs-head { display: flex; align-items: center; gap: var(--sp-6); }
+.needs-head .plan-title { flex: 1; min-width: 0; }
+.needs-count { flex: none; font-size: var(--fs-xs); color: var(--text-muted); }
+.needs-btn { flex: none; min-width: 24px; min-height: 24px; padding: var(--sp-2) var(--sp-8); border: var(--border-1) solid var(--line); border-radius: var(--radius-md); background: transparent; color: var(--text); font-size: var(--fs-xs); }
+.needs-btn:hover { background: var(--bg-inset); }
+.needs-btn:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
 .needs-findings { margin: var(--sp-4) 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--sp-3); }
 .needs-finding { display: flex; gap: var(--sp-8); font-size: var(--fs-xs); color: var(--text); }
 .needs-sev { flex: none; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
@@ -895,3 +902,16 @@ label[for="ticket-filter-request"] { color: var(--text); }
 .needs-finding.blocking .needs-sev::before { color: var(--red-strong); }
 .needs-finding.suggestion .needs-sev::before { color: var(--text-muted); }
 .needs-text { min-width: 0; overflow-wrap: anywhere; }
+
+/* Board filters: the ticket id field looks like the request select (inset field, mono) and shows a ring on keyboard focus. */
+#ticket-filter-id {
+  width: 100%; min-height: 28px; box-sizing: border-box;
+  background: var(--bg-inset); border: var(--border-1) solid var(--line); border-radius: var(--radius-md);
+  color: var(--text); font-family: var(--mono); font-size: var(--fs-base);
+  padding: var(--sp-8) var(--sp-12); outline: none;
+  transition: border-color var(--motion-fast);
+}
+#ticket-filter-id:hover { border-color: var(--line-hover); }
+#ticket-filter-id:focus-visible { border-color: var(--line-hover); outline: 2px solid var(--text); outline-offset: 1px; }
+#ticket-filter-id::placeholder { color: var(--text-muted); }
+label[for="ticket-filter-id"] { color: var(--text); }

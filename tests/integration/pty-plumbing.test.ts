@@ -293,13 +293,15 @@ describe("pty plumbing — skill view", () => {
     return { agents };
   }
 
-  // A probe that lists each path it is given, waits for `go`, lists them again.
+  // A probe that lists each path it is given, waits for `go`, lists them again. Each listing goes to a temp file and is renamed
+  // into place, so a file that exists is complete (`ls "$p" > file` creates the file before ls writes to it). PROBE_DELAY (seconds)
+  // widens the gap between the write and the rename: it is the trigger for that race.
   function probe(dir: string) {
     const f = join(dir, "probe.sh");
     writeFileSync(
       f,
-      `i=0; for p in "$@"; do i=$((i+1)); ls "$p" > "${dir}/before-$i.txt"; done\nwhile [ ! -e "${dir}/go" ]; do sleep 0.1; done\n` +
-        `i=0; for p in "$@"; do i=$((i+1)); ls "$p" > "${dir}/after-$i.txt"; done\nsleep 30\n`
+      `i=0; for p in "$@"; do i=$((i+1)); ls "$p" > "${dir}/before-$i.tmp"; sleep \${PROBE_DELAY:-0}; mv "${dir}/before-$i.tmp" "${dir}/before-$i.txt"; done\nwhile [ ! -e "${dir}/go" ]; do sleep 0.1; done\n` +
+        `i=0; for p in "$@"; do i=$((i+1)); ls "$p" > "${dir}/after-$i.tmp"; sleep \${PROBE_DELAY:-0}; mv "${dir}/after-$i.tmp" "${dir}/after-$i.txt"; done\nsleep 30\n`
     );
     return f;
   }
@@ -307,6 +309,7 @@ describe("pty plumbing — skill view", () => {
   const waitFor = async (f: string) => {
     const deadline = Date.now() + 5000;
     while (!existsSync(f) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+    if (!existsSync(f)) throw new Error(`waitFor: ${f} did not appear within 5000 ms`);
   };
 
   // flags: each element is "<flag> '<path>'" in the shape pty.rs writes

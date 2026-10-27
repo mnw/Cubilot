@@ -175,6 +175,10 @@
       <button type="button" class="ticket-new-btn" id="ticket-new-btn">+ New ticket</button>
       <div class="ticket-filter-panel" id="ticket-filter-panel" role="group" aria-label="Board filters" hidden>
         <div class="ff-section">
+          <label class="ff-label" for="ticket-filter-id">Ticket id</label>
+          <input type="search" id="ticket-filter-id" autocomplete="off" spellcheck="false" placeholder="e.g. a5e0 or t_a5e0" />
+        </div>
+        <div class="ff-section">
           <div class="ff-label" id="ff-radius-label">Blast radius</div>
           <div class="ff-seg" role="radiogroup" aria-labelledby="ff-radius-label">
             <label><input type="radio" name="ticket-filter-radius" id="ticket-filter-radius-all" value="all" checked /><span>All</span></label>
@@ -205,7 +209,7 @@
         </div>
       </div>
     </div>
-    <div class="plan-waiting" id="plan-waiting" aria-live="polite" hidden></div>
+    <div class="plan-waiting" id="plan-waiting" role="region" aria-label="Needs you and plans waiting" tabindex="0" aria-live="polite" hidden></div>
     <div class="ticket-board-columns" id="ticket-board-columns"></div>
   </div>
 

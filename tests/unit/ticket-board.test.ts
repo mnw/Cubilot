@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
@@ -92,6 +92,7 @@ beforeEach(async () => {
     setAttribute(k: string, v: string) { this.attrs[k] = v; }, focus() { active = this; }, contains(n: any) { return n === this; } });
   els["ticket-filter-panel"] = control({ hidden: true, contains(n: any) { return !!n?.inPanel; } });
   els["ticket-filter-done"] = control();
+  els["ticket-filter-id"] = control({ value: "", focus() { active = this; } });
   for (const k of ["highest", "high", "medium", "low", "lowest"]) els[`ticket-filter-p-${k}`] = control();
   els["ticket-lead"] = control({ value: "", innerHTML: "", disabled: false });
   els["ticket-lead-wrap"] = control({ hidden: true });
@@ -942,33 +943,33 @@ describe("board filters", () => {
     expect(ctx.TicketBoard._filter().priorities).toEqual(["high", "medium", "lowest"]);
     // Reset restores everything
     els["ticket-filter-reset"].handlers.click();
-    expect(ctx.TicketBoard._filter()).toEqual({ radius: "all", request: "", priorities: all5, showArchived: false, showCancelled: false });
+    expect(ctx.TicketBoard._filter()).toEqual({ id: "", radius: "all", request: "", priorities: all5, showArchived: false, showCancelled: false });
     expect(radio()).toBe("all");
   });
 
   test("the choice is saved per room and restored on the room's return", async () => {
     await show(...board());
     ctx.TicketBoard.setFilter({ radius: "high", priorities: ["low"] });
-    expect(JSON.parse(store.get("cubilot_board_filter:r")!)).toEqual({ radius: "high", request: "", priorities: ["low"], showArchived: false, showCancelled: false, v: 2 });
+    expect(JSON.parse(store.get("cubilot_board_filter:r")!)).toEqual({ id: "", radius: "high", request: "", priorities: ["low"], showArchived: false, showCancelled: false, v: 2 });
     ctx.SELECTED_ROOM = "r2";
     await ctx.TicketBoard.load();
-    expect(ctx.TicketBoard._filter()).toEqual({ radius: "all", request: "", priorities: all5, showArchived: false, showCancelled: false });   // another room starts clean
+    expect(ctx.TicketBoard._filter()).toEqual({ id: "", radius: "all", request: "", priorities: all5, showArchived: false, showCancelled: false });   // another room starts clean
     ctx.TicketBoard.setFilter({ radius: "low", priorities: all5 });
     ctx.SELECTED_ROOM = "r";
     await ctx.TicketBoard.load();
-    expect(ctx.TicketBoard._filter()).toEqual({ radius: "high", request: "", priorities: ["low"], showArchived: false, showCancelled: false });
+    expect(ctx.TicketBoard._filter()).toEqual({ id: "", radius: "high", request: "", priorities: ["low"], showArchived: false, showCancelled: false });
     expect(radio()).toBe("high");                                      // the controls follow the room
-    expect(JSON.parse(store.get("cubilot_board_filter:r2")!)).toEqual({ radius: "low", request: "", priorities: all5, showArchived: false, showCancelled: false, v: 2 });
+    expect(JSON.parse(store.get("cubilot_board_filter:r2")!)).toEqual({ id: "", radius: "low", request: "", priorities: all5, showArchived: false, showCancelled: false, v: 2 });
   });
 
   test("damaged storage falls back to no filter; unknown values are dropped", () => {
     store.set("cubilot_board_filter:r", "{not json");
-    expect(ctx.TicketBoard.readFilter("r")).toEqual({ radius: "all", request: "", priorities: all5, showArchived: false, showCancelled: false });
+    expect(ctx.TicketBoard.readFilter("r")).toEqual({ id: "", radius: "all", request: "", priorities: all5, showArchived: false, showCancelled: false });
     store.set("cubilot_board_filter:r", JSON.stringify({ radius: "extreme", priorities: ["high", "bogus", "constructor"] }));
-    expect(ctx.TicketBoard.readFilter("r")).toEqual({ radius: "all", request: "", priorities: ["high"], showArchived: false, showCancelled: false });
+    expect(ctx.TicketBoard.readFilter("r")).toEqual({ id: "", radius: "all", request: "", priorities: ["high"], showArchived: false, showCancelled: false });
     store.set("cubilot_board_filter:r", JSON.stringify({ radius: "low", priorities: "high" }));
-    expect(ctx.TicketBoard.readFilter("r")).toEqual({ radius: "low", request: "", priorities: all5, showArchived: false, showCancelled: false });
-    expect(ctx.TicketBoard.sanitizeFilter(null)).toEqual({ radius: "all", request: "", priorities: all5, showArchived: false, showCancelled: false });
+    expect(ctx.TicketBoard.readFilter("r")).toEqual({ id: "", radius: "low", request: "", priorities: all5, showArchived: false, showCancelled: false });
+    expect(ctx.TicketBoard.sanitizeFilter(null)).toEqual({ id: "", radius: "all", request: "", priorities: all5, showArchived: false, showCancelled: false });
   });
 });
 
@@ -2119,18 +2120,18 @@ describe("filters panel", () => {
     expect(btn().attrs["aria-label"]).toBe("Filters");
   });
 
-  test("the button opens the panel (aria-expanded, focus on the chosen radius) and toggles it shut", () => {
+  test("the button opens the panel (aria-expanded, focus on the id field) and toggles it shut", () => {
     expect(panel().hidden).toBe(true);
     btn().handlers.click();
     expect(panel().hidden).toBe(false);
     expect(btn().attrs["aria-expanded"]).toBe("true");
-    expect(active).toBe(els["ticket-filter-radius-all"]);
+    expect(active).toBe(els["ticket-filter-id"]);
     btn().handlers.click();
     expect(panel().hidden).toBe(true);
     expect(btn().attrs["aria-expanded"]).toBe("false");
     set({ radius: "low" });
     btn().handlers.click();
-    expect(active).toBe(els["ticket-filter-radius-low"]);                        // the selected segment gets the focus
+    expect(active).toBe(els["ticket-filter-id"]);                                // the id field gets the focus, whatever the radius
   });
 
   test("Done closes it and returns the focus to the button", () => {
@@ -2203,6 +2204,138 @@ describe("filters panel", () => {
     btn().handlers.click();
     for (const fn of docListeners["cubilot:right-pane"] ?? []) fn({ detail: { pane: "terminal" } });
     expect(panel().hidden).toBe(true);
+  });
+
+  describe("ticket id field", () => {
+    const idf = () => els["ticket-filter-id"];
+    const T = (id: string, extra: object = {}) => ({ ...ticket("", null), id, title: id, status: "queued", blast_radius: "low", priority: "medium", approval_request_id: null, assignee: null, archived_at_ms: null, ...extra });
+    let pending: any = null, delay = 0;
+    const typeRaw = (v: string) => { idf().value = v; idf().handlers.input({ target: idf() }); };
+    const flush = () => { const f = pending; pending = null; f?.(); };
+    const type = (v: string) => { typeRaw(v); flush(); };
+    const shown = () => ctx.TicketBoard._filter();
+    const count = () => els["ticket-filter-summary"].textContent;
+    beforeEach(async () => {
+      list = [T("t_a5e022f7f59ca72d", { request_id: "r1" }), T("t_b7710000aaaa0000", { request_id: "r2", blast_radius: "high" }), T("t_c5e0ffff00001111", { request_id: "r1", blast_radius: "high" })];
+      ctx.TicketBoard._tickets.clear();
+      await ctx.TicketBoard.load();
+      pending = null;
+      ctx.setTimeout = (fn: any, ms: number) => { pending = fn; delay = ms; return 1; };
+      ctx.clearTimeout = () => { pending = null; };
+      idf().value = "";
+      active = null;
+      set({ id: "" });
+    });
+    afterEach(() => { ctx.setTimeout = setTimeout; ctx.clearTimeout = clearTimeout; });
+
+    test("typing renders once after a 150 ms pause, not on every key", () => {
+      typeRaw("a");
+      typeRaw("a5");
+      typeRaw("a5e0");
+      expect(delay).toBe(150);
+      expect(count()).toBe("All 3 tickets");                                      // nothing rendered yet
+      flush();
+      expect(count()).toBe("Showing 1 of 3 tickets");
+      expect(shown().id).toBe("a5e0");
+    });
+
+    test("another filter change within the pause keeps the typed id", () => {
+      typeRaw("5e0");
+      set({ radius: "high" });
+      expect(shown().id).toBe("5e0");
+      expect(count()).toBe("Showing 1 of 3 tickets");
+      expect(pending).toBe(null);
+    });
+
+    test("Reset within the pause wins over the typed text", () => {
+      typeRaw("5e0");
+      els["ticket-filter-reset"].handlers.click();
+      expect(shown().id).toBe("");
+      expect(idf().value).toBe("");
+    });
+
+    test("substring with or without t_, any case, full id; trimmed in the match only", () => {
+      for (const q of ["a5e0", "t_a5e0", "T_A5E0", "t_a5e022f7f59ca72d", "  a5e0  "]) {
+        type(q);
+        expect(count()).toBe("Showing 1 of 3 tickets");
+      }
+      expect(shown().id).toBe("  a5e0  ");                                        // raw text stored
+      type("5e0");
+      expect(count()).toBe("Showing 2 of 3 tickets");
+    });
+
+    test("empty or spaces only is no id filter", () => {
+      type("   ");
+      expect(count()).toBe("All 3 tickets");
+      expect(btn().textContent).toBe("Filters");
+    });
+
+    test("no match: empty board, Showing 0 of M, no error", () => {
+      type("zzzz");
+      expect(count()).toBe("Showing 0 of 3 tickets");
+    });
+
+    test("ANDs with radius and request", () => {
+      type("5e0");
+      set({ radius: "high" });
+      expect(count()).toBe("Showing 1 of 3 tickets");
+      set({ radius: "all", request: "r1" });
+      expect(count()).toBe("Showing 2 of 3 tickets");
+      set({ radius: "high" });
+      expect(count()).toBe("Showing 1 of 3 tickets");
+      expect(ctx.TicketBoard.matchesFilter(T("t_a5e0"), shown())).toBe(false);   // low radius, id matches
+    });
+
+    test("sanitize: a number or a missing id reads as empty; an old v:2 value without id still loads", () => {
+      expect(ctx.TicketBoard.sanitizeFilter({ id: 5 }).id).toBe("");
+      expect(ctx.TicketBoard.sanitizeFilter({ radius: "high" }).id).toBe("");
+      expect(ctx.TicketBoard.sanitizeFilter({ id: " ab " }).id).toBe(" ab ");
+      store.set("cubilot_board_filter:r", JSON.stringify({ v: 2, radius: "high", request: "", priorities: all5 }));
+      const f = ctx.TicketBoard.readFilter("r");
+      expect(f.id).toBe("");
+      expect(f.radius).toBe("high");
+    });
+
+    test("counts as one active filter and is stored per room", () => {
+      type("a5e0");
+      expect(btn().textContent).toBe("Filters · 1");
+      expect(JSON.parse(store.get("cubilot_board_filter:r")!).id).toBe("a5e0");
+    });
+
+    test("Reset clears the field and the filter", () => {
+      type("a5e0");
+      els["ticket-filter-reset"].handlers.click();
+      expect(idf().value).toBe("");
+      expect(shown().id).toBe("");
+      expect(btn().textContent).toBe("Filters");
+    });
+
+    test("typing is not overwritten while the field has focus (caret and spaces stay)", () => {
+      active = idf();
+      type("a5e0 ");
+      expect(idf().value).toBe("a5e0 ");
+      set({ radius: "high" });
+      expect(idf().value).toBe("a5e0 ");
+    });
+
+    test("Escape in a non-empty field clears it and keeps the panel open; in an empty field it closes the panel", () => {
+      btn().handlers.click();
+      type("a5e0");
+      expect(key("Escape").prevented).toBe(true);
+      expect(idf().value).toBe("");
+      expect(shown().id).toBe("");
+      expect(panel().hidden).toBe(false);
+      expect(key("Escape").prevented).toBe(true);
+      expect(panel().hidden).toBe(true);
+      expect(active).toBe(btn());
+    });
+
+    test("markup: label bound to a search input, first section, no autocomplete or spellcheck", () => {
+      const html = readFileSync("ui/index.html", "utf8");
+      const p = html.slice(html.indexOf('id="ticket-filter-panel"'));
+      expect(p.indexOf('for="ticket-filter-id"')).toBeLessThan(p.indexOf("ff-radius-label"));
+      expect(p).toContain('<input type="search" id="ticket-filter-id" autocomplete="off" spellcheck="false" placeholder="e.g. a5e0 or t_a5e0"');
+    });
   });
 
   test("Showing N of M stays next to the button", async () => {
@@ -3469,10 +3602,12 @@ describe("request label and blockers (6.2, 6.3)", () => {
     expect(c).toContain('<span class="ticket-id" title="t_&lt;b&gt;&amp;">t_&lt;b&gt;&amp;</span>');
   });
 
-  test("the card id truncates with an ellipsis; the tag and priority do not shrink; the view header does not show it twice", async () => {
+  test("the card id is never cut: the top row wraps and the id does not shrink; the tag and priority do not shrink; the view header does not show it twice", async () => {
     const css = readFileSync("ui/styles/kinds.css", "utf8");
     expect(css).toContain(".ticket-card-top .ticket-id { font-family: var(--mono); color: var(--text-meta); white-space: nowrap; }");
-    expect(css).toContain(".ticket-card-top .ticket-id { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }");
+    expect(css).toContain(".ticket-card-top .ticket-id { flex: none; }");
+    expect(css).not.toMatch(/\.ticket-card-top \.ticket-id \{[^}]*text-overflow/);
+    expect(css).toMatch(/\.ticket-card-top \{[^}]*flex-wrap: wrap;/);
     expect(css).toContain(".ticket-card-top .ticket-tag, .ticket-card-top .ticket-prio { flex-shrink: 0; }");
     await show(mk("a", "in_review", { title: "[code] 8.3b Hot reload", assignee: "alice" }));
     ctx.TicketBoard.openView("a");

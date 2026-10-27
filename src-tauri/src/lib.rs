@@ -643,7 +643,22 @@ fn render_seed_yaml(
          adapter: disabled\n  \
          # claude_bin: ~/.claude/local/node_modules/.bin/claude\n  \
          # ollama_url: http://127.0.0.1:11434\n  \
-         # ollama_model: gemma4:e2b\n",
+         # ollama_model: gemma4:e2b\n\
+         \n\
+         # Stage models. The hub reads this at each stage launch (no Reload needed).\n\
+         # Per role (worker, tester, validator, writer, editor, reviewer): harness\n\
+         # (claude | pi), model, provider (pi only), effort (the claude effort or\n\
+         # the pi thinking level). All fields are optional. A harness other than\n\
+         # the role's own needs a model.\n\
+         # role_models:\n\
+         #   worker:\n\
+         #     model: sonnet\n\
+         #     effort: high\n\
+         #   validator:\n\
+         #     harness: pi\n\
+         #     provider: anthropic\n\
+         #     model: claude-sonnet-4-5\n\
+         #     effort: medium\n",
         ui                 = fonts.ui,
         mono               = fonts.mono,
         editor             = editor,
@@ -1547,6 +1562,26 @@ pub fn run() {
                 _ => {}
             }
         });
+}
+
+#[cfg(test)]
+mod role_models_config_tests {
+    use super::*;
+
+    // role_models is read by the hub only: the shell's AppConfig ignores the key (no deny_unknown_fields).
+    #[test]
+    fn app_config_ignores_role_models() {
+        let cfg: AppConfig = serde_yml::from_str("human_name: me\nrole_models:\n  worker:\n    model: m\n    effort: high\n").unwrap();
+        assert_eq!(cfg.human_name.as_deref(), Some("me"));
+    }
+
+    #[test]
+    fn the_seed_template_shows_role_models_commented_out() {
+        let yaml = render_seed_yaml("human", "", &[], "claude", "", "default", 1.0, &UiFonts { ui: "".into(), mono: "".into() }, "", 1000);
+        assert!(yaml.contains("# role_models:"));
+        assert!(!yaml.lines().any(|l| l.starts_with("role_models:")));
+        serde_yml::from_str::<AppConfig>(&yaml).unwrap();
+    }
 }
 
 #[cfg(test)]

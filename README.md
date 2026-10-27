@@ -25,12 +25,12 @@ Cubilot is a macOS desktop app. It runs a team of coding agents (Claude Code, an
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/02-roles-dark.png">
-  <img alt="Roles, models and skills: Orchestrator, Worker, Tester, Validator, Writer, Editor, Reviewer, and the SEO and accessibility councils" src="docs/readme/02-roles-light.png" width="100%">
+  <img alt="Roles, models and skills: Orchestrator, Worker, Tester, Validator, Writer, Editor, Reviewer, the planned Diagnostician, and the SEO and accessibility councils" src="docs/readme/02-roles-light.png" width="100%">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/03-workflows-dark.png">
-  <img alt="Workflows: intake with spec review, the technical, writing, SEO and accessibility tracks" src="docs/readme/03-workflows-light.png" width="100%">
+  <img alt="Workflows: intake with spec review, the technical and writing tracks, stage failure diagnosis, and the SEO and accessibility tracks" src="docs/readme/03-workflows-light.png" width="100%">
 </picture>
 
 <picture>
@@ -40,12 +40,12 @@ Cubilot is a macOS desktop app. It runs a team of coding agents (Claude Code, an
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/05-jev-dark.png">
-  <img alt="Jev decision points: narrow typed decisions, one planned and six ideas" src="docs/readme/05-jev-light.png" width="100%">
+  <img alt="Jev decision points: narrow typed decisions, three planned (Orchestrator checkpoint, model routing, mutation survivors) and four ideas" src="docs/readme/05-jev-light.png" width="100%">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/06-build-order-dark.png">
-  <img alt="Build order: migration, rebrand, roles and ticket grouping done, then Parts 4 to 15" src="docs/readme/06-build-order-light.png" width="100%">
+  <img alt="Build order: migration, rebrand, roles, ticket grouping, the agent column (4a) and the ticket card and dialog (15) done; Part 4 in test; then Part 6, Part 12 (hub-first, browser access, Linux), Part 5, and Parts 7 to 14" src="docs/readme/06-build-order-light.png" width="100%">
 </picture>
 
 ## Build from source
