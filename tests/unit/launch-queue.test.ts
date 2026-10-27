@@ -14,11 +14,11 @@ import type { Entry, HubCapabilities, Scope } from "../../hub/core/types";
 const ACK_MS = 60;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function makeEnv(o: { retainMs?: number; db?: Database } = {}) {
+function makeEnv(o: { retainMs?: number; db?: Database; sweepMs?: number; bootGraceMs?: number } = {}) {
   const db = o.db ?? new Database(":memory:");
   migrateLedger(db);
   createTicketKind(db).migrate(db);
-  const rt: StageRuntime = createStageRuntime(db, { ackMs: ACK_MS, retainMs: o.retainMs });
+  const rt: StageRuntime = createStageRuntime(db, { ackMs: ACK_MS, retainMs: o.retainMs, sweepMs: o.sweepMs, bootGraceMs: o.bootGraceMs });
   rt.module.migrate(db);
   const cap = { db, sse: { emit: (_e: Entry, _s: Scope) => {} }, briefing: { refresh: () => {} } } as unknown as HubCapabilities;
   const sent: LaunchRequest[] = [];
@@ -39,7 +39,7 @@ function makeEnv(o: { retainMs?: number; db?: Database } = {}) {
   const input = (stage_id: string, session = "worker-1", room = "r1"): LaunchInput => ({
     stage_id, session, room, harness: "claude", cwd: "/tmp/p", prompt: "first message",
   });
-  return { db, rt, cap, sent, connect, ticket, stageFor, input, stop: () => { ac.abort(); rt.queue.dispose(); } };
+  return { db, rt, cap, sent, connect, ticket, stageFor, input, stop: () => { ac.abort(); rt.module.dispose!(); } };
 }
 
 describe("launch queue and ack", () => {
@@ -390,9 +390,31 @@ describe("a hub restart settles launching stages (4.1 review)", () => {
     // the events record it as a normal change
     expect(db.query("SELECT kind FROM events WHERE entity_id = ? ORDER BY seq DESC LIMIT 1").get(a.id)).toEqual({ kind: "stage.launching" });
     // a second restart settles the relaunch of a the same way: attempt 2 has no ack, so it fails for good
+    second.rt.module.dispose!(); // a second start() would overwrite sweepTimer and leak the first interval
     second.rt.module.start!(second.cap);
     expect(before(a.id)).toBe("failed");
     second.stop();
+  });
+});
+
+describe("teardown", () => {
+  test("stop() clears the sweep interval that module.start set", async () => {
+    const e = makeEnv({ sweepMs: 5, bootGraceMs: 0 });
+    e.connect();
+    const s = e.stageFor(e.ticket());
+    e.rt.enqueueLaunch(e.input(s.id), e.cap);
+    e.rt.queue.ack(e.sent[0].id, { result: "spawned" }, e.cap); // running: the sweep reads cap.agents, which the stub cap lacks
+    e.rt.module.start!(e.cap);
+    e.stop();
+    const errors: unknown[][] = [];
+    const orig = console.error;
+    console.error = (...a: unknown[]) => { errors.push(a); };
+    try {
+      await sleep(40);
+    } finally {
+      console.error = orig;
+    }
+    expect(errors.filter((a) => String(a[0]).includes("[stage] sweep of"))).toEqual([]);
   });
 });
 
