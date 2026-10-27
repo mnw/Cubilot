@@ -58,6 +58,8 @@ export type TicketSnapshot = {
   assignee: string | null;
   approval_request_id: string | null;
   external_ref: string | null;
+  /** Free text for the stage sessions of the ticket (1-4000 characters, stored trimmed); null when none. */
+  planning_note: string | null;
   /** Groups the tickets of one request; null when ungrouped. */
   request_id: string | null;
   /** The stage role that picks this ticket's first stage; null when no session is launched for it. */
@@ -74,6 +76,7 @@ const TICKET_ID_RE = /^t_[0-9a-f]{16}$/;
 const TICKET_TITLE_MAX_CHARS = 200;
 const TICKET_CRITERIA_MAX_CHARS = 4_000;
 const TICKET_REF_MAX_CHARS = 200;
+const TICKET_PLANNING_NOTE_MAX_CHARS = 4_000;
 const REQUEST_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
 const isStageRole = (v: unknown): v is StageRole => typeof v === "string" && (STAGE_ROLES as readonly string[]).includes(v);
 const TICKET_BODY_MAX = 16_384;
@@ -121,6 +124,7 @@ const ticketDecl: StateMachineDecl<TicketSnapshot> = {
     assignee: "TEXT_NULL",
     approval_request_id: "TEXT_NULL",
     external_ref: "TEXT_NULL",
+    planning_note: "TEXT_NULL",
     request_id: "TEXT_NULL",
     role: "TEXT_NULL",
     status: "TEXT",
@@ -141,6 +145,7 @@ const ticketDecl: StateMachineDecl<TicketSnapshot> = {
     assignee: row.assignee == null ? null : (row.assignee as string),
     approval_request_id: row.approval_request_id == null ? null : (row.approval_request_id as string),
     external_ref: row.external_ref == null ? null : (row.external_ref as string),
+    planning_note: row.planning_note == null ? null : (row.planning_note as string),
     request_id: row.request_id == null ? null : (row.request_id as string),
     role: isStageRole(row.role) ? row.role : null,
     status: row.status as TicketStatus,
@@ -161,6 +166,13 @@ const ticketDecl: StateMachineDecl<TicketSnapshot> = {
 };
 
 // ---------- Entry projection ----------
+
+/** The trimmed planning note, or undefined when the value is not a string of 1-4000 characters after trim. */
+function planningNoteValue(v: unknown): string | undefined {
+  if (typeof v !== "string") return undefined;
+  const t = v.trim();
+  return t && t.length <= TICKET_PLANNING_NOTE_MAX_CHARS ? t : undefined;
+}
 
 /** A ticket's blocker ids and the ones still open (status other than done: the claim gate's rule). */
 export function blockerFields(db: Database, ticketId: string): { blocked_by: string[]; open_blockers: string[] } {
@@ -268,6 +280,7 @@ type CreateInput = {
   blast_radius: BlastRadius;
   priority: TicketPriority;
   external_ref: string | null;
+  planning_note: string | null;
   request_id: string | null;
   role: StageRole | null;
   /** Raw `blocked_by` from the body: undefined = none, null or [] = none, validated in decide(). */
@@ -298,6 +311,7 @@ const createTicketVerb: VerbDecl<TicketSnapshot, CreateInput> = {
       assignee: payload.assignee,
       approval_request_id: null,
       external_ref: payload.external_ref,
+      planning_note: payload.planning_note,
       request_id: payload.request_id,
       role: payload.role,
       status: payload.status,
@@ -519,7 +533,7 @@ export function closeReviewedBySystemInTx(db: Database, cap: HubCapabilities, ti
   return { snapshot, entry: ticketEntry(db, snapshot, "ticket.assigned", SYSTEM_ACTOR, false, null) };
 }
 
-type EditInput = { title?: string; acceptance_criteria?: string; blast_radius?: BlastRadius; blocked_by?: unknown; request_id?: string | null; role?: StageRole | null; priority?: TicketPriority; external_ref?: string | null };
+type EditInput = { title?: string; acceptance_criteria?: string; blast_radius?: BlastRadius; blocked_by?: unknown; request_id?: string | null; role?: StageRole | null; priority?: TicketPriority; external_ref?: string | null; planning_note?: string | null };
 
 // An open ticket's title and acceptance criteria: the human, the creator and the assignee. The blast radius is the
 // human's alone, because it gates the done approval. New criteria or a lower radius void the approval that was asked.
@@ -540,6 +554,10 @@ const editTicketVerb: VerbDecl<TicketSnapshot, EditInput> = {
     if (grouping && !human && actor !== prior.creator && actor !== roomLead(cap, prior.room)) {
       return forbidden("only the human, the creator or the room lead may edit request_id, blocked_by or role");
     }
+    // The planning note follows the request_id rule: the human, the creator or the room lead, not the assignee.
+    if (payload.planning_note !== undefined && !human && actor !== prior.creator && actor !== roomLead(cap, prior.room)) {
+      return forbidden("only the human, the creator or the room lead may edit planning_note");
+    }
     if (TICKET_TERMINAL.has(prior.status)) return conflict(`ticket already ${prior.status}`);
     // After the claim the grouping is frozen for agents: the human alone changes it.
     if (grouping && !human && prior.status !== "draft" && prior.status !== "queued") {
@@ -553,6 +571,7 @@ const editTicketVerb: VerbDecl<TicketSnapshot, EditInput> = {
     if (payload.blast_radius !== undefined && payload.blast_radius !== prior.blast_radius) changes.blast_radius = payload.blast_radius;
     if (payload.priority !== undefined && payload.priority !== prior.priority) changes.priority = payload.priority;
     if (payload.external_ref !== undefined && payload.external_ref !== prior.external_ref) changes.external_ref = payload.external_ref;
+    if (payload.planning_note !== undefined && payload.planning_note !== prior.planning_note) changes.planning_note = payload.planning_note;
     if (payload.request_id !== undefined && payload.request_id !== prior.request_id) changes.request_id = payload.request_id;
     if (payload.role !== undefined && payload.role !== prior.role) changes.role = payload.role;
     // The blocker list is replaced whole. It is not a snapshot field: it changes only when the set differs.
@@ -777,6 +796,12 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
           }
           externalRef = body.external_ref;
         }
+        let planningNote: string | null = null;
+        if (body.planning_note !== undefined && body.planning_note !== null) {
+          const note = planningNoteValue(body.planning_note);
+          if (note === undefined) return Response.json({ error: "invalid planning_note" }, { status: 400 });
+          planningNote = note;
+        }
         let requestId: string | null = null;
         if (body.request_id !== undefined && body.request_id !== null) {
           if (typeof body.request_id !== "string" || !REQUEST_ID_RE.test(body.request_id)) {
@@ -832,6 +857,7 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
               blast_radius: body.blast_radius,
               priority,
               external_ref: externalRef,
+              planning_note: planningNote,
               request_id: requestId,
               role,
               blocked_by: body.blocked_by,
@@ -1245,6 +1271,12 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
           }
           input.external_ref = body.external_ref;
         }
+        if (body.planning_note !== undefined) {
+          // A string of 1-4000 characters after trim sets it, an explicit null clears it.
+          const note = body.planning_note === null ? null : planningNoteValue(body.planning_note);
+          if (note === undefined) return Response.json({ error: "invalid planning_note" }, { status: 400 });
+          input.planning_note = note;
+        }
         if (body.request_id !== undefined) {
           // A label sets it, an explicit null clears it.
           if (body.request_id !== null && (typeof body.request_id !== "string" || !REQUEST_ID_RE.test(body.request_id))) {
@@ -1259,7 +1291,7 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
         }
         if (body.blocked_by !== undefined) input.blocked_by = body.blocked_by;
         if (Object.keys(input).length === 0) {
-          return Response.json({ error: "nothing to edit (title, acceptance_criteria, blast_radius, priority, external_ref, request_id, role or blocked_by)" }, { status: 400 });
+          return Response.json({ error: "nothing to edit (title, acceptance_criteria, blast_radius, priority, external_ref, planning_note, request_id, role or blocked_by)" }, { status: 400 });
         }
         try {
           const before = entity.load(params.id);
@@ -1520,6 +1552,10 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
       // stage-sessions: the role that picks a ticket's first stage. Existing tickets keep NULL.
       if (!d.query<{ name: string }, []>("PRAGMA table_info(tickets)").all().some((c) => c.name === "role")) {
         d.exec(`ALTER TABLE "tickets" ADD COLUMN "role" TEXT`);
+      }
+      // context-pack: the planning note. Existing tickets keep NULL.
+      if (!d.query<{ name: string }, []>("PRAGMA table_info(tickets)").all().some((c) => c.name === "planning_note")) {
+        d.exec(`ALTER TABLE "tickets" ADD COLUMN "planning_note" TEXT`);
       }
       d.exec(`CREATE INDEX IF NOT EXISTS "idx_tickets_room_status" ON "tickets" ("room", "status")`);
       // Blocker links: a ticket cannot be claimed while a blocker is not done.
