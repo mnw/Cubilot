@@ -36,8 +36,10 @@ src-tauri/binaries/*
 *.log
 
 # AI assistant local config / memory (not part of the product)
-CLAUDE.md
-.claude/
+# CLAUDE.md, .claude/skills/ and .claude/commands/ are tracked (human 2026-10-27).
+.claude/*
+!.claude/skills/
+!.claude/commands/
 .agents/
 .cursor/
 .cursorrules
