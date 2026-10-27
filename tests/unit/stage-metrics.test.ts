@@ -10,7 +10,8 @@ import { giveProject } from "../helpers/repo";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createTicketKind } from "../../hub/kinds/ticket";
 import { createStageRuntime } from "../../hub/kinds/stage";
-import { HANDOFF_SECTION_MAX, renderFirstMessage } from "../../hub/core/first-message";
+import { HANDOFF_SECTION_MAX, NOTES_SECTION_MAX, PACK_SECTION_MAX, renderFirstMessage } from "../../hub/core/first-message";
+import { renderStable } from "../../hub/core/primer";
 import { HEAD_CAP_BYTES, MAX_FIRST_MESSAGE_BYTES, claudeProjectFolder, recordStageMetrics, selectTranscript } from "../../hub/core/stage-metrics";
 import type { Entry, HubCapabilities, RouteDef, Scope } from "../../hub/core/types";
 import type { LaunchRequest } from "../../hub/core/launch-queue";
@@ -389,11 +390,17 @@ describe("bounded candidate read", () => {
     const e = makeEnv();
     const l = e.spawn();
     e.pinLaunchTimes(1000);
+    const primerProject = mkdtempSync(join(tmpdir(), "primer-max-"));
+    mkdirSync(join(primerProject, "docs"));
+    writeFileSync(join(primerProject, "docs", "PRIMER.md"), "x".repeat(100_000));
     const max = renderFirstMessage({
       stageId: e.stageId, role: "worker",
       ticket: { id: "t_0000000000000001", title: "T".repeat(200), acceptance_criteria: "c".repeat(4000), blast_radius: "medium", request_id: "r".repeat(64) },
       branch: "ticket/t_0000000000000001", worktree: "/" + "w".repeat(1023), reason: "r".repeat(1500), recipient: "Orchestrator",
       handoff: { id: "h_0000000000000001", from: "Orchestrator", task: "x".repeat(500), context: { notes: "n".repeat(HANDOFF_SECTION_MAX * 2) } },
+      stable: renderStable({ projectFolder: primerProject, nutshell: "N".repeat(256 * 1024) }),
+      notes: [{ source: "planning", role: null, notes: "p".repeat(NOTES_SECTION_MAX * 2) }],
+      pack: { graph: "g".repeat(PACK_SECTION_MAX * 2), signatures: "s".repeat(PACK_SECTION_MAX * 2) },
     });
     const line1 = user(1500, max);
     expect(Buffer.byteLength(max)).toBeGreaterThan(HANDOFF_SECTION_MAX);
@@ -424,13 +431,13 @@ describe("bounded candidate read", () => {
 
   test("58 candidate files read under 58 x 64 KiB, in chunks of at most 4 KiB", async () => {
     const f = dir();
-    for (let i = 0; i < 57; i++) writeFileSync(join(f, `c${i}.jsonl`), user(1500, "Stage: s_other " + "z".repeat(200 * 1024)) + "\n");
+    for (let i = 0; i < 57; i++) writeFileSync(join(f, `c${i}.jsonl`), user(1500, "Stage: s_other " + "z".repeat(HEAD_CAP_BYTES + 200 * 1024)) + "\n");
     const hit = join(f, "hit.jsonl");
     writeFileSync(hit, user(1600, "Stage: s_x") + "\n");
     const stats = { bytes: 0 };
     expect(await selectTranscript(f, "s_x", 1000, null, stats)).toBe(hit);
     expect(stats.bytes).toBeLessThan(58 * HEAD_CAP_BYTES);
-    expect(stats.bytes).toBeLessThan(57 * 200 * 1024); // each 200 KiB candidate stops at the cap, not at its end
+    expect(stats.bytes).toBeLessThan(57 * (HEAD_CAP_BYTES + 200 * 1024)); // each candidate over the cap stops at the cap, not at its end
     console.log(`bytes read for 58 files: ${stats.bytes}`);
   });
 });

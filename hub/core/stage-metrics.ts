@@ -6,7 +6,8 @@ import { open, readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
-import { HANDOFF_SECTION_MAX } from "./first-message";
+import { HANDOFF_SECTION_MAX, NOTES_SECTION_MAX, PACK_SECTION_MAX } from "./first-message";
+import { PRIMER_CAP_BYTES } from "./primer";
 
 export type MetricsRow = {
   stage_id: string;
@@ -34,11 +35,16 @@ const CHUNK_BYTES = 4 * 1024;
  * - handoff section (from, task, context): HANDOFF_SECTION_MAX = 64 KiB (hub/core/first-message.ts:25), notice included
  * - reason note: the launch ack error is cut at 500 units (hub/kinds/stage.ts:1418) -> 1500, plus 200 for prefix and note text;
  *   every other reason is a fixed string
+ * - stable block (hub/core/primer.ts): docs/PRIMER.md cut at PRIMER_CAP_BYTES (8000) plus the cut line and headings (200), plus the
+ *   Nutshell, which is never cut: its handoff patch came in a JSON body of at most 256 KiB, so 256 KiB bounds it
+ * - earlier notes: NOTES_SECTION_MAX = 32 KiB, cut with a notice (hub/core/first-message.ts)
+ * - pack and diff: PACK_SECTION_MAX = 16 KiB each, cut with a notice
  * - ids, branch, recipient and worktree path: 1500 together (worktree <= 1024 = macOS PATH_MAX, recipient <= 64 chars x 3,
  *   ticket, stage and request ids, branch and blast radius under 150)
  */
 const TEMPLATE_ALLOWANCE = 4 * 1024;
-export const MAX_FIRST_MESSAGE_BYTES = TEMPLATE_ALLOWANCE + 600 + 12_000 + HANDOFF_SECTION_MAX + 1_700 + 1_500;
+export const MAX_FIRST_MESSAGE_BYTES =
+  TEMPLATE_ALLOWANCE + 600 + 12_000 + HANDOFF_SECTION_MAX + 1_700 + 1_500 + (PRIMER_CAP_BYTES + 200 + 256 * 1024) + NOTES_SECTION_MAX + 2 * PACK_SECTION_MAX;
 /** Hard cap per candidate: 2 x the largest renderable first message (human decision, msg 1505). A candidate whose first user message is not complete by then does not match (no error, no log line). */
 export const HEAD_CAP_BYTES = 2 * MAX_FIRST_MESSAGE_BYTES;
 /** A tool call that changes a file ends "before the first action"; so does the result handoff. */

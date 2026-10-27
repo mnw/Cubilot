@@ -12,3 +12,6 @@ Work in the worktree below. Report with a result handoff that names the stage id
 
 ## Acceptance criteria
 {{acceptance_criteria}}
+{{notes}}
+{{pack}}
+{{diff}}
