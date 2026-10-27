@@ -12,7 +12,7 @@ The first message is rendered by `hub/core/first-message.ts` (`renderFirstMessag
 
 **Non-Goals:**
 - Dashboard, model routing, keep-open Worker option, tool bundling. See the proposal.
-- Changing the role prompts beyond the tool-order text.
+- Changing the role prompts beyond the tool-order text and the notes rule (task 4.3).
 
 ## Decisions
 
