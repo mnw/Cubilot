@@ -472,7 +472,7 @@ const pathSegment = (x: string) => x.replace(/[^A-Za-z0-9_.-]/g, "_");
 
 /**
  * The room of a stage: the room of its ticket, or for a spec stage (no ticket) the room of its scope tickets. A spec handoff
- * checks that all of them are in the sender's room, so the first one tells. Used by the role limit and the free-slot start.
+ * checks that all of them are in one room (the agent's room, or for a human sender the room of the named tickets), so the first one tells. Used by the role limit and the free-slot start.
  */
 const STAGE_ROOM_SQL = `COALESCE(
   (SELECT room FROM tickets WHERE id = s.ticket_id),
