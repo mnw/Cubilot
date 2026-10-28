@@ -331,8 +331,9 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
     <article class="n planned role">
       <div class="head"><h3>Design team</h3><span class="model">Claude + 2nd model</span></div>
       <span class="track">Design track · 2 roles</span>
-      <p class="job">Designer (opus for new work, sonnet for changes) makes UI designs before the build, the project design system (ECL for EC projects) and SVG assets. Design reviewer (a different model) checks designs, then the built UI against the approved design.</p>
-      <dl><dt>skills</dt><dd>ui-designer, ux-architect, design-system, frontend-design-direction, frontend-ui-engineering; reviewer: ui-finish-gate-reviewer</dd>
+      <p class="job">Designer (opus for new work, sonnet for changes) makes UI designs in Figma before the build (remote Figma MCP, write to canvas), the project design system as Figma variables and components (ECL for EC projects) and SVG assets. Design reviewer (a different model) checks designs, then the built UI against the approved design.</p>
+      <dl><dt>tool</dt><dd>Figma (use_figma, get_screenshot, Code Connect); tokens exported to the repo</dd>
+      <dt>skills</dt><dd>figma-use, ui-designer, ux-architect, design-system, frontend-design-direction, frontend-ui-engineering; reviewer: ui-finish-gate-reviewer</dd>
       <dt>never</dt><dd>changes product code, approves its own work, copies brand marks</dd></dl>
     </article>
 
@@ -418,7 +419,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
     <h3>Design track</h3>
     <div class="flow">
       <div class="n planned"><span class="t">[design] ticket</span><span class="d">request with a UI change; code tickets wait for it</span></div><span class="arrow">→</span>
-      <div class="n planned"><span class="t">Designer</span><span class="d">prototype on the design system, screenshots, assets</span></div><span class="arrow">→</span>
+      <div class="n planned"><span class="t">Designer</span><span class="d">screens in Figma on the library, screenshots and tokens to the repo, assets</span></div><span class="arrow">→</span>
       <div class="n planned"><span class="t">Design reviewer</span><span class="d">PASS or CHANGES; 2 CHANGES: arbiter</span></div><span class="arrow">→</span>
       <div class="n planned"><span class="t">Plan + design</span><span class="d">one Approve at the start</span><span class="gate">you approve the plan and the design</span></div><span class="arrow">→</span>
       <div class="n planned"><span class="t">Design review of built UI</span><span class="d">after the Tester on UI tickets: layout, states, tokens</span><span class="ref">§16</span></div>

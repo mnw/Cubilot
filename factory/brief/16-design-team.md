@@ -20,21 +20,39 @@ The factory makes the design of a feature before the Workers build it, keeps a d
 | Designer | Claude, opus for a new design or design system, sonnet for changes | Makes the designs, the design system and the assets. Runs its own screenshot check before hand-in. | Changes product code. Approves its own work. |
 | Design reviewer | A different model from the Designer: OpenAI on Pi when it is set up, else opus in a new session | Checks a design against the request and the design system, and the built UI against the approved design. PASS or CHANGES. | Edits files. |
 
+## Tool: Figma (decision 2026-10-28)
+
+The design team works in Figma. It uses the remote Figma MCP server:
+- **Write:** `use_figma` creates and edits frames, components, variants, variables and auto layout in a Figma file, through the Figma Plugin API. `upload_assets` and `generate_image` add images. The Figma skill `figma-use` makes these calls reliable.
+- **Read:** `get_design_context`, `get_screenshot`, `get_variable_defs` and `get_metadata`. The Design reviewer reads only.
+- **Code link:** Code Connect maps Figma components to code components, so that the Workers build from the real components.
+
+Conditions (Figma documentation, read 2026-10-28; check again before the build):
+- A Figma Professional, Education, Organization or Enterprise plan, and edit access to the files.
+- Write to canvas is in beta. It is free during the beta and becomes a paid, usage-based feature later. Record the cost in the delivery report when Figma starts to charge.
+- Output can need manual cleanup. The Designer works in a draft file or a branch of the file, never in the published library directly.
+- Fonts must be in the Figma account. Components with images or video cannot be imported.
+- The stage sessions need the Figma MCP in their role plugin, with the human's Figma sign-in on the Mac. Agents never see the human's password; the sign-in is the human's step (Part 8, setup).
+
 ## Where the work lives
 
+In Figma, for each project:
+- **Library:** the design system as Figma variables (colour, type, spacing, radius, shadow, with modes for the themes) and published components. For a European Commission project, start from the ECL Figma kit when one is available, and do not make a second system.
+- **Design file:** one page for each request, with the screens and their states. The Designer works on a draft or a branch; the human approves the page link.
+
 In the project repository:
-- `design/system/`: `design-tokens.json`, `tokens.css`, `components.md`.
-- `design/<request-id>/`: `brief.md` (the screens and states), the prototype (static HTML and CSS that load `design/system/tokens.css`), and `screenshots/` (desktop and mobile, light and dark where the project has them).
+- `design/system/`: `design-tokens.json` and `tokens.css`, exported from the Figma variables, so that code and Figma use the same values. A check compares them.
+- `design/<request-id>/`: `brief.md` (the Figma page link, the screens and states) and `screenshots/` (from `get_screenshot`), so that the review and the delivery report work without Figma.
 - `design/assets/`: SVG files, each with a line in `design/assets/SOURCES.md`.
 
 Inputs:
-- Figma files, read with the Figma MCP (`get_design_context`, `get_screenshot`, `get_variable_defs`) when the project has them. The team does not write to Figma.
+- Existing Figma files of the project.
 - The existing UI, through screenshots that Playwright makes.
 
 ## Flow
 
 1. The Orchestrator triages a request (Part 6, item 1). A request with a UI change gets a `[design]` ticket first.
-2. Designer: makes the design or the system change, and its screenshots.
+2. Designer: makes the design or the system change in Figma (draft or branch), exports the screenshots and, for a system change, the tokens.
 3. Design reviewer: PASS or CHANGES. CHANGES goes back to the Designer. After two CHANGES, the arbiter decides (Part 6, item 11).
 4. The plan of the request goes to the human with the design screenshots. One Approve covers both.
 5. The Workers build. Each UI ticket names the screens of the approved design that it implements.
@@ -47,7 +65,7 @@ Sources as for the other roles (`factory/README.md`). Copy each skill with its s
 
 | Role | Core | Optional |
 |---|---|---|
-| Designer | `agency-design-ui-designer`, `agency-design-ux-architect`, `design-system` (ECC), `frontend-design-direction` (ECC), `frontend-ui-engineering` (Osmani) | `agency-design-brand-guardian`, `agency-design-visual-storyteller`, `agency-design-inclusive-visuals-specialist` |
+| Designer | `figma-use` (Figma), `agency-design-ui-designer`, `agency-design-ux-architect`, `design-system` (ECC), `frontend-design-direction` (ECC), `frontend-ui-engineering` (Osmani) | `agency-design-brand-guardian`, `agency-design-visual-storyteller`, `agency-design-inclusive-visuals-specialist` |
 | Design reviewer | `agency-design-ui-finish-gate-reviewer`, `design-system` (ECC, audit mode) | `agency-design-ux-researcher`, `agency-design-persona-walkthrough` |
 
 ## Dependencies
@@ -64,10 +82,13 @@ Sources as for the other roles (`factory/README.md`). Copy each skill with its s
 3. A built UI that uses a colour value outside the design system gets a blocking design-review finding.
 4. On a European Commission project, the Designer uses ECL tokens and components, and creates no new token set.
 5. Each asset in `design/assets/` has a line in `SOURCES.md`.
+6. The tokens exported from the Figma variables match `design/system/tokens.css` (a check that fails on a difference).
+7. A design stage without the Figma sign-in stops with a clear message and a "Needs you" line; it does not fall back to HTML silently.
 
 ## Open questions
 
-1. Image generation (illustrations that are not SVG): which model, and is it in scope? Today: SVG only.
+1. Image generation: Figma's `generate_image` can make raster images. Is it in scope, and at what cost after the beta? Today: SVG only.
+3. Which Figma plan and team does the factory use, and who owns the files (the human, or each client)?
 2. Does the design review run on every UI ticket, or only when the ticket names a screen of an approved design?
 
 ---
