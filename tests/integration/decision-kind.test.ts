@@ -3,7 +3,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrateLedger } from "../../hub/core/ledger";
 import { insertEvent } from "../../hub/core/events";
-import { createDecisionKind, type DecisionStatus } from "../../hub/kinds/decision";
+import { createDecisionKind, parseEscalation, type DecisionStatus } from "../../hub/kinds/decision";
 import { createTicketKind } from "../../hub/kinds/ticket";
 import { LedgerConflict } from "../../hub/core/types";
 import { spawnHub, type HubHandle } from "../helpers/hub";
@@ -291,6 +291,93 @@ describe("decision kind: fan-out (1.3)", () => {
       expect(mentions("boss")).toHaveLength(1);
       expect(JSON.stringify(mentions("boss")[0])).toContain("answered");
       for (const s of streams) s.close();
+    } finally {
+      await hub.kill();
+    }
+  });
+});
+
+describe("decision kind: rework 3 (h_0b38ad1b593d35f4)", () => {
+  test("(a) parser: a full stop before a closing quote still ends the sentence", () => {
+    for (const block of ['The log says "Stop." Another action waits.', "The log says (Stop.) Another action waits.", "Did it end?' Another action waits."]) {
+      const r = parseEscalation(escalation({ block }) as any);
+      expect("error" in r).toBe(true);
+    }
+    expect("error" in parseEscalation(escalation({ block: 'The log says "Stop."' }) as any)).toBe(false);
+  });
+
+  test("(a) route: two sentences with a quote gets 400", async () => {
+    const hub = await spawnHub();
+    try {
+      const c = await registerAgent(hub, "boss", { room: "r1" });
+      expect((await postJson(hub, "/rooms/r1/lead", { by: hub.humanName, agent: "boss" })).status).toBe(200);
+      const r = await postJson(hub, "/decisions", { by: "boss", ...escalation({ block: 'The log says "Stop." Another action waits.' }) });
+      expect(r.status).toBe(400);
+      c.close();
+    } finally {
+      await hub.kill();
+    }
+  });
+
+  test("(b) lead offline at answer time: one entry when the lead connects; a retry adds none", async () => {
+    const s = setup();
+    const kindRoutes = s.kind.routes;
+    const answerRoute = kindRoutes.find((r) => r.path instanceof RegExp && String(r.path).includes("answer"))!;
+    const d = s.create("open");
+    let leadHere = false;
+    s.cap.agents.get = (n: string) => (n === "boss" && leadHere ? { name: "boss", room: "r1", permanent: false } : null);
+    const ans = () => answerRoute.handler(new Request("http://x/", { method: "POST", body: JSON.stringify({ by: "human", option: "A" }) }), s.cap, { id: d.id });
+    expect((await ans()).status).toBe(200);
+    expect(s.emitted.filter((e) => e.scope.kind === "to-agents")).toHaveLength(0);
+    leadHere = true;
+    const first = s.kind.pendingFor({ name: "boss", room: "r1", permanent: false }, s.cap);
+    expect(first).toHaveLength(1);
+    expect(first[0].text).toContain(d.id);
+    expect(s.kind.pendingFor({ name: "boss", room: "r1", permanent: false }, s.cap)).toHaveLength(0);
+    expect((await ans()).status).toBe(200);
+    expect(s.emitted.filter((e) => e.scope.kind === "to-agents")).toHaveLength(0);
+    expect(s.events(d.id).filter((e) => e.kind === "decision.answered")).toHaveLength(1);
+  });
+
+  test("(b) lead offline: a retry delivers the undelivered answer once", async () => {
+    const s = setup();
+    const answerRoute = s.kind.routes.find((r) => r.path instanceof RegExp && String(r.path).includes("answer"))!;
+    const d = s.create("open");
+    const realGet = s.cap.agents.get;
+    s.cap.agents.get = () => null;
+    const ans = () => answerRoute.handler(new Request("http://x/", { method: "POST", body: JSON.stringify({ by: "human", option: "A" }) }), s.cap, { id: d.id });
+    await ans();
+    s.cap.agents.get = realGet;
+    await ans();
+    await ans();
+    expect(s.emitted.filter((e) => e.scope.kind === "to-agents")).toHaveLength(1);
+    expect(s.kind.pendingFor({ name: "boss", room: "r1", permanent: false }, s.cap)).toHaveLength(0);
+  });
+
+  test("(c) a failed ticket note gives 500; the retry writes it once; a second retry adds none", async () => {
+    const hub = await spawnHub();
+    try {
+      const boss = await registerAgent(hub, "boss", { room: "r1" });
+      expect((await postJson(hub, "/rooms/r1/lead", { by: hub.humanName, agent: "boss" })).status).toBe(200);
+      const t = await postJson(hub, "/tickets", { by: "boss", title: "Ship", acceptance_criteria: "Tests pass.", blast_radius: "low", priority: "high" });
+      const ticket = (t.json as { snapshot: { id: string } }).snapshot.id;
+      const id = ((await postJson(hub, "/decisions", { by: "boss", ...escalation({ ticket_id: ticket }) })).json as { id: string }).id;
+      const side = new Database(hub.ledgerPath);
+      side.run("CREATE TRIGGER fail_note BEFORE INSERT ON ticket_notes BEGIN SELECT RAISE(ABORT, 'injected'); END");
+      const bad = await postJson(hub, `/decisions/${id}/answer`, { by: hub.humanName, option: "B" });
+      expect(bad.status).toBe(500);
+      expect(JSON.stringify(bad.json)).toContain("note");
+      const notes = async () => ((await getJson(hub, `/tickets/${ticket}/notes?token=${hub.token}`)).json as Array<{ text: string }>).filter((n) => n.text.includes(id));
+      expect(await notes()).toHaveLength(0);
+      side.run("DROP TRIGGER fail_note");
+      expect((await postJson(hub, `/decisions/${id}/answer`, { by: hub.humanName, option: "B" })).status).toBe(200);
+      expect(await notes()).toHaveLength(1);
+      expect((await postJson(hub, `/decisions/${id}/answer`, { by: hub.humanName, option: "B" })).status).toBe(200);
+      expect(await notes()).toHaveLength(1);
+      const n = side.query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM events WHERE entity_id = ? AND kind = 'decision.answered'").get(id)!.n;
+      expect(n).toBe(1);
+      side.close();
+      boss.close();
     } finally {
       await hub.kill();
     }

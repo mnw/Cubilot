@@ -219,7 +219,7 @@ export function parseEscalation(b: Record<string, unknown>): Escalation | { erro
   const reason = typeof b.reason === "string" ? b.reason : "";
   if (!REASONS.has(reason)) return { error: "reason must be scope, feature, irreversible or security" };
   const block = str(b.block, BLOCK_MAX);
-  if (!block || /[\r\n]/.test(block) || /[.!?]\s+\S/.test(block)) return { error: `block must be one sentence on one line (max ${BLOCK_MAX} chars)` };
+  if (!block || /[\r\n]/.test(block) || /[.!?]["'”’)\]]*\s+\S/.test(block)) return { error: `block must be one sentence on one line (max ${BLOCK_MAX} chars)` };
   if (!Array.isArray(b.facts) || b.facts.length < 1 || b.facts.length > FACTS_MAX) {
     return { error: `facts must be a list of 1 to ${FACTS_MAX} items` };
   }
@@ -279,13 +279,27 @@ export function createDecisionKind(db: Database): DecisionKind {
     },
   };
 
-  /** The ticket note of an answer: its own transaction, after the decision row is answered. */
+  const leadText = (d: DecisionSnapshot) => {
+    const label = d.body?.options.find((o) => o.id === d.option)?.label;
+    return `Decision ${d.id} answered: ${d.option}${label ? ` (${label})` : ""}${d.text ? `. ${d.text}` : ""}${d.body ? ` Block: ${d.body.block}` : ""}`;
+  };
+  const leadEntry = (d: DecisionSnapshot, lead: string, from: string): Entry =>
+    ({ from, to: lead, room: d.room, ts: ts(), image: null, text: leadText(d) });
+  const delivered = (id: string) => !!db.query("SELECT 1 FROM decision_deliveries WHERE decision_id = ?").get(id);
+  const markDelivered = (id: string) => db.run("INSERT OR IGNORE INTO decision_deliveries (decision_id, delivered_at_ms) VALUES (?, ?)", [id, Date.now()]);
+
+  const answerPrefix = (d: DecisionSnapshot) => `Decision ${d.id} answered:`;
+
+  /** The ticket note of an answer: its own transaction, after the decision row is answered. One note for each decision, also after a retry or a restart. */
   function writeTicketNote(cap: HubCapabilities, d: DecisionSnapshot, author: string): boolean {
     if (!d.ticket_id) return false;
     const t = db.query<{ id: string; room: string }, [string]>("SELECT id, room FROM tickets WHERE id = ?").get(d.ticket_id);
     if (!t) return false;
+    const prefix = answerPrefix(d);
+    const have = db.query<{ n: number }, [string, number, string]>("SELECT COUNT(*) AS n FROM ticket_notes WHERE ticket_id = ? AND substr(text, 1, ?) = ?").get(t.id, prefix.length, prefix)!.n;
+    if (have > 0) return true;
     const label = d.body?.options.find((o) => o.id === d.option)?.label;
-    let text = `Decision ${d.id} answered: ${d.option}${label ? ` (${label})` : ""}${d.text ? `. ${d.text}` : ""}`;
+    let text = `${prefix} ${d.option}${label ? ` (${label})` : ""}${d.text ? `. ${d.text}` : ""}`;
     while (new TextEncoder().encode(text).length > NOTE_MAX_BYTES) text = text.slice(0, -1);
     const at = Date.now();
     let seq = 0;
@@ -368,24 +382,22 @@ export function createDecisionKind(db: Database): DecisionKind {
         }
         try {
           const r = api.move(cap, id, "answered", by, { option, text });
-          if (!r.emitted) return Response.json({ snapshot: r.snapshot, idempotent: true }, { status: 200 });
           const d = r.snapshot;
+          // Deliver the answer to the lead once. A lead that is away gets it from pendingFor when it connects.
           const lead = roomLead(cap, d.room);
-          if (lead) {
-            const label = d.body?.options.find((o) => o.id === d.option)?.label;
-            cap.sse.emit(
-              { from: by, to: lead, room: d.room, ts: ts(), image: null,
-                text: `Decision ${d.id} answered: ${d.option}${label ? ` (${label})` : ""}${d.text ? `. ${d.text}` : ""}${d.body ? ` Block: ${d.body.block}` : ""}` },
-              { kind: "to-agents", agents: [lead] },
-            );
+          if (lead && !delivered(d.id)) {
+            cap.sse.emit(leadEntry(d, lead, by), { kind: "to-agents", agents: [lead] });
+            markDelivered(d.id);
           }
+          // No 200 without the audit note. A retry finds the answer and writes the missing note.
           let ticket_note = false;
           try {
             ticket_note = writeTicketNote(cap, d, by);
           } catch (e) {
             console.error(`[decision] ticket note for ${d.id} failed:`, e);
+            return Response.json({ error: `ticket note for ${d.id} was not written; retry the same answer`, snapshot: d }, { status: 500 });
           }
-          return Response.json({ snapshot: d, lead, ticket_note }, { status: 200 });
+          return Response.json(r.emitted ? { snapshot: d, lead, ticket_note } : { snapshot: d, idempotent: true, lead, ticket_note }, { status: 200 });
         } catch (e) {
           if (e instanceof LedgerConflict) return ledgerConflictResponse(e);
           throw e;
@@ -413,10 +425,23 @@ export function createDecisionKind(db: Database): DecisionKind {
     kind: "decision",
     migrate: (d: Database) => {
       entity.migrate(d);
+      d.exec(`CREATE TABLE IF NOT EXISTS "decision_deliveries" ("decision_id" TEXT PRIMARY KEY, "delivered_at_ms" INTEGER NOT NULL)`);
       d.exec(`CREATE INDEX IF NOT EXISTS "idx_decisions_room_status" ON "decisions" ("room", "status")`);
     },
     routes: withLedgerRequired(routes),
-    pendingFor: () => [],
+    pendingFor: (agent, cap) => {
+      const lead = db.query<{ room: string }, [string]>("SELECT room FROM ticket_room_lead WHERE agent = ?").all(agent.name);
+      const out: Entry[] = [];
+      for (const { room } of lead) {
+        if (agent.room !== room) continue;
+        for (const d of entity.listByStatus({ status: "answered", room, limit: 200 })) {
+          if (delivered(d.id)) continue;
+          markDelivered(d.id);
+          out.push(leadEntry(d, agent.name, cap.config.humanName));
+        }
+      }
+      return out;
+    },
     toolNames: ["escalate"],
     api,
   };
