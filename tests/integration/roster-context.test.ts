@@ -40,3 +40,43 @@ test("Empty value: no used_percentage gives null; so do a missing file and a bad
   for (const n of ["ctx-b", "ctx-c", "ctx-d"]) expect(r.find((a) => a.name === n).context_pct).toBeNull();
   acs.forEach((a) => a.abort());
 });
+
+async function sseRosters(ac: AbortController): Promise<AsyncGenerator<any>> {
+  const r = await fetch(`${hub.url}/stream`, { headers: H(), signal: ac.signal });
+  const reader = r.body!.getReader();
+  const dec = new TextDecoder();
+  async function* gen() {
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      buf += dec.decode(value);
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const m = buf.slice(0, i).split("\n").find((l) => l.startsWith("data:"));
+        buf = buf.slice(i + 2);
+        if (!m) continue;
+        try { const d = JSON.parse(m.slice(5)); if (d.type === "roster") yield d; } catch {}
+      }
+    }
+  }
+  return gen();
+}
+
+test("the SSE roster snapshot after GET /agents keeps context_pct 42.5, and a changed file reaches the next roster broadcast", async () => {
+  writeFileSync(join(ctx, "ctx-e.json"), '{"context_window":{"used_percentage":42.5}}');
+  const agent = await register("ctx-e");
+  await roster();
+  const ac = new AbortController();
+  const it = await sseRosters(ac);
+  const first = (await it.next()).value;
+  expect(first.agents.find((a: any) => a.name === "ctx-e").context_pct).toBe(42.5);
+  writeFileSync(join(ctx, "ctx-e.json"), '{"context_window":{"used_percentage":77}}');
+  let seen: number | null = null;
+  for (let i = 0; i < 5 && seen !== 77; i++) {
+    seen = (await it.next()).value.agents.find((a: any) => a.name === "ctx-e").context_pct;
+  }
+  expect(seen).toBe(77);
+  ac.abort();
+  agent.abort();
+}, 20000);
