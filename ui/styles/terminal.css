@@ -132,6 +132,7 @@
   .terminal-tab .tab-label, .agent-row-human .tab-label { color: hsl(from var(--agent-color, var(--text)) h s var(--agent-name-l)); }
   .terminal-tab-shell .tab-label { color: inherit; }
 }
+.row-ctx { flex: 0 0 auto; font-size: var(--fs-md); color: var(--text-muted); }
 .row-state { display: none; flex: 0 0 auto; font-size: var(--fs-md); }
 .terminal-tab[data-presence="offline"] .lbl-offline { display: inline; color: var(--text-muted); }
 .terminal-tab.paused:not([data-presence="offline"]):not(.needs-attention) .lbl-paused { display: inline; color: var(--text); }

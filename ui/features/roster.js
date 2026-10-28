@@ -15,6 +15,7 @@ function applyRoster(agents) {
   }
 
   renderAgentColumn();
+  for (const a of ROSTER) window.setAgentContext?.(a.name, a.context_pct);
   refreshRolePills();
   renderTargetDropdown();
   renderRoomSwitcher();

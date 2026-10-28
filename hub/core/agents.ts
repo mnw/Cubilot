@@ -11,6 +11,7 @@
 
 import { DropQueue } from "./sse";
 import { colorFromName, validName } from "./ids";
+import { readContextPct } from "./context-usage";
 import type { Agent, Entry } from "./types";
 
 export type AgentRegistryOptions = {
@@ -230,7 +231,7 @@ export function createAgentRegistry(opts: AgentRegistryOptions): AgentRegistry {
   }
 
   function rosterSnapshot(): Entry {
-    return { type: "roster", agents: [...knownAgents.values()] as unknown as Entry["agents"] };
+    return { type: "roster", agents: [...knownAgents.values()].map((a) => ({ ...a, context_pct: readContextPct(a.name) })) as unknown as Entry["agents"] };
   }
 
   function presenceSnapshot(): Entry {

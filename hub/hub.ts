@@ -158,6 +158,16 @@ const agents = createAgentRegistry({
     briefingDispatcher.scheduleFanout();
   },
 });
+// The context files change with no roster event: re-send the roster when a percentage changed.
+const CONTEXT_REFRESH_MS = 5000;
+let lastContextKey = "";
+setInterval(() => {
+  const snap = agents.rosterSnapshot();
+  const key = JSON.stringify((snap.agents as any[]).map((a) => a.context_pct));
+  if (key === lastContextKey) return;
+  lastContextKey = key;
+  fanout.send(snap, { kind: "ui-only-ambient" });
+}, CONTEXT_REFRESH_MS).unref?.();
 const ensureAgent = agents.ensure;
 const removeAgent = agents.remove;
 

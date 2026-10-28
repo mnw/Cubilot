@@ -2600,7 +2600,7 @@ mod spawn_argv_tests {
         let version = dest.join(&v);
         let home = root.join("home/.claude");
         std::fs::create_dir_all(&home).unwrap();
-        let settings = write_agent_settings(agent, role, &root, &home, &root.join("settings")).unwrap();
+        let settings = write_agent_settings(agent, role, &root, &home, &version.join("shared"), &root.join("settings")).unwrap();
         let spec = load_role_spec(role, &src, &version).unwrap();
         let settings = if spec.harness == "claude" { Some(settings) } else { None };
         (root, role_launch(&spec, &version, settings))
