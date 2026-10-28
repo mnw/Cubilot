@@ -474,6 +474,25 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
             return Response.json({ error: "context.commit must be a commit hash" }, { status: 400 });
           }
           handoffRoom = fromAgent.room ?? cap.config.defaultRoom;
+          const humanRows = new Map<string, { status: string; request_id: string | null; room: string }>();
+          // The human has no room: the review takes the room of its named tickets (spec-fail-gate 1). They must exist and share one room.
+          if (from === cap.config.humanName) {
+            const ids = c.ticket_ids as string[] | undefined;
+            if (!ids?.length) return Response.json({ error: "a spec review from the human needs context.ticket_ids" }, { status: 400 });
+            // One query loads every named ticket; the scope check below reuses these rows.
+            const uniq = [...new Set(ids)];
+            const found = db
+              .query<{ id: string; status: string; request_id: string | null; room: string }, string[]>(
+                `SELECT id, status, request_id, room FROM tickets WHERE id IN (${uniq.map(() => "?").join(",")})`,
+              )
+              .all(...uniq);
+            for (const t of found) humanRows.set(t.id, t);
+            const missing = uniq.find((id) => !humanRows.has(id));
+            if (missing) return Response.json({ error: `unknown ticket ${missing}` }, { status: 400 });
+            const rooms = new Set(found.map((t) => t.room));
+            if (rooms.size !== 1) return Response.json({ error: `context.ticket_ids must be in one room, found: ${[...rooms].sort().join(", ")}` }, { status: 400 });
+            handoffRoom = [...rooms][0];
+          }
           // The FAIL limit (spec-fail-gate 1): after two FAILs since the last PASS only the human sends this review.
           if (from !== cap.config.humanName) {
             const { fails } = specFailState(db, handoffRoom, specRequestId);
@@ -495,7 +514,7 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
           const named = c.ticket_ids as string[] | undefined;
           if (named) {
             for (const id of new Set(named)) {
-              const t = db.query<{ status: string; request_id: string | null; room: string }, [string]>("SELECT status, request_id, room FROM tickets WHERE id = ?").get(id);
+              const t = humanRows.get(id) ?? db.query<{ status: string; request_id: string | null; room: string }, [string]>("SELECT status, request_id, room FROM tickets WHERE id = ?").get(id);
               if (!t || t.room !== handoffRoom) return Response.json({ error: `unknown ticket ${id} in room ${handoffRoom}` }, { status: 400 });
               if (t.status !== "draft") return Response.json({ error: `ticket ${id} is ${t.status}, not draft` }, { status: 400 });
               if (t.request_id !== specRequestId) return Response.json({ error: `ticket ${id} is not in request ${specRequestId}` }, { status: 400 });

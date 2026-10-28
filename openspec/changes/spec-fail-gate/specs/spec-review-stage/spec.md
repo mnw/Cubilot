@@ -2,7 +2,7 @@
 
 ### Requirement: The hub refuses a third spec review from a non-human sender
 
-The hub SHALL refuse a spec review handoff with 409 when the sender is not the human and the request has two or more spec FAIL verdicts since its last PASS in the room. The error text SHALL name the count and say "the human must send this review". The hub SHALL NOT record a handoff, a stage or an event. A spec review from the human SHALL start as before. A PASS SHALL reset the count.
+The hub SHALL refuse a spec review handoff with 409 when the sender is not the human and the request has two or more spec FAIL verdicts since its last PASS in the room. The error text SHALL name the count and say "the human must send this review". The hub SHALL NOT record a handoff, a stage or an event. A spec review from the human SHALL name `ticket_ids` and SHALL take the room of those tickets (see "A spec review is a stage of the request"). A PASS SHALL reset the count.
 
 #### Scenario: Third review from the Orchestrator
 
@@ -13,9 +13,11 @@ The hub SHALL refuse a spec review handoff with 409 when the sender is not the h
 
 #### Scenario: Human sends the review
 
-- **GIVEN** the request `r-1` has two FAIL verdicts since its last PASS
-- **WHEN** the human sends a spec review of `r-1`
-- **THEN** the hub creates a stage and starts it
+- **GIVEN** the request `r-1` in room `cubilot` has two FAIL verdicts since its last PASS
+- **WHEN** the human sends a spec review of `r-1` that names its `draft` ticket in `ticket_ids`
+- **THEN** the hub creates a stage and starts it in room `cubilot`
+- **AND** the stored handoff room is `cubilot`
+- **AND** the first message says "This is spec review 3 of this request since its last PASS."
 
 #### Scenario: PASS resets the gate
 
@@ -53,6 +55,47 @@ The hub SHALL list a request in the "Needs you" area when it has two or more FAI
 - **THEN** the "Needs you" area lists `r-1`
 
 ## MODIFIED Requirements
+
+### Requirement: A spec review is a stage of the request
+
+The hub SHALL create one spec-review stage for a request when a handoff names `to_role: "validator"` with `review: "spec"` and a `request_id`. The stage SHALL NOT have a ticket. The handoff SHALL contain `request_text` and MAY contain `spec_paths`, `ticket_ids` and `commit`. When the sender is the human, `ticket_ids` SHALL be a non-empty list, and the room of the review SHALL be the room of those tickets. All named tickets SHALL be in one room. Otherwise the hub SHALL return HTTP 400 and record nothing. The error for a missing or empty list SHALL name `ticket_ids`. When the sender is an agent, the room of the review SHALL be the room of the agent.
+
+#### Scenario: Spec handoff creates a stage
+
+- **WHEN** the Orchestrator sends a handoff to `validator` with `request_id` `r-1` and `review` `spec`
+- **THEN** the hub creates one spec-review stage for `r-1`
+- **AND** the stage has no ticket id
+
+#### Scenario: Missing request text
+
+- **WHEN** a spec handoff has no `request_text`
+- **THEN** the hub returns HTTP 400 and records nothing
+
+#### Scenario: Human names tickets of two rooms
+
+- **WHEN** the human sends a spec review whose `ticket_ids` name tickets in two rooms
+- **THEN** the hub returns HTTP 400 and records no handoff, stage or event
+
+#### Scenario: Human names no tickets
+
+- **WHEN** the human sends a spec review with no `ticket_ids`, or with an empty list
+- **THEN** the hub returns HTTP 400 with an error that names `ticket_ids`
+- **AND** the handoff, stage and event counts do not change
+
+### Requirement: The scope of a spec review holds draft tickets only
+
+The scope of a spec review SHALL be the `ticket_ids` of the handoff. Without `ticket_ids`, for an agent sender only, the scope SHALL be every `draft` ticket of the request in the room. Every ticket in the scope SHALL be `draft` and SHALL carry the request id. Otherwise the hub SHALL return HTTP 400 and record nothing.
+
+#### Scenario: Default scope
+
+- **GIVEN** a request with three `draft` tickets and one `queued` ticket
+- **WHEN** an agent sends a spec handoff that names no ticket ids
+- **THEN** the scope holds the three `draft` tickets
+
+#### Scenario: Ticket outside the draft state
+
+- **WHEN** a spec handoff names a `queued` ticket
+- **THEN** the hub returns HTTP 400 and records nothing
 
 ### Requirement: The second FAIL goes to the human
 
