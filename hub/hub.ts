@@ -51,9 +51,9 @@ import {
   readSummariserConfigFromEnv,
   type Summariser,
 } from "./core/summariser";
+import { createLaunchRecord } from "./core/launch-record";
 import {
   createBriefingBuilder,
-  liveStageSessions,
   briefingSignature as computeBriefingSignature,
   type BriefingBuilder,
   type BriefingPayload,
@@ -236,6 +236,7 @@ const fanout = createFanout({
   nextEntryId: () => ++entrySeq,
 });
 
+const launchRecord = createLaunchRecord();
 // Lazy-init: depends on KINDS, defined below in source order.
 let _briefingBuilder: BriefingBuilder | null = null;
 function buildBriefing(agent: string): BriefingPayload {
@@ -249,7 +250,7 @@ function buildBriefing(agent: string): BriefingPayload {
         const room = agents.get(name)?.room;
         return !!room && (ledgerDb ? roomLeadOf(ledgerDb, room) : "Orchestrator") === name;
       },
-      stageSessions: () => liveStageSessions(ledgerDb),
+      stageSessions: () => launchRecord.sessions(),
     });
   }
   return _briefingBuilder.build(agent);
@@ -276,7 +277,7 @@ const buildCap = createCapBuilder({
 });
 
 // Add a Kind: one entry in `hub/kinds/index.ts`. hub.ts unchanged.
-const KINDS: readonly KindModule[] = buildKinds(ledgerDb);
+const KINDS: readonly KindModule[] = buildKinds(ledgerDb, launchRecord);
 
 if (ledgerDb) {
   for (const k of KINDS) k.migrate(ledgerDb);

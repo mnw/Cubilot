@@ -25,6 +25,7 @@ import { createLedgerEntity, ledgerConflictResponse, withLedgerRequired } from "
 import { validName, validRoomLabel } from "../core/ids";
 import { getRoomSettings, DEFAULT_ROLE_LIMITS, DEFAULT_STAGE_TIMEOUT_MIN, STAGE_ROLES, type StageRole } from "../core/ledger";
 import { LedgerConflict } from "../core/types";
+import type { LaunchRecord } from "../core/launch-record";
 import { createLaunchQueue, type LaunchEnd, type LaunchQueue, type LaunchRequest } from "../core/launch-queue";
 import { roleHarness } from "../core/role-harness";
 import { roleModelFor } from "../core/role-models";
@@ -690,6 +691,8 @@ export function createStageRuntime(
     recordMetrics?: typeof recordStageMetrics;
     /** Replaces the start repair's selection query (tests only). */
     findMissingMetrics?: typeof stagesMissingMetrics;
+    /** The hub's record of launched stage sessions: bound at a launch, released at the close ack (P6-10). */
+    launchRecord?: LaunchRecord;
   } = {},
 ): StageRuntime {
   const entity = createLedgerEntity({ decl: stageDecl, db });
@@ -738,6 +741,7 @@ export function createStageRuntime(
       // The session is gone: its role slot is free. Start what waits for it (a relaunch of a retrying stage first).
       const held = closing.get(session);
       closing.delete(session);
+      opts.launchRecord?.release(session);
       // 6.5 fix: the session is closed, so its temporary worktree can go. A stage that ended (passed, retrying, failed) stays
       // in its old session's worktree until here: the close is only queued when the stage moves, and the session may still run.
       try {
@@ -772,6 +776,7 @@ export function createStageRuntime(
           // A value that came from role_models and was refused by pty_spawn names its source (role-models 4). A later
           // tmux or filesystem error does not: the value was fine.
           const why = end.by === "ack" && fromRoleModels && VALUE_REFUSAL.test(raw) ? `role_models.${req.role}: ${raw}` : raw;
+          if (end.by === "ack") opts.launchRecord?.release(req.session); // the shell says no session started
           endLaunchAttempt(api, req.stage_id, cap, why);
           reportFinalFailure(req.stage_id, `the launch did not start: ${why}`, cap);
         }
@@ -1395,6 +1400,7 @@ export function createStageRuntime(
     if (models.entry) roleModelLaunches.add(req.id);
     const push = () => {
       queue.push(req);
+      opts.launchRecord?.bind(req.session, req.stage_id);
       inflight.set(req.stage_id, { id: req.id, session: req.session });
     };
     const buildPackFor = opts.buildPack;

@@ -10,6 +10,7 @@ import { createHandoffKind, createSystemHandoff } from "./handoff";
 import { createInterruptKind } from "./interrupt";
 import { createPermissionKind } from "./permission";
 import { buildPack } from "../core/context-pack";
+import type { LaunchRecord } from "../core/launch-record";
 import { createStageRuntime } from "./stage";
 import { createTicketKind } from "./ticket";
 
@@ -21,11 +22,12 @@ export function roomLeadOf(db: Database, room: string): string {
 export type KindFactory = (db: Database) => KindModule;
 
 /** Construct all Kinds against the live ledger db. Empty array when ledger disabled. */
-export function buildKinds(db: Database | null): readonly KindModule[] {
+export function buildKinds(db: Database | null, launchRecord?: LaunchRecord): readonly KindModule[] {
   if (!db) return [];
   const cancelTrace = createCancelTraceKind(db);
   // The handoff kind calls the stage runtime when a handoff names a role, so the two share one runtime.
   const stage = createStageRuntime(db, {
+    launchRecord,
     ackMs: Number(process.env.CUBILOT_LAUNCH_ACK_MS) || undefined,
     // A failed stage cancel or sweep leaves a row for the human (cancel-trace).
     traceFailure: (input, cap) => cancelTrace.record(input, cap),
