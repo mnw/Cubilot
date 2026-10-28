@@ -63,6 +63,10 @@ The source is "SEO-AEO-GEO Ultimate" v3.3.0 by Oegeyilmaz9, Apache License 2.0. 
 5. A conflict in the result creates a question for the human, not a ticket.
 6. The skill listing of an SEO seat shows the six factory skills and not the 27 suite skills.
 
+## Mockups (2026-10-28)
+
+Not designed yet: the `[seo]` ticket with its four stages, and the agreed, single and conflict findings. Design them with the council, after Part 9.
+
 ---
 
 Index: [00-index.md](00-index.md). This part is one file of the implementation brief. "Part N" means file `NN-*.md` in this folder.

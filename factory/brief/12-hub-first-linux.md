@@ -137,6 +137,14 @@ Tests for Linux:
 3. Notifications to the phone for "Waiting for you" items: web push from the hub, or a different channel?
 4. More than one human account? Options: (a) one human, many devices (this part); (b) a small team on one instance: accounts with a role (owner, approver, viewer) and room membership, every human action records the account; (c) separate customers: one instance (server or container) for each customer, not shared tenants in one hub. Each Claude subscription belongs to one person, so each human who runs agents needs their own Claude plan or an API key.
 
+## Mockups (2026-10-28)
+
+Designed in `design/mockups/cubilot-prototype.html`:
+- Sign-in (`#sign-in`) and its states (`#sign-in-states`): first run with the setup code, recovery codes, password and code, the lock, the step-up dialog. Settings, Security (`#app-settings`): passkeys, fallback, recovery codes, sessions and devices, pairing, sign-in log, typing into terminals from other devices.
+- The terminal over the hub (`#session`): read-only by default; "Take control" (step-up) and "Hand back"; while the human has control, the hub holds new messages and handoffs for that agent and delivers them at Hand back. The phone version adds a key strip (Esc, Ctrl+C, Tab, Shift+Tab, arrows, Enter).
+
+Hub work these screens need, in this part: the hold queue for an agent under human control (hold, release, show "held: N"), the step-up time on the session, and the routes for sessions, devices and the sign-in log. Part 14 builds the screens (T07, T09, T12).
+
 ---
 
 Index: [00-index.md](00-index.md). This part is one file of the implementation brief. "Part N" means file `NN-*.md` in this folder.

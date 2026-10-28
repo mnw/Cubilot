@@ -27,6 +27,14 @@ The specification of Part 14 (`factory/brief/14-ui-redesign.md`). Made with the 
 | Agent session | `#session` | yes | live terminal (xterm over the hub), take control, hand back; phone key strip |
 | Delivery | `#delivery` | yes | the human's checks, decided without you, Accept or Send back |
 | Settings | `#app-settings` | no | security, appearance, config and hub, agents, room, cancel traces |
+| Stage diagnosis | `#why-it-failed` | yes | Why it failed on a ticket, trace, failures and Check a diagnosis on Decisions, results per tier (Part 4) |
+| Mutation result | `#mutation` | no | score, threshold, survivors with bands, on the Ticket screen (Part 13) |
+| Deliver to client | `#deliver` | no | Deliver step, leak gate, approval, push (Part 5) |
+| Admin | `#admin` | no | checks (Doctor), components, accounts, projects, backup, updates (Parts 5, 7, 8) |
+| Setup 0 · start | `#setup` | no | new factory or restore (Part 8) |
+| Setup 1 · components | `#setup-components` | no | components with size and status |
+| Setup 3 · install | `#setup-install` | no | status per step, Retry and Skip, live log |
+| Setup 4 · accounts | `#setup-accounts` | no | sign-ins in a terminal pane, backup password once |
 | Dialogs and toasts | `#dialogs` | no | factory room, nutshell editor, confirm, reason, MCP servers, launch command, toasts |
 | Coverage | `#coverage` | no | the table in COVERAGE.md |
 

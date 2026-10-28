@@ -6,7 +6,7 @@ Reader: the Orchestrator. Split this part into tickets. The section "Tickets" gi
 ## Source
 
 - `design/mockups/cubilot-prototype.html`: every screen, desktop and phone, dark and light, in one page. Open it in a browser (Playwright). Each screen has an address after `#`, listed in `design/mockups/README.md`. The prototype bar picks Dark or Light and Desktop or Phone.
-- `design/mockups/COVERAGE.md`: every feature of the current UI and the hub (89 rows), the element that shows it and the screen. This part is done when every row works in the built UI.
+- `design/mockups/COVERAGE.md`: every feature of the current UI and the hub (112 rows), the element that shows it and the screen. This part is done when every row works in the built UI.
 - `design/system/tokens.json` and `design/system/README.md`: the token system. Three themes, contrast of 4.5:1 or more for every text token, six font sizes.
 - The canvas "Cubilot Browser UI" in claude.ai is private to the human. Agents read only the files in the repository.
 - The data in the mockups is invented.
@@ -62,9 +62,43 @@ Each screen ticket has these criteria, in addition to its own:
 | T11 | Dashboard shell: the layout, with "Waiting for you" and "Stuck" (no new data). The other panels come with Part 11. | `#dashboard` | low |
 | T12 | Sign-in screens on the tokens, when Part 12 "Internet access and sign-in" exists. | `#sign-in`, `#sign-in-states` | high (security) |
 
+## Hub work the screens need
+
+Most screens show data the hub has today (checked against `hub/` on 2026-10-28). These elements need data or routes that do not exist yet. Each row names the part that delivers it. A screen ticket does not wait for a row it does not need: it shows the element when the data exists.
+
+| Screen | Element | Delivered by |
+|---|---|---|
+| Decisions, Room, Ticket | Decision cards, questions with options, rulings, Overrule, "Decided without you" | Part 6 (`decision` Kind: `POST /decisions`, `/answer`, `/overrule`) |
+| Request | Plan with radius source, features, scope changes since the Approve | Part 6 (P6-02, P6-03) |
+| Delivery | Delivery report: done tickets, FAILs, rulings, criteria edits, merge message | Part 6 (`GET /requests/<room>/<id>/delivery`, P6-08) |
+| Delivery | The human's mark for each check (works or problem), note and screenshot | **H3** (this part) |
+| Agents, Dashboard | Context % of each agent | Part 6 (P6-11) |
+| Agents, Dashboard | Model pair and its source; first-pass rate per pair | Part 6 item 6 (model routing) |
+| Flow, Dashboard | Stalls, slots, stuck items | Part 6 items 9 and 10 (flow report, stop rules) |
+| Dashboard | Roadmap, milestones, burn-up, quality, cost, queue, graphs | Part 11 (section "Mockups") |
+| Session | Terminal stream over the hub, take control, hand back, held messages | Part 12 |
+| Sign in, Settings Security | Sign-in, sessions, devices, step-up, sign-in log | Part 12 |
+| Ticket, Decisions, Dashboard | "Why it failed", trace, failures, check a diagnosis, results per tier (`#why-it-failed`) | OpenSpec change `stage-diagnosis` |
+| Requests | List of requests with status, tickets done of total, high radius count, updated time | **H1** |
+| Ticket | Code: branch head, on `staging` or not, files and lines changed, link to the diff | **H2** |
+| Header | Search (⌘K) over tickets, requests and agents by id or name | **H4** |
+| Room | Reply to a message (a reference to the earlier message) | **H5** |
+| Room | Filters "To you and from you", "Questions only", and the count of hidden agent messages | UI only (T06), from the message fields |
+| Room | Pins | UI only: `ui/features/pins.js` exists but is not loaded in `index.html` (T06) |
+| Settings | Theme "System" (follow the operating system) | UI only (T09); `config.yml` `theme` gets the value `system` |
+| Settings | Default model for new agents | **H6** |
+
+Hub tickets of this part (radius low unless stated):
+- **H1** `GET /rooms/<room>/requests`: each request with origin, status (draft, waiting for Approve, building, ready for test, merged), tickets done of total, high-radius count, last event time.
+- **H2** `GET /tickets/<id>/code`: branch, head commit, merged into `staging` or not, files and lines changed (from git in the room's project). Read-only.
+- **H3** `POST /requests/<room>/<id>/delivery/checks` (human only): the mark for one check (`works` or `problem`), a note, and attachments; a `problem` adds the note to the ticket of that check and reopens it. Radius high (human-only route, moves tickets).
+- **H4** `GET /search?q=`: tickets, requests and agents of the rooms the caller can see, by id prefix or name.
+- **H5** Message reference: an optional `reply_to` (message id) on `POST /send`; the chat shows the quoted line.
+- **H6** `default_model` in `config.yml`, read by the launch form.
+
 ## Build order
 
-1. T01.
+1. T01, and H1 to H6 in parallel (hub only).
 2. T02.
 3. T03 to T10, in parallel within the room slots. T05 and T07 first, because the human uses them most.
 4. T11.
@@ -75,6 +109,8 @@ Each screen ticket has these criteria, in addition to its own:
 - Part 11 (dashboard) fills the panels of T11: roadmap, milestones from `openspec/changes`, burn-up, flow, quality, cost, agents, model pairs, queue and graphs.
 - Part 12 builds the terminal stream, the sign-in and the sessions; this part builds their screens.
 - Part 15 (ticket card and dialog, done) is replaced by T05.
+- These screens are designed but are built by their own part, on the browser UI, after this part: stage diagnosis (`#why-it-failed`, Part 4), Deliver to client (`#deliver`, Part 5), setup and admin (`#setup`, `#setup-components`, `#setup-install`, `#setup-accounts`, `#admin`, Parts 7 and 8), mutation result (`#mutation`, Part 13). Each part names them in its section "Mockups".
+- Parts 9, 10, 16 and 17 (councils) list the screens that are not designed yet.
 
 ## Tests
 
@@ -83,6 +119,7 @@ Each screen ticket has these criteria, in addition to its own:
 3. Keyboard and screen reader: the path through each screen with VoiceOver and with NVDA.
 4. Contrast: measure every text in each screen in the three themes. No text that gives information is below 4.5:1. Record the measurements.
 5. COVERAGE.md: a checklist run against the live hub; every row is checked.
+6. H1 to H6: an integration test for each route (H3 also: an agent token gets 403, and a `problem` mark reopens the ticket with the note).
 
 ## Open questions for the human
 

@@ -92,6 +92,10 @@ A council can be called at any point of the work. The call must be deterministic
 5. The council result has a list of manual checks. It does not contain the words "compliant" or "conformant" as a claim.
 6. The skill listing of an a11y seat shows the five factory skills, not the suite skills.
 
+## Mockups (2026-10-28)
+
+Not designed yet: the council call and its findings: agreed, single and conflict findings, and the manual checks for the human. Design them with the council, after Part 9.
+
 ---
 
 Index: [00-index.md](00-index.md). This part is one file of the implementation brief. "Part N" means file `NN-*.md` in this folder.

@@ -74,6 +74,10 @@ The hub calls the plan council by its rules and Jev (Part 9, "Calling a council"
 1. Is a second plan worth its cost for every human request, or only for requests with a high-radius ticket? Measure with the spec FAIL count of council plans against single plans.
 2. Should the OpenAI member run in the Codex CLI instead of Pi? Pi is the harness the factory already runs with `openai-codex`; the Codex CLI would be a third harness.
 
+## Mockups (2026-10-28)
+
+Not designed yet: the comparison of the two plans and the merged plan in the Approve. Design them with the council, after Part 9.
+
 ---
 
 Index: [00-index.md](00-index.md). This part is one file of the implementation brief. "Part N" means file `NN-*.md` in this folder.

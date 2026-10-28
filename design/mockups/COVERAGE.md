@@ -1,8 +1,8 @@
 # Coverage: every feature and its screen
 
-89 features from `ui/` and the hub routes (staging a0a89b1, 2026-10-28), plus sign-in (Part 12) and the dashboard (Part 11). Each feature has an element in the mockups. Part 14 is done when every row works in the built UI.
+112 rows (2026-10-28): the features of `ui/` and the hub routes (staging a0a89b1), sign-in (Part 12), the dashboard (Part 11), stage diagnosis (Part 4), setup and admin (Parts 7, 8), delivery and backup (Part 5), mutation testing (Part 13), and five features kept from the current UI. Each has an element in the mockups. Part 14 is done when every row of its own screens works in the built UI; the other parts check their rows.
 
-Screen names are the prototype screens (`cubilot-prototype.html`, prototype bar, "Screen"). Light and phone versions exist for the screens that list them in README.md.
+Screen names are the prototype screens (`cubilot-prototype.html`, prototype bar, "Screen"); addresses are in README.md.
 
 ## Sign-in (Part 12)
 
@@ -125,6 +125,44 @@ Screen names are the prototype screens (`cubilot-prototype.html`, prototype bar,
 | Waiting for you, stuck, flow, quality, cost, agents with harness and model | Factory health panels | Dashboard |
 | Model pairs first-pass rate and cost (Jev decision) | Model pairs panel | Dashboard |
 | Stage queue, graph freshness | Queue and graphs panel | Dashboard |
+
+## Stage diagnosis (Part 4, stage-diagnosis)
+
+| Feature | Element | Screen |
+|---|---|---|
+| Why it failed: category, cause key, evidence, proven or probable, tier, action, gap ticket | Why it failed section | Diagnosis (on Ticket) |
+| Trace of a stage, secrets masked | Trace dialog | Diagnosis |
+| Escalated failure, Dismiss | Failures group | Diagnosis (on Decisions) |
+| Check a diagnosis: right or wrong, note, ignore a key | Check a diagnosis group | Diagnosis (on Decisions) |
+| Diagnosis results per tier | Results table | Diagnosis (on Dashboard) |
+
+## Setup and admin (Parts 7 and 8)
+
+| Feature | Element | Screen |
+|---|---|---|
+| Start: new factory or restore | Setup 0 | SetupStart |
+| Components with size and status | Setup 1 | SetupComponents |
+| Plan, install with status per step, Retry, Skip, log | Setup 3 | SetupInstall |
+| Sign-ins in a terminal pane, backup password once, OpenRouter key | Setup 4 | SetupAccounts |
+| Doctor checks with one fix each | Checks | Admin |
+| Components, accounts, projects (mutation, triage, disclosure, backup target, primer), updates | Admin sections | Admin |
+
+## Delivery to client and backup (Part 5)
+
+| Feature | Element | Screen |
+|---|---|---|
+| Deliver step: fetch, branch, commit, leak gate, approval, push, merge request | Deliver steps | Deliver |
+| Leak gate findings with fixes | Leak gate section | Deliver |
+| Backup: last result, back up now, restore test, keep policy, second copy, snapshots | Backup section | Admin |
+| Restore from backup | Setup 0 | SetupStart |
+
+## Mutation testing (Part 13)
+
+| Feature | Element | Screen |
+|---|---|---|
+| Score, threshold, act, review and ignore counts, run time | Tiles | Mutation |
+| Survivors with band, location, mutation, equivalent marks | Survivors list | Mutation |
+| Project mutation settings | Projects section | Admin |
 
 ## Delivery
 

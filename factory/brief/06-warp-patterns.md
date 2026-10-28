@@ -396,6 +396,15 @@ File: `.agents/skills/triage/evals/evals.json`. Each entry has a prompt and the 
 - The GitHub Actions workflows and the label triggers. The factory uses hub tickets. A later link to GitHub or Jira issues can use `external_ref` on tickets.
 - The installer script and the `oz-cloud-factory-demo` setup skill
 
+## Mockups (2026-10-28)
+
+The screens for item 11 (human touchpoints) are designed in `design/mockups/cubilot-prototype.html`: Decisions (`#decisions`: choose, approve, allow, review cards; "Decided today without you" with Overrule), Request (`#request`: the plan to approve once), Ticket (`#ticket`: rulings with Overrule, criteria edited after the Approve with before and after), Room (`#room`: a question from the Orchestrator as a card with the options and the recommended one) and Delivery (`#delivery`: the checks, "Decided without you", Accept or Send back). The routing pair and its source (item 6) show on the Agents screen and in the Dashboard "Model pairs" panel.
+
+Part 6 builds its UI in the current app; Part 14 rebuilds it on the browser UI. So keep the Part 6 UI work small, and make the routes return the fields these screens show:
+- Decision: kind, ticket or request, radius, time asked, tickets that wait, the question, a short summary, the options with the recommended one and the cost of each, the facts the Orchestrator checked, the FAIL history.
+- Delivery report: tickets done, FAILs and their fixes, build time, cost, suite result; the checks from the plan with the human's mark (works or problem) and note; the rulings and criteria edits with Overrule; the merge command.
+- The human marks each delivery check in the screen. This needs a route for the marks (human only), which the current plan does not have: Part 14, hub ticket H3.
+
 ---
 
 Index: [00-index.md](00-index.md). This part is one file of the implementation brief. "Part N" means file `NN-*.md` in this folder.

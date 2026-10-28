@@ -139,6 +139,10 @@ The Briefing also shows each agent its worktree root and graph status.
 
 `.serena/` is not in git, so each worktree has its own Serena memories. Keep decisions that all agents need in tracked files (`CONTEXT.md`, `docs/adr/`), not in Serena memories. Add `graphify-out/` and `.serena/` to a global git excludes file (`core.excludesFile`), so neither one gets into a commit. The Doctor can offer this as a fix.
 
+## Mockups (2026-10-28)
+
+The Doctor is the Checks section of the admin screen (`design/mockups/cubilot-prototype.html`, `#admin`): each check with its status and one fix button, and "Run checks". The toolchain installs as steps of the setup flow (`#setup-install`), and updates in `#admin`, Updates.
+
 ---
 
 Index: [00-index.md](00-index.md). This part is one file of the implementation brief. "Part N" means file `NN-*.md` in this folder.

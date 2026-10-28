@@ -120,6 +120,10 @@ Sources as for the other roles (`factory/README.md`). Copy each skill with its s
 3. Can Pi use the OpenPencil MCP server? The trial answers this. If not, a Pi extension is built before the council.
 4. Does a fork of OpenPencil become the base of the shelved Sketch clone (Ardoise)? A separate decision, after a good trial.
 
+## Mockups (2026-10-28)
+
+Not designed yet: the side-by-side choice of two designs in the start Approve. Design them with the council, after Part 9.
+
 ---
 
 Index: [00-index.md](00-index.md). This part is one file of the implementation brief. "Part N" means file `NN-*.md` in this folder.
