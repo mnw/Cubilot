@@ -40,7 +40,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **In the mod, pass $ only to top-level function declarations.** docs/rules/bridge.md
 - **After changing `hub/channel/**`.** Rerun build-sidecars.sh AND check-mod.sh. docs/rules/bridge.md
 - **Claude Code 2.1.296 is the minimum.** Never force tengu_plugin_hooks_modules. docs/rules/bridge.md
-- **Verified on Claude Code 2.1.296 and pi 0.87.1.** Rerun spike evidence on change. docs/rules/bridge.md
+- **Verified on Claude Code 2.1.296 and pi 0.87.1.** Rerun spike evidence on change. `usage.cache_read_input_tokens` checked on 2.1.311. docs/rules/bridge.md
 - **Claude hooks pass via --settings <path>.** Never write ~/.claude/settings.json. docs/rules/bridge.md
 - **pty_capture_turn is the single TUI capture primitive.** docs/rules/terminal.md
 - **Dev rebuilds only via ./scripts/install.sh.** Never pkill + cp. docs/rules/core.md
@@ -63,6 +63,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **system is the hub's own actor, never a caller's.** Hub returns 400 if a body names it. docs/rules/kinds.md
 - **Validator and Reviewer worktrees are read-only.** Hub refuses a writable one. docs/rules/kinds.md
 - **CUBILOT_STAGE_ID marks a hub-launched session.** Never set it by hand. docs/rules/kinds.md
+- **The hub builds the context pack with no model.** Stable block: no per-stage field. Metrics failure never changes a stage. docs/rules/kinds.md
 - **Nutshell is a document, not a kind.** Lives in hub/nutshell.ts. docs/rules/kinds.md
 - **Rooms are immutable per agent.** Never add a route that changes it. docs/rules/kinds.md
 - **Cross-room mutations are 403 for non-human senders.** Bulk interrupt is human-only. docs/rules/kinds.md
@@ -137,8 +138,8 @@ curl -sN --max-time 1 "$HUB/agent-stream?agent=foo&token=$TOK"   # auto-register
 curl -s "$HUB/agents?token=$TOK"                                 # includes "foo"
 ```
 
-Full test run: `./scripts/test.sh [bun test args]` is the default. It takes the heavy lock itself. It runs `bun test "$@"`, so arguments pass through. It applies a time limit and a memory limit. When either is reached, it stops the run and its process group. Settings: `CUBILOT_TEST_TIMEOUT_S` (default 300 s), `CUBILOT_TEST_MAX_RSS_MB` (default 2048 MB) and `CUBILOT_HEAVY_LOCK` (default `/tmp/cubilot-heavy.lock`). The memory check sums the RSS of the test process group once per second. It is not a strict ceiling. A process that leaves the group is not counted.
+Full test run: `./scripts/test.sh [bun test args]` is the default. It takes the heavy lock itself, runs `bun test "$@"`, and stops the run and its process group at a time or memory limit. Settings: `CUBILOT_TEST_TIMEOUT_S` (default 300 s), `CUBILOT_TEST_MAX_RSS_MB` (default 2048 MB), `CUBILOT_HEAVY_LOCK` (default `/tmp/cubilot-heavy.lock`). Memory check: RSS sum of the process group, once per second; not a strict ceiling.
 
 Tests: `bun test` (discovery scoped to `tests/` by `bunfig.toml`), `cargo test --manifest-path src-tauri/Cargo.toml`, and `./scripts/check-mod.sh` for the Claude mod's own `claude plugin test` suite. Type check: `bun x tsc --noEmit`. No linter.
 
-Single test: `bun test tests/unit/briefing-signature.test.ts` or `bun test -t "<name pattern>"`; Rust: `cargo test --manifest-path src-tauri/Cargo.toml <name>`. Integration tests boot a real hub per test via `tests/helpers/hub.ts` (`bun run hub/hub.ts` on port 0, temp ledger/attachments dir, no mocks) — they don't need the `.app`. `pty-plumbing.test.ts` needs tmux on PATH (`tests/helpers/tmux.ts`). `check-mod.sh` needs the Claude Code declarations a live session writes into the staged mod (or pass the `index.d.ts` path).
+Single test: `bun test tests/unit/briefing-signature.test.ts` or `bun test -t "<name pattern>"`; Rust: `cargo test --manifest-path src-tauri/Cargo.toml <name>`. Integration tests boot a real hub per test via `tests/helpers/hub.ts` (port 0, temp ledger, no mocks) — they don't need the `.app`. `pty-plumbing.test.ts` needs tmux on PATH. `check-mod.sh` needs the Claude Code declarations a live session writes into the staged mod (or pass the `index.d.ts` path).
