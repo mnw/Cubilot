@@ -20,6 +20,8 @@ export type AgentRegistryOptions = {
   resolveRoom: (raw: string | null | undefined) => string;
   onRosterChange: () => void;
   onPresenceChange: () => void;
+  /** Called for each entry that is queued for an agent (lead-inbound measure). */
+  onEnqueue?: (name: string, entry: Entry) => void;
 };
 
 export type AgentRegistry = {
@@ -189,7 +191,10 @@ export function createAgentRegistry(opts: AgentRegistryOptions): AgentRegistry {
     const q = agentQueues.get(name);
     if (!q) return false;
     const out = forDelivery(name, entry);
-    if (out) q.push(out);
+    if (out) {
+      q.push(out);
+      opts.onEnqueue?.(name, out);
+    }
     return true;
   }
 
