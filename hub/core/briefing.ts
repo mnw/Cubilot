@@ -143,12 +143,13 @@ function toBriefingRow(
 // Phase 3 room summary is in the payload but is not rendered yet, so its layer counts are
 // out. If renderBriefing starts to render it, add the counts back (the signature test
 // compares signature equality with rendered-text equality and will say so).
-// Sessions of stages that are live now. A finished stage row must not mark a later
+// Sessions of stages that are live now. A retrying stage keeps its session: its close is queued but the session runs until the ack
+// (the row keeps the session after the ack until the relaunch gives a new one). A finished stage row must not mark a later
 // ordinary agent that reuses the name (docs/rules/kinds.md: CUBILOT_STAGE_ID marks a stage session).
 export function liveStageSessions(db: Database | null): Set<string> {
   if (!db) return new Set();
   return new Set(
-    db.query<{ session: string }, []>("SELECT session FROM stage WHERE session IS NOT NULL AND status IN ('launching', 'running')").all().map((r) => r.session),
+    db.query<{ session: string }, []>("SELECT session FROM stage WHERE session IS NOT NULL AND status IN ('launching', 'running', 'retrying')").all().map((r) => r.session),
   );
 }
 

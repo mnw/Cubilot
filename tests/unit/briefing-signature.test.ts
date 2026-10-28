@@ -144,5 +144,27 @@ describe("briefing signature agrees with renderBriefing", () => {
       expect(mk(["worker-4"]).stage_peers).toEqual(["worker-4"]);
       expect(briefingSignature(mk(["worker-4"]))).toBe(briefingSignature(before));
     });
+
+    test("a retrying stage session that leaves keeps the lead signature", () => {
+      const db = new Database(":memory:");
+      db.run("CREATE TABLE stage (id TEXT, session TEXT, status TEXT)");
+      db.run("INSERT INTO stage VALUES ('s1', 'worker-4', 'retrying'), ('s2', 'worker-3', 'passed')");
+      const live = liveStageSessions(db);
+      expect([...live]).toEqual(["worker-4"]);
+      const mk = (names: string[]) => {
+        const agents = {
+          get: (n: string) => ({ name: n, color: "#000", room: "r1" }),
+          entries: () => new Map([["Orchestrator", {}], ...names.map((n) => [n, { room: "r1" }] as [string, object])]).entries(),
+          isPermanent: () => false,
+          connectionCount: () => 1,
+        } as any;
+        return createBriefingBuilder({
+          agents, kinds: [], ledgerDb: null, ledgerEnabled: false, roomSummariser: null,
+          defaultRoom: "r1", attachmentsDir: "/a", humanName: "human",
+          isLead: () => true, stageSessions: () => live,
+        }).build("Orchestrator");
+      };
+      expect(briefingSignature(mk(["worker-4"]))).toBe(briefingSignature(mk([])));
+    });
   });
 });
