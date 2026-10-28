@@ -5,6 +5,7 @@ import type { HubFeature } from "../core/types";
 import type { AgentRegistry } from "../core/agents";
 import { validRoomLabel } from "../core/ids";
 import type { NutshellSnapshot } from "../nutshell";
+import { readContextPct } from "../core/context-usage";
 
 export type RosterDeps = {
   agents: AgentRegistry;
@@ -22,7 +23,7 @@ export function createRosterFeature(deps: RosterDeps): HubFeature {
         method: "GET",
         path: "/agents",
         auth: "read",
-        handler: () => Response.json([...agents.values()]),
+        handler: () => Response.json([...agents.values()].map((a) => ({ ...a, context_pct: readContextPct(a.name) }))),
       },
       {
         method: "GET",

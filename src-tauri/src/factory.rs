@@ -497,7 +497,7 @@ fn skill_override_names(root: &Path) -> Vec<String> {
 // settings for one launch: installed marketplace plugins off (not the --plugin-dir ones: role, shared and
 // chatbridge are never in installed_plugins.json), user and project skills and commands off. Account-synced
 // plugins stay on: no setting turns them off (check 0.2).
-pub(crate) fn build_agent_settings(role: &str, user_claude: &Path, project: &Path) -> serde_json::Value {
+pub(crate) fn build_agent_settings(role: &str, user_claude: &Path, project: &Path, shared: &Path) -> serde_json::Value {
     let mut plugins: Vec<String> = fs::read_to_string(user_claude.join("plugins/installed_plugins.json"))
         .ok()
         .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
@@ -511,22 +511,25 @@ pub(crate) fn build_agent_settings(role: &str, user_claude: &Path, project: &Pat
     skills.extend(skill_override_names(&project.join(".claude")));
     skills.sort();
     skills.dedup();
+    // The status line command keeps the context percentage for the roster (it replaces the user's own in factory sessions).
+    let status_line = format!("bash '{}'", shared.join("scripts/statusline.sh").display().to_string().replace('\'', "'\\''"));
     serde_json::json!({
         "enabledPlugins": plugins.into_iter().map(|k| (k, false.into())).collect::<serde_json::Map<_, _>>(),
         "skillOverrides": skills.into_iter().map(|k| (k, "off".into())).collect::<serde_json::Map<_, _>>(),
+        "statusLine": { "type": "command", "command": status_line },
     })
 }
 
 // <dir>/<agent>.json, mode 0600, tmpfile + rename. One file per agent, outside the version folders, because the
 // lists depend on the agent's project folder.
-pub(crate) fn write_agent_settings(agent: &str, role: &str, project: &Path, user_claude: &Path, dir: &Path) -> Result<PathBuf, String> {
+pub(crate) fn write_agent_settings(agent: &str, role: &str, project: &Path, user_claude: &Path, shared: &Path, dir: &Path) -> Result<PathBuf, String> {
     use std::io::Write as _;
     use std::os::unix::fs::OpenOptionsExt;
     if agent.is_empty() || agent.starts_with('.') || agent.contains('/') || agent.contains('\\') {
         return Err(format!("invalid agent name for a settings file: {agent:?}"));
     }
     fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
-    let text = serde_json::to_string_pretty(&build_agent_settings(role, user_claude, project)).map_err(|e| e.to_string())?;
+    let text = serde_json::to_string_pretty(&build_agent_settings(role, user_claude, project, shared)).map_err(|e| e.to_string())?;
     let run = STAGE_RUNS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let tmp = dir.join(format!(".{agent}.json.tmp-{}-{run}", std::process::id()));
     let path = dir.join(format!("{agent}.json"));
@@ -753,7 +756,7 @@ pub(crate) fn resolve_role_launch(agent: &str, role: &str, cwd: &Path, harness: 
     check_role_harness(&spec, harness, choice)?;
     let settings = if harness == "claude" {
         let user_claude = dirs::home_dir().ok_or_else(|| "no home dir".to_string())?.join(".claude");
-        Some(write_agent_settings(agent, role, cwd, &user_claude, &factory_settings_dir())?)
+        Some(write_agent_settings(agent, role, cwd, &user_claude, &launch_root.join("shared"), &factory_settings_dir())?)
     } else {
         None
     };
@@ -1507,7 +1510,7 @@ mod tests {
         fs::write(proj.join(".claude/skills/projskill/SKILL.md"), "---\nname: projskill\n---\n").unwrap();
         fs::create_dir_all(proj.join(".claude/commands/x")).unwrap();
         fs::write(proj.join(".claude/commands/x/y.md"), "x").unwrap();
-        let path = write_agent_settings("worker-1", "worker", &proj, &home.join(".claude"), &root.join("out")).unwrap();
+        let path = write_agent_settings("worker-1", "worker", &proj, &home.join(".claude"), &root.join("shared"), &root.join("out")).unwrap();
         let v: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(v["enabledPlugins"]["ponytail@ponytail"], false);
         assert_eq!(v["enabledPlugins"]["figma@official"], false);
@@ -1523,6 +1526,19 @@ mod tests {
     }
 
     #[test]
+    fn role_settings_name_the_status_line_command_of_the_shared_plugin() {
+        let root = tmp_root("settings-sl");
+        let home = fake_home(&root);
+        let shared = root.join("it's shared");
+        let path = write_agent_settings("worker-1", "worker", &root, &home.join(".claude"), &shared, &root.join("out")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(v["statusLine"]["type"], "command");
+        let want = format!("bash '{}'", shared.join("scripts/statusline.sh").display().to_string().replace('\'', "'\\''"));
+        assert_eq!(v["statusLine"]["command"], want.as_str());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn two_agents_in_different_projects_get_separate_files() {
         let root = tmp_root("settings2");
         let home = fake_home(&root);
@@ -1532,14 +1548,14 @@ mod tests {
             fs::write(p.join(".claude/skills").join(skill).join("SKILL.md"), "x").unwrap();
         }
         let dir = root.join("out");
-        let a = write_agent_settings("worker-1", "worker", &p1, &home.join(".claude"), &dir).unwrap();
-        let b = write_agent_settings("worker-2", "worker", &p2, &home.join(".claude"), &dir).unwrap();
+        let a = write_agent_settings("worker-1", "worker", &p1, &home.join(".claude"), &root.join("shared"), &dir).unwrap();
+        let b = write_agent_settings("worker-2", "worker", &p2, &home.join(".claude"), &root.join("shared"), &dir).unwrap();
         assert_ne!(a, b);
         let (ta, tb) = (fs::read_to_string(&a).unwrap(), fs::read_to_string(&b).unwrap());
         assert!(ta.contains("only-one") && !ta.contains("only-two"));
         assert!(tb.contains("only-two") && !tb.contains("only-one"));
         // a relaunch rewrites the same file and leaves no temp file
-        write_agent_settings("worker-1", "worker", &p1, &home.join(".claude"), &dir).unwrap();
+        write_agent_settings("worker-1", "worker", &p1, &home.join(".claude"), &root.join("shared"), &dir).unwrap();
         let names: Vec<_> = fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
         assert_eq!(names.len(), 2, "{names:?}");
         let _ = fs::remove_dir_all(&root);
@@ -1550,7 +1566,7 @@ mod tests {
         let root = tmp_root("settings3");
         let home = fake_home(&root);
         for bad in ["", "../x", "a/b", ".hidden"] {
-            assert!(write_agent_settings(bad, "worker", &root, &home.join(".claude"), &root.join("out")).is_err(), "{bad}");
+            assert!(write_agent_settings(bad, "worker", &root, &home.join(".claude"), &root.join("shared"), &root.join("out")).is_err(), "{bad}");
         }
         let _ = fs::remove_dir_all(&root);
     }

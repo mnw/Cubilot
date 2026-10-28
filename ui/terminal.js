@@ -411,6 +411,7 @@
       '<button type="button" class="row-chevron" aria-expanded="false">' + icon('<polyline points="9 6 15 12 9 18"/>') + '</button>' +
       '<span class="state-dot"></span>' +
       '<button type="button" class="tab-label"></button>' +
+      '<span class="row-ctx" title="Context used"></span>' +
       '<span class="row-state lbl-offline">offline</span><span class="row-state lbl-paused">paused</span><span class="row-state lbl-needs">needs you</span>' +
       '<span class="row-actions">' +
         '<button type="button" class="pause-toggle"></button>' +
@@ -919,6 +920,13 @@
     if (t) t.tabEl.dataset.presence = online ? 'online' : 'offline';
   };
   window.reconcileAgentColumn = () => reconcile();
+  // The context percentage of each agent (roster context_pct) as text; "–" when the hub has no value.
+  window.setAgentContext = function setAgentContext(agent, pct) {
+    const el = tabs.get(agent)?.tabEl?.querySelector('.row-ctx');
+    if (!el) return;
+    el.textContent = typeof pct === 'number' ? `${pct}%` : '–';
+    el.setAttribute('aria-label', typeof pct === 'number' ? `Context ${pct} percent used` : 'Context unknown');
+  };
 
   function setTabState(agent, state) {
     const t = tabs.get(agent);

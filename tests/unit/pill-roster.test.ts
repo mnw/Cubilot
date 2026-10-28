@@ -12,3 +12,8 @@ test('a recorded default is shown as recorded', () => {
   const fields = win.pillCardFields({ role: '', harness: 'claude', model: 'default', effort: 'default', provider: '' });
   expect(Object.fromEntries(fields)).toMatchObject({ Model: 'default', Effort: 'default' });
 });
+
+test('Empty value: the agent column shows "–" for a null context_pct and "N%" for a number', () => {
+  const src = readFileSync('./ui/terminal.js', 'utf8');
+  expect(src).toContain("typeof pct === 'number' ? `${pct}%` : '–'");
+});
