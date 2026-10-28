@@ -77,3 +77,10 @@ Hub state-machine kinds, tickets, stages, launches, rooms and ledger transaction
 ## Nutshell is per-room, not single-row
 
 - **Nutshell is per-room, not single-row.** The `nutshell` table has `room TEXT PRIMARY KEY`. Edits flow through the handoff primitive as before, with an added `context.room` field that the accept path respects. The human can patch any room; non-human senders can only patch their own. `GET /nutshell?room=<label>` is required — no-arg returns 400. Agents receive the same-room nutshell on connect via briefing AND live via `nutshell.updated` fan-out to same-room queues.
+
+## Context pack and stage metrics
+
+- **The hub builds the context pack with no model.** `hub/core/context-pack.ts` runs `graphify query`, `ctags` and `git` as argv arrays, 20 s each. It imports no model adapter and no shell string. A command that fails marks only its part `missing`; the launch continues.
+- **The stable block carries no per-stage field.** `renderStable` in `hub/core/primer.ts` returns `docs/PRIMER.md` and the Nutshell only. No stage, time, session or worktree field. The ticket block follows it and nothing follows the ticket block, so two stages of one room share the same first bytes.
+- **A metrics failure never changes a stage.** `hub/core/stage-metrics.ts` writes its row after the commit of `stage.passed` or `stage.failed`. A failed read or write logs one line.
+- **Details:** `docs/PROTOCOL.md` sections "Context pack" and "Stage metrics".

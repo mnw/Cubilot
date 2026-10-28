@@ -511,6 +511,10 @@ Room-scoped work items that exist before they have an owner. Lifecycle `draft �
 - Cancel: the assignee, the creator or the human.
 - Cross-room creation or claim by a non-human → 403.
 
+### Planning note
+
+`planning_note` is an optional text field of the ticket (`string | null`, default null). The Orchestrator writes it to give the reason and the decisions. It is the first note in the "Earlier notes" part of each later stage message. `create_ticket` and `edit_ticket` accept it, and `GET /tickets` returns it. Only the human, the creator of the ticket or the room lead can edit it. Other callers get 403 and nothing changes.
+
 ### Approval for `high` radius
 
 `done` on a `high` ticket succeeds only when the human is the actor, or the permission named by `approval_request_id` is `allowed` with `resolved_by` = the human's name. Otherwise 409 with `approval_request_id` (this key appears only on this 409). `POST /tickets/:id/approval` (assignee, `in_review`, `high`) returns the pending request, or creates a `ticket:done` permission request (`input_preview` `{"ticket_id":"…"}`) and sets the pointer in one transaction — one `permission.new` event, no ticket event. `in_review → in_progress` and a human `in_review → queued` clear the pointer. Rework, cancel and a human `done` also dismiss a still-pending request in a separate transaction after the ticket's (`permission.dismissed`), so it is neither pending nor replayed on reconnect. Trust is self-asserted like every route, so `blast_radius: high` is advisory: a token holder can send `by` = the human name, open the gate or complete the ticket itself. The gate stops an agent that reports its own name honestly. Enforcement needs per-agent tokens bound to identity.
@@ -823,6 +827,8 @@ A stage ends with a result handoff from its session. The hub treats a handoff as
 | `context.verdict` | — | `"PASS"` or `"FAIL"`, upper case |
 | `context.findings` | — | list of `{ticket_id, text}`. Each `ticket_id` and `text` is a non-empty string. The list can be empty. |
 
+Every stage result, also a spec-review result, needs `context.notes`: a non-empty string of at most 400 words (target 300). The notes say what the stage did, what it found and what is open. A missing, empty or too long `notes` gives the 400 result error that names the field `context.notes`. The stage stays `running`. A handoff to a named agent that is not a stage result needs no notes. The hub gives the notes to later stages of the same ticket (see "Context pack").
+
 A Worker stage (role `worker`) has a stricter rule. Its result is a handoff with `to_role: "tester"`:
 
 | Field | Worker stage |
@@ -842,6 +848,7 @@ Example of a valid Validator result:
   "context": {
     "stage_id": "s_0123456789abcdef",
     "ticket_id": "t_0123456789abcdef",
+    "notes": "I checked the 409 path. It has no test. I did not run the full suite.",
     "verdict": "FAIL",
     "findings": [{ "ticket_id": "t_0123456789abcdef", "text": "The 409 path has no test." }]
   }
@@ -858,6 +865,41 @@ Example of a valid Validator result:
 - `blast_radius: high`: one `ticket.assigned` event to the room lead. The hub never writes `done` on a `high` ticket. The assignment clears `approval_request_id`. The lead then asks the human's Allow with `POST /tickets/:id/approval`.
 
 Nothing moves for a FAIL, a spec-review stage, a `worker`, `tester` or `writer` stage, or a ticket that is not `in_review`. Nothing moves for a `high` ticket when the room has no lead (the hub logs one line) or when the lead is already the assignee.
+
+### Context pack
+
+The hub builds the first message of a stage with no model call. The parts come in this order:
+
+1. The stable block: `docs/PRIMER.md` (at most 2,000 tokens, counted as `ceil(bytes / 4)`) and the Nutshell. It holds no stage, time, session or worktree field. Two stages of one room get the same bytes while the primer file and the Nutshell do not change.
+2. The ticket block: the role template, then the pack parts below, then the handoff section.
+
+| Part | Content | Roles |
+|---|---|---|
+| Earlier notes | The planning note first, then spec-review notes, then the `context.notes` of earlier stage results, oldest first. | worker, writer, reviewer, tester, validator |
+| Graph query | `graphify query` with budget 1500 in the room's project folder, with a status line `fresh` or `stale`. The graph describes the room base, not the ticket branch. | worker, writer, reviewer, spec review |
+| Symbol signatures | `ctags` tags of the files that the criteria and the spec paths name. | worker, writer, reviewer |
+| Diff stat | `git diff --stat` against the room base branch. | validator (code review) |
+| Changed files | `git diff --name-only` against the room base branch. | validator (code review), tester |
+
+The editor gets no pack part. A template cannot widen the parts of a role (`hub/core/pack-depth.ts`). The other pack commands (`ctags`, `git diff`) run in the stage worktree. Each command stops after 20 s. A command that fails or stops marks only its own part `missing` and the launch continues. A `missing` graph part adds no text. Without a usable `ctags`, the signatures part says `missing`. The notes part is cut at 32 KiB and the pack parts together at 16 KiB. Source: `hub/core/context-pack.ts`, `hub/core/first-message.ts`, `hub/core/primer.ts`.
+
+### Stage metrics
+
+After a stage ends as `passed` or `failed`, the hub writes one `stage_metrics` row for each attempt. The write happens outside the stage transaction. A failure of the write logs one line and never changes the stage.
+
+`GET /rooms/<room>/stage-metrics` returns `{ "room": "<room>", "roles": { "<role>": [row, ...] } }`. It needs a bearer token or `?token=`. A request without a valid token gets 401. A row has these fields:
+
+| Field | Meaning |
+|---|---|
+| `stage_id`, `attempt`, `role` | The stage attempt. |
+| `first_message_bytes`, `first_message_tokens_est` | Size of the first message. The estimate is `ceil(bytes / 4)`. |
+| `prompt_tokens_first` | Input, cache creation and cache read tokens of the first model request. NULL when no usage is readable. |
+| `cache_read_tokens` | `usage.cache_read_input_tokens` of the first request. NULL when no usage is readable. |
+| `tokens_before_action` | Tokens used before the first `Edit` or the result. NULL when no usage is readable. |
+| `source` | `claude` when the Claude transcript gave the numbers, else `none`. A pi stage has `none` and three NULL numbers. |
+| `created_seq` | Event sequence of the end of the attempt. |
+
+Source: `hub/core/stage-metrics.ts`.
 
 ### End of turn, reminders and retries
 
