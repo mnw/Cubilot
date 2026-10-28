@@ -53,6 +53,8 @@ export type DecisionSnapshot = {
 const DECISION_ID_RE = /^d_[0-9a-f]{16}$/;
 const TICKET_ID_RE = /^t_[0-9a-f]{16}$/;
 const REASONS: ReadonlySet<string> = new Set(["scope", "feature", "irreversible", "security"]);
+// A commit hash (7 to 40 hex digits with a digit in it) or a hub record id (ticket, decision, stage, handoff, request).
+const FACT_REF_RE = /\b(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b|\b[tdsh]_[0-9a-f]{4,16}\b|\br-\d{4}-\d{2}-\d{2}-[\w-]+/;
 const BLOCK_MAX = 300;
 const LINE_MAX = 500;
 const ANSWER_TEXT_MAX = 2_000;
@@ -179,7 +181,7 @@ const createVerb: VerbDecl<DecisionSnapshot, CreateInput> = {
       entry: (post) => decisionEntry(post, `decision.${p.status}`, actor),
     };
   },
-  scope: (post) => ({ kind: "room-ambient", room: post.room }),
+  scope: () => ({ kind: "ui-only-ambient" }), // the lead gets its one entry from the answer route; no other agent sees a decision
 };
 
 type MoveInput = { to: DecisionStatus; option?: string | null; text?: string | null };
@@ -202,7 +204,7 @@ const moveVerb: VerbDecl<DecisionSnapshot, MoveInput> = {
       entry: (post) => decisionEntry(post, `decision.${p.to}`, actor),
     };
   },
-  scope: (post) => ({ kind: "room-ambient", room: post.room }),
+  scope: () => ({ kind: "ui-only-ambient" }), // the lead gets its one entry from the answer route; no other agent sees a decision
 };
 
 // ---------- Escalation format ----------
@@ -217,12 +219,13 @@ export function parseEscalation(b: Record<string, unknown>): Escalation | { erro
   const reason = typeof b.reason === "string" ? b.reason : "";
   if (!REASONS.has(reason)) return { error: "reason must be scope, feature, irreversible or security" };
   const block = str(b.block, BLOCK_MAX);
-  if (!block || /[\r\n]/.test(block)) return { error: `block must be one sentence on one line (max ${BLOCK_MAX} chars)` };
+  if (!block || /[\r\n]/.test(block) || /[.!?]\s+\S/.test(block)) return { error: `block must be one sentence on one line (max ${BLOCK_MAX} chars)` };
   if (!Array.isArray(b.facts) || b.facts.length < 1 || b.facts.length > FACTS_MAX) {
     return { error: `facts must be a list of 1 to ${FACTS_MAX} items` };
   }
   const facts = b.facts.map((f) => str(f, LINE_MAX));
   if (facts.some((f) => f === null)) return { error: `each fact must be text (max ${LINE_MAX} chars)` };
+  if (!facts.every((f) => FACT_REF_RE.test(f as string))) return { error: "each fact must name a commit hash or a hub record id" };
   if (!Array.isArray(b.options) || b.options.length < 2 || b.options.length > 3) {
     return { error: "options must be 2 or 3" };
   }

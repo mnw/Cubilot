@@ -7,7 +7,7 @@ import { createDecisionKind, type DecisionStatus } from "../../hub/kinds/decisio
 import { createTicketKind } from "../../hub/kinds/ticket";
 import { LedgerConflict } from "../../hub/core/types";
 import { spawnHub, type HubHandle } from "../helpers/hub";
-import { authedFetch, getJson, postJson, registerAgent } from "../helpers/fetch";
+import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
 
 const T1 = "t_00000000000000a1";
 const STATUSES: DecisionStatus[] = ["recorded", "applied", "escalated", "open", "answered", "overruled"];
@@ -220,7 +220,8 @@ describe("decision kind: routes through the real hub", () => {
 
   test("each missing part of the escalation format gets 400", async () => {
     const bad: Array<Record<string, unknown>> = [
-      { reason: "other" }, { block: "" }, { block: "Two\nlines" }, { facts: [] },
+      { reason: "other" }, { block: "" }, { block: "Two\nlines" }, { block: "One. Two." }, { facts: [] },
+      { facts: ["unchecked prose"] }, { facts: ["1. Commit 9e2250b holds the plan.", "unchecked prose"] },
       { options: [...OPTIONS, { id: "C", label: "c", effect: "e" }, { id: "D", label: "d", effect: "e" }] },
       { options: OPTIONS.map((o) => ({ ...o, recommended: false })) },
       { options: OPTIONS.map((o) => ({ ...o, recommended: true })) },
@@ -264,5 +265,34 @@ describe("decision kind: routes through the real hub", () => {
   test("a request without a bearer token cannot read the list", async () => {
     expect((await fetch(`${hub.url}/decisions?room=r1`)).status).toBe(401);
     expect((await authedFetch(hub, "/decisions?room=bad%20/room")).status).toBe(400);
+  });
+});
+
+describe("decision kind: fan-out (1.3)", () => {
+  test("a second agent in the room gets no decision entry; the lead gets exactly one on the answer", async () => {
+    const hub = await spawnHub();
+    try {
+      const got: Record<string, any[]> = { boss: [], worker: [] };
+      const streams = ["boss", "worker"].map((n) => {
+        const sse = openSSE(hub, `/agent-stream?agent=${n}&room=r1`);
+        (async () => { for await (const e of sse.events) got[n].push(e); })().catch(() => {});
+        return sse;
+      });
+      await Bun.sleep(300);
+      expect((await postJson(hub, "/rooms/r1/lead", { by: hub.humanName, agent: "boss" })).status).toBe(200);
+      const r = await postJson(hub, "/decisions", { by: "boss", ...escalation() });
+      expect(r.status).toBe(201);
+      const id = (r.json as { id: string }).id;
+      expect((await postJson(hub, `/decisions/${id}/answer`, { by: hub.humanName, option: "A" })).status).toBe(200);
+      await Bun.sleep(400);
+      const mentions = (n: string) => got[n].filter((e) => JSON.stringify(e).includes(id));
+      expect(mentions("worker")).toHaveLength(0);
+      expect(got.worker.some((e) => JSON.stringify(e).includes("decision.answered"))).toBe(false);
+      expect(mentions("boss")).toHaveLength(1);
+      expect(JSON.stringify(mentions("boss")[0])).toContain("answered");
+      for (const s of streams) s.close();
+    } finally {
+      await hub.kill();
+    }
   });
 });
