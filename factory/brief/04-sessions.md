@@ -1,6 +1,6 @@
 # Part 4: visible sessions, one session for each ticket stage
 
-Status: stage sessions (`openspec/specs/stage-sessions`) and spec review are done, archived on 2026-10-27. Open: the context pack (`openspec/changes/context-pack`, in work) and stage diagnosis (`openspec/changes/stage-diagnosis`, proposed).
+Status: done on 2026-10-28. Stage sessions and spec review were archived on 2026-10-27, the context pack on 2026-10-28 (live check 7.1 passed; cache finding in `test-reports/t_1d56be14bddc5d3b.md`, no change chosen). Stage diagnosis (`openspec/changes/stage-diagnosis`) is proposed and is built after Part 6 items 7 and 11.
 
 ## Decision
 

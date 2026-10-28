@@ -7,13 +7,13 @@ Each folder here is one OpenSpec change, drafted from one part of the brief (`..
 | Part 1, `01-rebrand.md` | (done without an OpenSpec change) | done |
 | Part 2, `02-factory-roles.md` | `openspec/changes/archive/2026-10-22-factory-roles/` | done (archived 2026-10-22) |
 | Part 3, `03-ticket-grouping-checkpoints.md` | `openspec/changes/archive/2026-10-23-ticket-grouping/` | done (archived 2026-10-23) |
-| Part 4, `04-sessions.md` | `openspec/changes/stage-sessions/` | in test: code committed 2026-10-26 (`4ec238f`). Open: tick `tasks.md`, live check 6.5, archive. |
-| Part 4, `04-sessions.md` | `openspec/changes/spec-review-stage/` | in test: code committed 2026-10-26 (`4ec238f`). Open: tick `tasks.md`, live check 7.2, archive. |
-| Part 4, `04-sessions.md` | `context-pack` | not proposed yet |
+| Part 4, `04-sessions.md` | `openspec/changes/archive/2026-10-27-stage-sessions/` | done (archived 2026-10-27) |
+| Part 4, `04-sessions.md` | `openspec/changes/archive/2026-10-27-spec-review-stage/` | done (archived 2026-10-27) |
+| Part 4, `04-sessions.md` | `openspec/changes/archive/` (context-pack) | done (archived 2026-10-28, live check 7.1 passed) |
 | Part 4a, `04a-agent-column.md` | (built from the brief's tickets, no OpenSpec change) | done 2026-10-26 (`4ec238f`). Built so that Part 4 can be tested. |
 | Part 15, `15-ticket-card-dialog.md` | (built from the brief's tickets, no OpenSpec change) | done 2026-10-26 |
-| Part 6, `06-warp-patterns.md` (with model routing, item 6) | not proposed yet | next after Part 4. Before Part 5 (decision 2026-10-26). |
-| Part 5, `05-delivery-backup.md` | not proposed yet | after Part 6 |
+| Part 6, `06-warp-patterns.md` | `human-touchpoints-checkpoint` (items 11 and 7) in planning | next. Order inside the part: 11 and 7, then 8, 9, 10, 6, 1-5. Before Part 12 and Part 5. |
+| Part 5, `05-delivery-backup.md` | not proposed yet | after Parts 6, 12 and 14 |
 
 Rules:
 - The brief keeps the research and the reasons. The change keeps the work. Do not copy the research into the change. Link to the brief.
