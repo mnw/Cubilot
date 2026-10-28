@@ -82,4 +82,27 @@ describe("cancel traces on a real hub", () => {
     expect(again.status).toBe(200);
     expect(events()).toHaveLength(1);
   });
+
+  test("a registered paused agent clears: 403, no row change, no event", async () => {
+    open.push(await registerAgent(hub, "claude-p", { room: "pz" }));
+    seed("ct_" + "d".repeat(16), "pz");
+    expect((await postJson(hub, "/agents/claude-p/pause", { paused: true, by: hub.humanName })).status).toBe(200);
+    const before = events().length;
+    expect((await clear("pz", "ct_" + "d".repeat(16), { by: "claude-p" })).status).toBe(403);
+    expect(await ids("pz")).toEqual(["ct_" + "d".repeat(16)]);
+    expect(events()).toHaveLength(before);
+  });
+
+  test("GET returns every open row of the room (1001), oldest first, none of another room", async () => {
+    const insert = `INSERT INTO cancel_traces (id, status, room, stage_id, ticket_id, site, caller, status_at_failure, error, created_at, cleared_at, version)
+      VALUES (?, 'open', ?, 's_1', NULL, 'cancel', 'ticket_cancel', 'queued', 'boom', ?, NULL, 0)`;
+    db((d) => {
+      d.transaction(() => {
+        for (let i = 0; i < 1001; i++) d.run(insert, ["ct_" + i.toString(16).padStart(16, "0"), "big", i]);
+        d.run(insert, ["ct_" + "e".repeat(16), "big2", 1]);
+      })();
+    });
+    const traces = ((await getJson(hub, "/rooms/big/cancel-traces")).json as { traces: Array<{ created_at: number }> }).traces;
+    expect(traces.map((t) => t.created_at)).toEqual(Array.from({ length: 1001 }, (_, i) => i));
+  });
 });

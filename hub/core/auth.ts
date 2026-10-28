@@ -2,6 +2,9 @@
 // Consumers compose these via the `makeAuthHelpers(token)` factory so AUTH_TOKEN
 // stays owned by the hub entry point, not scattered as a module-level global here.
 
+import type { HubCapabilities } from "./types";
+import { validName } from "./ids";
+
 export const JSON_BODY_MAX = 262_144;         // 256 KiB (default for JSON routes)
 export const HANDOFF_BODY_MAX = 1_048_576;    // 1 MiB (POST /handoffs — accommodates context payloads)
 export const PERMISSION_BODY_MAX = 16_384;    // 16 KiB (POST /permissions — bounded fields)
@@ -26,6 +29,16 @@ export function pausedRefusal(): Response {
     status: 423,
     headers: { "Content-Type": "application/json", ...corsHeaders },
   });
+}
+
+// The acting name of a mutating route: 400 for a missing, invalid or unknown name. A paused agent is
+// refused (423) unless the route is one a running tool call may need (allowPaused).
+export function actorOr400(by: unknown, cap: HubCapabilities, allowPaused = false): { name: string } | Response {
+  const name = typeof by === "string" ? by.trim() : "";
+  if (!validName(name)) return Response.json({ error: "invalid by" }, { status: 400 });
+  if (!cap.agents.get(name)) return Response.json({ error: `unknown actor: ${name}` }, { status: 400 });
+  if (!allowPaused && cap.agents.isPaused(name)) return pausedRefusal();
+  return { name };
 }
 
 export function json(body: unknown, init?: ResponseInit): Response {

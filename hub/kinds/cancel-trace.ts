@@ -6,8 +6,8 @@ import type { Database } from "bun:sqlite";
 import type { Decision, Entry, HubCapabilities, KindModule, RouteDef, StateMachineDecl, VerbDecl } from "../core/types";
 import { createLedgerEntity, ledgerConflictResponse, withLedgerRequired } from "../core/ledger-entity";
 import { LedgerConflict } from "../core/types";
-import { ts, validName, validRoomLabel } from "../core/ids";
-import { pausedRefusal } from "../core/auth";
+import { ts, validRoomLabel } from "../core/ids";
+import { actorOr400 } from "../core/auth";
 import { redactPrivateText } from "../core/redaction";
 
 export type CancelTraceStatus = "open" | "cleared";
@@ -171,7 +171,9 @@ export function createCancelTraceKind(db: Database): CancelTraceKind {
       handler: (_req, _cap, params) => {
         const room = roomOf(params);
         if (!validRoomLabel(room)) return Response.json({ error: "invalid room" }, { status: 400 });
-        return Response.json({ room, traces: entity.listByStatus({ status: "open", room, limit: 1000 }).reverse() });
+        // The Store clamps listByStatus to 1000 rows: read every open row of the room, oldest first.
+        const rows = db.query<Record<string, unknown>, [string]>(`SELECT * FROM cancel_traces WHERE status = 'open' AND room = ? ORDER BY rowid`).all(room);
+        return Response.json({ room, traces: rows.map(cancelTraceDecl.rowToSnapshot) });
       },
     },
     {
@@ -184,10 +186,9 @@ export function createCancelTraceKind(db: Database): CancelTraceKind {
         const id = decodeURIComponent(new URL(req.url).pathname.split("/")[4] ?? "");
         if (!validRoomLabel(room)) return Response.json({ error: "invalid room" }, { status: 400 });
         const body = (await req.json().catch(() => ({}))) as { by?: unknown };
-        const by = typeof body.by === "string" ? body.by.trim() : "";
-        if (!validName(by)) return Response.json({ error: "invalid by" }, { status: 400 });
-        if (!cap.agents.get(by)) return Response.json({ error: `unknown actor: ${by}` }, { status: 400 });
-        if (cap.agents.isPaused(by)) return pausedRefusal();
+        const a = actorOr400(body.by, cap, true);
+        if (a instanceof Response) return a;
+        const by = a.name;
         if (by !== cap.config.humanName) return Response.json({ error: "only the human may clear a cancel trace" }, { status: 403 });
         if (!CANCEL_TRACE_ID_RE.test(id)) return Response.json({ error: "not found" }, { status: 404 });
         try {
