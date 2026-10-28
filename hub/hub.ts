@@ -53,6 +53,7 @@ import {
 } from "./core/summariser";
 import {
   createBriefingBuilder,
+  liveStageSessions,
   briefingSignature as computeBriefingSignature,
   type BriefingBuilder,
   type BriefingPayload,
@@ -248,9 +249,7 @@ function buildBriefing(agent: string): BriefingPayload {
         const room = agents.get(name)?.room;
         return !!room && (ledgerDb ? roomLeadOf(ledgerDb, room) : "Orchestrator") === name;
       },
-      stageSessions: () => new Set(
-        ledgerDb ? ledgerDb.query<{ session: string }, []>("SELECT session FROM stage WHERE session IS NOT NULL").all().map((r) => r.session) : [],
-      ),
+      stageSessions: () => liveStageSessions(ledgerDb),
     });
   }
   return _briefingBuilder.build(agent);

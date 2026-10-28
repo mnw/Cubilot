@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { briefingSignature, createBriefingBuilder, type BriefingPayload } from "../../hub/core/briefing";
+import { Database } from "bun:sqlite";
+import { briefingSignature, createBriefingBuilder, liveStageSessions, type BriefingPayload } from "../../hub/core/briefing";
 import { createBriefingDispatcher } from "../../hub/core/briefing-dispatcher";
 import { renderBriefing } from "../../hub/channel/core";
 
@@ -115,6 +116,33 @@ describe("briefing signature agrees with renderBriefing", () => {
       };
       expect(mk(true).stage_peers).toEqual(["worker-3"]);
       expect(mk(false).stage_peers).toBeUndefined();
+    });
+
+    test("an ordinary agent named like a finished stage session still re-briefs the lead", () => {
+      const db = new Database(":memory:");
+      db.run("CREATE TABLE stage (id TEXT, session TEXT, status TEXT)");
+      db.run("INSERT INTO stage VALUES ('s1', 'worker-3', 'passed'), ('s2', 'worker-4', 'running'), ('s3', 'worker-5', 'launching'), ('s4', 'worker-6', 'failed')");
+      const live = liveStageSessions(db);
+      expect([...live].sort()).toEqual(["worker-4", "worker-5"]);
+      const mk = (names: string[]) => {
+        const agents = {
+          get: (n: string) => ({ name: n, color: "#000", room: "r1" }),
+          entries: () => new Map([["Orchestrator", {}], ...names.map((n) => [n, { room: "r1" }] as [string, object])]).entries(),
+          isPermanent: () => false,
+          connectionCount: () => 1,
+        } as any;
+        return createBriefingBuilder({
+          agents, kinds: [], ledgerDb: null, ledgerEnabled: false, roomSummariser: null,
+          defaultRoom: "r1", attachmentsDir: "/a", humanName: "human",
+          isLead: () => true, stageSessions: () => live,
+        }).build("Orchestrator");
+      };
+      const before = mk([]);
+      const after = mk(["worker-3"]);
+      expect(after.stage_peers).toEqual([]);
+      expect(briefingSignature(after)).not.toBe(briefingSignature(before));
+      expect(mk(["worker-4"]).stage_peers).toEqual(["worker-4"]);
+      expect(briefingSignature(mk(["worker-4"]))).toBe(briefingSignature(before));
     });
   });
 });
