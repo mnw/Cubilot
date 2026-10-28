@@ -118,6 +118,7 @@ For each Worker stage, the hub chooses the model (Haiku, Sonnet or Opus) and the
 - The launch accepts a model × effort pair for one launch (Part 2, the model × effort picker).
 - `config.yml` sets the pair for each role. Check before you build: name the exact key in this brief.
 - Tickets have a blast radius, acceptance criteria, a title tag such as `[code]`, and a request (Part 3).
+- Cache finding t_1d56 (2026-10-28, `test-reports/t_1d56be14bddc5d3b.md`): a Claude stage reads only the tools and the system prompt from the cache (8165, 12926 or 13670 of 38k to 46k first-prompt tokens). Human decision: option A, no change now. When this item measures stage cost, examine options B, C1 and C2 of that report again.
 
 #### Design
 

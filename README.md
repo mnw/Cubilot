@@ -25,12 +25,12 @@ Cubilot is a macOS desktop app. It runs a team of coding agents (Claude Code, an
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/02-roles-dark.png">
-  <img alt="Roles, models and skills: Orchestrator, Worker, Tester, Validator, Writer, Editor, Reviewer, the planned Diagnostician, and the SEO and accessibility councils" src="docs/readme/02-roles-light.png" width="100%">
+  <img alt="Roles, models and skills: Orchestrator, Worker, Tester, Validator, Writer, Editor, Reviewer, the planned Diagnostician, the SEO council, the planned design team and the accessibility council" src="docs/readme/02-roles-light.png" width="100%">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/03-workflows-dark.png">
-  <img alt="Workflows: intake with spec review, the technical and writing tracks, stage failure diagnosis, and the SEO and accessibility tracks" src="docs/readme/03-workflows-light.png" width="100%">
+  <img alt="Workflows: intake with spec review, the technical and writing tracks, stage failure diagnosis, and the SEO, design and accessibility tracks" src="docs/readme/03-workflows-light.png" width="100%">
 </picture>
 
 <picture>
@@ -45,7 +45,7 @@ Cubilot is a macOS desktop app. It runs a team of coding agents (Claude Code, an
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/06-build-order-dark.png">
-  <img alt="Build order: migration, rebrand, roles, ticket grouping, the agent column (4a) and the ticket card and dialog (15) done; Part 4 in test; then Part 6, Part 12 (hub-first, browser access, Linux), Part 14 (UI redesign on the browser UI), Part 5, and Parts 7 to 13" src="docs/readme/06-build-order-light.png" width="100%">
+  <img alt="Build order: migration, rebrand, roles, ticket grouping, the agent column (4a) and the ticket card and dialog (15) done; Part 4 in test; then Part 6, Part 12 (hub-first, browser access, Linux), Part 16 (design team, mockups), Part 14 (UI redesign on the browser UI), Part 5, Parts 7 to 11 and Part 13" src="docs/readme/06-build-order-light.png" width="100%">
 </picture>
 
 ## Build from source

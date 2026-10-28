@@ -1,6 +1,6 @@
 # Part 14: UI redesign (refined warm terminal)
 
-Status: ready to plan. Build it directly after Part 12 (decision 2026-10-28), on the UI that the hub serves to the browser. Line references below are from 2026-10-22 and must be checked again after Part 12. The human chose to include every proposal on the mockup. Some tickets wait for an answer from the human (see "Open questions").
+Status: ready to plan. Build it after Part 12 and Part 16 (decisions 2026-10-28), on the UI that the hub serves to the browser. The design team (Part 16) makes the mockups first, from this brief, and the human approves them. Line references below are from 2026-10-22 and must be checked again after Part 12. The human chose to include every proposal on the mockup. Some tickets wait for an answer from the human (see "Open questions").
 Date: 2026-10-22. File paths and line numbers refer to the working tree on that date (`main`, 4 commits ahead of `origin/main`).
 Reader: the Orchestrator. Split this part into tickets. The section "Tickets" gives one ticket for each item, with acceptance criteria.
 

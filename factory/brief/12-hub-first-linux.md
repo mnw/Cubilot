@@ -88,7 +88,7 @@ Tests for Linux:
 
 - Parts 1 to 4 and Part 6 come first, in the current app on macOS.
 - Then this part, before Part 5 and Parts 7 to 11 (decision 2026-10-27). So the Doctor (Part 7), the setup screen (Part 8) and the dashboard (Part 11) are built in the hub and served to the browser from the start. Nothing moves later.
-- Part 14 (UI redesign) comes directly after this part (decision 2026-10-28). It works on the UI that the hub serves, so the redesign is done once, in the browser.
+- Then Part 16 (design team) and Part 14 (UI redesign) (decisions 2026-10-28). The design team makes the mockups, and Part 14 builds them on the UI that the hub serves, so the redesign is done once, in the browser.
 - First step: the tmux control mode test (open question 1). It decides the terminal design. Second step: move the settings commands. Third step: the terminal stream. Fourth step: browser access and pairing. Fifth step: the Linux checklist.
 - Start with an OpenSpec change for steps 1 to 4. The Linux checklist can be a second change.
 
