@@ -12,7 +12,7 @@ describe("role files: test-run split", () => {
     const text = read("worker");
     expect(text).toContain("targeted tests");
     expect(text).toContain("Never run `./scripts/test.sh`");
-    expect(text).not.toMatch(/(?<!Never )run `?\.\/scripts\/test\.sh/);
+    expect(text).not.toMatch(/(?<!never )run `?\.\/scripts\/test\.sh/i);
     const splits = sentences(text).filter((s) => /split/i.test(s));
     expect(splits.every((s) => /Do not split/.test(s))).toBe(true);
     expect(text).not.toContain("For a large run");
