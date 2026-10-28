@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cubilot · Request plan</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;family=Fraunces:wght@500&amp;display=swap">
+<style>
+:root{color-scheme:dark;--bg:#1a1714;--bg-raised:#221d19;--bg-elev:#2a231e;--bg-inset:#14110f;--bg-hover:#2f2621;--line:#352c26;--line-soft:#2a231e;--line-hover:#4a3d34;--text:#f5ede2;--text-muted:#a69583;--text-meta:#978b78;--orange:#d97757;--orange-text:#d97757;--amber:#e8a857;--green:#7fb069;--red-strong:#e38f7a;--green-strong:#9dc285;--blue:#6b9bc9;--purple:#a788c4;--teal:#6ab5a3;--sans:Inter,-apple-system,'Segoe UI',sans-serif;--mono:'JetBrains Mono',ui-monospace,Menlo,monospace;--serif:Fraunces,Georgia,serif}
+body{margin:0;background:var(--bg)}
+a{color:var(--orange-text)}a:hover{color:#e08265}
+*{box-sizing:border-box}
+button{font:inherit}
+th{font-weight:500}
+@media (max-width: 900px){.c-side{display:none !important}}
+</style>
+</helmet>
+<div style="min-height: 1180px; display: flex; flex-direction: column; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; line-height: 1.45">
+
+<header style="height: 52px; flex: none; position: relative; z-index: 10; display: flex; align-items: center; gap: 12px; padding: 0 16px 0 20px; border-bottom: 1px solid var(--line-soft); background: var(--bg)"><div style="display: flex; align-items: center; gap: 8px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--orange)" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 3 7v10l9 5 9-5V7z"></path><path d="m3 7 9 5 9-5"></path><path d="M12 12v10"></path></svg><span style="font-family: var(--serif); font-weight: 500; font-size: 18px">Cubilot</span></div><div style="position: relative"><button aria-haspopup="listbox" aria-expanded="false" style="height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-raised); color: var(--text); cursor: pointer; font-size: 14px; font-family: var(--mono); min-width: 150px"><span style="color: var(--text-meta)">#</span>cubilot<span style="flex: 1"></span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-meta)" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button></div><button style="height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-raised); color: var(--text); cursor: pointer; font-size: 14px; flex: 1; max-width: 420px; background: var(--bg-inset); color: var(--text-meta)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg><span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0">Find a ticket, request or agent</span><span style="flex: 1"></span><kbd style="font-family: var(--mono); font-size: 12px; padding: 1px 6px; border: 1px solid var(--line); border-radius: 4px">⌘K</kbd></button><div style="flex: 1"></div><div style="display: flex; align-items: center; gap: 8px"><span style="font-family: var(--mono); font-size: 12px; letter-spacing: .08em; color: var(--text-meta)">LEAD</span><button aria-haspopup="listbox" style="height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-raised); color: var(--text); cursor: pointer; font-size: 14px"><span style="width: 7px; height: 7px; border-radius: 50%; background: var(--green)"></span>Orchestrator<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-meta)" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button></div><div role="group" aria-label="Room run state" style="display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden"><button style="height: 30px; padding: 0 10px; border: 0; background: var(--bg-raised); color: var(--text); cursor: pointer; font-size: 14px; display: inline-flex; align-items: center; gap: 6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14"></rect><rect x="14" y="5" width="4" height="14"></rect></svg>Pause room</button><span aria-live="polite" style="height: 30px; padding: 0 10px; border-left: 1px solid var(--line); display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--green-strong)"><span style="width: 7px; height: 7px; border-radius: 50%; background: var(--green)"></span>running</span></div><button style="height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-raised); color: var(--text); cursor: pointer; font-size: 14px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add agent</button><span style="width: 1px; height: 20px; background: var(--line)"></span><div style="display: flex; align-items: center; gap: 2px"><button aria-label="Room instructions" title="Room instructions" style="width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; color: var(--text-muted); cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path><path d="M14 3v5h5M9 13h6M9 17h6"></path></svg></button><button aria-label="Factory map" title="Factory map" style="width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; color: var(--text-muted); cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="6" cy="6" r="2.5"></circle><circle cx="18" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M8 7.5 10.5 16M16 7.5 13.5 16M8.5 6h7"></path></svg></button><button aria-label="Project folder" title="Project folder" style="width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; color: var(--text-muted); cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg></button><button aria-label="Settings" title="Settings" style="width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; color: var(--text-muted); cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></button></div><button aria-label="Michel" style="width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line); background: var(--bg-elev); color: var(--text); font-weight: 600; font-size: 12px; cursor: pointer">M</button></header><div style="height: 40px; flex: none; display: flex; align-items: center; padding: 0 12px 0 8px; border-bottom: 1px solid var(--line-soft); background: var(--bg)"><nav aria-label="Sections" style="display: flex"><a href="#"  style="height: 40px; display: inline-flex; align-items: center; padding: 0 12px; text-decoration: none; font-size: 14px; color: var(--text-muted)">Decisions <span style="margin-left: 6px; padding: 0 6px; border-radius: 999px; background: var(--orange); color: #1a1714; font-family: var(--mono); font-size: 12px; font-weight: 600">4</span></a><a href="#" aria-current="page" style="height: 40px; display: inline-flex; align-items: center; padding: 0 12px; text-decoration: none; font-size: 14px; color: var(--text); box-shadow: inset 0 -2px 0 var(--orange); font-weight: 500">Requests</a><a href="#"  style="height: 40px; display: inline-flex; align-items: center; padding: 0 12px; text-decoration: none; font-size: 14px; color: var(--text-muted)">Flow</a><a href="Dashboard.dc.html"  style="height: 40px; display: inline-flex; align-items: center; padding: 0 12px; text-decoration: none; font-size: 14px; color: var(--text-muted)">Dashboard</a><a href="#"  style="height: 40px; display: inline-flex; align-items: center; padding: 0 12px; text-decoration: none; font-size: 14px; color: var(--text-muted)">Room</a><a href="#"  style="height: 40px; display: inline-flex; align-items: center; padding: 0 12px; text-decoration: none; font-size: 14px; color: var(--text-muted)">Agents</a><a href="#"  style="height: 40px; display: inline-flex; align-items: center; padding: 0 12px; text-decoration: none; font-size: 14px; color: var(--text-muted)">Delivery</a></nav><nav aria-label="Breadcrumb" style="margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-meta)"><a href="#" style="color: var(--text-muted); text-decoration: none">Requests</a><span>/</span><span style="font-family: var(--mono); color: var(--text)">human-touchpoints-checkpoint</span></nav></div>
+
+<div style="flex: 1; display: flex; flex-wrap: wrap; min-height: 0">
+
+<main style="flex: 999 1 640px; min-width: 0; padding: 28px 40px 48px; display: flex; flex-direction: column; gap: 24px">
+
+<div style="display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px">
+<span style="padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--blue) 20%, transparent); color: #9bbfe0; font-weight: 600">Waiting for your Approve</span>
+<span style="padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line-hover); color: var(--text-muted)">origin: you</span>
+<span style="font-family: var(--mono); color: var(--text-meta)">spec review PASS h_6f20 · 11:02 · plan check 0 errors, 1 warning</span>
+</div>
+<h1 style="margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; text-wrap: balance">You only at start and delivery; the Orchestrator checkpoint</h1>
+<p style="margin: 0; max-width: 78ch; color: var(--text-muted)">Part 6, items 11 and 7. The factory decides between your Approve and your delivery test; an arbiter replaces you for review loops; high radius means a second review instead of your Allow. The Orchestrator's context is cleared at set points from a summary built by code.</p>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; background: var(--line-soft); border: 1px solid var(--line-soft); border-radius: 6px; overflow: hidden">
+<div style="background: var(--bg-raised); padding: 12px 14px"><div style="font-family: var(--mono); font-size: 22px; font-weight: 500">18</div><div style="font-size: 12px; color: var(--text-meta)">tickets</div></div>
+<div style="background: var(--bg-raised); padding: 12px 14px"><div style="font-family: var(--mono); font-size: 22px; font-weight: 500; color: var(--red-strong)">7</div><div style="font-size: 12px; color: var(--text-meta)">high radius</div></div>
+<div style="background: var(--bg-raised); padding: 12px 14px"><div style="font-family: var(--mono); font-size: 22px; font-weight: 500; color: var(--green-strong)">3</div><div style="font-size: 12px; color: var(--text-meta)">can start now (2 slots)</div></div>
+<div style="background: var(--bg-raised); padding: 12px 14px"><div style="font-family: var(--mono); font-size: 22px; font-weight: 500; color: var(--amber)">10</div><div style="font-size: 12px; color: var(--text-meta)">longest chain · reason given</div></div>
+<div style="background: var(--bg-raised); padding: 12px 14px"><div style="font-family: var(--mono); font-size: 22px; font-weight: 500">7</div><div style="font-size: 12px; color: var(--text-meta)">checks for you at delivery</div></div>
+</div>
+
+<section style="display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: baseline; gap: 12px">
+<h2 style="margin: 0; font-size: 16px; font-weight: 600">Tickets in order</h2>
+<span style="font-size: 12px; color: var(--text-meta)">two tracks run side by side; a link names its reason</span>
+</div>
+<div style="border: 1px solid var(--line-soft); border-radius: 6px; overflow-x: auto">
+<table style="width: 100%; border-collapse: collapse; font-size: 14px; min-width: 760px">
+<thead><tr style="background: var(--bg-inset); color: var(--text-meta); text-align: left">
+<th style="padding: 9px 12px; width: 36px">#</th><th style="padding: 9px 12px">Ticket</th><th style="padding: 9px 12px; width: 150px">Radius</th><th style="padding: 9px 12px; width: 230px">Waits for</th><th style="padding: 9px 12px; width: 90px">Start</th></tr></thead>
+<tbody>
+<tr style="border-top: 1px solid var(--line-soft)"><td style="padding: 9px 12px; font-family: var(--mono); color: var(--text-meta)">1</td><td style="padding: 9px 12px">Human escalation: decision Kind, Needs-you line, your answer</td><td style="padding: 9px 12px; color: var(--text-muted)">low</td><td style="padding: 9px 12px; color: var(--text-meta)">nothing</td><td style="padding: 9px 12px"><span style="color: var(--green-strong); font-weight: 500">now</span></td></tr>
+<tr style="border-top: 1px solid var(--line-soft)"><td style="padding: 9px 12px; font-family: var(--mono); color: var(--text-meta)">2</td><td style="padding: 9px 12px">Request Kind and the Approve rule</td><td style="padding: 9px 12px"><span style="color: var(--red-strong)">high</span> <span style="color: var(--text-meta)">· who may queue</span></td><td style="padding: 9px 12px; color: var(--text-muted)">1 · same file index.ts</td><td style="padding: 9px 12px; color: var(--text-meta)">after 1</td></tr>
+<tr style="border-top: 1px solid var(--line-soft)"><td style="padding: 9px 12px; font-family: var(--mono); color: var(--text-meta)">3</td><td style="padding: 9px 12px">Radius set by the rule; lower only through the arbiter</td><td style="padding: 9px 12px"><span style="color: var(--red-strong)">high</span> <span style="color: var(--text-meta)">· permissions</span></td><td style="padding: 9px 12px; color: var(--text-muted)">2 · same file ticket.ts</td><td style="padding: 9px 12px; color: var(--text-meta)">after 2</td></tr>
+<tr style="border-top: 1px solid var(--line-soft)"><td style="padding: 9px 12px; font-family: var(--mono); color: var(--text-meta)">4</td><td style="padding: 9px 12px">High radius: second review, no Allow gate</td><td style="padding: 9px 12px"><span style="color: var(--red-strong)">high</span> <span style="color: var(--text-meta)">· permissions</span></td><td style="padding: 9px 12px; color: var(--text-muted)">3 · needs its config reader</td><td style="padding: 9px 12px; color: var(--text-meta)">after 3</td></tr>
+<tr style="border-top: 1px solid var(--line-soft)"><td style="padding: 9px 12px; font-family: var(--mono); color: var(--text-meta)">5–8</td><td style="padding: 9px 12px">FAIL gate per ticket, arbiter stage, rulings applied, delivery report</td><td style="padding: 9px 12px"><span style="color: var(--red-strong)">3 high</span> <span style="color: var(--text-meta)">· 1 low</span></td><td style="padding: 9px 12px; color: var(--text-muted)">in a row · same files stage.ts, decision.ts</td><td style="padding: 9px 12px; color: var(--text-meta)">after 4</td></tr>
+<tr style="border-top: 1px solid var(--line-soft); background: color-mix(in srgb, var(--teal) 5%, transparent)"><td style="padding: 9px 12px; font-family: var(--mono); color: var(--text-meta)">9</td><td style="padding: 9px 12px">Count what reaches the lead</td><td style="padding: 9px 12px; color: var(--text-muted)">low</td><td style="padding: 9px 12px; color: var(--text-meta)">nothing</td><td style="padding: 9px 12px"><span style="color: var(--green-strong); font-weight: 500">now</span></td></tr>
+<tr style="border-top: 1px solid var(--line-soft); background: color-mix(in srgb, var(--teal) 5%, transparent)"><td style="padding: 9px 12px; font-family: var(--mono); color: var(--text-meta)">11</td><td style="padding: 9px 12px">Context % in the agent column</td><td style="padding: 9px 12px; color: var(--text-muted)">low</td><td style="padding: 9px 12px; color: var(--text-meta)">nothing</td><td style="padding: 9px 12px"><span style="color: var(--green-strong); font-weight: 500">now</span></td></tr>
+<tr style="border-top: 1px solid var(--line-soft); background: color-mix(in srgb, var(--teal) 5%, transparent)"><td style="padding: 9px 12px; font-family: var(--mono); color: var(--text-meta)">10, 12–15</td><td style="padding: 9px 12px">Checkpoint track: briefing, digest, summaries, state summary, checkpoint run</td><td style="padding: 9px 12px"><span style="color: var(--red-strong)">1 high</span> <span style="color: var(--text-meta)">· 4 low</span></td><td style="padding: 9px 12px; color: var(--text-muted)">9, 11, 14 · their output</td><td style="padding: 9px 12px; color: var(--text-meta)">after 9</td></tr>
+<tr style="border-top: 1px solid var(--line-soft)"><td style="padding: 9px 12px; font-family: var(--mono); color: var(--text-meta)">16–18</td><td style="padding: 9px 12px">Docs, your live check, closing (the interim rule ends)</td><td style="padding: 9px 12px; color: var(--text-muted)">low</td><td style="padding: 9px 12px; color: var(--text-muted)">both tracks</td><td style="padding: 9px 12px; color: var(--text-meta)">last</td></tr>
+</tbody></table>
+</div>
+<p style="margin: 0; display: flex; gap: 8px; align-items: flex-start; font-size: 14px; color: var(--amber)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex: none; margin-top: 3px" aria-hidden="true"><path d="M12 9v4M12 17h.01"></path><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path></svg><span>Plan check warning: the main track is 10 links long. Reason in the plan: tickets 2–8 edit the same five hub files.</span></p>
+</section>
+
+<section style="display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 16px; font-weight: 600">What you will test at delivery</h2>
+<ol style="margin: 0; padding-left: 20px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 32px; color: var(--text-muted); font-size: 14px">
+<li>Approve once; edit a criterion; it queues without a new Approve</li>
+<li>A high-radius ticket reaches done with two PASSes, no Allow</li>
+<li>Two FAILs start the arbiter; its ruling is a ticket note</li>
+<li>An escalation arrives as one card; your answer reaches him</li>
+<li>The delivery report lists rulings and edits; overrule one</li>
+<li>The agent column shows the Orchestrator's context %</li>
+<li>After a checkpoint his first context holds the summary</li>
+</ol>
+</section>
+</main>
+
+<aside style="flex: 1 1 340px; max-width: 420px; min-width: 0; padding: 28px 28px 48px; border-left: 1px solid var(--line-soft); background: var(--bg-inset); display: flex; flex-direction: column; gap: 22px">
+<div style="border: 1px solid var(--line-hover); border-radius: 6px; background: var(--bg-raised); padding: 16px; display: flex; flex-direction: column; gap: 12px">
+<div style="font-weight: 600">Your decision</div>
+<div style="font-size: 14px; color: var(--text-muted)">Approve once for the whole request. Later edits inside this scope need no new Approve; a new ticket, a higher radius or a changed feature list asks again.</div>
+<button style="height: 40px; border: 0; border-radius: 6px; background: var(--orange); color: #1a1714; font-weight: 600; cursor: pointer">Approve plan</button>
+<label for="ret" style="font-size: 12px; color: var(--text-meta)">Or send it back with a note</label>
+<textarea id="ret" rows="3" placeholder="What should change before you approve" style="resize: vertical; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-inset); color: var(--text); font: inherit"></textarea>
+<button style="height: 34px; border: 1px solid var(--line-hover); border-radius: 6px; background: none; color: var(--text); cursor: pointer">Send back</button>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div style="font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-meta)">Features you approve</div>
+<ul style="margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; color: var(--text-muted); font-size: 14px">
+<li>One Approve per request you ask for</li>
+<li>Arbiter decides after two FAILs</li>
+<li>High radius: second review, no Allow</li>
+<li>Delivery report before main</li>
+<li>Orchestrator checkpoint</li>
+</ul>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div style="font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-meta)">Review and rulings</div>
+<div style="display: flex; flex-direction: column; gap: 6px; font-size: 14px">
+<div style="display: flex; justify-content: space-between; gap: 8px"><span style="color: var(--text-muted)">Your 4 review points</span><span style="color: var(--green-strong)">all in</span></div>
+<div style="display: flex; justify-content: space-between; gap: 8px"><span style="color: var(--text-muted)">Spec review</span><span style="font-family: var(--mono)">PASS · 1st</span></div>
+<div style="display: flex; justify-content: space-between; gap: 8px"><span style="color: var(--text-muted)">Open questions for you</span><span style="font-family: var(--mono)">0</span></div>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 6px; font-size: 14px">
+<a href="#">Read the full plan (proposal, design, 59 tasks)</a>
+<a href="#">Ask the Orchestrator about this plan</a>
+</div>
+</aside>
+</div>
+<footer style="height: 28px; flex: none; display: flex; align-items: center; gap: 14px; padding: 0 16px; border-top: 1px solid var(--line-soft); background: var(--bg-inset); font-family: var(--mono); font-size: 12px; color: var(--text-meta)"><span style="display: inline-flex; align-items: center; gap: 6px"><span style="width: 7px; height: 7px; border-radius: 50%; background: var(--green)"></span>5/5 agents · hub :49286</span><span>staging <span style="color: var(--text)">5283321</span> · install <span style="color: var(--text)">28</span></span><span style="flex: 1"></span><span>Session <span style="color: var(--text)">$159</span> · resets 3h 41m</span><span>·</span><span>Weekly <span style="color: var(--text)">0%</span> · resets Oct 29 at 3 pm</span></footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1180}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
