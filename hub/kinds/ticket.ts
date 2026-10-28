@@ -245,7 +245,7 @@ const noteCount = (cap: HubCapabilities, id: string): number =>
   cap.db.query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM ticket_notes WHERE ticket_id = ?").get(id)!.n;
 
 /** The room's lead: a stored name that is still a registered agent of that room, else null. */
-function roomLead(cap: HubCapabilities, room: string): string | null {
+export function roomLead(cap: HubCapabilities, room: string): string | null {
   const row = cap.db.query<{ agent: string }, [string]>("SELECT agent FROM ticket_room_lead WHERE room = ?").get(room);
   if (!row) return null;
   const a = cap.agents.get(row.agent);

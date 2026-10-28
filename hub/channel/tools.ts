@@ -336,6 +336,60 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
     },
   },
   {
+    name: "escalate",
+    description:
+      "Room lead only. Ask the human one decision, in the escalation format. Use it only when a decision changes a feature or the approved scope, an action cannot be undone, or a security finding has no fix in scope. The human sees one Needs-you line and the answer comes back to you as one message.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        reason: { type: "string", enum: ["scope", "feature", "irreversible", "security"] },
+        block: { type: "string", maxLength: 300, description: "What stops the work, in one sentence." },
+        facts: { type: "array", minItems: 1, maxItems: 20, items: { type: "string", maxLength: 500 }, description: "Numbered facts. Each names a commit hash or a hub record." },
+        options: {
+          type: "array",
+          minItems: 2,
+          maxItems: 3,
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string", maxLength: 64 },
+              label: { type: "string", maxLength: 500 },
+              effect: { type: "string", maxLength: 500 },
+              recommended: { type: "boolean", description: "True for exactly one option." },
+            },
+            required: ["id", "label", "effect"],
+          },
+        },
+        human_actions: {
+          type: "array",
+          minItems: 1,
+          maxItems: 20,
+          items: {
+            type: "object",
+            properties: {
+              ticket_id: { type: "string", pattern: "^t_[0-9a-f]{16}$" },
+              action: { type: "string", maxLength: 500 },
+            },
+            required: ["ticket_id", "action"],
+          },
+        },
+        next: { type: "string", maxLength: 500, description: "What happens after the answer." },
+        ticket_id: { type: "string", pattern: "^t_[0-9a-f]{16}$" },
+        request_id: { type: "string", maxLength: 128 },
+      },
+      required: ["reason", "block", "facts", "options", "human_actions", "next"],
+    },
+    handler: async (ctx, args) => {
+      const resp = await authedPost(ctx.host, ctx.hubEnv, "/decisions", { ...args, by: ctx.agent });
+      if (resp.status !== 201) toolError(resp, "escalate");
+      const id =
+        resp.json && typeof resp.json === "object" && "id" in resp.json
+          ? String((resp.json as { id: string }).id)
+          : "";
+      return { content: [{ type: "text", text: `decision_id=${id}` }] };
+    },
+  },
+  {
     name: "ack_permission",
     description:
       "Submit a verdict on a pending Claude Code permission request. Any agent may ack any request (the hub accepts the first verdict; later ones are idempotent or rejected with 409). Returns 'verdict_applied=<allow|deny> resolved_by=<agent> your_verdict_won=<true|false>' so delegation logic can tell whether the caller's verdict transitioned the state or arrived after peer/human resolution. In Claude Code this tool runs without a prompt in default mode; a user ask or deny rule on it refuses the call, because the mod has no approval dialog.",

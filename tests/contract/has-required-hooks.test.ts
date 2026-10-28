@@ -10,12 +10,13 @@ import { describe, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createHandoffKind } from "../../hub/kinds/handoff";
+import { createDecisionKind } from "../../hub/kinds/decision";
 import { createInterruptKind } from "../../hub/kinds/interrupt";
 import { createPermissionKind } from "../../hub/kinds/permission";
 
 const db = new Database(":memory:");
 migrateLedger(db);
-const KINDS = [createHandoffKind(db), createInterruptKind(db), createPermissionKind(db)] as const;
+const KINDS = [createHandoffKind(db), createInterruptKind(db), createPermissionKind(db), createDecisionKind(db)] as const;
 
 describe("KindModule contract conformance", () => {
   for (const k of KINDS) {

@@ -33,6 +33,14 @@ export function mintInterruptId(): string {
   return out;
 }
 
+export function mintDecisionId(): string {
+  const buf = new Uint8Array(8);
+  crypto.getRandomValues(buf);
+  let out = "d_";
+  for (const b of buf) out += b.toString(16).padStart(2, "0");
+  return out;
+}
+
 // `HH:MM:SS` wall-clock, used for SSE entry `ts` fields.
 export function ts(): string {
   return new Date().toTimeString().slice(0, 8);
