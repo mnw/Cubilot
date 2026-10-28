@@ -331,9 +331,9 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
     <article class="n planned role">
       <div class="head"><h3>Design team</h3><span class="model">Claude + 2nd model</span></div>
       <span class="track">Design track · 2 roles</span>
-      <p class="job">Designer (opus for new work, sonnet for changes) makes UI designs in Figma before the build (remote Figma MCP, write to canvas), the project design system as Figma variables and components (ECL for EC projects) and SVG assets. Design reviewer (a different model) checks designs, then the built UI against the approved design.</p>
-      <dl><dt>tool</dt><dd>Figma (use_figma, get_screenshot, Code Connect); tokens exported to the repo</dd>
-      <dt>skills</dt><dd>figma-use, ui-designer, ux-architect, design-system, frontend-design-direction, frontend-ui-engineering; reviewer: ui-finish-gate-reviewer</dd>
+      <p class="job">Designer (opus for new work, sonnet for changes) makes UI designs in OpenPencil before the build (free, MIT, local files in git, MCP server), the project design system as a library file and exported tokens (ECL for EC projects) and SVG assets. Design reviewer (a different model) checks designs, then the built UI against the approved design.</p>
+      <dl><dt>tool</dt><dd>OpenPencil (MCP, CLI export); trial first, Penpot self-hosted as fallback</dd>
+      <dt>skills</dt><dd>OpenPencil skill (after trial), ui-designer, ux-architect, design-system, frontend-design-direction, frontend-ui-engineering; reviewer: ui-finish-gate-reviewer</dd>
       <dt>never</dt><dd>changes product code, approves its own work, copies brand marks</dd></dl>
     </article>
 
@@ -419,7 +419,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
     <h3>Design track</h3>
     <div class="flow">
       <div class="n planned"><span class="t">[design] ticket</span><span class="d">request with a UI change; code tickets wait for it</span></div><span class="arrow">→</span>
-      <div class="n planned"><span class="t">Designer</span><span class="d">screens in Figma on the library, screenshots and tokens to the repo, assets</span></div><span class="arrow">→</span>
+      <div class="n planned"><span class="t">Designer</span><span class="d">screens in OpenPencil on the library, .pen files, screenshots and tokens in the repo</span></div><span class="arrow">→</span>
       <div class="n planned"><span class="t">Design reviewer</span><span class="d">PASS or CHANGES; 2 CHANGES: arbiter</span></div><span class="arrow">→</span>
       <div class="n planned"><span class="t">Plan + design</span><span class="d">one Approve at the start</span><span class="gate">you approve the plan and the design</span></div><span class="arrow">→</span>
       <div class="n planned"><span class="t">Design review of built UI</span><span class="d">after the Tester on UI tickets: layout, states, tokens</span><span class="ref">§16</span></div>
@@ -492,7 +492,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
     <div class="n built"><span class="step">4a</span><span class="t">Agent column</span><span class="d">done: built to test Part 4; reload one agent, skill switches</span><span class="ref">§4a</span></div>
     <div class="n planned"><span class="step">6</span><span class="t">Touchpoints, checkpoint, guards, routing</span><span class="d">in planning (human-touchpoints-checkpoint): human only at start and delivery (arbiter, delivery report) with the Orchestrator checkpoint; then plan check, flow report, stop rules; then model × effort; triage, spec stage, review.json</span><span class="ref">§6</span></div>
     <div class="n planned"><span class="step">12</span><span class="t">Hub-first, browser, Linux</span><span class="d">after Part 6: hub serves the UI, terminal layer into the hub, browser access and pairing, Linux</span><span class="ref">§12</span></div>
-    <div class="n planned"><span class="step">16</span><span class="t">Design team</span><span class="d">after Part 12, before 14: design track (Designer, Design reviewer); makes the mockups for the redesign; design system, design review, assets</span><span class="ref">§16</span></div>
+    <div class="n planned"><span class="step">16</span><span class="t">Design team</span><span class="d">after Part 12, before 14: OpenPencil trial, then the design track; makes the mockups for the redesign</span><span class="ref">§16</span></div>
     <div class="n planned"><span class="step">14</span><span class="t">UI redesign</span><span class="d">after Parts 12 and 16, from the design team's mockups: title bar, tab bar, roster view; WCAG 2.2 AA (agent rail done in 4a)</span><span class="ref">§14</span></div>
     <div class="n planned"><span class="step">5</span><span class="t">Delivery and backup</span><span class="d">after Part 14: internal remote, Deliver step, leak gate, hourly backup</span><span class="ref">§5</span></div>
     <div class="n planned"><span class="step">7</span><span class="t">Toolchain</span><span class="d">bundled tools, worktrees, Serena limits</span><span class="ref">§7</span></div>

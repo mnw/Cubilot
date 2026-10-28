@@ -20,39 +20,48 @@ The factory makes the design of a feature before the Workers build it, keeps a d
 | Designer | Claude, opus for a new design or design system, sonnet for changes | Makes the designs, the design system and the assets. Runs its own screenshot check before hand-in. | Changes product code. Approves its own work. |
 | Design reviewer | A different model from the Designer: OpenAI on Pi when it is set up, else opus in a new session | Checks a design against the request and the design system, and the built UI against the approved design. PASS or CHANGES. | Edits files. |
 
-## Tool: Figma (decision 2026-10-28)
+## Tool: OpenPencil (decision 2026-10-28)
 
-The design team works in Figma. It uses the remote Figma MCP server:
-- **Write:** `use_figma` creates and edits frames, components, variants, variables and auto layout in a Figma file, through the Figma Plugin API. `upload_assets` and `generate_image` add images. The Figma skill `figma-use` makes these calls reliable.
-- **Read:** `get_design_context`, `get_screenshot`, `get_variable_defs` and `get_metadata`. The Design reviewer reads only.
-- **Code link:** Code Connect maps Figma components to code components, so that the Workers build from the real components.
+The design team works in OpenPencil (github.com/open-pencil/open-pencil). The human chose it because it has no licence fee, no account and no cloud, and it works like Sketch: frames, components, auto layout and variables on a vector canvas.
 
-Conditions (Figma documentation, read 2026-10-28; check again before the build):
-- A Figma Professional, Education, Organization or Enterprise plan, and edit access to the files.
-- Write to canvas is in beta. It is free during the beta and becomes a paid, usage-based feature later. Record the cost in the delivery report when Figma starts to charge.
-- Output can need manual cleanup. The Designer works in a draft file or a branch of the file, never in the published library directly.
-- Fonts must be in the Figma account. Components with images or video cannot be imported.
-- The stage sessions need the Figma MCP in their role plugin, with the human's Figma sign-in on the Mac. Agents never see the human's password; the sign-in is the human's step (Part 8, setup).
+Facts (sources read 2026-10-28; check again before the build):
+- MIT licence. A Tauri desktop app (macOS, Linux, Windows) and a browser app (PWA). Written in TypeScript, with a headless SDK.
+- Reads and writes `.pen` and Figma `.fig` files. Exports PNG, JPG, WebP, SVG, HTML and JSX.
+- An MCP server for agents (Claude Code is named) with tools to create shapes, set layouts, use boolean operations and variables.
+- A command-line tool to inspect, query, change and export files.
+- Its maturity is not known: the sources give no version number and no test results.
+
+How it fits Cubilot:
+- The Designer's role plugin registers the OpenPencil MCP server. The Design reviewer uses the read tools and the command-line export only.
+- The design files are local files in the project repository, so they are in git next to the code.
+- The setup screen (Part 8) installs OpenPencil with the other bundled tools, at a pinned version (Part 7, `toolchain.lock`).
+- After Part 12, the browser version of OpenPencil can open as a "Design" tab in Cubilot's browser UI, so that the human sees and approves the mockups in Cubilot.
+
+### First task: the trial
+
+Before the design track is built, one Designer stage makes one Cubilot screen (from the Part 14 brief) in OpenPencil through its MCP server. The trial records:
+- which MCP tools work, which fail, and which are missing;
+- the time and the tokens of the stage;
+- whether the command-line tool exports the screenshots and the tokens without the app open (this decides if design stages can run on the Linux server);
+- the human's judgement of the result.
+
+If the trial fails, the fallback is Penpot, self-hosted (free, MPL licence, an official MCP server; it needs a browser tab that stays open while the agent works). Figma and Sketch stay possible for a client project that already uses them and pays for them. The tool is a project setting; the design system in the repository does not depend on it.
 
 ## Where the work lives
 
-In Figma, for each project:
-- **Library:** the design system as Figma variables (colour, type, spacing, radius, shadow, with modes for the themes) and published components. For a European Commission project, start from the ECL Figma kit when one is available, and do not make a second system.
-- **Design file:** one page for each request, with the screens and their states. The Designer works on a draft or a branch; the human approves the page link.
-
 In the project repository:
-- `design/system/`: `design-tokens.json` and `tokens.css`, exported from the Figma variables, so that code and Figma use the same values. A check compares them.
-- `design/<request-id>/`: `brief.md` (the Figma page link, the screens and states) and `screenshots/` (from `get_screenshot`), so that the review and the delivery report work without Figma.
+- `design/system/`: the library file (`library.pen`) with the variables (colour, type, spacing, radius, shadow, with modes for the themes) and the components, plus `design-tokens.json` and `tokens.css` exported from it, so that code and design use the same values. A check compares them. For a European Commission project, the system is ECL: start from the ECL tokens and components, and do not make a second system. For Cubilot itself, the system is `ui/styles/tokens.css` (the three themes).
+- `design/<request-id>/`: the design file (`<request-id>.pen`) with one page for each screen and its states, `brief.md`, and `screenshots/` exported by the command-line tool, so that the review and the delivery report work without the app.
 - `design/assets/`: SVG files, each with a line in `design/assets/SOURCES.md`.
 
 Inputs:
-- Existing Figma files of the project.
+- Existing design files of the project (`.pen`, or `.fig` from Figma, which OpenPencil opens).
 - The existing UI, through screenshots that Playwright makes.
 
 ## Flow
 
 1. The Orchestrator triages a request (Part 6, item 1). A request with a UI change gets a `[design]` ticket first.
-2. Designer: makes the design or the system change in Figma (draft or branch), exports the screenshots and, for a system change, the tokens.
+2. Designer: makes the design or the system change in OpenPencil, exports the screenshots and, for a system change, the tokens. It commits the files on the ticket branch, as a Worker does.
 3. Design reviewer: PASS or CHANGES. CHANGES goes back to the Designer. After two CHANGES, the arbiter decides (Part 6, item 11).
 4. The plan of the request goes to the human with the design screenshots. One Approve covers both.
 5. The Workers build. Each UI ticket names the screens of the approved design that it implements.
@@ -65,7 +74,7 @@ Sources as for the other roles (`factory/README.md`). Copy each skill with its s
 
 | Role | Core | Optional |
 |---|---|---|
-| Designer | `figma-use` (Figma), `agency-design-ui-designer`, `agency-design-ux-architect`, `design-system` (ECC), `frontend-design-direction` (ECC), `frontend-ui-engineering` (Osmani) | `agency-design-brand-guardian`, `agency-design-visual-storyteller`, `agency-design-inclusive-visuals-specialist` |
+| Designer | an OpenPencil skill (write it after the trial, from the tools that work), `agency-design-ui-designer`, `agency-design-ux-architect`, `design-system` (ECC), `frontend-design-direction` (ECC), `frontend-ui-engineering` (Osmani) | `agency-design-brand-guardian`, `agency-design-visual-storyteller`, `agency-design-inclusive-visuals-specialist` |
 | Design reviewer | `agency-design-ui-finish-gate-reviewer`, `design-system` (ECC, audit mode) | `agency-design-ux-researcher`, `agency-design-persona-walkthrough` |
 
 ## Dependencies
@@ -82,13 +91,14 @@ Sources as for the other roles (`factory/README.md`). Copy each skill with its s
 3. A built UI that uses a colour value outside the design system gets a blocking design-review finding.
 4. On a European Commission project, the Designer uses ECL tokens and components, and creates no new token set.
 5. Each asset in `design/assets/` has a line in `SOURCES.md`.
-6. The tokens exported from the Figma variables match `design/system/tokens.css` (a check that fails on a difference).
-7. A design stage without the Figma sign-in stops with a clear message and a "Needs you" line; it does not fall back to HTML silently.
+6. The tokens exported from `design/system/library.pen` match `design/system/tokens.css` (a check that fails on a difference).
+7. A design stage that cannot reach the OpenPencil MCP server stops with a clear message and a "Needs you" line; it does not fall back to HTML silently.
 
 ## Open questions
 
-1. Image generation: Figma's `generate_image` can make raster images. Is it in scope, and at what cost after the beta? Today: SVG only.
-3. Which Figma plan and team does the factory use, and who owns the files (the human, or each client)?
+1. Image generation (raster illustrations): not in scope. SVG only.
+3. Can design stages run on the Linux server without a screen? The trial answers this (command-line export without the app).
+4. Does a fork of OpenPencil become the base of the shelved Sketch clone (Ardoise)? A separate decision, only after a good trial.
 2. Does the design review run on every UI ticket, or only when the ticket names a screen of an approved design?
 
 ---
