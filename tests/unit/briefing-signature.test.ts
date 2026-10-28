@@ -82,4 +82,39 @@ describe("briefing signature agrees with renderBriefing", () => {
     await Bun.sleep(25);
     expect(queued.length).toBe(0);
   });
+
+  describe("room lead", () => {
+    const lead = (): BriefingPayload => ({ ...base(), stage_peers: ["worker-3"], peers: [...base().peers, { name: "worker-3", online: true, room: "r1" }] });
+
+    test("Stage session joins: the lead's signature does not change", () => {
+      const before = { ...base(), stage_peers: [] as string[] };
+      const joined = lead();
+      expect(briefingSignature(joined)).toBe(briefingSignature(before));
+      const left = { ...joined, peers: joined.peers.map((p) => (p.name === "worker-3" ? { ...p, online: false } : p)) };
+      expect(briefingSignature(left)).toBe(briefingSignature(before));
+    });
+
+    test("a non-stage agent joining still changes the lead's signature", () => {
+      const joined = { ...lead(), peers: [...lead().peers, { name: "cy", online: true, room: "r1" }] };
+      expect(briefingSignature(joined)).not.toBe(briefingSignature(lead()));
+    });
+
+    test("the builder marks stage sessions for a lead only", () => {
+      const mk = (isLead: boolean) => {
+        const agents = {
+          get: (n: string) => ({ name: n, color: "#000", room: "r1" }),
+          entries: () => new Map([["Orchestrator", {}], ["worker-3", { room: "r1" }], ["cy", { room: "r1" }]]).entries(),
+          isPermanent: () => false,
+          connectionCount: () => 1,
+        } as any;
+        return createBriefingBuilder({
+          agents, kinds: [], ledgerDb: null, ledgerEnabled: false, roomSummariser: null,
+          defaultRoom: "r1", attachmentsDir: "/a", humanName: "human",
+          isLead: () => isLead, stageSessions: () => new Set(["worker-3"]),
+        }).build("Orchestrator");
+      };
+      expect(mk(true).stage_peers).toEqual(["worker-3"]);
+      expect(mk(false).stage_peers).toBeUndefined();
+    });
+  });
 });

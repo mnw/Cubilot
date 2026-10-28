@@ -244,6 +244,13 @@ function buildBriefing(agent: string): BriefingPayload {
       defaultRoom: DEFAULT_ROOM, attachmentsDir: ATTACHMENTS_DIR, humanName: HUMAN_NAME,
       factoryVersion: (process.env.CUBILOT_FACTORY_VERSION ?? "").trim() || null,
       buildCap: () => buildCap(),
+      isLead: (name) => {
+        const room = agents.get(name)?.room;
+        return !!room && (ledgerDb ? roomLeadOf(ledgerDb, room) : "Orchestrator") === name;
+      },
+      stageSessions: () => new Set(
+        ledgerDb ? ledgerDb.query<{ session: string }, []>("SELECT session FROM stage WHERE session IS NOT NULL").all().map((r) => r.session) : [],
+      ),
     });
   }
   return _briefingBuilder.build(agent);

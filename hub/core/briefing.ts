@@ -31,6 +31,8 @@ export type BriefingPayload = {
   factory_version: string | null;
   // Lines contributed by kinds' optional briefingLines hook, in KINDS order.
   kind_lines: string[];
+  // Set for a room lead only: the peers that are stage sessions. The signature leaves them out.
+  stage_peers?: string[];
   // Phase 3 layers — null when summariser is disabled.
   room_summary: {
     rollups: Array<{ start_line: number; end_line: number; model: string; summary: string }>;
@@ -50,6 +52,9 @@ export type BriefingBuilderOptions = {
   factoryVersion?: string | null;
   // Needed only for kinds' briefingLines; omitted → no kind lines.
   buildCap?: () => HubCapabilities;
+  // Both needed to mark stage sessions in a room lead's briefing; omitted → none marked.
+  isLead?: (name: string) => boolean;
+  stageSessions?: () => ReadonlySet<string>;
 };
 
 export type BriefingBuilder = {
@@ -72,6 +77,9 @@ export function createBriefingBuilder(opts: BriefingBuilderOptions): BriefingBui
         room: a.room,
       });
     }
+
+    const stageSessions = opts.isLead?.(agent) ? opts.stageSessions?.() : undefined;
+    const stage_peers = stageSessions ? peers.map((p) => p.name).filter((n) => stageSessions.has(n)) : undefined;
 
     const nutshell = opts.ledgerEnabled ? readNutshell(opts.ledgerDb, myRoom).text : "";
 
@@ -109,6 +117,7 @@ export function createBriefingBuilder(opts: BriefingBuilderOptions): BriefingBui
       nutshell: nutshell || null,
       factory_version: opts.factoryVersion || null,
       kind_lines,
+      ...(stage_peers ? { stage_peers } : {}),
       room_summary,
     };
   }
@@ -134,8 +143,12 @@ function toBriefingRow(
 // Phase 3 room summary is in the payload but is not rendered yet, so its layer counts are
 // out. If renderBriefing starts to render it, add the counts back (the signature test
 // compares signature equality with rendered-text equality and will say so).
+// A room lead's signature also leaves out its stage sessions (stage_peers): they come and go
+// with every stage, and a lead re-briefed for each one pays context for no decision.
 export function briefingSignature(b: BriefingPayload): string {
+  const stage = new Set(b.stage_peers ?? []);
   const peers = b.peers
+    .filter((p) => !stage.has(p.name))
     .map((p) => `${p.name}:${p.online ? 1 : 0}:${p.room ?? ""}`)
     .sort()
     .join(",");
