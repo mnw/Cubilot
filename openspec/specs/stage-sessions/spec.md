@@ -86,7 +86,7 @@ The hub SHALL create a stage for a ticket only when the ticket is not `draft`, `
 
 ### Requirement: The ticket role starts only the first stage
 
-The ticket's `role` SHALL start a stage only when no stage exists for the ticket and that role. Stages of any role after that SHALL come from `to_role` handoffs.
+The ticket's `role` SHALL start a stage only when no stage exists for the ticket and that role. A `cancelled` stage SHALL NOT count, whatever its reason. The ready seq SHALL be the latest `ticket.queued` event. A `done` or `cancelled` ticket cannot be queued, so its cancelled stages start nothing. Stages of any role after that SHALL come from `to_role` handoffs.
 
 #### Scenario: New ticket with a role
 
@@ -105,6 +105,18 @@ The ticket's `role` SHALL start a stage only when no stage exists for the ticket
 - **GIVEN** the last `tester` stage of a ticket has passed
 - **WHEN** a handoff to role `tester` arrives for that ticket
 - **THEN** the hub creates one new `tester` stage
+
+#### Scenario: Draft and queued again
+
+- **GIVEN** a ticket whose only stage of its role was cancelled by a move to draft
+- **WHEN** the ticket moves to `queued`
+- **THEN** the hub creates exactly one new `queued` stage of the ticket role
+
+#### Scenario: Done ticket
+
+- **GIVEN** a cancelled stage of a done ticket
+- **WHEN** the hub evaluates the ticket
+- **THEN** no stage is created
 
 ### Requirement: One live stage per ticket
 
@@ -509,3 +521,159 @@ Before a schema migration runs, the hub SHALL copy the ledger to `<app data>/sna
 
 - **WHEN** the snapshot cannot be written
 - **THEN** the migration does not run and the hub reports the error
+
+### Requirement: A stage can be cancelled
+
+A stage SHALL have a terminal status `cancelled`, reachable from `queued`, `launching`, `running` and `retrying`. A cancelled stage SHALL NOT retry, SHALL NOT start a launch, SHALL NOT send a final-failure handoff, SHALL NOT count as a spec FAIL, SHALL NOT add a Needs-you line, and SHALL NOT be a failure record or a diagnosis input. A `passed` or `failed` stage SHALL NOT change. The move SHALL write one `stage.cancelled` event and one row update in one transaction, actor `system`.
+
+#### Scenario: Passed stage stays
+
+- **GIVEN** a stage that is `passed`
+- **WHEN** its ticket is cancelled
+- **THEN** the stage stays `passed`
+
+#### Scenario: No failure trail
+
+- **GIVEN** a stage that is cancelled
+- **THEN** no handoff goes to the room lead
+- **AND** no `stage.retrying` or `stage.failed` event exists for it
+- **AND** `GET /requests/<room>/needs-you` lists nothing for it
+
+### Requirement: A cancelled stage carries its reason
+
+The stage snapshot SHALL have `reason`, a string or null. For a cancelled stage it SHALL be the `reason` in the payload of its last `stage.cancelled` event. For any other stage it SHALL be null. `GET /stages`, `GET /stages/<id>` and the SSE stage entry SHALL carry it. No column SHALL store it. The UI SHALL show `cancelled` and the reason as text, live and after a reload.
+
+#### Scenario: Reason after reload
+
+- **GIVEN** a stage cancelled with the reason "ticket cancelled"
+- **WHEN** a client reads `GET /stages?status=cancelled`
+- **THEN** the stage has `reason` "ticket cancelled"
+
+### Requirement: A ticket cancel cancels its open stages
+
+After the commit of `ticket.cancelled`, the hub SHALL move each `queued`, `launching`, `running` or `retrying` stage of the ticket to `cancelled` with the reason "ticket cancelled". Each move SHALL use the stage API in its own transaction after the ticket transaction. A live stage SHALL get one close request before the move. A `queued` stage SHALL get none and SHALL NOT launch.
+
+#### Scenario: Queued stage
+
+- **GIVEN** a queued stage of a ticket
+- **WHEN** the ticket is cancelled
+- **THEN** the stage is `cancelled` with the reason "ticket cancelled"
+- **AND** no close and no launch request exists for it
+
+#### Scenario: Running stage
+
+- **GIVEN** a running stage
+- **WHEN** its ticket is cancelled
+- **THEN** one close request is queued, then the stage is `cancelled`
+
+#### Scenario: Two roles
+
+- **GIVEN** two cancelled tickets with a worker stage and a validator stage
+- **THEN** both stages are `cancelled`
+
+### Requirement: A cancelled stage keeps its reservation until its close is acked
+
+The session name, the role slot and the worktree of a cancelled stage SHALL stay reserved until a close ack arrives while no launch of that stage is in flight. A close ack, `absent` included, while the launch is in flight SHALL release nothing.
+
+#### Scenario: First close acks absent before the spawn
+
+- **GIVEN** a cancelled stage whose launch is not acked and whose first close acks `absent`
+- **THEN** the name, the slot and the worktree stay reserved
+- **WHEN** the `spawned` ack arrives and then the second close is acked
+- **THEN** they are released
+
+### Requirement: A late launch end of a cancelled stage gets one more close
+
+When the launch of a cancelled stage ends by `spawned`, `error` or no ack, the hub SHALL queue one more close, and only the ack of that close SHALL release. The stage SHALL NOT move to `running`, SHALL NOT be retried and SHALL NOT report a final failure.
+
+#### Scenario: Delayed spawned ack
+
+- **GIVEN** a cancelled stage whose launch is not acked
+- **WHEN** the `spawned` ack arrives
+- **THEN** one more close is queued and the stage stays `cancelled`
+- **AND** a new stage gets another name and another slot until that close is acked
+
+#### Scenario: Launch error after the session exists
+
+- **GIVEN** a cancelled stage whose launch is not acked
+- **WHEN** the launch is acked with `error`
+- **THEN** one more close is queued and its ack releases
+- **AND** the stage is not retried
+
+### Requirement: An undelivered launch of a cancelled stage is dropped
+
+A launch request that the shell never received SHALL be dropped, with no close, and SHALL release the reservation at once.
+
+#### Scenario: Undelivered launch
+
+- **GIVEN** a cancelled stage whose launch request no shell received
+- **THEN** the request is dropped, no close is queued and everything is released at once
+
+### Requirement: A cancelled stage's worktree follows its kind
+
+A `ticket/<id>` worktree (worker, writer) SHALL stay. A temporary worktree SHALL be removed at the releasing close ack, or at once for a dropped launch.
+
+#### Scenario: Worker and validator
+
+- **GIVEN** a cancelled worker stage and a cancelled validator stage
+- **WHEN** each releasing close ack arrives
+- **THEN** the worker worktree exists and the validator worktree is removed
+
+### Requirement: Hub start cancels the open stages of a cancelled ticket
+
+At hub start, before the sweep of `launching` stages, each open stage of a cancelled ticket SHALL move to `cancelled` with the reason "ticket cancelled". Each live one SHALL get one close request. The `launching` sweep SHALL then skip them: no retry and no final failure.
+
+#### Scenario: Four states seeded
+
+- **GIVEN** a ledger with a running, a launching, a retrying and a queued stage of cancelled tickets
+- **WHEN** the hub starts
+- **THEN** all are `cancelled`, each live one has one close request and no launch is queued
+
+### Requirement: A ticket that moves to draft or done cancels its queued stages
+
+After the commit of a move of a ticket to `draft` or `done`, the hub SHALL move each `queued` stage of the ticket to `cancelled` with the reason "ticket moved to draft" or "ticket moved to done". Each move SHALL use the stage API in its own transaction after the ticket transaction. A `launching`, `running` or `retrying` stage SHALL NOT change. The cancel SHALL NOT retry, send a failure handoff or count as a spec FAIL.
+
+#### Scenario: Criteria edit
+
+- **GIVEN** a `queued` ticket with a `queued` stage
+- **WHEN** a criteria edit moves the ticket to `draft`
+- **THEN** the stage is `cancelled` with the reason "ticket moved to draft"
+- **AND** no launch request exists for it
+
+#### Scenario: Transition to done
+
+- **GIVEN** a `queued` stage of a ticket
+- **WHEN** the ticket moves to `done`
+- **THEN** the stage is `cancelled` with the reason "ticket moved to done"
+
+#### Scenario: Final PASS
+
+- **GIVEN** a low-radius ticket in `in_review` with a running Validator stage and a `queued` stage of another role
+- **WHEN** the Validator PASS moves the ticket to `done`
+- **THEN** after `stage.passed` commits, the queued stage is `cancelled` with the reason "ticket moved to done"
+
+#### Scenario: Running stage
+
+- **GIVEN** a `running` stage
+- **WHEN** its ticket moves to `draft`
+- **THEN** the stage stays `running`
+
+### Requirement: Hub start cancels the queued stages of a draft or done ticket
+
+At hub start, each `queued` stage of a `draft` or `done` ticket SHALL move to `cancelled` with the same reason, before the sweep of `launching` stages.
+
+#### Scenario: Seeded stages
+
+- **GIVEN** a queued stage of a draft ticket and a queued stage of a done ticket in the ledger
+- **WHEN** the hub starts
+- **THEN** both stages are `cancelled` and no launch request exists
+
+### Requirement: The launch check refuses a stage of a draft, done or cancelled ticket
+
+The launch check SHALL refuse a stage whose ticket is `draft`, `done` or `cancelled`. A refusal SHALL NOT change the stage row.
+
+#### Scenario: Slot frees
+
+- **GIVEN** a `queued` stage of a draft ticket in the ledger
+- **WHEN** a slot of its role frees
+- **THEN** no launch request exists for it and its row is unchanged

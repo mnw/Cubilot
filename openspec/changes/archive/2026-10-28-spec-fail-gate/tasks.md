@@ -15,4 +15,4 @@
 ## 3. Checks
 
 - [x] 3.1 `./scripts/test.sh`, `bun x tsc --noEmit`, `cargo test --manifest-path src-tauri/Cargo.toml`, `./scripts/check-mod.sh` pass; `./scripts/build-sidecars.sh` exit 0
-- [ ] 3.2 The Orchestrator checks the Needs-you area in a browser before the install
+- [x] 3.2 The Orchestrator checks the Needs-you area in a browser before the install (done: Orchestrator browser check PASS on a test hub, Orchestrator status 2026-10-28 07:07, before install 27; covered: 2-FAIL row with its finding, Collapse and Expand, Clear kept after a reload, storage-failure block, a new FAIL shows the block, no console errors)
