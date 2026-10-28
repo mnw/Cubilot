@@ -1518,7 +1518,8 @@ mod tests {
             assert_eq!(v["skillOverrides"][k], "off", "{k}");
         }
         assert!(v["skillOverrides"].get("synced").is_none());
-        let text = fs::read_to_string(&path).unwrap();
+        // statusLine holds a path under the temp folder (cubilot-factory-...), so only the two lists are checked.
+        let text = format!("{}{}", v["enabledPlugins"], v["skillOverrides"]);
         assert!(!text.contains("chatbridge") && !text.contains("factory-"), "test 8a: role, shared and chatbridge stay on");
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
