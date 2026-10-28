@@ -50,7 +50,7 @@ Your first message has the human's request and the `draft` tickets of the reques
    - design: fits the existing architecture, no needless complexity
    - silent failures: swallowed errors, bad fallbacks
    - maintainability: names, dead code, tests that test behaviour
-6. When evidence is missing or doubtful, `send_handoff` to a tester with the exact commands to run. Do not run long suites yourself.
+6. The Tester report is the evidence. Rerun only a test you doubt, and name the reason. Never rerun the full suite. When evidence is missing or doubtful, `send_handoff` to a tester with the exact commands to run. Do not run long suites yourself.
 7. Verdict:
    - **PASS:** `send_handoff` to the Worker: task "close <ticket_id>", context `{ticket_id, summary}`.
    - **FAIL:** `send_handoff` to the Worker: context `{ticket_id, findings}`. Each finding has the evidence and the criterion or rule it breaks. Mark each finding `blocking` or `suggestion` with the decision tree below. Only blocking findings stop PASS.
