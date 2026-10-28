@@ -5,6 +5,7 @@
 
 import type { Database } from "bun:sqlite";
 import type { KindModule } from "../core/types";
+import { createCancelTraceKind } from "./cancel-trace";
 import { createHandoffKind, createSystemHandoff } from "./handoff";
 import { createInterruptKind } from "./interrupt";
 import { createPermissionKind } from "./permission";
@@ -17,9 +18,12 @@ export type KindFactory = (db: Database) => KindModule;
 /** Construct all Kinds against the live ledger db. Empty array when ledger disabled. */
 export function buildKinds(db: Database | null): readonly KindModule[] {
   if (!db) return [];
+  const cancelTrace = createCancelTraceKind(db);
   // The handoff kind calls the stage runtime when a handoff names a role, so the two share one runtime.
   const stage = createStageRuntime(db, {
     ackMs: Number(process.env.CUBILOT_LAUNCH_ACK_MS) || undefined,
+    // A failed stage cancel or sweep leaves a row for the human (cancel-trace).
+    traceFailure: (input, cap) => cancelTrace.record(input, cap),
     // The context pack is built before each launch is queued (context-pack 3.5).
     buildPack,
     // A stage that failed twice goes to the room's Orchestrator (its lead) as a handoff from the hub (stage-sessions 5.3).
@@ -44,5 +48,6 @@ export function buildKinds(db: Database | null): readonly KindModule[] {
     createPermissionKind(db),
     createTicketKind(db, stage.hooks),
     stage.module,
+    cancelTrace,
   ];
 }

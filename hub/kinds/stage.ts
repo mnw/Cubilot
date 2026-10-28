@@ -31,6 +31,7 @@ import { roleModelFor } from "../core/role-models";
 import { metricsByRole, recordStageMetrics, stagesMissingMetrics, type Launch } from "../core/stage-metrics";
 import { makeSSE } from "../core/sse";
 import { assignBySystemInTx, closeReviewedBySystemInTx, notifyHeldDrafts, queueBySystemInTx, type HeldDraft } from "./ticket";
+import type { CancelTraceCaller, CancelTraceInput } from "./cancel-trace";
 
 export type StageStatus = "queued" | "launching" | "running" | "retrying" | "passed" | "failed" | "cancelled";
 
@@ -670,6 +671,8 @@ export function createStageRuntime(
     roleHandoffs?: (ticketId: string) => RoleHandoff[];
     /** Tells the room's Orchestrator that a stage failed for good (second failure). index.ts wires the handoff kind in. */
     onFinalFailure?: (info: { stage: StageSnapshot; room: string | null; reason: string }, cap: HubCapabilities) => void;
+    /** Leaves a visible trace of a failed cancel or sweep (cancel-trace). It may throw: the stage runtime logs it and goes on. */
+    traceFailure?: (input: CancelTraceInput, cap: HubCapabilities) => void;
     /** How often the hub checks running stages for a time-out or a gone agent (default 30 s; tests call sweep). */
     sweepMs?: number;
     /** A passed stage whose session sent no turn-end report is closed after this time (default 120 s). */
@@ -891,14 +894,38 @@ export function createStageRuntime(
     reportFinalFailure(stage.id, reason, cap);
   }
 
+  /** Writes the trace row of a failed cancel or sweep. A failure here is logged and goes no further. */
+  function traceFailure(stageId: string, site: "cancel" | "sweep", caller: CancelTraceCaller, statusAtFailure: string, e: unknown, cap: HubCapabilities): void {
+    if (!opts.traceFailure) return;
+    try {
+      const ticketId = db.query<{ ticket_id: string | null }, [string]>("SELECT ticket_id FROM stage WHERE id = ?").get(stageId)?.ticket_id ?? null;
+      opts.traceFailure(
+        {
+          room: roomOfStage(stageId) ?? cap.config.defaultRoom,
+          stage_id: stageId,
+          ticket_id: ticketId,
+          site,
+          caller,
+          status_at_failure: statusAtFailure,
+          error: e instanceof Error ? e.message : String(e),
+        },
+        cap,
+      );
+    } catch (t) {
+      console.error(`[stage] trace for ${stageId} failed: ${t instanceof Error ? t.message : String(t)}`);
+    }
+  }
+
   /**
    * G4: cancels one open stage of a cancelled ticket (queued, launching, running or retrying). A live one gets one close queued
    * before the mark and keeps its name, slot and worktree until a close ack arrives with no launch in flight (onCloseEnd). A launch
    * the shell never received is dropped and releases at once. It never retries and never reports a failure. It never throws.
    */
-  function cancelStage(stageId: string, reason: string, cap: HubCapabilities, atStart = false): void {
+  function cancelStage(stageId: string, reason: string, cap: HubCapabilities, caller: CancelTraceCaller, atStart = false): void {
+    let statusAtFailure = "unknown";
     try {
       const stage = api.load(stageId);
+      if (stage) statusAtFailure = stage.status;
       if (!stage || !["queued", "launching", "running", "retrying"].includes(stage.status)) return;
       turnEnds.delete(stageId);
       refused.delete(stageId);
@@ -932,6 +959,7 @@ export function createStageRuntime(
       }
     } catch (e) {
       console.error(`[stage] cancelling ${stageId} failed:`, e);
+      traceFailure(stageId, "cancel", caller, statusAtFailure, e, cap);
     }
   }
 
@@ -939,13 +967,13 @@ export function createStageRuntime(
     const open = db
       .query<{ id: string }, [string]>("SELECT id FROM stage WHERE ticket_id = ? AND status IN ('queued', 'launching', 'running', 'retrying') ORDER BY rowid")
       .all(ticketId);
-    for (const { id } of open) cancelStage(id, "ticket cancelled", cap, atStart);
+    for (const { id } of open) cancelStage(id, "ticket cancelled", cap, atStart ? "start_sweep" : "ticket_cancel", atStart);
   }
 
   /** G10: cancels the queued stages of a ticket that is draft or done. Launching, running and retrying stages do not change. */
   function cancelQueuedStagesOfTicket(ticketId: string, to: "draft" | "done", cap: HubCapabilities, atStart = false): void {
     const queued = db.query<{ id: string }, [string]>("SELECT id FROM stage WHERE ticket_id = ? AND status = 'queued' ORDER BY rowid").all(ticketId);
-    for (const { id } of queued) cancelStage(id, `ticket moved to ${to}`, cap, atStart);
+    for (const { id } of queued) cancelStage(id, `ticket moved to ${to}`, cap, atStart ? "start_sweep" : to === "draft" ? "ticket_draft" : "ticket_done", atStart);
   }
 
   function sweep(cap: HubCapabilities, now: number = Date.now()): void {
@@ -973,6 +1001,7 @@ export function createStageRuntime(
         else if (now - since >= (opts.bootGraceMs ?? 90_000) && !cap.agents.get(stage.session!)) stopStage(stage, "the session left the room", cap);
       } catch (e) {
         console.error(`[stage] sweep of ${id} failed:`, e);
+        traceFailure(id, "sweep", "sweep", "running", e, cap);
       }
     }
   }
@@ -1716,14 +1745,14 @@ export function createStageRuntime(
           "SELECT s.id FROM stage s JOIN tickets t ON t.id = s.ticket_id WHERE t.status = 'cancelled' AND s.status IN ('queued', 'launching', 'running', 'retrying') ORDER BY s.rowid",
         )
         .all();
-      for (const { id } of ofCancelled) cancelStage(id, "ticket cancelled", cap, true);
+      for (const { id } of ofCancelled) cancelStage(id, "ticket cancelled", cap, "start_sweep", true);
       // G10: the queued stages of a draft or done ticket, the same way.
       const ofParked = db
         .query<{ id: string; status: string }, []>(
           "SELECT s.id, t.status FROM stage s JOIN tickets t ON t.id = s.ticket_id WHERE t.status IN ('draft', 'done') AND s.status = 'queued' ORDER BY s.rowid",
         )
         .all();
-      for (const { id, status } of ofParked) cancelStage(id, `ticket moved to ${status}`, cap, true);
+      for (const { id, status } of ofParked) cancelStage(id, `ticket moved to ${status}`, cap, "start_sweep", true);
       const stuck = db.query<{ id: string }, []>("SELECT id FROM stage WHERE status = 'launching' ORDER BY rowid").all();
       for (const { id } of stuck) {
         try {

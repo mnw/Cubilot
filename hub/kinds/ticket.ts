@@ -15,12 +15,12 @@ import type {
   TxHandle,
   VerbDecl,
 } from "../core/types";
-import { pausedRefusal } from "../core/auth";
+import { actorOr400 } from "../core/auth";
 import { LedgerConflict } from "../core/types";
 import { createLedgerEntity, ledgerConflictResponse, withLedgerRequired } from "../core/ledger-entity";
 import { IMAGE_URL_RE, imageUrlToPath } from "../core/attachments";
 import { insertEvent } from "../core/events";
-import { ts, validName, validRoomLabel } from "../core/ids";
+import { ts, validRoomLabel } from "../core/ids";
 import { validateBlockedBy } from "./ticket-blockers";
 import { STAGE_ROLES, type StageRole } from "../core/ledger";
 import { createPermissionWithSideEffect, dismissPendingPermission } from "./permission";
@@ -746,16 +746,6 @@ function conflictResponse(e: LedgerConflict): Response {
 
 export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicketChanged"> & Partial<Pick<StageHooks, "onTicketCancelled" | "onTicketParked">>): KindModule {
   const entity = createLedgerEntity({ decl: ticketDecl, db });
-
-  // A paused agent's writes are refused (423) unless the route is one a running tool call may need
-  // (the ticket:done approval request).
-  function actorOr400(by: unknown, cap: HubCapabilities, allowPaused = false): { name: string } | Response {
-    const name = typeof by === "string" ? by.trim() : "";
-    if (!validName(name)) return Response.json({ error: "invalid by" }, { status: 400 });
-    if (!cap.agents.get(name)) return Response.json({ error: `unknown actor: ${name}` }, { status: 400 });
-    if (!allowPaused && cap.agents.isPaused(name)) return pausedRefusal();
-    return { name };
-  }
 
   // Rework, cancel, a direct done and a reassignment leave the ticket's `ticket:done` request moot.
   // It would sit pending (and replay on every reconnect), so dismiss it: its own transaction, after
