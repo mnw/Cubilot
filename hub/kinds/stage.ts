@@ -1000,17 +1000,36 @@ export function createStageRuntime(
   const leadOfRoom = (room: string | null): string =>
     (room ? db.query<{ agent: string }, [string]>("SELECT agent FROM ticket_room_lead WHERE room = ?").get(room)?.agent : undefined) ?? "Orchestrator";
 
-  /** The request text, spec paths and scope tickets of a spec stage, from its handoff and its scope. */
-  function specFirstMessage(stage: { id: string; request_id: string | null }, room: string, worktree: string, reason?: string, pack?: PackText): string | null {
-    const seq = db.query<{ n: number }, [string]>("SELECT created_seq AS n FROM stage WHERE id = ?").get(stage.id)?.n ?? 0;
-    const ctx = db
+  /**
+   * The context_json of the latest spec-review handoff (to role:validator) of a request that began before the stage.
+   * `needPaths`: only a handoff that carries spec_paths (a ticket stage takes its spec paths from it, context-pack 3.3).
+   */
+  function specHandoffContext(stageId: string, requestId: string | null, room: string, needPaths: boolean): string | null | undefined {
+    const seq = db.query<{ n: number }, [string]>("SELECT created_seq AS n FROM stage WHERE id = ?").get(stageId)?.n ?? 0;
+    return db
       .query<{ c: string | null }, [string, number, string]>(
         `SELECT h.context_json AS c FROM handoffs h
           WHERE h.to_agent = 'role:validator' AND json_extract(h.context_json, '$.request_id') = ?1 AND h.room = ?3
+            ${needPaths ? "AND json_extract(h.context_json, '$.spec_paths') IS NOT NULL" : ""}
             AND (SELECT MIN(e.seq) FROM events e WHERE e.entity_id = h.id) < ?2
           ORDER BY (SELECT MIN(e.seq) FROM events e WHERE e.entity_id = h.id) DESC LIMIT 1`,
       )
-      .get(stage.request_id ?? "", seq, room)?.c;
+      .get(requestId ?? "", seq, room)?.c;
+  }
+
+  /** Spec paths of a request: strings of context.spec_paths in its latest spec-review handoff. Empty when there is none. */
+  function specPathsOf(stageId: string, requestId: string | null, room: string): string[] {
+    if (!requestId) return [];
+    try {
+      const c = JSON.parse(specHandoffContext(stageId, requestId, room, true) ?? "null") as { spec_paths?: unknown } | null;
+      return Array.isArray(c?.spec_paths) ? c!.spec_paths.filter((x): x is string => typeof x === "string") : [];
+    } catch { return []; }
+  }
+
+  /** The request text, spec paths and scope tickets of a spec stage, from its handoff and its scope. */
+  function specFirstMessage(stage: { id: string; request_id: string | null }, room: string, worktree: string, reason?: string, pack?: PackText): string | null {
+    const seq = db.query<{ n: number }, [string]>("SELECT created_seq AS n FROM stage WHERE id = ?").get(stage.id)?.n ?? 0;
+    const ctx = specHandoffContext(stage.id, stage.request_id, room, false);
     let c: { request_text?: unknown; spec_paths?: unknown; commit?: unknown } = {};
     try { c = ctx ? JSON.parse(ctx) : {}; } catch { /* no context: an empty request text */ }
     const scope = db
@@ -1284,7 +1303,8 @@ export function createStageRuntime(
         prompt = renderFirstMessage(fm);
         renderWithPack = (pack) => renderFirstMessage({ ...fm, pack });
         packQuestion = `${t.title} ${t.acceptance_criteria}`;
-        packFiles = namedPaths(t.acceptance_criteria);
+        // Named files: paths in the criteria, then the spec paths of the request (context-pack design item 4). Once each; containment is in buildPack.
+        packFiles = [...new Set([...namedPaths(t.acceptance_criteria), ...specPathsOf(stage.id, t.request_id, input.room)])];
       }
     } else if (prompt === "" && stage.review === "spec" && cwd) {
       const wt = cwd;

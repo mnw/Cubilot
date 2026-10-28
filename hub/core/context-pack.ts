@@ -30,6 +30,8 @@ export type PackInput = {
   projectFolder?: string | null;
   /** Paths that the ticket names (3.3). Only a file inside the worktree reaches ctags; every other path is dropped. */
   files?: string[];
+  /** The ctags lookup. Undefined: search PATH and the Homebrew folders. A function lets a test fix the answer (a path, or null for no tool). */
+  findCtags?: () => string | null;
   /** Limit of each command in ms. Default COMMAND_LIMIT_MS; a test passes a small one. */
   limitMs?: number;
 };
@@ -159,12 +161,14 @@ function findCtags(): string | null {
 const SIGNATURES_MISSING = "Symbol signatures: missing (no Serena interface for the hub, no universal-ctags run)";
 
 /** Signatures (ctags) of the named files (3.3). Undefined: nothing was named. A failing or slow ctags gives the missing line. */
-async function signaturesPart(names: string[], worktree: string, run: Runner, limit: number): Promise<string | undefined> {
-  const { keep, missing } = containNamed(names, worktree);
+async function signaturesPart(names: string[], worktree: string, run: Runner, limit: number, find: () => string | null): Promise<string | undefined> {
+  const contained = containNamed(names, worktree);
+  const keep = contained.keep.slice(0, FILES_MAX);
+  const missing = contained.missing.slice(0, FILES_MAX);
   if (!keep.length && !missing.length) return undefined;
   const none = missing.map((m) => `${m}: none`);
   if (!keep.length) return ["signatures (ctags)", ...none].join("\n");
-  const bin = findCtags();
+  const bin = find();
   if (!bin) return SIGNATURES_MISSING;
   const argv = [bin, "--output-format=json", "--fields=+nS", "-f", "-", ...keep.map((k) => `./${k}`)];
   const r = await run(argv, realpathSync(worktree), limit);
@@ -216,7 +220,7 @@ export async function buildPack(i: PackInput, run: Runner = runCommand): Promise
       if (g.text) text.graph = g.text;
     }
     if (depth.has("signatures") && i.files?.length) {
-      const sig = await signaturesPart(i.files, i.worktree, run, limit);
+      const sig = await signaturesPart(i.files, i.worktree, run, limit, i.findCtags ?? findCtags);
       if (sig) text.signatures = sig;
     }
     if (depth.has("diffStat") || depth.has("changedFiles")) {

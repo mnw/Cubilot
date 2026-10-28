@@ -109,13 +109,13 @@ describe("signatures part of the pack (3.3)", () => {
     expect(pack.text.signatures).toContain("other.ts: none");
   });
 
-  test("neither Serena nor ctags: the part says missing", async () => {
+  test("neither Serena nor ctags: the part says missing, on every host", async () => {
     const { worktree } = repoWithBranch();
     writeFileSync(join(worktree, "src.ts"), "x");
-    const saved = Bun.which;
-    const pack = await withEnv({ PATH: emptyBin() }, () => buildPack({ role: "worker", question: "q", worktree, files: ["src.ts"] }));
-    // The Homebrew folders are searched too; accept a machine that has universal-ctags there.
-    if (!saved("ctags", { PATH: "/opt/homebrew/bin:/usr/local/bin" })) expect(pack.text.signatures).toContain("missing");
+    const seen: string[][] = [];
+    const pack = await buildPack({ role: "worker", question: "q", worktree, files: ["src.ts"], findCtags: () => null }, async (a) => { seen.push(a); return { ok: true, stdout: "" }; });
+    expect(pack.text.signatures).toContain("missing");
+    expect(seen.some((a) => a[0].includes("ctags"))).toBe(false);
   });
 
   test("a ctags that fails (the BSD ctags of macOS) marks only the signatures part missing", async () => {
@@ -124,7 +124,7 @@ describe("signatures part of the pack (3.3)", () => {
     writeGraph(worktree);
     const bin = stubBin("ctags", "exit 1");
     stubBinAdd(bin, "graphify", "echo G");
-    const pack = await withEnv({ PATH: `${bin}:${sys}` }, () => buildPack({ role: "worker", question: "q", worktree, files: ["src.ts"] }));
+    const pack = await withEnv({ PATH: `${bin}:${sys}` }, () => buildPack({ role: "worker", question: "q", worktree, files: ["src.ts"], findCtags: () => join(bin, "ctags") }));
     expect(pack.text.signatures).toContain("missing");
     expect(pack.text.graph).toContain("G");
   });
@@ -134,7 +134,7 @@ describe("signatures part of the pack (3.3)", () => {
     writeFileSync(join(worktree, "src.ts"), "x");
     const bin = stubBin("ctags", "sleep 30");
     const t0 = Date.now();
-    const pack = await withEnv({ PATH: `${bin}:${sys}` }, () => buildPack({ role: "worker", question: "q", worktree, files: ["src.ts"], limitMs: 300 }));
+    const pack = await withEnv({ PATH: `${bin}:${sys}` }, () => buildPack({ role: "worker", question: "q", worktree, files: ["src.ts"], limitMs: 300, findCtags: () => join(bin, "ctags") }));
     expect(Date.now() - t0).toBeLessThan(3000);
     expect(pack.text.signatures).toContain("missing");
   });
@@ -207,6 +207,30 @@ describe("path containment (5b)", () => {
   test("a missing file inside the worktree is named as missing, a folder is dropped", () => {
     const { worktree } = tree();
     expect(containNamed(["src/gone.ts", "src"], worktree)).toEqual({ keep: [], missing: ["src/gone.ts"] });
+  });
+});
+
+describe("spec paths in the named files (3.3, item 2)", () => {
+  // The merge of criteria paths and spec paths is made by the stage seam (tests/unit/context-pack-launch.test.ts);
+  // here every path of the merged list goes through the same containment.
+  test("a spec path inside the worktree reaches the signature command once, also when the criteria name it", async () => {
+    const { worktree } = repoWithBranch();
+    mkdirSync(join(worktree, "hub"));
+    writeFileSync(join(worktree, "hub", "a.ts"), "x");
+    const seen: string[][] = [];
+    await buildPack({ role: "worker", question: "q", worktree, files: ["hub/a.ts", "hub/a.ts", "./hub/a.ts"], findCtags: () => "/stub/ctags" }, async (a) => { seen.push(a); return { ok: true, stdout: "" }; });
+    const c = seen.find((a) => a[0] === "/stub/ctags")!;
+    expect(c.filter((x) => x.endsWith("a.ts"))).toEqual(["./hub/a.ts"]);
+  });
+  test("a spec path outside the worktree (absolute, parent, symlink to a file) is dropped", async () => {
+    const { worktree } = repoWithBranch();
+    const outside = mkdtempSync(join(tmpdir(), "pack-out-"));
+    writeFileSync(join(outside, "s.ts"), "s");
+    symlinkSync(join(outside, "s.ts"), join(worktree, "l.ts"));
+    const seen: string[][] = [];
+    const pack = await buildPack({ role: "worker", question: "q", worktree, files: [join(outside, "s.ts"), "../s.ts", "l.ts"], findCtags: () => "/stub/ctags" }, async (a) => { seen.push(a); return { ok: true, stdout: "" }; });
+    expect(seen.filter((a) => a[0] === "/stub/ctags")).toEqual([]);
+    expect(pack.text.signatures).toBeUndefined();
   });
 });
 
