@@ -70,7 +70,9 @@ Most screens show data the hub has today (checked against `hub/` on 2026-10-28).
 |---|---|---|
 | Decisions, Room, Ticket | Decision cards, questions with options, rulings, Overrule, "Decided without you" | Part 6 (`decision` Kind: `POST /decisions`, `/answer`, `/overrule`) |
 | Request | Plan with radius source, features, scope changes since the Approve | Part 6 (P6-02, P6-03) |
-| Delivery | Delivery report: done tickets, FAILs, rulings, criteria edits, merge message | Part 6 (`GET /requests/<room>/<id>/delivery`, P6-08) |
+| Delivery | Delivery report: done tickets, rulings, criteria edits, suite result, live-check steps | Part 6 (`GET /requests/<room>/<id>/delivery`, P6-08) |
+| Delivery | FAILs and fixes per ticket, build time, cost, merge command | **H8** |
+| Decisions, Room, Ticket | Read route for decisions with card kind, radius, time asked, waiting tickets, FAIL history; "Decided today without you" | **H7** |
 | Delivery | The human's mark for each check (works or problem), note and screenshot | **H3** (this part) |
 | Agents, Dashboard | Context % of each agent | Part 6 (P6-11) |
 | Agents, Dashboard | Model pair and its source; first-pass rate per pair | Part 6 item 6 (model routing) |
@@ -95,10 +97,12 @@ Hub tickets of this part (radius low unless stated):
 - **H4** `GET /search?q=`: tickets, requests and agents of the rooms the caller can see, by id prefix or name.
 - **H5** Message reference: an optional `reply_to` (message id) on `POST /send`; the chat shows the quoted line.
 - **H6** `default_model` in `config.yml`, read by the launch form.
+- **H7** `GET /rooms/<room>/decisions?state=&since=` (Part 6 has only POST routes for decisions). Each row: id, card kind (choose, approve, review; derived from `decider`, `reason` and the request state), ticket or request, the radius of that ticket or request, time asked (event `ts`), the tickets that wait on it (from `blocked_by`), `block`, a summary (`text`, or `block` for a human decision), `options` with the recommended one (the cost of an option goes in its effect text, no new field), `facts`, the FAIL history (handoff ids with their finding counts, not only `fail_count`), `decider`, state. `state=applied&since=<start of day>` gives "Decided today without you". Source: the Orchestrator's comparison of 2026-10-28 (staging 763395b).
+- **H8** Additions to the delivery report `GET /requests/<room>/<id>/delivery` (Part 6, P6-08): for each ticket the FAIL handoffs with their findings and the fix commit; build time (first claim to last done); cost (Claude stage tokens from the stage metrics; Pi stages show "no data"); the merge command for `staging` into `main`; the decision id on each ruling row, if Part 6 does not add it.
 
 ## Build order
 
-1. T01, and H1 to H6 in parallel (hub only).
+1. T01, and H1 to H8 in parallel (hub only).
 2. T02.
 3. T03 to T10, in parallel within the room slots. T05 and T07 first, because the human uses them most.
 4. T11.
@@ -119,7 +123,7 @@ Hub tickets of this part (radius low unless stated):
 3. Keyboard and screen reader: the path through each screen with VoiceOver and with NVDA.
 4. Contrast: measure every text in each screen in the three themes. No text that gives information is below 4.5:1. Record the measurements.
 5. COVERAGE.md: a checklist run against the live hub; every row is checked.
-6. H1 to H6: an integration test for each route (H3 also: an agent token gets 403, and a `problem` mark reopens the ticket with the note).
+6. H1 to H8: an integration test for each route (H3 also: an agent token gets 403, and a `problem` mark reopens the ticket with the note).
 
 ## Open questions for the human
 
