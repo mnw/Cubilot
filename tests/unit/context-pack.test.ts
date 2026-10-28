@@ -1,4 +1,4 @@
-// context-pack 3.1: buildPack runs `graphify query` with budget 1500 in the worktree; no model call.
+// context-pack 3.1: buildPack runs `graphify query` with budget 1500 in the room's project folder; no model call.
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,48 +9,48 @@ import { repoWithBranch, stubBin, stubBinAdd, stubGraphify, withEnv, writeGraph 
 const PATH = process.env.PATH ?? "";
 
 describe("graph part of the pack (3.1)", () => {
-  test("a stub graphify returns text: the pack holds it, called with the question and --budget 1500 in the worktree", async () => {
-    const { worktree } = repoWithBranch();
-    writeGraph(worktree);
+  test("a stub graphify returns text: the pack holds it, called with the question and --budget 1500 in the project folder", async () => {
+    const { project, worktree } = repoWithBranch();
+    writeGraph(project);
     const bin = stubGraphify('echo "ARGS: $*"; pwd');
-    const pack = await withEnv({ PATH: `${bin}:${PATH}` }, () => buildPack({ role: "worker", question: "add the thing", worktree }));
+    const pack = await withEnv({ PATH: `${bin}:${PATH}` }, () => buildPack({ role: "worker", question: "add the thing", worktree, projectFolder: project }));
     expect(pack.text.graph).toContain("Graph status: fresh");
     expect(pack.text.graph).toContain(`ARGS: query add the thing --budget ${GRAPH_BUDGET_TOKENS}`);
-    expect(pack.text.graph).toContain(worktree.replace(/^\/private/, ""));
+    expect(pack.text.graph).toContain(project.replace(/^\/private/, ""));
   });
 
   test("output over the budget is cut to 4 bytes per token", async () => {
-    const { worktree } = repoWithBranch();
-    writeGraph(worktree);
+    const { project, worktree } = repoWithBranch();
+    writeGraph(project);
     const bin = stubGraphify("head -c 20000 /dev/zero | tr '\\0' x");
-    const pack = await withEnv({ PATH: `${bin}:${PATH}` }, () => buildPack({ role: "worker", question: "q", worktree }));
-    const body = pack.text.graph!.split("\n").slice(1).join("\n");
+    const pack = await withEnv({ PATH: `${bin}:${PATH}` }, () => buildPack({ role: "worker", question: "q", worktree, projectFolder: project }));
+    const body = pack.text.graph!.split("\n").slice(2).join("\n");
     expect(Buffer.byteLength(body)).toBeLessThanOrEqual(GRAPH_BUDGET_TOKENS * 4);
   });
 
   test("a question that starts with a dash is not passed as an option", async () => {
-    const { worktree } = repoWithBranch();
-    writeGraph(worktree);
+    const { project, worktree } = repoWithBranch();
+    writeGraph(project);
     const bin = stubGraphify('echo "FIRST: $2"');
-    const pack = await withEnv({ PATH: `${bin}:${PATH}` }, () => buildPack({ role: "worker", question: "--graph /etc/passwd", worktree }));
+    const pack = await withEnv({ PATH: `${bin}:${PATH}` }, () => buildPack({ role: "worker", question: "--graph /etc/passwd", worktree, projectFolder: project }));
     expect(pack.text.graph).toContain("FIRST: graph /etc/passwd");
   });
 
   test("a failing graphify gives no graph text and the other parts still build", async () => {
-    const { worktree } = repoWithBranch();
-    writeGraph(worktree);
+    const { project, worktree } = repoWithBranch();
+    writeGraph(project);
     const bin = stubGraphify("exit 3");
-    const pack = await withEnv({ PATH: `${bin}:${PATH}` }, () => buildPack({ role: "worker", question: "q", worktree }));
+    const pack = await withEnv({ PATH: `${bin}:${PATH}` }, () => buildPack({ role: "worker", question: "q", worktree, projectFolder: project }));
     expect(pack.text.graph).toBeUndefined();
     expect(pack.graphStatus).toBe("missing");
   });
 
   test("roles without graph depth run no graphify (tester, editor)", async () => {
-    const { worktree } = repoWithBranch();
-    writeGraph(worktree);
+    const { project, worktree } = repoWithBranch();
+    writeGraph(project);
     const bin = stubGraphify("echo should-not-run");
     for (const role of ["tester", "editor"]) {
-      const pack = await withEnv({ PATH: `${bin}:${PATH}` }, () => buildPack({ role, question: "q", worktree }));
+      const pack = await withEnv({ PATH: `${bin}:${PATH}` }, () => buildPack({ role, question: "q", worktree, projectFolder: project }));
       expect(pack.text.graph).toBeUndefined();
     }
   });
@@ -119,12 +119,12 @@ describe("signatures part of the pack (3.3)", () => {
   });
 
   test("a ctags that fails (the BSD ctags of macOS) marks only the signatures part missing", async () => {
-    const { worktree } = repoWithBranch();
+    const { project, worktree } = repoWithBranch();
     writeFileSync(join(worktree, "src.ts"), "x");
-    writeGraph(worktree);
+    writeGraph(project);
     const bin = stubBin("ctags", "exit 1");
     stubBinAdd(bin, "graphify", "echo G");
-    const pack = await withEnv({ PATH: `${bin}:${sys}` }, () => buildPack({ role: "worker", question: "q", worktree, files: ["src.ts"], findCtags: () => join(bin, "ctags") }));
+    const pack = await withEnv({ PATH: `${bin}:${sys}` }, () => buildPack({ role: "worker", question: "q", worktree, projectFolder: project, files: ["src.ts"], findCtags: () => join(bin, "ctags") }));
     expect(pack.text.signatures).toContain("missing");
     expect(pack.text.graph).toContain("G");
   });
