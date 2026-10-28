@@ -58,7 +58,7 @@ New ticket columns `radius_rule`, `radius_reasons` (JSON), `radius_source`. A fa
 - Main: no code change. The rule "only the human merges staging into main" stays in the role files; task 4.6 checks that no hub code writes main.
 
 ### 5. Ticket FAIL count and gate
-`ticketFailState(db, ticketId)`: Validator and Reviewer stages of the ticket (review null or `second`) with verdict FAIL after the newest PASS stage. `stampResult` writes it into ticket review FAILs. `handoff.ts` refuses a role handoff to `validator`/`reviewer` at 2 or more unless the sender is the human or a grant exists (decision 8). `evaluateStages` creates no stage for a ticket with a count of 2 or more and no applied ruling, except the arbiter.
+`ticketFailState(db, ticketId)`: Validator and Reviewer stages of the ticket (review null or `second`) with verdict FAIL since the last complete cycle (R1: low radius, the Validator PASS; high radius, the second-review PASS; a FAIL in the second review continues the count). `stampResult` writes it into ticket review FAILs. `handoff.ts` refuses a role handoff to `validator`/`reviewer` at 2 or more unless the sender is the human or a grant exists (decision 8). `evaluateStages` creates no stage for a ticket with a count of 2 or more and no applied ruling, except the arbiter.
 
 ### 6. The arbiter stage
 - `STAGE_ROLES` gets `arbiter`; `DEFAULT_ROLE_LIMITS.arbiter = 1`. The ticket kind refuses it as a ticket role; the handoff route refuses it as `to_role`.
@@ -76,7 +76,7 @@ Effects:
 | rework | system role handoff to `worker` (scope + open findings) + 1 grant | one entry to the lead with the scope + 1 grant |
 | waiver | review with `waiver_text` and `waived_findings` in the first message | spec review with the waiver |
 | third_review | review with the scope | spec review with the scope |
-| follow_up | factory request `<request_id>-followup` (cut to 64 chars, parent and decision as source), one draft ticket, a spec review by `system`; then as waiver | same |
+| follow_up | factory request `<request_id>-fu-<n>` (R2; the hub assigns n; cut to 64 chars, parent and decision as source), one draft ticket, a spec review by `system`; then as waiver | same |
 | cancel | system cancel (only outside the approved scope) | always escalated |
 | human | open human decision | open human decision |
 A waived finding is a suggestion in that review. The Validator role file says so.
@@ -119,25 +119,44 @@ That unarchived change also adds a stage role (`diagnostician`), stage review ty
 One ticket for each piece of behaviour. tasks.md group N = ticket N. `blocked_by` only for an output or a same file.
 | # | Ticket | Radius | blocked_by (reason) |
 |---|---|---|---|
-| 1 | Human escalation (`decision` Kind) | low | — |
+| 1 | Human escalation (`decision` Kind) | high (security, R8) | — |
 | 2 | Request Kind and the Approve rule | high (who may queue) | 1 (same files `hub/kinds/index.ts`, `hub/channel/tools.ts`) |
 | 3 | Radius by rule | high (permissions) | 2 (same file `hub/kinds/ticket.ts`); 1 (same file `hub/channel/tools.ts`) |
 | 4 | High radius checks, Allow removed | high (permissions, launch) | 3 (same files `ticket.ts`, `tools.ts`, `ui/kinds/ticket.js`; output `config-file.ts`) |
 | 5 | Ticket FAIL count and gate | high (permissions) | 4 (same file `hub/kinds/stage.ts`) |
 | 6 | Arbiter stage | high (launch, read-only worktree) | 5 (same files `stage.ts`, `handoff.ts`; output FAIL count); 11 (same file `src-tauri/src/factory.rs`) |
 | 7 | Rulings applied | high (permissions) | 6 (same file `stage.ts`; output arbiter stage) |
-| 8 | Delivery report and overrule | low | 7 (same file `hub/kinds/decision.ts`; output rulings) |
+| 8 | Delivery report and overrule | high (security, R8) | 7 (same file `hub/kinds/decision.ts`; output rulings) |
 | 9 | Measure lead inbound | low | — |
+| 9b | Baseline check (task 9.2) | high (live install, R8) | 9 (output: the P6-09 install); 4 (the P6-04 rules are live at its install, R10) |
 | 10 | Lead briefing ignores stage sessions | low | 9 (output: the baseline measure) |
 | 11 | Context percentage | low | — |
 | 12 | Ticket-event digest for the lead | low | 9 (output: the baseline measure) |
-| 13 | Result summary for the lead, `read_handoff` | low | 12 (same file `hub/channel/core.ts`); 7 (same file `hub/kinds/handoff.ts`); 4 (same file `tools.ts`) |
+| 13 | Result summary for the lead, `read_handoff` | high (security, R8) | 12 (same file `hub/channel/core.ts`); 7 (same file `hub/kinds/handoff.ts`); 4 (same file `tools.ts`) |
 | 14 | State summary | low | 1 (output: `decision` table) |
 | 15 | Checkpoint run | high (writes into a live session) | 2 (same file `index.ts`); 3 (output `config-file.ts`); 11 (output context reader); 14 (output summary) |
 | 16 | Docs and role files | low | 8, 10, 13, 15 (output: the final routes, tools and rules to document) |
-| 17 | [human] Live check | low | 16 (output: the installed build with the role files) |
+| 17 | Live check (Orchestrator owns; the human moves it to done, R9, R11) | high (live install, R8) | 16 (output: the installed build with the role files) |
 | 18 | Closing: interim rule removed, tasks.md ticks | low | 17 (output: proof that the arbiter is live) |
 Chain 1→2→3→4→5→6→7→8→16→17→18 has 10 links. Reason: tickets 2 to 8 edit the same files (`ticket.ts`, `stage.ts`, `handoff.ts`, `tools.ts`, `index.ts`). At once: 1, 9, 11 (3 tickets; 2 Worker slots).
+
+## Rulings
+
+Spec review 1 (FAIL h_f7ae6110aacfba31) found gaps. These rulings close them. The ticket criteria carry the full text and the tests. Where a ruling and the text above differ, the ruling applies.
+
+| # | Ruling | By | Ticket criteria |
+|---|---|---|---|
+| R1 | FAIL count reset: the count resets only after a complete cycle (low radius: the Validator PASS; high radius: the second-review PASS). A FAIL in the second review continues the count. Replaces "after the newest PASS" in decision 5. | human (Q2 A) | P6-05 `t_85759091ea5156b0` |
+| R2 | Follow-up name: one request for each ruling, `<request_id>-fu-<n>`. The hub assigns n, so two rulings cannot take the same name. The ruling covers its follow-up: a low-radius follow-up with no feature change queues at its spec PASS, without the human. A high-radius follow-up, or one that changes features, waits for the human's Approve. Ticket fields: role `worker`, radius by the radius rule, priority `medium`; `blocked_by` the parent ticket when the parent is not `done`, else no `blocked_by`. Replaces `<request_id>-followup` in specs/arbiter. | human (Q1 A) | P6-07 `t_79fa3445e18ec228` |
+| R3 | Waived findings: a reference is `<handoff_id>#<n>` (n = 1-based index in the findings of a FAIL result of the case). An unknown or duplicate reference makes the result invalid. A waiver of a finding with `category: security` is not applied and escalates (decision 9). | Orchestrator, accepted by the human | P6-07 `t_79fa3445e18ec228` |
+| R4 | Request done: each ticket of the request is `done` or `cancelled`, and at least one is `done`. The done time is the `ts` of the ticket event that made this true. A checkpoint is due when a done time is after the newest checkpoint of the lead. A ticket added later makes the request not done again. | Orchestrator (interim) | P6-15 `t_6d55d5ced081407e` |
+| R5 | Decision moves: start `recorded` (arbiter ruling) or `open` (escalation). Legal: recorded→applied, recorded→escalated, escalated→answered (the human answers an escalated ruling), open→answered, applied→overruled. `answered` is final: no answered→overruled. Any other move gets 409. A request-only decision writes no ticket note; its row, its events and the one lead entry are the audit trail. | Orchestrator (interim) | P6-01 `t_a2466a1bed95cda9` |
+| R6 | Lead-inbound line: `hour` (UTC start of the hour), `room`, `lead` and the seven kind keys, each `{count, bytes}`. One line for each room lead at each full hour, also with zeros. | Orchestrator (interim) | P6-09 `t_8af8b7a060596ef0` |
+| R7 | Task 9.2 is its own ticket, owned by the Orchestrator, after an install of P6-09. The baseline window is the 24 full UTC hours after the install, with 24 hourly lines for each lead, read with one fixed `jq` command. No other Part 6 install happens inside the baseline window. If one is necessary, the window ends at that install, and the baseline check runs again after it. Task 18.2 uses the same check for the window after the P6-17 install. | Orchestrator (interim) | P6-09b `t_54b90b34346d08d0`, P6-18 `t_6794ff6c1797f8a4` |
+| R8 | Radius high for P6-01, P6-08 and P6-13 (security) and for P6-09b and P6-17 (live install). The table in decision 16 shows them as low. | Orchestrator (review finding) | the five tickets |
+| R9 | Task 17.1: the Orchestrator owns the ticket (the hub refuses the human as assignee) and records the human's results. Before the install: a browser check of five named UI flows, each with a screenshot attached to the ticket and zero console errors. Done not before 25 h after the install, after the human's delivery check passes (Part 6 removes the Allow gate for high radius). | Orchestrator (interim) | P6-17 `t_cb686c860846f6cc` |
+| R10 | P6-09b path: blocked_by P6-04, so the P6-04 rules are live at its install. The Orchestrator collects the evidence (baseline lines, jq output, hub start time) and moves the ticket to `in_review` with the note. Then a Tester stage runs the full suite on the installed commit and sends its result `to_role: validator`. A Validator PASS and the second review (P6-04) close it. The human does not move it. | human (msg 273), spec reviews 4 and 5 | P6-09b `t_54b90b34346d08d0` |
+| R11 | P6-17 done path: no stage gives the two PASSes. The human moves P6-17 from `in_review` to `done` after the live check passes, not before T2 + 25 h (T2 = end of the install). | human (msg 273) | P6-17 `t_cb686c860846f6cc` |
 
 ## Risks / Trade-offs
 
