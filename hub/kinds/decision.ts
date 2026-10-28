@@ -283,10 +283,18 @@ export function createDecisionKind(db: Database): DecisionKind {
     const label = d.body?.options.find((o) => o.id === d.option)?.label;
     return `Decision ${d.id} answered: ${d.option}${label ? ` (${label})` : ""}${d.text ? `. ${d.text}` : ""}${d.body ? ` Block: ${d.body.block}` : ""}`;
   };
-  const leadEntry = (d: DecisionSnapshot, lead: string, from: string): Entry =>
-    ({ from, to: lead, room: d.room, ts: ts(), image: null, text: leadText(d) });
   const delivered = (id: string) => !!db.query("SELECT 1 FROM decision_deliveries WHERE decision_id = ?").get(id);
   const markDelivered = (id: string) => db.run("INSERT OR IGNORE INTO decision_deliveries (decision_id, delivered_at_ms) VALUES (?, ?)", [id, Date.now()]);
+  // The agent stream calls claim() just before it sends the entry. Only then is the answer delivered. A copy that
+  // sits in a queue the hub drops (stale lead) never claims, so the next lead session gets the answer from pendingFor.
+  // A second copy (retry, replay plus queue) finds the mark and is skipped.
+  const claimFor = (id: string) => () => {
+    if (delivered(id)) return false;
+    markDelivered(id);
+    return true;
+  };
+  const leadEntry = (d: DecisionSnapshot, lead: string, from: string): Entry =>
+    ({ from, to: lead, room: d.room, ts: ts(), image: null, text: leadText(d), claim: claimFor(d.id) });
 
   const answerPrefix = (d: DecisionSnapshot) => `Decision ${d.id} answered:`;
 
@@ -383,11 +391,11 @@ export function createDecisionKind(db: Database): DecisionKind {
         try {
           const r = api.move(cap, id, "answered", by, { option, text });
           const d = r.snapshot;
-          // Deliver the answer to the lead once. A lead that is away gets it from pendingFor when it connects.
+          // Queue the answer for the lead. It counts as delivered when a lead stream claims it, not here.
+          // A lead that is away or removed as stale gets it from pendingFor when it connects.
           const lead = roomLead(cap, d.room);
           if (lead && !delivered(d.id)) {
             cap.sse.emit(leadEntry(d, lead, by), { kind: "to-agents", agents: [lead] });
-            markDelivered(d.id);
           }
           // No 200 without the audit note. A retry finds the answer and writes the missing note.
           let ticket_note = false;
@@ -436,7 +444,6 @@ export function createDecisionKind(db: Database): DecisionKind {
         if (agent.room !== room) continue;
         for (const d of entity.listByStatus({ status: "answered", room, limit: 200 })) {
           if (delivered(d.id)) continue;
-          markDelivered(d.id);
           out.push(leadEntry(d, agent.name, cap.config.humanName));
         }
       }

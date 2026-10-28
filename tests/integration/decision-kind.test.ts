@@ -53,6 +53,10 @@ const escalation = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+// What the agent stream does with entries: it sends an entry unless its claim() refuses.
+const sentByStream = (entries: Array<{ claim?: () => boolean }>) => entries.filter((e) => e.claim?.() !== false);
+const leadEntries = (emitted: Array<{ entry: any; scope: any }>) => emitted.filter((e) => e.scope.kind === "to-agents").map((e) => e.entry);
+
 describe("decision kind: state machine (R5)", () => {
   for (const [from, to] of LEGAL) {
     test(`legal move ${from} -> ${to} writes one event and one row update`, () => {
@@ -172,10 +176,11 @@ describe("decision kind: answer route in process", () => {
     const s = setup();
     const d = s.create("open");
     await answer(s, d.id, { by: "human", option: "A" });
+    expect(sentByStream(leadEntries(s.emitted))).toHaveLength(1);   // the stream claims the first copy
     const n = s.emitted.length;
     const again = await answer(s, d.id, { by: "human", option: "A" });
     expect(again.status).toBe(200);
-    expect(s.emitted.length).toBe(n);
+    expect(sentByStream(leadEntries(s.emitted.slice(n)))).toHaveLength(0);
   });
 
   test("an answer on a decision that cannot be answered gets 409", async () => {
@@ -333,6 +338,7 @@ describe("decision kind: rework 3 (h_0b38ad1b593d35f4)", () => {
     const first = s.kind.pendingFor({ name: "boss", room: "r1", permanent: false }, s.cap);
     expect(first).toHaveLength(1);
     expect(first[0].text).toContain(d.id);
+    expect(sentByStream(first)).toHaveLength(1);                    // the stream sends it and so claims it
     expect(s.kind.pendingFor({ name: "boss", room: "r1", permanent: false }, s.cap)).toHaveLength(0);
     expect((await ans()).status).toBe(200);
     expect(s.emitted.filter((e) => e.scope.kind === "to-agents")).toHaveLength(0);
@@ -349,8 +355,9 @@ describe("decision kind: rework 3 (h_0b38ad1b593d35f4)", () => {
     await ans();
     s.cap.agents.get = realGet;
     await ans();
+    expect(sentByStream(leadEntries(s.emitted))).toHaveLength(1);   // the stream sends it once
     await ans();
-    expect(s.emitted.filter((e) => e.scope.kind === "to-agents")).toHaveLength(1);
+    expect(sentByStream(leadEntries(s.emitted))).toHaveLength(0);   // a retry after the send adds no second copy
     expect(s.kind.pendingFor({ name: "boss", room: "r1", permanent: false }, s.cap)).toHaveLength(0);
   });
 
@@ -378,6 +385,72 @@ describe("decision kind: rework 3 (h_0b38ad1b593d35f4)", () => {
       expect(n).toBe(1);
       side.close();
       boss.close();
+    } finally {
+      await hub.kill();
+    }
+  });
+});
+
+// Rework 4 (h_c2ab8c6ffcb98087): an answer counts as delivered only when a lead stream receives it.
+describe("decision kind: rework 4, delivery needs a lead stream", () => {
+  const STALE_MS = 400;
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  async function staleHub() {
+    const orig = process.env.CUBILOT_STALE_AGENT_MS;
+    process.env.CUBILOT_STALE_AGENT_MS = String(STALE_MS);
+    try { return await spawnHub(); } finally {
+      if (orig === undefined) delete process.env.CUBILOT_STALE_AGENT_MS; else process.env.CUBILOT_STALE_AGENT_MS = orig;
+    }
+  }
+  function lead(hub: HubHandle) {
+    const sse = openSSE(hub, "/agent-stream?agent=boss&room=r1");
+    const texts: string[] = [];
+    (async () => { try { for await (const e of sse.events) if (typeof e.text === "string") texts.push(e.text); } catch {} })();
+    return { texts, close: sse.close };
+  }
+  const roster = async (hub: HubHandle) => ((await getJson(hub, "/agents")).json as Array<{ name: string }>).map((a) => a.name);
+
+  test("(i) answer while the lead is disconnected, lead removed as stale: a new session gets it once", async () => {
+    const hub = await staleHub();
+    try {
+      const first = lead(hub);
+      await sleep(250);
+      expect((await postJson(hub, "/rooms/r1/lead", { by: hub.humanName, agent: "boss" })).status).toBe(200);
+      const id = ((await postJson(hub, "/decisions", { by: "boss", ...escalation() })).json as { id: string }).id;
+      first.close();
+      await sleep(100);
+      expect(await roster(hub)).toContain("boss");                 // away, not yet stale
+      const ans = () => postJson(hub, `/decisions/${id}/answer`, { by: hub.humanName, option: "A" });
+      expect((await ans()).status).toBe(200);
+      await sleep(STALE_MS * 3);
+      expect(await roster(hub)).not.toContain("boss");             // removed as stale, queue gone
+      const second = lead(hub);
+      await sleep(400);
+      expect(second.texts.filter((t) => t.includes(`Decision ${id} answered`))).toHaveLength(1);
+      second.close();
+    } finally {
+      await hub.kill();
+    }
+  });
+
+  test("(ii) no second delivery after a reconnect or a retry of the answer", async () => {
+    const hub = await staleHub();
+    try {
+      const first = lead(hub);
+      await sleep(250);
+      await postJson(hub, "/rooms/r1/lead", { by: hub.humanName, agent: "boss" });
+      const id = ((await postJson(hub, "/decisions", { by: "boss", ...escalation() })).json as { id: string }).id;
+      const ans = () => postJson(hub, `/decisions/${id}/answer`, { by: hub.humanName, option: "A" });
+      expect((await ans()).status).toBe(200);
+      await sleep(300);
+      expect(first.texts.filter((t) => t.includes(`Decision ${id} answered`))).toHaveLength(1);
+      first.close();
+      const again = lead(hub);
+      await sleep(300);
+      expect((await ans()).status).toBe(200);
+      await sleep(300);
+      expect(again.texts.filter((t) => t.includes(`Decision ${id} answered`))).toHaveLength(0);
+      again.close();
     } finally {
       await hub.kill();
     }
