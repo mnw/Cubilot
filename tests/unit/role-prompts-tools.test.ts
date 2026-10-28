@@ -16,6 +16,12 @@ describe("role prompts: find before you read (context-pack 4.1)", () => {
     });
   }
 
+  for (const role of ROLES.filter((r) => r !== "orchestrator")) {
+    test(`${role}.md says to use rg when graphify or Serena is missing`, () => {
+      expect(read(role)).toContain("When graphify or Serena is missing, use `rg`.");
+    });
+  }
+
   test("orchestrator.md gives the rg fallback and the planning note rule (4.2)", () => {
     const text = read("orchestrator");
     expect(text).toMatch(/When a tool is missing, use `rg`/);

@@ -800,6 +800,7 @@ Example of a valid Validator result:
   "context": {
     "stage_id": "s_0123456789abcdef",
     "ticket_id": "t_0123456789abcdef",
+    "notes": "I checked the 409 path. It has no test. I did not run the full suite.",
     "verdict": "FAIL",
     "findings": [{ "ticket_id": "t_0123456789abcdef", "text": "The 409 path has no test." }]
   }
@@ -827,12 +828,12 @@ The hub builds the first message of a stage with no model call. The parts come i
 | Part | Content | Roles |
 |---|---|---|
 | Earlier notes | The planning note first, then spec-review notes, then the `context.notes` of earlier stage results, oldest first. | worker, writer, reviewer, tester, validator |
-| Graph query | `graphify query` with budget 1500 in the stage worktree, with a status line `fresh` or `stale`. | worker, writer, reviewer, spec review |
+| Graph query | `graphify query` with budget 1500 in the room's project folder, with a status line `fresh` or `stale`. The graph describes the room base, not the ticket branch. | worker, writer, reviewer, spec review |
 | Symbol signatures | `ctags` tags of the files that the criteria and the spec paths name. | worker, writer, reviewer |
 | Diff stat | `git diff --stat` against the room base branch. | validator (code review) |
 | Changed files | `git diff --name-only` against the room base branch. | validator (code review), tester |
 
-The editor gets no pack part. A template cannot widen the parts of a role (`hub/core/pack-depth.ts`). Each command stops after 20 s. A command that fails or stops marks only its own part `missing` and the launch continues. A `missing` graph part adds no text. Without a usable `ctags`, the signatures part says `missing`. The notes part is cut at 32 KiB and the pack parts together at 16 KiB. Source: `hub/core/context-pack.ts`, `hub/core/first-message.ts`, `hub/core/primer.ts`.
+The editor gets no pack part. A template cannot widen the parts of a role (`hub/core/pack-depth.ts`). The other pack commands (`ctags`, `git diff`) run in the stage worktree. Each command stops after 20 s. A command that fails or stops marks only its own part `missing` and the launch continues. A `missing` graph part adds no text. Without a usable `ctags`, the signatures part says `missing`. The notes part is cut at 32 KiB and the pack parts together at 16 KiB. Source: `hub/core/context-pack.ts`, `hub/core/first-message.ts`, `hub/core/primer.ts`.
 
 ### Stage metrics
 
