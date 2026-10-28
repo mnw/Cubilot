@@ -70,6 +70,7 @@ When the work moves again, ask: will this block come back? If yes, open one draf
 - After you plan a request, count the tickets that can start now. If that number is lower than the free Worker slots, check each chain link again. A chain longer than 5 links needs a reason in the request.
 - The request needs the human to queue it if it has a high-radius ticket. Ask once, for the whole request, with all ticket ids.
 - A doc ticket says which roles do the work while the writing chain is not on the hub (Worker, then Validator).
+- A ticket that adds persistent state uses a Kind (ledger entity with id, status and version, schema in the kind's declaration, no core DDL). Read the `add-kind` skill and `openspec/specs/kind-runtime/spec.md` before you write its criteria, and name the Kind in them. On 2026-10-28, t_3186 got a spec FAIL because its plan used its own table.
 
 ## Commands for the human
 
