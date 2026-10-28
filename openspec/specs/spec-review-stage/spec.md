@@ -7,7 +7,7 @@ Agents claim tickets before anyone checks the plan of a request. A spec review b
 
 ### Requirement: A spec review is a stage of the request
 
-The hub SHALL create one spec-review stage for a request when a handoff names `to_role: "validator"` with `review: "spec"` and a `request_id`. The stage SHALL NOT have a ticket. The handoff SHALL contain `request_text` and MAY contain `spec_paths`, `ticket_ids` and `commit`. When the sender is the human, `ticket_ids` SHALL be a non-empty list, and the room of the review SHALL be the room of those tickets. All named tickets SHALL be in one room. Otherwise the hub SHALL return HTTP 400 and record nothing. The error for a missing or empty list SHALL name `ticket_ids`. When the sender is an agent, the room of the review SHALL be the room of the agent.
+The hub SHALL create one spec-review stage for a request when a handoff names `to_role: "validator"` with `review: "spec"` and a `request_id`. The stage SHALL NOT have a ticket. The handoff SHALL contain `request_text` and MAY contain `spec_paths`, `ticket_ids` and `commit`.
 
 #### Scenario: Spec handoff creates a stage
 
@@ -19,6 +19,10 @@ The hub SHALL create one spec-review stage for a request when a handoff names `t
 
 - **WHEN** a spec handoff has no `request_text`
 - **THEN** the hub returns HTTP 400 and records nothing
+
+### Requirement: A human spec review names its tickets
+
+When the sender is the human, `ticket_ids` SHALL be a non-empty list, and the room of the review SHALL be the room of those tickets. All named tickets SHALL be in one room. Otherwise the hub SHALL return HTTP 400 and record nothing. The error for a missing or empty list SHALL name `ticket_ids`. When the sender is an agent, the room of the review SHALL be the room of the agent.
 
 #### Scenario: Human names tickets of two rooms
 
