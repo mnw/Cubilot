@@ -1,8 +1,10 @@
 // context-pack 3.1: buildPack runs `graphify query` with budget 1500 in the worktree; no model call.
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { buildPack, GRAPH_BUDGET_TOKENS, packCommandCount, COMMAND_LIMIT_MS } from "../../hub/core/context-pack";
-import { repoWithBranch, stubGraphify, withEnv, writeGraph } from "../helpers/pack-fixture";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildPack, containNamed, namedPaths, GRAPH_BUDGET_TOKENS, packCommandCount, COMMAND_LIMIT_MS } from "../../hub/core/context-pack";
+import { repoWithBranch, stubBin, stubBinAdd, stubGraphify, withEnv, writeGraph } from "../helpers/pack-fixture";
 
 const PATH = process.env.PATH ?? "";
 
@@ -54,7 +56,7 @@ describe("graph part of the pack (3.1)", () => {
   });
 
   test("worst-case delay: command count by role", () => {
-    expect(packCommandCount("worker")).toBe(2);
+    expect(packCommandCount("worker")).toBe(3); // git log, graphify query, one ctags run
     expect(packCommandCount("tester")).toBe(2);
     expect(packCommandCount("validator")).toBe(3);
     expect(packCommandCount("validator", "spec")).toBe(2);
@@ -67,5 +69,151 @@ describe("graph part of the pack (3.1)", () => {
     const imports = [...src.matchAll(/^import .* from "([^"]+)"/gm)].map((m) => m[1]);
     expect(imports.sort()).toEqual(["./first-message", "./pack-depth", "node:fs", "node:os", "node:path"].sort());
     expect(src).not.toMatch(/spawnSync|\bsh -c\b|\bbash -c\b|anthropic|claude-|openai|fetch\(/i);
+  });
+});
+
+// 3.3: signatures of the named files. Serena has no callable interface for the hub, so the only tool is universal-ctags.
+const CTAGS_JSON = String.raw`printf '%s\n' '{"_type":"tag","name":"hello","path":"./src.ts","kind":"function","signature":"(a: number)","line":3}'`;
+
+describe("signatures part of the pack (3.3)", () => {
+  const emptyBin = () => mkdtempSync(join(tmpdir(), "pack-nobin-"));
+  const sys = "/usr/bin:/bin";
+
+  test("with a ctags stub: signatures for a named file and none for a missing one, labelled ctags", async () => {
+    const { worktree } = repoWithBranch();
+    writeFileSync(join(worktree, "src.ts"), "x");
+    const bin = stubBin("ctags", `echo "ARGS: $*" >&2; ${CTAGS_JSON}`);
+    const pack = await withEnv({ PATH: `${bin}:${sys}` }, () => buildPack({ role: "worker", question: "q", worktree, files: ["src.ts", "gone.ts"] }));
+    const t = pack.text.signatures!;
+    expect(t.split("\n")[0]).toBe("signatures (ctags)");
+    expect(t).toContain("src.ts:\n  function hello(a: number) :3");
+    expect(t).toContain("gone.ts: none");
+  });
+
+  test("ctags argv is fixed: json output, relative ./ paths, no shell", async () => {
+    const { worktree } = repoWithBranch();
+    writeFileSync(join(worktree, "-rf.ts"), "x");
+    const seen: string[][] = [];
+    const bin = stubBin("ctags", "true");
+    await withEnv({ PATH: `${bin}:${sys}` }, () =>
+      buildPack({ role: "worker", question: "q", worktree, files: ["-rf.ts"] }, async (argv) => { seen.push(argv); return { ok: true, stdout: "" }; }));
+    const c = seen.find((a) => a[0].endsWith("ctags"))!;
+    expect(c.slice(1)).toEqual(["--output-format=json", "--fields=+nS", "-f", "-", "./-rf.ts"]);
+  });
+
+  test("a file ctags knows nothing about is none", async () => {
+    const { worktree } = repoWithBranch();
+    writeFileSync(join(worktree, "other.ts"), "x");
+    const bin = stubBin("ctags", "true");
+    const pack = await withEnv({ PATH: `${bin}:${sys}` }, () => buildPack({ role: "worker", question: "q", worktree, files: ["other.ts"] }));
+    expect(pack.text.signatures).toContain("other.ts: none");
+  });
+
+  test("neither Serena nor ctags: the part says missing", async () => {
+    const { worktree } = repoWithBranch();
+    writeFileSync(join(worktree, "src.ts"), "x");
+    const saved = Bun.which;
+    const pack = await withEnv({ PATH: emptyBin() }, () => buildPack({ role: "worker", question: "q", worktree, files: ["src.ts"] }));
+    // The Homebrew folders are searched too; accept a machine that has universal-ctags there.
+    if (!saved("ctags", { PATH: "/opt/homebrew/bin:/usr/local/bin" })) expect(pack.text.signatures).toContain("missing");
+  });
+
+  test("a ctags that fails (the BSD ctags of macOS) marks only the signatures part missing", async () => {
+    const { worktree } = repoWithBranch();
+    writeFileSync(join(worktree, "src.ts"), "x");
+    writeGraph(worktree);
+    const bin = stubBin("ctags", "exit 1");
+    stubBinAdd(bin, "graphify", "echo G");
+    const pack = await withEnv({ PATH: `${bin}:${sys}` }, () => buildPack({ role: "worker", question: "q", worktree, files: ["src.ts"] }));
+    expect(pack.text.signatures).toContain("missing");
+    expect(pack.text.graph).toContain("G");
+  });
+
+  test("a ctags that sleeps past the limit marks only its part missing", async () => {
+    const { worktree } = repoWithBranch();
+    writeFileSync(join(worktree, "src.ts"), "x");
+    const bin = stubBin("ctags", "sleep 30");
+    const t0 = Date.now();
+    const pack = await withEnv({ PATH: `${bin}:${sys}` }, () => buildPack({ role: "worker", question: "q", worktree, files: ["src.ts"], limitMs: 300 }));
+    expect(Date.now() - t0).toBeLessThan(3000);
+    expect(pack.text.signatures).toContain("missing");
+  });
+
+  test("roles without signatures in the depth table run no ctags", async () => {
+    const { worktree } = repoWithBranch();
+    writeFileSync(join(worktree, "src.ts"), "x");
+    const bin = stubBin("ctags", CTAGS_JSON);
+    for (const role of ["tester", "validator", "editor"]) {
+      const pack = await withEnv({ PATH: `${bin}:${sys}` }, () => buildPack({ role, question: "q", worktree, files: ["src.ts"] }));
+      expect(pack.text.signatures).toBeUndefined();
+    }
+  });
+
+  test("no file named: no part", async () => {
+    const { worktree } = repoWithBranch();
+    const pack = await buildPack({ role: "worker", question: "q", worktree, files: [] });
+    expect(pack.text.signatures).toBeUndefined();
+  });
+
+  test("no rg or grep fallback in context-pack.ts", () => {
+    const src = readFileSync(new URL("../../hub/core/context-pack.ts", import.meta.url), "utf8");
+    expect(src).not.toMatch(/["'`](rg|grep|ripgrep|egrep)["'`]/);
+    expect(src).not.toMatch(/ripgrep|\bgrep\b/);
+  });
+});
+
+describe("path containment (5b)", () => {
+  function tree() {
+    const { worktree } = repoWithBranch();
+    const outside = mkdtempSync(join(tmpdir(), "pack-out-"));
+    writeFileSync(join(outside, "secret.ts"), "s");
+    mkdirSync(join(worktree, "src"));
+    writeFileSync(join(worktree, "src", "ok.ts"), "x");
+    return { worktree, outside };
+  }
+
+  test("a normal relative path is kept", () => {
+    const { worktree } = tree();
+    expect(containNamed(["src/ok.ts"], worktree).keep).toEqual(["src/ok.ts"]);
+  });
+  test("an absolute path outside is dropped", () => {
+    const { worktree, outside } = tree();
+    expect(containNamed([join(outside, "secret.ts"), "/etc/hosts"], worktree)).toEqual({ keep: [], missing: [] });
+  });
+  test("a parent path that leaves the worktree is dropped", () => {
+    const { worktree, outside } = tree();
+    expect(containNamed(["../../etc/hosts", `../${outside}/secret.ts`], worktree)).toEqual({ keep: [], missing: [] });
+  });
+  test("a symlink to an outside file is dropped", () => {
+    const { worktree, outside } = tree();
+    symlinkSync(join(outside, "secret.ts"), join(worktree, "link.ts"));
+    expect(containNamed(["link.ts"], worktree)).toEqual({ keep: [], missing: [] });
+  });
+  test("a symlink to an outside folder is dropped, also for a file below it", () => {
+    const { worktree, outside } = tree();
+    symlinkSync(outside, join(worktree, "dir"));
+    expect(containNamed(["dir", "dir/secret.ts"], worktree)).toEqual({ keep: [], missing: [] });
+  });
+  test("a dropped path never reaches the command", async () => {
+    const { worktree, outside } = tree();
+    symlinkSync(join(outside, "secret.ts"), join(worktree, "link.ts"));
+    const seen: string[][] = [];
+    const bin = stubBin("ctags", "true");
+    const pack = await withEnv({ PATH: `${bin}:/usr/bin:/bin` }, () =>
+      buildPack({ role: "worker", question: "q", worktree, files: ["link.ts", join(outside, "secret.ts"), "../x.ts"] }, async (a) => { seen.push(a); return { ok: true, stdout: "" }; }));
+    expect(seen.filter((a) => a[0].endsWith("ctags"))).toEqual([]);
+    expect(pack.text.signatures).toBeUndefined();
+  });
+  test("a missing file inside the worktree is named as missing, a folder is dropped", () => {
+    const { worktree } = tree();
+    expect(containNamed(["src/gone.ts", "src"], worktree)).toEqual({ keep: [], missing: ["src/gone.ts"] });
+  });
+});
+
+describe("named paths of a criteria text", () => {
+  test("path-like tokens only", () => {
+    expect(namedPaths("Edit `hub/core/context-pack.ts`, see tasks.md. e.g. fast; then (tests/unit/a.test.ts).")).toEqual([
+      "hub/core/context-pack.ts", "tasks.md", "tests/unit/a.test.ts",
+    ]);
   });
 });

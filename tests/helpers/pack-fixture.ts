@@ -57,3 +57,16 @@ export async function withEnv<T>(env: { PATH?: string; HOME?: string }, fn: () =
     process.env.HOME = old.HOME;
   }
 }
+
+/** A folder with an executable `name` script; returns the folder. */
+export function stubBin(name: string, body: string): string {
+  const dir = mkdtempSync(join(tmpdir(), "pack-bin-"));
+  stubBinAdd(dir, name, body);
+  return dir;
+}
+
+export function stubBinAdd(dir: string, name: string, body: string): void {
+  const f = join(dir, name);
+  writeFileSync(f, `#!/bin/sh\n${body}\n`);
+  chmodSync(f, 0o755);
+}

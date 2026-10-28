@@ -5,7 +5,7 @@
 
 import { join } from "node:path";
 import { renderFirstMessage, renderSpecFirstMessage, type PackText } from "../core/first-message";
-import { packCommandCount, type Pack, type PackInput } from "../core/context-pack";
+import { namedPaths, packCommandCount, type Pack, type PackInput } from "../core/context-pack";
 import { renderStable } from "../core/primer";
 import { readNutshell } from "../nutshell";
 import { createWorktree, removeWorktree, worktreesRoot } from "../core/worktrees";
@@ -1272,6 +1272,7 @@ export function createStageRuntime(
     // The same render with the pack text, run once the pack is built (context-pack 3.5). Null: nothing to add.
     let renderWithPack: ((pack: PackText) => string) | null = null;
     let packQuestion = "";
+    let packFiles: string[] = [];
     if (prompt === "" && stage.ticket_id && cwd) {
       const t = db
         .query<{ id: string; title: string; acceptance_criteria: string; blast_radius: string; request_id: string | null }, [string]>(
@@ -1283,6 +1284,7 @@ export function createStageRuntime(
         prompt = renderFirstMessage(fm);
         renderWithPack = (pack) => renderFirstMessage({ ...fm, pack });
         packQuestion = `${t.title} ${t.acceptance_criteria}`;
+        packFiles = namedPaths(t.acceptance_criteria);
       }
     } else if (prompt === "" && stage.review === "spec" && cwd) {
       const wt = cwd;
@@ -1358,7 +1360,7 @@ export function createStageRuntime(
     void (async () => {
       let pack: Pack = { text: {}, graphStatus: "missing" };
       try {
-        pack = await buildPackFor({ role: stage.role, review: stage.review, question: packQuestion, worktree: packWorktree, projectFolder: getRoomSettings(db, input.room)?.project_folder ?? null });
+        pack = await buildPackFor({ role: stage.role, review: stage.review, question: packQuestion, files: packFiles, worktree: packWorktree, projectFolder: getRoomSettings(db, input.room)?.project_folder ?? null });
       } catch (e) {
         console.error(`[stage] pack of ${req.stage_id} failed, launching without it:`, e);
       }

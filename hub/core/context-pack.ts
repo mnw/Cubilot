@@ -3,9 +3,9 @@
 // has its own limit (COMMAND_LIMIT_MS) and the commands run one after another, so the worst-case delay of a launch is
 // `packCommandCount(role) x COMMAND_LIMIT_MS`. A command that fails or passes its limit marks only its part missing.
 
-import { existsSync, statSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { packDepth } from "./pack-depth";
 import type { PackText } from "./first-message";
 
@@ -28,6 +28,8 @@ export type PackInput = {
   worktree: string;
   /** The room's project folder. The room base is the branch that it has out. Without it, the first `git worktree list` entry. */
   projectFolder?: string | null;
+  /** Paths that the ticket names (3.3). Only a file inside the worktree reaches ctags; every other path is dropped. */
+  files?: string[];
   /** Limit of each command in ms. Default COMMAND_LIMIT_MS; a test passes a small one. */
   limitMs?: number;
 };
@@ -84,6 +86,7 @@ export function packCommandCount(role: string, review?: string | null): number {
   if (d.has("diffStat") || d.has("changedFiles")) n += 1; // git symbolic-ref (the room base)
   if (d.has("diffStat")) n += 1;
   if (d.has("changedFiles")) n += 1;
+  if (d.has("signatures")) n += 1; // one ctags run for all named files (the Serena path is not implemented)
   return n;
 }
 
@@ -100,6 +103,85 @@ async function graphPart(question: string, worktree: string, run: Runner, limit:
   const r = await run([bin, "query", q, "--budget", String(GRAPH_BUDGET_TOKENS)], worktree, limit);
   if (!r.ok || !r.stdout.trim()) return { status: "missing" };
   return { status, text: `Graph status: ${status}\n${cutBytes(r.stdout.trim(), GRAPH_BUDGET_TOKENS * 4)}` };
+}
+
+const FILES_MAX = 20;
+const SIGNATURES_MAX_BYTES = 8 * 1024;
+const PATH_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|rs|py|go|java|c|h|cc|cpp|hpp|rb|php|swift|kt|sh|json|md|toml|yaml|yml|html|css)$/;
+
+/** Path-like tokens of a text: contain "/" or end in a known extension. At most FILES_MAX, no duplicates. */
+export function namedPaths(text: string): string[] {
+  const out = new Set<string>();
+  for (const raw of text.split(/[\s`'"()\[\]<>,;]+/)) {
+    const tok = raw.replace(/[.:]+$/, "");
+    if (!/^[\w.\-@/]+$/.test(tok) || !/[A-Za-z]/.test(tok)) continue;
+    if (tok.includes("/") ? !/\w/.test(tok) : !PATH_EXT.test(tok)) continue;
+    out.add(tok);
+    if (out.size >= FILES_MAX) break;
+  }
+  return [...out];
+}
+
+/**
+ * Path containment (5b). Each named path is resolved with realpath; only a file inside the real worktree is kept.
+ * A file that is missing but lies inside the worktree by its text is `missing` (shown as "none"). Every other path
+ * (absolute outside, ".." out, symlink to a file or folder outside, a folder) is dropped and never read.
+ */
+export function containNamed(names: string[], worktree: string): { keep: string[]; missing: string[] } {
+  const keep: string[] = [];
+  const missing: string[] = [];
+  let root: string;
+  try { root = realpathSync(worktree); } catch { return { keep, missing }; }
+  const inside = (p: string) => p.startsWith(root + sep);
+  for (const name of names) {
+    const abs = isAbsolute(name) ? resolve(name) : resolve(root, name);
+    let real: string;
+    try {
+      real = realpathSync(abs);
+    } catch {
+      // Not on disk. Only a path that is inside the worktree by its text counts as a named missing file.
+      if (inside(abs)) missing.push(relative(root, abs));
+      continue;
+    }
+    try {
+      if (inside(real) && statSync(real).isFile()) keep.push(relative(root, real));
+    } catch { /* dropped */ }
+  }
+  return { keep: [...new Set(keep)], missing: [...new Set(missing)] };
+}
+
+/** Universal-ctags: PATH, then the Homebrew folders. The BSD ctags of macOS is found too, but it fails on the options below, so the part is missing. */
+function findCtags(): string | null {
+  const extra = ["/opt/homebrew/bin", "/usr/local/bin"].join(":");
+  return Bun.which("ctags", { PATH: `${process.env.PATH ?? ""}:${extra}` });
+}
+
+const SIGNATURES_MISSING = "Symbol signatures: missing (no Serena interface for the hub, no universal-ctags run)";
+
+/** Signatures (ctags) of the named files (3.3). Undefined: nothing was named. A failing or slow ctags gives the missing line. */
+async function signaturesPart(names: string[], worktree: string, run: Runner, limit: number): Promise<string | undefined> {
+  const { keep, missing } = containNamed(names, worktree);
+  if (!keep.length && !missing.length) return undefined;
+  const none = missing.map((m) => `${m}: none`);
+  if (!keep.length) return ["signatures (ctags)", ...none].join("\n");
+  const bin = findCtags();
+  if (!bin) return SIGNATURES_MISSING;
+  const argv = [bin, "--output-format=json", "--fields=+nS", "-f", "-", ...keep.map((k) => `./${k}`)];
+  const r = await run(argv, realpathSync(worktree), limit);
+  if (!r.ok) return SIGNATURES_MISSING;
+  const byFile = new Map<string, string[]>();
+  for (const line of r.stdout.split("\n")) {
+    try {
+      const t = JSON.parse(line) as { _type?: string; name?: string; path?: string; kind?: string; signature?: string; line?: number };
+      if (t._type !== "tag" || typeof t.name !== "string" || typeof t.path !== "string") continue;
+      const f = t.path.replace(/^\.\//, "");
+      const l = byFile.get(f) ?? [];
+      l.push(`  ${t.kind ?? "tag"} ${t.name}${t.signature ?? ""}${t.line ? ` :${t.line}` : ""}`);
+      byFile.set(f, l);
+    } catch { /* not a tag line */ }
+  }
+  const body = keep.map((k) => (byFile.get(k)?.length ? `${k}:\n${byFile.get(k)!.join("\n")}` : `${k}: none`));
+  return cutBytes(["signatures (ctags)", ...body, ...none].join("\n"), SIGNATURES_MAX_BYTES);
 }
 
 /**
@@ -121,7 +203,6 @@ async function roomBase(worktree: string, projectFolder: string | null | undefin
 
 /**
  * Builds the pack parts that the depth table gives `role`. Never throws; a part that could not be built is absent.
- * Signatures (3.3) are not built here.
  */
 export async function buildPack(i: PackInput, run: Runner = runCommand): Promise<Pack> {
   const depth = packDepth(i.role, i.review);
@@ -133,6 +214,10 @@ export async function buildPack(i: PackInput, run: Runner = runCommand): Promise
       const g = await graphPart(i.question, i.worktree, run, limit);
       graphStatus = g.status;
       if (g.text) text.graph = g.text;
+    }
+    if (depth.has("signatures") && i.files?.length) {
+      const sig = await signaturesPart(i.files, i.worktree, run, limit);
+      if (sig) text.signatures = sig;
     }
     if (depth.has("diffStat") || depth.has("changedFiles")) {
       const base = await roomBase(i.worktree, i.projectFolder, run, limit);

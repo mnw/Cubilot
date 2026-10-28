@@ -72,6 +72,24 @@ describe("pack at the launch seam (3.5)", () => {
     expect(req.prompt.indexOf("## Ticket")).toBeLessThan(req.prompt.indexOf("GRAPH-HIT"));
   });
 
+  test("3.3: a ticket that names a file and a host with no ctags: the first message says the signatures are missing", async () => {
+    const { project, worktree } = repoWithBranch();
+    writeFileSync(join(worktree, "src.ts"), "x");
+    let files: string[] | undefined;
+    const e = makeEnv((i) => { files = i.files; return buildPack({ ...i, worktree, projectFolder: project }); });
+    const s = e.stage("worker");
+    e.db.run("UPDATE tickets SET acceptance_criteria = 'Change src.ts and ../outside.ts' WHERE id = ?", [s.ticket]);
+    await withEnv({ PATH: "/usr/bin:/bin" }, async () => {
+      e.launch(s.id, "worker-1");
+      await sleep(500);
+    });
+    expect(files).toEqual(["src.ts", "../outside.ts"]);
+    // A machine with universal-ctags in the Homebrew folders gives real signatures instead.
+    if (!Bun.which("ctags", { PATH: "/opt/homebrew/bin:/usr/local/bin" })) {
+      expect(e.launches()[0].prompt).toMatch(/## Symbol signatures\nSymbol signatures: missing/);
+    }
+  });
+
   test("the ack time-out starts at the push: a launch waiting for its pack is not timed out", async () => {
     const d = deferred();
     const e = makeEnv(d.fn);
