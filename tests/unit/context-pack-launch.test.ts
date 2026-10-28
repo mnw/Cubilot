@@ -1,10 +1,11 @@
 // context-pack 3.5: the pack is built inside enqueueLaunch, after stage.launching and before the first message and queue.push.
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { giveProject } from "../helpers/repo";
-import { repoWithBranch, stubGraphify, withEnv } from "../helpers/pack-fixture";
+import { repoWithBranch, stubGraphify, withEnv, writeGraph } from "../helpers/pack-fixture";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createTicketKind } from "../../hub/kinds/ticket";
 import { createStageRuntime } from "../../hub/kinds/stage";
@@ -72,6 +73,61 @@ describe("pack at the launch seam (3.5)", () => {
     expect(req.prompt.indexOf("## Ticket")).toBeLessThan(req.prompt.indexOf("GRAPH-HIT"));
   });
 
+  test("3.3: a ticket that names a file and a host with no ctags: the first message says the signatures are missing", async () => {
+    const { project, worktree } = repoWithBranch();
+    writeFileSync(join(worktree, "src.ts"), "x");
+    let files: string[] | undefined;
+    const e = makeEnv((i) => { files = i.files; return buildPack({ ...i, worktree, projectFolder: project, findCtags: () => null }); });
+    const s = e.stage("worker");
+    e.db.run("UPDATE tickets SET acceptance_criteria = 'Change src.ts and ../outside.ts' WHERE id = ?", [s.ticket]);
+    await withEnv({ PATH: "/usr/bin:/bin" }, async () => {
+      e.launch(s.id, "worker-1");
+      await sleep(500);
+    });
+    expect(files).toEqual(["src.ts", "../outside.ts"]);
+    expect(e.launches()[0].prompt).toMatch(/## Symbol signatures\nSymbol signatures: missing/);
+  });
+
+  // Spec paths come from context.spec_paths of the spec-review handoff of the ticket's request (stage.ts specPathsOf).
+  function specHandoff(e: ReturnType<typeof makeEnv>, requestId: string, ctx: unknown, id = "h_spec1") {
+    e.db.run("INSERT INTO handoffs (id, from_agent, to_agent, task, context_json, status, created_at_ms, expires_at_ms, room) VALUES (?, 'Orchestrator', 'role:validator', 'spec', ?, 'pending', 1, 2, 'r1')", [id, JSON.stringify(ctx)]);
+    e.db.run("INSERT INTO events (entity_id, kind, actor, payload_json, at_ms, room) VALUES (?, 'handoff.created', 'Orchestrator', '{}', 1, 'r1')", [id]);
+  }
+  async function filesFor(spec: string[] | null, criteria: string): Promise<string[] | undefined> {
+    let files: string[] | undefined;
+    const e = makeEnv((i) => { files = i.files; return Promise.resolve({ text: {}, graphStatus: "missing" } as Pack); });
+    if (spec) specHandoff(e, "r-1", { request_id: "r-1", review: "spec", spec_paths: spec });
+    const s = e.stage("worker");
+    e.db.run("UPDATE tickets SET acceptance_criteria = ?, request_id = 'r-1' WHERE id = ?", [criteria, s.ticket]);
+    e.launch(s.id, "worker-1");
+    await sleep(100);
+    return files;
+  }
+
+  test("3.3 spec paths: criteria paths and spec paths both reach the pack, a path in both once", async () => {
+    expect(await filesFor(["openspec/x/spec.md", "src.ts"], "Change src.ts and hub/a.ts")).toEqual(["src.ts", "hub/a.ts", "openspec/x/spec.md"]);
+  });
+  test("3.3 spec paths: no spec handoff gives the criteria paths only", async () => {
+    expect(await filesFor(null, "Change src.ts")).toEqual(["src.ts"]);
+  });
+  test("3.3 spec paths: an outside spec path reaches buildPack but is dropped by containment", async () => {
+    const { project, worktree } = repoWithBranch();
+    writeFileSync(join(worktree, "src.ts"), "x");
+    const out = mkdtempSync(join(tmpdir(), "pack-out-"));
+    writeFileSync(join(out, "s.ts"), "s");
+    symlinkSync(join(out, "s.ts"), join(worktree, "link.ts"));
+    const seen: string[][] = [];
+    const run = async (a: string[]) => { seen.push(a); return { ok: true as const, stdout: "" }; };
+    const e = makeEnv((i) => buildPack({ ...i, worktree, projectFolder: project, findCtags: () => "/stub/ctags" }, run));
+    specHandoff(e, "r-1", { request_id: "r-1", spec_paths: ["src.ts", join(out, "s.ts"), "../s.ts", "link.ts"] });
+    const s = e.stage("worker");
+    e.db.run("UPDATE tickets SET acceptance_criteria = 'x', request_id = 'r-1' WHERE id = ?", [s.ticket]);
+    e.launch(s.id, "worker-1");
+    await sleep(500);
+    const c = seen.find((a) => a[0] === "/stub/ctags")!;
+    expect(c.slice(5)).toEqual(["./src.ts"]);
+  });
+
   test("the ack time-out starts at the push: a launch waiting for its pack is not timed out", async () => {
     const d = deferred();
     const e = makeEnv(d.fn);
@@ -99,11 +155,9 @@ describe("pack at the launch seam (3.5)", () => {
   });
 
   test("a failing graphify still launches, with no graph section", async () => {
-    const e = makeEnv(async (i) => {
-      Bun.spawnSync(["mkdir", "-p", join(i.worktree, "graphify-out")]);
-      writeFileSync(join(i.worktree, "graphify-out", "graph.json"), "{}");
-      return buildPack(i);
-    });
+    const { project } = repoWithBranch();
+    writeGraph(project);
+    const e = makeEnv((i) => buildPack({ ...i, projectFolder: project }));
     const bin = stubGraphify("exit 7");
     const s = e.stage("worker");
     await withEnv({ PATH: `${bin}:${PATH}` }, async () => {
@@ -116,11 +170,9 @@ describe("pack at the launch seam (3.5)", () => {
   });
 
   test("a stub that sleeps past the limit is stopped and the launch continues", async () => {
-    const e = makeEnv(async (i) => {
-      Bun.spawnSync(["mkdir", "-p", join(i.worktree, "graphify-out")]);
-      writeFileSync(join(i.worktree, "graphify-out", "graph.json"), "{}");
-      return buildPack({ ...i, limitMs: 300 });
-    });
+    const { project } = repoWithBranch();
+    writeGraph(project);
+    const e = makeEnv((i) => buildPack({ ...i, projectFolder: project, limitMs: 300 }));
     const bin = stubGraphify("sleep 30");
     const s = e.stage("worker");
     const t0 = Date.now();

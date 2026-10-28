@@ -62,6 +62,15 @@ Ask these questions in order for each finding. Stop at the first "yes".
 
 1. Is the finding outside the ticket or the plan? It is not in the acceptance criteria, the spec, or the files that the change touches.
    → Yes: **suggestion**.
+
+Before a test failure blocks, check the same test on staging without the ticket. If it fails there too, it is a staging issue: name it as a suggestion, not a blocking finding. A criterion such as "./scripts/test.sh passes" does not make a staging-only failure blocking. Use only read operations:
+- Find B with `git merge-base <reviewed commit> staging`.
+- Read `~/Library/Logs/Cubilot/staging-suite/<full sha of B>.log` with `rg`. The Orchestrator writes one log after each merge into staging.
+- Do not create a worktree, change a branch, run the suite on staging, or write a file.
+- The suggestion names the failing test, B, the log path, and the failing line from the log and from the Tester report.
+- No log for B: the failure stays blocking. The finding says "no staging log for <B>". Post the finding to the Orchestrator.
+- A test that passes in the log for B and fails with the ticket stays blocking.
+
 2. Does an acceptance criterion fail? Run the command in its `verify:` line and use the output as evidence. A criterion without evidence fails.
    → Yes: **blocking**.
 3. Does the change open a security or permission hole? Examples: auth, tokens, who may open a session, who may approve, read-only paths, the human's gates.
