@@ -13,6 +13,11 @@ import { buildPack } from "../core/context-pack";
 import { createStageRuntime } from "./stage";
 import { createTicketKind } from "./ticket";
 
+/** The lead of a room: its ticket_room_lead row, else "Orchestrator". */
+export function roomLeadOf(db: Database, room: string): string {
+  return db.query<{ agent: string }, [string]>("SELECT agent FROM ticket_room_lead WHERE room = ?").get(room)?.agent ?? "Orchestrator";
+}
+
 export type KindFactory = (db: Database) => KindModule;
 
 /** Construct all Kinds against the live ledger db. Empty array when ledger disabled. */
@@ -29,7 +34,7 @@ export function buildKinds(db: Database | null): readonly KindModule[] {
     // A stage that failed twice goes to the room's Orchestrator (its lead) as a handoff from the hub (stage-sessions 5.3).
     onFinalFailure({ stage: s, room, reason }, cap) {
       if (!room) return;
-      const lead = db.query<{ agent: string }, [string]>("SELECT agent FROM ticket_room_lead WHERE room = ?").get(room)?.agent ?? "Orchestrator";
+      const lead = roomLeadOf(db, room);
       if (!cap.agents.get(lead)) {
         console.error(`[stage] stage ${s.id} failed for good (${reason}); no Orchestrator "${lead}" in the roster to tell`);
         return;

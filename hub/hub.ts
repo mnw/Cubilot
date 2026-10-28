@@ -67,7 +67,7 @@ import {
   nutshellEntry,
   type NutshellSnapshot,
 } from "./nutshell";
-import { buildKinds } from "./kinds";
+import { buildKinds, roomLeadOf } from "./kinds";
 import {
   expireHandoff as expireHandoffK,
   findExpirable as findExpirableK,
@@ -127,15 +127,13 @@ const uiSubscribers = new Set<DropQueue<Entry>>();
 let entrySeq = 0;
 const SESSION_ID = randomId(8);
 
-// The lead of a room is its ticket_room_lead row, else "Orchestrator" (as in hub/kinds/index.ts).
 const leadInbound = createLeadInbound({
   file: join(dirname(LEDGER_DB || join(ATTACHMENTS_DIR || ".", "x")), "metrics", "lead-inbound.jsonl"),
   leads: () => {
     const out: Array<{ room: string; lead: string }> = [];
     for (const a of agents.values()) {
       if (!a.room) continue;
-      const row = ledgerDb?.query<{ agent: string }, [string]>("SELECT agent FROM ticket_room_lead WHERE room = ?").get(a.room);
-      if ((row?.agent ?? "Orchestrator") === a.name) out.push({ room: a.room, lead: a.name });
+      if ((ledgerDb ? roomLeadOf(ledgerDb, a.room) : "Orchestrator") === a.name) out.push({ room: a.room, lead: a.name });
     }
     return out;
   },

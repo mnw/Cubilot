@@ -85,4 +85,43 @@ describe("lead inbound", () => {
     m.flush(HOUR);
     expect(lines(file)[0].ticket.count).toBe(1);
   });
+  test("a late timer writes every missing full hour in order", () => {
+    const file = join(tmp(), "l.jsonl");
+    let clock = HOUR + 600_000; // 13:10
+    const real = globalThis.setTimeout;
+    let fire: (() => void) | null = null;
+    globalThis.setTimeout = ((fn: () => void) => { fire = fn; return { unref() {} }; }) as unknown as typeof setTimeout;
+    const m = createLeadInbound({ file, leads: () => LEADS, now: () => clock });
+    try {
+      m.start();
+      m.record("Orchestrator", { kind: "ticket.new" });
+      clock = HOUR + 3 * 3_600_000 + 60_000; // the 14:00 callback runs at 16:01
+      fire!();
+    } finally { globalThis.setTimeout = real; m.stop(); }
+    const all = lines(file);
+    expect(all.map((l) => l.hour)).toEqual(["2026-10-29T13:00:00Z", "2026-10-29T14:00:00Z", "2026-10-29T15:00:00Z"]);
+    expect(all[0].ticket.count).toBe(1);
+    expect(all[1].ticket.count).toBe(0);
+  });
+
+  test("a failed write keeps the counts for the next line", () => {
+    const d = tmp();
+    const ro = join(d, "ro");
+    mkdirSync(ro);
+    const file = join(ro, "sub", "l.jsonl");
+    const m = createLeadInbound({ file, leads: () => LEADS, log() {} });
+    m.record("Orchestrator", { kind: "ticket.new" });
+    chmodSync(ro, 0o500);
+    m.flush(HOUR);
+    chmodSync(ro, 0o700);
+    m.flush(HOUR + 3_600_000);
+    expect(lines(file)[0].ticket.count).toBe(1);
+  });
+
+  test("enqueue does not call the lead lookup each time", () => {
+    let calls = 0;
+    const m = createLeadInbound({ file: join(tmp(), "l.jsonl"), leads: () => { calls++; return LEADS; }, now: () => HOUR });
+    for (let i = 0; i < 50; i++) m.record("Orchestrator", { kind: "ticket.new" });
+    expect(calls).toBe(1);
+  });
 });

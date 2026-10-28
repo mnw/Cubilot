@@ -29,6 +29,7 @@ export type LeadInbound = {
 };
 
 const HOUR_MS = 3_600_000;
+const LEAD_CACHE_MS = 30_000;
 
 export function classifyEntry(entry: Entry): LeadInboundKind {
   if (entry.type === "briefing") return "briefing";
@@ -46,10 +47,24 @@ export function createLeadInbound(opts: LeadInboundOptions): LeadInbound {
   const log = opts.log ?? ((m) => console.error(m));
   let tallies = new Map<string, Tally>();
   let timer: ReturnType<typeof setTimeout> | null = null;
+  // First hour not yet written. Set by start().
+  let nextHour = 0;
+  // The lead lookup may query the ledger, so enqueue reads a cached set that is at most LEAD_CACHE_MS old.
+  let leadNames = new Set<string>();
+  let leadNamesAt = -Infinity;
+
+  function isLead(name: string): boolean {
+    const t = now();
+    if (t - leadNamesAt >= LEAD_CACHE_MS || t < leadNamesAt) {
+      leadNames = new Set(opts.leads().map((l) => l.lead));
+      leadNamesAt = t;
+    }
+    return leadNames.has(name);
+  }
 
   function record(name: string, entry: Entry): void {
     try {
-      if (!opts.leads().some((l) => l.lead === name)) return;
+      if (!isLead(name)) return;
       const t = tallies.get(name) ?? emptyTally();
       tallies.set(name, t);
       const slot = t[classifyEntry(entry)];
@@ -70,6 +85,8 @@ export function createLeadInbound(opts: LeadInboundOptions): LeadInbound {
       mkdirSync(dirname(opts.file), { recursive: true });
       appendFileSync(opts.file, lines.join(""));
     } catch (e) {
+      // Keep the counts for the next line, so a failed write does not lose them.
+      tallies = done;
       log(`[lead-inbound] write failed: ${(e as Error).message}`);
     }
   }
@@ -78,7 +95,9 @@ export function createLeadInbound(opts: LeadInboundOptions): LeadInbound {
     const t = now();
     const next = Math.floor(t / HOUR_MS) * HOUR_MS + HOUR_MS;
     timer = setTimeout(() => {
-      flush(next - HOUR_MS);
+      // A late timer writes every full hour that is still missing, in order.
+      const current = Math.floor(now() / HOUR_MS) * HOUR_MS;
+      for (; nextHour < current; nextHour += HOUR_MS) flush(nextHour);
       arm();
     }, next - t);
     timer.unref?.();
@@ -87,7 +106,11 @@ export function createLeadInbound(opts: LeadInboundOptions): LeadInbound {
   return {
     record,
     flush,
-    start() { if (!timer) arm(); },
+    start() {
+      if (timer) return;
+      nextHour = Math.floor(now() / HOUR_MS) * HOUR_MS;
+      arm();
+    },
     stop() { if (timer) clearTimeout(timer); timer = null; },
   };
 }
