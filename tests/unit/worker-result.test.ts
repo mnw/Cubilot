@@ -282,13 +282,17 @@ describe("refusals", () => {
 });
 
 describe("other roles are unchanged", () => {
-  test("a writer, a tester and a validator result need no commit", () => {
+  test("a writer and a validator result need no commit; a tester result needs the full commit sha", () => {
     const e = makeEnv();
     const w = e.running("writer", "writer-1");
     expect(e.rt().hooks.checkResult("writer-1", { notes: "n", stage_id: w, ticket_id: TID }, e.cap, "Orchestrator")).toEqual([]);
     const t = e.running("tester", "tester-1");
-    expect(e.rt().hooks.checkResult("tester-1", { notes: "n", stage_id: t, ticket_id: TID }, e.cap, "role:validator")).toEqual([]);
+    expect(e.rt().hooks.checkResult("tester-1", { notes: "n", stage_id: t, ticket_id: TID }, e.cap, "role:validator")).toEqual([
+      "context.commit must be the full 40-character commit sha",
+    ]);
+    expect(e.rt().hooks.checkResult("tester-1", { notes: "n", stage_id: t, ticket_id: TID, commit: "a".repeat(40) }, e.cap, "role:validator")).toEqual([]);
     const v = e.running("validator", "validator-1");
     expect(e.rt().hooks.checkResult("validator-1", { notes: "n", stage_id: v, ticket_id: TID, verdict: "PASS", findings: [] }, e.cap, "Orchestrator")).toEqual([]);
   });
+
 });

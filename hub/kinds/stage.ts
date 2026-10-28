@@ -1948,6 +1948,7 @@ export function createStageRuntime(
           const refusal = checkWorkerResult(stage, c, to);
           if (refusal) errors.push(refusal);
         } else if (c.ticket_id !== stage.ticket_id) errors.push(`context.ticket_id must be ${stage.ticket_id}`);
+        if (stage.role === "tester" && (typeof c.commit !== "string" || !FULL_SHA_RE.test(c.commit))) errors.push("context.commit must be the full 40-character commit sha");
         if (REVIEW_ROLES.has(stage.role)) {
           if (typeof c.verdict !== "string" || !VERDICTS.has(c.verdict)) errors.push("context.verdict must be PASS or FAIL (upper case)");
           if (!Array.isArray(c.findings)) errors.push("context.findings must be a list of {ticket_id, text}");
