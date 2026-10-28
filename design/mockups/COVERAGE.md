@@ -1,6 +1,6 @@
 # Coverage: every feature and its screen
 
-112 rows (2026-10-28): the features of `ui/` and the hub routes (staging a0a89b1), sign-in (Part 12), the dashboard (Part 11), stage diagnosis (Part 4), setup and admin (Parts 7, 8), delivery and backup (Part 5), mutation testing (Part 13), and five features kept from the current UI. Each has an element in the mockups. Part 14 is done when every row of its own screens works in the built UI; the other parts check their rows.
+113 rows (2026-10-28): the features of `ui/` and the hub routes (staging a0a89b1), sign-in (Part 12), the dashboard (Part 11), stage diagnosis (Part 4), setup and admin (Parts 7, 8), delivery and backup (Part 5), mutation testing (Part 13), and five features kept from the current UI. Each has an element in the mockups. Part 14 is done when every row of its own screens works in the built UI; the other parts check their rows.
 
 Screen names are the prototype screens (`cubilot-prototype.html`, prototype bar, "Screen"); addresses are in README.md.
 
@@ -29,6 +29,7 @@ Screen names are the prototype screens (`cubilot-prototype.html`, prototype bar,
 | Persist transcript, auto-summary | Toggles | Room, RoomCards, Settings |
 | Archive transcript, start fresh | Archive transcript… button | RoomCards, Settings |
 | Room settings: stage timeout, role limits | Room # cubilot section | Settings |
+| Change slots per role while work runs (workers, testers, validators); a waiting stage starts at once | Slots control with − and +, waiting count; Add a slot on the queue panel | Flow, Dashboard |
 | Cancel traces: list, clear | Cancel traces section · Flow footer link | Settings, Flow |
 
 ## Chat

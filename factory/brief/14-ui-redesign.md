@@ -87,6 +87,7 @@ Most screens show data the hub has today (checked against `hub/` on 2026-10-28).
 | Room | Reply to a message (a reference to the earlier message) | **H5** |
 | Room | Filters "To you and from you", "Questions only", and the count of hidden agent messages | UI only (T06), from the message fields |
 | Room | Pins | UI only: `ui/features/pins.js` exists but is not loaded in `index.html` (T06) |
+| Flow, Dashboard | Slots per role, changed while work runs (decision of the human, 2026-10-28): − and + for workers, testers and validators, the number in use, the number of stages waiting; "Add a slot" on the Dashboard queue panel | UI only (T05, T11): `PUT /rooms/<room>/settings` with `role_limits` exists and applies at once (a waiting stage starts when a slot opens); the waiting count comes from `GET /stages`. The control warns that testers share the test-suite lock, so more than 2 testers only wait. In `internet` mode it is a room setting, so it asks for the step-up (Part 12). |
 | Settings | Theme "System" (follow the operating system) | UI only (T09); `config.yml` `theme` gets the value `system` |
 | Settings | Default model for new agents | **H6** |
 
@@ -98,7 +99,7 @@ Hub tickets of this part (radius low unless stated):
 - **H5** Message reference: an optional `reply_to` (message id) on `POST /send`; the chat shows the quoted line.
 - **H6** `default_model` in `config.yml`, read by the launch form.
 - **H7** `GET /rooms/<room>/decisions?state=&since=` (Part 6 has only POST routes for decisions). Each row: id, card kind (choose, approve, review; derived from `decider`, `reason` and the request state), ticket or request, the radius of that ticket or request, time asked (event `ts`), the tickets that wait on it (from `blocked_by`), `block`, a summary (`text`, or `block` for a human decision), `options` with the recommended one (the cost of an option goes in its effect text, no new field), `facts`, the FAIL history (handoff ids with their finding counts, not only `fail_count`), `decider`, state. `state=applied&since=<start of day>` gives "Decided today without you". Source: the Orchestrator's comparison of 2026-10-28 (staging 763395b).
-- **H8** Additions to the delivery report `GET /requests/<room>/<id>/delivery` (Part 6, P6-08): for each ticket the FAIL handoffs with their findings and the fix commit; build time (first claim to last done); cost (Claude stage tokens from the stage metrics; Pi stages show "no data"); the merge command for `staging` into `main`; the decision id on each ruling row, if Part 6 does not add it.
+- **H8** Additions to the delivery report `GET /requests/<room>/<id>/delivery` (Part 6, P6-08): for each ticket the FAIL handoffs with their findings and the fix commit; build time (first claim to last done); cost (Claude stage tokens from the stage metrics; Pi stages show "no data"); the merge command for `staging` into `main`. (The decision id on each ruling and waiver row comes from Part 6, P6-08.)
 
 ## Build order
 

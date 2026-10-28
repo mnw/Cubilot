@@ -44,13 +44,16 @@ flt=(f'<div role="dialog" aria-label="Filter tickets" style="position: absolute;
 body=('<main style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; padding: 20px 24px 24px">'
  '<div style="position: relative; display: flex; align-items: center; gap: 12px; flex-wrap: wrap">'
  '<h1 style="margin: 0; font-size: 22px; font-weight: 600">Flow</h1>'
- '<span style="font-size: 14px; color: var(--text-muted)">10 open · slots: workers 1/2 · testers 1/2 · validators 1/2</span>'
+ + ('<span style="font-size: 14px; color: var(--text-muted)">10 open</span>'
+ + '<div role="group" aria-label="Slots in this room" style="display: flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; border: 1px solid var(--line-hover); border-radius: 8px; background: var(--bg-raised)"><span style="font-size: 12px; color: var(--text-meta)">Slots</span>'
+ + ''.join('<span style="display: inline-flex; align-items: center; gap: 4px; padding: 0 4px 0 8px; border-left: 1px solid var(--line-soft); font-size: 12px"><span style="color: var(--text-muted)">'+r+'</span><span style="font-family: var(--mono); color: var(--text)">'+u+'/'+m+'</span>'+(('<span style="color: var(--amber); font-family: var(--mono)">+'+w+' waiting</span>') if w else '')+'<button aria-label="One '+r[:-1]+' slot less" style="width: 24px; height: 24px; border: 1px solid var(--line); border-radius: 4px; background: none; color: var(--text-muted); cursor: pointer">−</button><button aria-label="One '+r[:-1]+' slot more" style="width: 24px; height: 24px; border: 1px solid '+('var(--amber)' if w else 'var(--line)')+'; border-radius: 4px; background: none; color: '+('var(--amber)' if w else 'var(--text-muted)')+'; cursor: pointer">+</button></span>' for r,u,m,w in [('workers','3','4',''),('testers','2','2','1'),('validators','3','3','2')])
+ + '</div>') +
  '<span style="font-size: 14px; color: var(--amber)">1 stall</span><span style="flex: 1"></span>'
  '<span style="display: inline-flex; gap: 6px">'+pill('Priority: highest, high','background: var(--bg-elev); color: var(--text)')+pill('Show cancelled','background: var(--bg-elev); color: var(--text)')+'</span>'
  f'<button aria-expanded="true" style="{BTN2}; background: var(--bg-elev)">Filters · 2</button>'
  f'<button style="{BTNP}">+ New ticket</button>'+flt+'</div>'
  f'<div style="flex: 1; display: flex; gap: 12px; align-items: flex-start">{colhtml}</div>'
- '<div style="display: flex; gap: 20px; font-size: 12px; color: var(--text-meta)"><span>Light: red waits for you · orange an agent works · green no one works</span><span>Drag a card to move it, or use ⋯ · Move to</span><a href="#">Stage metrics for this room</a><a href="#">Cancel traces (2)</a></div>'
+ '<div style="display: flex; gap: 20px; font-size: 12px; color: var(--text-meta)"><span>Slots change at once: a waiting stage starts when you add one. Testers share the test-suite lock, so more than 2 only wait.</span><span>Light: red waits for you · orange an agent works · green no one works</span><span>Drag a card to move it, or use ⋯ · Move to</span><a href="#">Stage metrics for this room</a><a href="#">Cancel traces (2)</a></div>'
  '</main>')
 open(P+'Flow.dc.html','w').write(desk('Flow',1000,'Flow','<span style="font-family: var(--mono); color: var(--text)"># cubilot</span>',body))
 # phone flow: column tabs + list
