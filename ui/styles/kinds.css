@@ -877,6 +877,8 @@ label[for="ticket-filter-request"] { color: var(--text); }
 .plan-waiting { flex: none; display: flex; flex-direction: column; gap: var(--sp-6); max-height: max(120px, 20vh); overflow-y: auto; }
 .plan-waiting:focus-visible { outline: 2px solid var(--orange); outline-offset: -2px; }
 .plan-waiting[hidden] { display: none; }
+.decision-line { flex: 1; min-width: 0; text-align: left; overflow-wrap: anywhere; }
+.decision-detail { margin-top: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); }
 .plan-row { display: flex; align-items: center; gap: var(--sp-10); padding: var(--sp-8) var(--sp-10); border: 1px solid var(--orange); border-radius: var(--radius-md); background: var(--bg-raised); }
 .plan-text { flex: 1; min-width: 0; }
 .plan-title { font-size: var(--fs-sm); color: var(--text); font-weight: 600; }

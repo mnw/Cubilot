@@ -6,6 +6,7 @@
 import type { Database } from "bun:sqlite";
 import type { KindModule } from "../core/types";
 import { createCancelTraceKind } from "./cancel-trace";
+import { createDecisionKind } from "./decision";
 import { createHandoffKind, createSystemHandoff } from "./handoff";
 import { createInterruptKind } from "./interrupt";
 import { createPermissionKind } from "./permission";
@@ -54,5 +55,6 @@ export function buildKinds(db: Database | null): readonly KindModule[] {
     createTicketKind(db, stage.hooks),
     stage.module,
     cancelTrace,
+    createDecisionKind(db),
   ];
 }

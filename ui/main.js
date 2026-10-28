@@ -101,6 +101,7 @@ async function connect() {
     window.syncTicketBoard?.();
     window.syncFinishedSessions?.();
     window.syncPlanApproval?.();
+    window.syncDecisions?.();
   };
   es.onmessage = (e) => {
     try { handleEvent(JSON.parse(e.data)); }

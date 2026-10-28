@@ -146,6 +146,8 @@ export type Entry = {
   version?: number;
   replay?: boolean;
   room?: string | null;
+  /** Called by the agent stream just before it sends this entry. False skips the send. Not serialised. */
+  claim?: () => boolean;
   [extra: string]: unknown;
 };
 

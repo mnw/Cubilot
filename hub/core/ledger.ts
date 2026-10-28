@@ -5,7 +5,7 @@ import { chmodSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomId } from "./ids";
 
-export const LEDGER_SCHEMA_VERSION = 17;
+export const LEDGER_SCHEMA_VERSION = 18;
 
 export type LedgerOpenResult =
   | { db: Database; enabled: true }
@@ -456,6 +456,12 @@ export function migrateLedger(db: Database): void {
       db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '17')");
     })();
     console.log(`[ledger] applied migration v17`);
+  }
+  if (current < 18) {
+    // v18: P6-01. The `decisions` table belongs to the decision kind's migrate (CREATE TABLE IF NOT EXISTS).
+    // This step only raises the version, so that openLedger copies the ledger before the new table appears.
+    db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '18')");
+    console.log(`[ledger] applied migration v18`);
   }
 }
 

@@ -140,7 +140,7 @@ export function createStreamHandlers(deps: StreamsDeps): StreamHandlers {
             for (const entry of k.pendingFor(ctx, cap)) {
               if (entry.room != null && entry.room !== myRoom) continue;
               const out = agents.forDelivery(agent, entry);   // a pause that started while the agent was away still applies
-              if (out) send(out);
+              if (out && out.claim?.() !== false) send(out);
             }
           }
         } catch (e) {
@@ -154,7 +154,7 @@ export function createStreamHandlers(deps: StreamsDeps): StreamHandlers {
         for await (const lease of agents.subscribeLeased(agent, live)) {
           if (!lease.take()) break;
           const out = lease.deliverable();   // the pause may have started since the lease was yielded
-          if (out) send(out);
+          if (out && out.claim?.() !== false) send(out);
         }
       } finally {
         agents.releaseLiveStream(self, mine);
