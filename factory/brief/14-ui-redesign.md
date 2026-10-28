@@ -1,6 +1,6 @@
 # Part 14: UI redesign (refined warm terminal)
 
-Status: ready to plan. The human chose to include every proposal on the mockup. Some tickets wait for an answer from the human (see "Open questions").
+Status: ready to plan. Build it directly after Part 12 (decision 2026-10-28), on the UI that the hub serves to the browser. Line references below are from 2026-10-22 and must be checked again after Part 12. The human chose to include every proposal on the mockup. Some tickets wait for an answer from the human (see "Open questions").
 Date: 2026-10-22. File paths and line numbers refer to the working tree on that date (`main`, 4 commits ahead of `origin/main`).
 Reader: the Orchestrator. Split this part into tickets. The section "Tickets" gives one ticket for each item, with acceptance criteria.
 
@@ -30,6 +30,7 @@ Make the main window calmer and easier to scan. Keep every function that exists 
 4. The mockup uses the font IBM Plex Sans. Use the bundled `--sans` (Inter) and `--mono` (JetBrains Mono) instead. Do not load a web font.
 5. Use the `--fs-*` steps for font sizes, so the `font_scale` setting in `config.yml` keeps working.
 6. Use real `<button>`, `<a>`, `<select>`, `<input>` and `<label>` elements. Every action must work from the keyboard. Text contrast must be 4.5:1 or more.
+6a. Accessibility target (decision 2026-10-28): WCAG 2.2 AA for the browser UI that the hub serves (Part 12), because Cubilot is not only for one user. Screen-reader checks (VoiceOver and NVDA) start with this part. Before this part and Part 12, the current desktop UI gets no screen-reader checks, because it will be rebuilt.
 7. Put new pure logic in small modules that run in node, like `ui/features/pill-card.js`. Test them with `bun test` in `tests/unit/`.
 8. Do not commit. The human commits.
 9. After a change in `hub/`, run `./scripts/build-sidecars.sh`. Use `./scripts/install.sh` for app rebuilds.

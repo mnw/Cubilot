@@ -461,7 +461,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
 <!-- 6 BUILD ORDER -->
 <section class="sec" aria-labelledby="h-seq">
   <h2 id="h-seq"><span class="num">06</span>Build order</h2>
-  <p class="intro">The migration comes first, then the rebrand, so Cubilot runs beside the previous app without touching it. Parts 1 to 4 give a working factory with fresh sessions, and 4a gives the agent column that Part 4 needs for its tests. Part 6 comes next, before Part 5 (decision 2026-10-26): review format and model routing make the agents more reliable, and delivery and backup is a local item that can wait. Parts 7 to 10 add toolchain, setup and the two councils; 11 to 13 improve it; 14 and 15 redesign the window.</p>
+  <p class="intro">The migration comes first, then the rebrand, so Cubilot runs beside the previous app without touching it. Parts 1 to 4 give a working factory with fresh sessions, and 4a gives the agent column that Part 4 needs for its tests. Part 6 comes next, before Part 5 (decision 2026-10-26): review format and model routing make the agents more reliable, and delivery and backup is a local item that can wait. Part 12 follows Part 6 (decision 2026-10-27): the desktop app approach is limiting, so the hub serves the UI to any browser and can run on Linux before the later parts are built. Part 14 follows Part 12 (decision 2026-10-28), so the redesign is done once, on the browser UI. Parts 7 to 10 add toolchain, setup and the two councils; 11 and 13 improve it.</p>
   <div class="seq">
     <div class="n built first"><span class="step">Step 0</span><span class="t">Migrate to new repo</span><span class="d">done: mnw/Cubilot, fresh history</span></div>
     <div class="n built"><span class="step">1</span><span class="t">Rebrand to Cubilot</span><span class="d">done: own identifier and data folder, side by side with the previous app</span><span class="ref">§1</span></div>
@@ -471,14 +471,14 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
     <div class="n built"><span class="step">4a</span><span class="t">Agent column</span><span class="d">done: built to test Part 4; reload one agent, skill switches</span><span class="ref">§4a</span></div>
     <div class="n planned"><span class="step">6</span><span class="t">Touchpoints, checkpoint, guards, routing</span><span class="d">next: human only at start and delivery (arbiter, delivery report) with the Orchestrator checkpoint; then plan check, flow report, stop rules; then model × effort; triage, spec stage, review.json</span><span class="ref">§6</span></div>
     <div class="n planned"><span class="step">12</span><span class="t">Hub-first, browser, Linux</span><span class="d">after Part 6: hub serves the UI, terminal layer into the hub, browser access and pairing, Linux</span><span class="ref">§12</span></div>
-    <div class="n planned"><span class="step">5</span><span class="t">Delivery and backup</span><span class="d">after Part 12: internal remote, Deliver step, leak gate, hourly backup</span><span class="ref">§5</span></div>
+    <div class="n planned"><span class="step">14</span><span class="t">UI redesign</span><span class="d">after Part 12, on the browser UI: title bar, tab bar, roster view; WCAG 2.2 AA (agent rail done in 4a)</span><span class="ref">§14</span></div>
+    <div class="n planned"><span class="step">5</span><span class="t">Delivery and backup</span><span class="d">after Part 14: internal remote, Deliver step, leak gate, hourly backup</span><span class="ref">§5</span></div>
     <div class="n planned"><span class="step">7</span><span class="t">Toolchain</span><span class="d">bundled tools, worktrees, Serena limits</span><span class="ref">§7</span></div>
     <div class="n planned"><span class="step">8</span><span class="t">Setup and admin</span><span class="d">components, accounts, projects, Doctor</span><span class="ref">§8</span></div>
     <div class="n planned"><span class="step">9</span><span class="t">Accessibility council</span><span class="d">builds the council form; axe-core, Figma</span><span class="ref">§9</span></div>
     <div class="n planned"><span class="step">10</span><span class="t">SEO council</span><span class="d">same council form</span><span class="ref">§10</span></div>
     <div class="n planned"><span class="step">11</span><span class="t">Dashboard</span><span class="d">waiting for you, stuck, flow, quality, cost</span><span class="ref">§11</span></div>
     <div class="n planned"><span class="step">13</span><span class="t">Mutation testing</span><span class="d">advisory first, opt-in, the most risk</span><span class="ref">§13</span></div>
-    <div class="n planned"><span class="step">14</span><span class="t">UI redesign</span><span class="d">title bar, tab bar, roster view (agent rail done in 4a)</span><span class="ref">§14</span></div>
     <div class="n built"><span class="step">15</span><span class="t">Ticket card and dialog</span><span class="d">done: replaces the card tickets of Part 14</span><span class="ref">§15</span></div>
   </div>
 </section>
