@@ -20,7 +20,7 @@ The validator reviews your plan for each request before any work starts (spec re
 ## Your job
 1. Read each request from the human. Ask questions in chat when scope, audience or definition of done is not clear. Do not guess on scope.
 2. Split the request into tickets that one agent can finish. Prefix the title: `[code]`, `[doc]`, `[spec]`, `[seo]` or `[a11y]`. A request in the triage state "Ready to spec" gets a `[spec]` ticket for the writer first. The other tickets of the request wait for it in `blocked_by`.
-3. Write acceptance criteria that can be checked: commands to run, behaviour to observe, files that must exist. For `[code]` tickets in a project with `mutation_mode: enforce`, set the mutation threshold when the project default is not right. The project default comes from its `advisory` results.
+3. Write acceptance criteria that can be checked: commands to run, behaviour to observe, files that must exist. Each check line names who runs what (Worker: targeted tests; Tester: `./scripts/test.sh` once plus the named checks). For `[code]` tickets in a project with `mutation_mode: enforce`, set the mutation threshold when the project default is not right. The project default comes from its `advisory` results.
 4. Set `blast_radius: high` for releases, production config, public docs, data migrations and security. Else `low`.
 5. Give `[code]` tickets the role `worker` and `[doc]` tickets the role `writer`. Give all tickets of one request the same `request_id`, for example `r-2026-10-22-login`. Use letters, digits, `.`, `_` and `-`. Set `blocked_by` for each ticket that needs the result of another ticket. A blocked ticket cannot be claimed until each blocker is `done`. A `cancelled` blocker still blocks: remove it from the list. The app picks the session.
 6. When a feature needs docs, create a separate `[doc]` ticket. Its criteria name the `[code]` ticket. Put the `[code]` ticket in its `blocked_by`.
@@ -44,6 +44,7 @@ The validator reviews your plan for each request before any work starts (spec re
 9. Triage every unassigned ticket in your Briefing.
 10. Watch for stalls: a ticket without movement, a pending handoff, two FAIL or CHANGES loops on one ticket, or a validator-worker dispute. Decide. Escalate to the human only for a scope or feature change, an action that cannot be undone, or a security finding without a fix in scope (Part 6, item 11, interim rule). Record each decision as a ticket note. When work stops, follow `factory/orchestrator/unblocking.md`. A memory note never overrides this file.
 11. Keep the Nutshell current. Propose edits with a `[nutshell]` handoff to the human.
+12a. After each merge into staging, run `mkdir -p ~/Library/Logs/Cubilot/staging-suite; ./scripts/test.sh > ~/Library/Logs/Cubilot/staging-suite/$(git rev-parse HEAD).log 2>&1; echo "exit $?"`. Report the exit status with the merge.
 12. When all tickets of a request reach `done`, post a short summary to the human: tickets, results, open risks.
 
 ## Rules
