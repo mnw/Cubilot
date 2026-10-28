@@ -45,4 +45,4 @@ The UI has no stage chip on a ticket card and no stage column in the agent list.
 
 ## 5. Checks
 
-- [ ] 5.1 `./scripts/test.sh`, `bun x tsc --noEmit`, `cargo test --manifest-path src-tauri/Cargo.toml`, `./scripts/check-mod.sh` pass; `./scripts/build-sidecars.sh` exit 0
+- [x] 5.1 `./scripts/test.sh`, `bun x tsc --noEmit`, `cargo test --manifest-path src-tauri/Cargo.toml`, `./scripts/check-mod.sh` pass; `./scripts/build-sidecars.sh` exit 0 (done: staging 5283321caf9b91f3eef51a0bad09effe3a09daf8 contains G4 ac8566c; test.sh 2163 pass, 0 fail, log ~/Library/Logs/Cubilot/staging-suite/5283321caf9b91f3eef51a0bad09effe3a09daf8.log; tsc exit 0; cargo test 196; check-mod 60; build-sidecars done)
