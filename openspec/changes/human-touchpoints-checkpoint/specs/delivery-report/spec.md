@@ -19,8 +19,8 @@ The report SHALL hold, in this order: the origin and the features; each ticket w
 - **THEN** the report shows the old and the new criteria of `t1`
 
 #### Scenario: Factory follow-up
-- **GIVEN** the arbiter made follow-up request `r-1-followup` with one low ticket, queued without the human
-- **THEN** the report of `r-1` lists `r-1-followup`, its ticket and its status
+- **GIVEN** the arbiter made follow-up request `r-1-fu-1` with one low ticket, queued without the human
+- **THEN** the report of `r-1` lists `r-1-fu-1`, its ticket and its status
 
 ### Requirement: The report holds the checks of the request
 After the facts, the report SHALL hold: each high-radius ticket with both PASS handoff ids and a mark when its merge message does not name both; the test counts of the staging suite log at the newest merge commit (or `no staging log`); the steps of the request's `[human]` live-check ticket.

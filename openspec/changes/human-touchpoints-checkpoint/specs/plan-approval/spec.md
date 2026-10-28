@@ -73,7 +73,7 @@ A request SHALL need the human's Approve when its origin is `human`, or when its
 - **THEN** its tickets stay `draft` and `r-1` is shown as waiting for approval
 
 #### Scenario: Factory request, low radius
-- **GIVEN** request `r-1-followup` has origin `factory`, no features and one low ticket
+- **GIVEN** request `r-1-fu-1` has origin `factory`, no features and one low ticket
 - **WHEN** its spec review passes
 - **THEN** its ticket is `queued` and the human did nothing
 

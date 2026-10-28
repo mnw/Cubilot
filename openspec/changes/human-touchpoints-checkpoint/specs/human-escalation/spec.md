@@ -11,6 +11,13 @@ The hub SHALL keep a `decision` Kind with id, room, `ticket_id` or `request_id`,
 - **WHEN** a decision moves from `open` to `answered`
 - **THEN** exactly one `decision.answered` event exists for it
 
+### Requirement: A decision moves by a fixed list
+A decision SHALL start `recorded` (arbiter ruling) or `open` (escalation). The legal moves are: `recorded` to `applied`, `recorded` to `escalated`, `escalated` to `answered` (the human answers an escalated ruling), `open` to `answered`, `applied` to `overruled`. `answered` is final: there is no move from `answered` to `overruled`. The hub SHALL refuse any other move with 409 (R5).
+
+#### Scenario: Answered is final
+- **WHEN** the human overrules a decision with status `answered`
+- **THEN** the hub returns 409
+
 ### Requirement: The human is asked only in four cases
 The hub SHALL open a human decision only when: a decision changes a feature or the approved scope; an action cannot be undone (data loss, a delete outside the factory, an external effect, secrets); the arbiter returns `human` or fails; a security finding has no fix in scope. No other hub path SHALL add a Needs-you line for a FAIL.
 
@@ -40,7 +47,7 @@ The Needs-you area SHALL show one line for each `open` decision of the room, wit
 - **THEN** the Needs-you area has exactly one line for `t1`
 
 ### Requirement: Only the human answers
-`POST /decisions/<id>/answer` with an option SHALL move an `open` decision to `answered`. Only the human SHALL call it; another caller SHALL get 403. The hub SHALL send the answer to the room lead as one entry and write it as a ticket note.
+`POST /decisions/<id>/answer` with an option SHALL move an `open` or `escalated` decision to `answered`. Only the human SHALL call it; another caller SHALL get 403. The hub SHALL send the answer to the room lead as one entry and write it as a ticket note. A request-only decision SHALL write no ticket note; its row, its events and the one lead entry are the audit trail (R5).
 
 #### Scenario: Human answers
 - **WHEN** the human answers option B

@@ -5,7 +5,7 @@ Keeps the Orchestrator's context small. The hub sends it fewer and shorter entri
 ## ADDED Requirements
 
 ### Requirement: The hub measures what reaches the room lead
-The hub SHALL count each entry that it queues for a room lead, by kind (`briefing`, `ticket`, `handoff`, `interrupt`, `chat`, `stage`, `other`), with its size in bytes. Once an hour it SHALL append one JSONL line for each lead to `<app data>/metrics/lead-inbound.jsonl`. A write error SHALL be logged and SHALL change nothing else.
+The hub SHALL count each entry that it queues for a room lead, by kind (`briefing`, `ticket`, `handoff`, `interrupt`, `chat`, `stage`, `other`), with its size in bytes. At each full hour it SHALL append one JSONL line for each room lead, also with zeros, to `<app data>/metrics/lead-inbound.jsonl`. A line SHALL hold `hour` (UTC start of the hour), `room`, `lead` and the seven kind keys, each `{count, bytes}` (R6). A write error SHALL be logged and SHALL change nothing else.
 
 #### Scenario: Hourly line
 - **WHEN** the lead received 3 ticket entries of 400 bytes in one hour
@@ -51,8 +51,16 @@ The hub SHALL build the state summary of a room with no model, in this order: th
 - **WHEN** the summary is built
 - **THEN** it is at most 8,000 characters, and it names the cut tickets by count and the command to list them
 
+### Requirement: A request is done by a fixed predicate
+A request SHALL be done when each ticket of the request is `done` or `cancelled`, and at least one is `done`. Its done time SHALL be the `ts` of the ticket event that made this true. A checkpoint is due when a done time is after the newest checkpoint of the lead. A ticket added later SHALL make the request not done again (R4).
+
+#### Scenario: Ticket added later
+- **GIVEN** all tickets of `r-1` are `done` or `cancelled` and at least one is `done`
+- **WHEN** a new ticket is added to `r-1`
+- **THEN** `r-1` is not done
+
 ### Requirement: A checkpoint is due by a fixed rule
-A checkpoint of a Claude room lead SHALL be due when a request of the room reached `done` after the last checkpoint, or when `context_pct` is at least `checkpoint.context_pct` of `config.yml` (default 60). It SHALL start only at the end of a lead turn, and only when the room has no request that waits for approval, no `open` decision and no live spec review or arbiter stage.
+A checkpoint of a Claude room lead SHALL be due when a request of the room reached `done` after the newest checkpoint of the lead (R4, see "A request is done by a fixed predicate"), or when `context_pct` is at least `checkpoint.context_pct` of `config.yml` (default 60). It SHALL start only at the end of a lead turn, and only when the room has no request that waits for approval, no `open` decision and no live spec review or arbiter stage.
 
 #### Scenario: Request done
 - **WHEN** a request reaches done and the lead ends its turn with no open decision

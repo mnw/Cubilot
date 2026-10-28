@@ -5,7 +5,7 @@ Replaces the human for decisions after two FAILs, waivers, contradictory criteri
 ## ADDED Requirements
 
 ### Requirement: The hub counts review FAILs for each ticket
-The ticket FAIL count SHALL be the number of Validator and Reviewer stages of the ticket with verdict FAIL after its last stage with verdict PASS. The hub SHALL write it as `fail_count` into each ticket review FAIL result and SHALL overwrite a sender's value.
+The ticket FAIL count SHALL be the number of Validator and Reviewer stages of the ticket with verdict FAIL since the last complete cycle (R1): for a low-radius ticket the cycle ends with the Validator PASS, for a high-radius ticket with the second-review PASS. A FAIL in the second review continues the count. The hub SHALL write it as `fail_count` into each ticket review FAIL result and SHALL overwrite a sender's value.
 
 #### Scenario: Two FAILs
 - **WHEN** the Validator sends a second FAIL on `t1` with `fail_count` 7
@@ -17,7 +17,7 @@ A role handoff to `validator` or `reviewer` for a ticket with a FAIL count of 2 
 #### Scenario: Orchestrator sends a third review
 - **GIVEN** `t1` has two FAILs and no ruling
 - **WHEN** the Orchestrator sends a role handoff to `validator` for `t1`
-- **THEN** the hub returns 409 "ticket t1 has 2 review FAILs since its last PASS: the arbiter rules first"
+- **THEN** the hub returns 409 "ticket t1 has 2 review FAILs since its last complete cycle: the arbiter rules first"
 
 ### Requirement: The arbiter is a read-only stage role
 The hub SHALL accept `arbiter` as a stage role and SHALL refuse it as a ticket role and as a `to_role`. An arbiter stage SHALL run on Claude with the `arbiter` pair of `role_models` (default opus, high), in a new session and a read-only detached worktree of the ticket branch or the spec commit. Its role limit SHALL be 1 for each room.
@@ -81,13 +81,37 @@ The hub SHALL apply each option so. `rework`: a role handoff to `worker` (or, fo
 - **WHEN** the arbiter returns `third_review`
 - **THEN** the hub sends the spec review and the FAIL gate accepts it
 
+### Requirement: A waived finding has a reference
+A waived finding SHALL be named by `<handoff_id>#<n>`, where n is the 1-based index in the findings of a FAIL result of the case. The hub SHALL treat an unknown or duplicate reference as an invalid result. The hub SHALL NOT apply a waiver of a finding with `category: security`; it SHALL escalate it (R3).
+
+#### Scenario: Unknown reference
+- **WHEN** the result waives `h_1#9` and the FAIL result `h_1` has 3 findings
+- **THEN** the result is invalid
+
+#### Scenario: Security finding
+- **WHEN** the result waives a finding with `category: security`
+- **THEN** the hub does not apply the waiver and escalates it
+
 ### Requirement: A follow-up is a factory request
-For `follow_up` the hub SHALL create request `<request_id>-followup` (cut to 64 characters) with origin `factory`, the parent request and the decision as source, one `draft` ticket with the ruling's title and criteria, and a spec review sent by `system`. The Approve rule of `plan-approval` SHALL apply to it.
+For `follow_up` the hub SHALL create one request for each ruling, named `<request_id>-fu-<n>` (cut to 64 characters; the hub assigns n, so two rulings cannot take the same name) with origin `factory`, the parent request and the decision as source, one `draft` ticket with the ruling's title and criteria, and a spec review sent by `system`. The Approve rule of `plan-approval` SHALL apply to it, and the ruling covers its follow-up (R2).
 
 #### Scenario: Follow-up
 - **WHEN** the arbiter of `t1` in `r-1` returns `follow_up`
-- **THEN** request `r-1-followup` has origin `factory` and parent `r-1`, its `draft` ticket is in spec review, and a review of `t1` starts with the waived findings
+- **THEN** request `r-1-fu-1` has origin `factory` and parent `r-1`, its `draft` ticket is in spec review, and a review of `t1` starts with the waived findings
 - **AND** when the follow-up ticket is low radius, its spec PASS queues it without the human
+
+### Requirement: A follow-up ticket has fixed fields
+The follow-up ticket SHALL have role `worker`, the radius by the radius rule and priority `medium`. It SHALL have `blocked_by` the parent ticket when the parent is not `done`, else no `blocked_by` (R2).
+
+#### Scenario: Parent not done
+- **GIVEN** the parent ticket `t1` is `in_review`
+- **WHEN** the follow-up ticket is created
+- **THEN** it has `blocked_by` `t1`
+
+#### Scenario: Parent done
+- **GIVEN** the parent ticket `t1` is `done`
+- **WHEN** the follow-up ticket is created
+- **THEN** it has no `blocked_by`
 
 ### Requirement: A ruling that changes the scope goes to the human
 The hub SHALL NOT apply a ruling, and SHALL set its decision `escalated` with an open human decision, when: it is `cancel` of an approved ticket or of a request; `meaning_changed` is not empty; or the last FAIL has a finding with `category: security` and the option is not `rework`.
