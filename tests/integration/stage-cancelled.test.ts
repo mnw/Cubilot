@@ -248,7 +248,7 @@ describe("a ticket cancel cancels its open stages", () => {
     const reg = await registerAgent(hub, agent2.session, { room: "cc" });
     cleanup.push(() => reg.close());
     const s2 = await stageOf(hub, t2);
-    expect((await postJson(hub, "/handoffs", { from: agent2.session, to: "Orchestrator", task: "result", context: { notes: "n", stage_id: s2.id, ticket_id: t2 } })).status).toBe(201);
+    expect((await postJson(hub, "/handoffs", { from: agent2.session, to: "Orchestrator", task: "result", context: { notes: "n", stage_id: s2.id, ticket_id: t2, commit: "0123456789abcdef0123456789abcdef01234567" } })).status).toBe(201);
     expect((await stageOf(hub, t2)).status).toBe("passed");
 
     expect(await cancel(hub, t1)).toBe(200);
@@ -314,7 +314,7 @@ describe("a ticket cancel cancels its open stages", () => {
     await sleep(150);
     const s = await stageOf(hub, t);
     expect(s.status).toBe("cancelled");
-    const r = await postJson(hub, "/handoffs", { from: l.session, to: "Orchestrator", task: "result", context: { notes: "n", stage_id: s.id, ticket_id: t } });
+    const r = await postJson(hub, "/handoffs", { from: l.session, to: "Orchestrator", task: "result", context: { notes: "n", stage_id: s.id, ticket_id: t, commit: "0123456789abcdef0123456789abcdef01234567" } });
     expect(r.status).toBeGreaterThanOrEqual(400);
     expect(r.status).toBeLessThan(500);
     expect(await stageOf(hub, t)).toMatchObject({ status: "cancelled", reason: "ticket cancelled" });

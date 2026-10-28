@@ -109,7 +109,7 @@ describe("one live stage per ticket", () => {
   };
   /** Ends a tester or writer stage with a result to a named agent (not to_role). */
   const finish = async (stage: Stage, session: string, h: HubHandle = hub, to = "ols-alice") => {
-    const r = await postJson(h, "/handoffs", { from: session, to, task: "result", context: { notes: "n", stage_id: stage.id, ticket_id: stage.ticket_id } });
+    const r = await postJson(h, "/handoffs", { from: session, to, task: "result", context: { notes: "n", stage_id: stage.id, ticket_id: stage.ticket_id, commit: "0123456789abcdef0123456789abcdef01234567" } });
     expect(r.status).toBe(201);
   };
   const finishReview = async (stage: Stage, session: string, verdict: "PASS" | "FAIL") => {

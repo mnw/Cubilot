@@ -100,3 +100,56 @@ describe("result handoff schema", () => {
     expect(r.status).toBe(201);
   });
 });
+
+describe("tester result needs a full commit sha", () => {
+  let hub: HubHandle;
+  const open: Array<{ close: () => void }> = [];
+  let stageId = "";
+  let ticketId = "";
+
+  beforeAll(async () => {
+    hub = await spawnHub();
+    await giveProjectHttp(hub, "r1");
+    open.push(await registerAgent(hub, "alice", { room: "r1" }));
+    const t = await postJson(hub, "/tickets", {
+      by: "alice", title: "T", acceptance_criteria: "c", blast_radius: "low", priority: "medium", role: "tester",
+    });
+    ticketId = (t.json as { snapshot: { id: string } }).snapshot.id;
+    const sse = openSSE(hub, "/launches/stream");
+    for await (const req of sse.events) {
+      expect(req.session).toBe("tester-1");
+      expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+      break;
+    }
+    sse.close();
+    open.push(await registerAgent(hub, "tester-1", { room: "r1" }));
+    stageId = ((await getJson(hub, "/stages?status=running")).json as Array<{ id: string }>)[0].id;
+  });
+  afterAll(async () => {
+    for (const c of open) c.close();
+    await hub.kill();
+  });
+
+  const send = (commit?: unknown) =>
+    postJson(hub, "/handoffs", {
+      from: "tester-1", to_role: "validator", task: "validate",
+      context: { notes: "n", stage_id: stageId, ticket_id: ticketId, verdict: "PASS", report: "r", ...(commit === undefined ? {} : { commit }) },
+    });
+  const validatorStages = async () => ((await getJson(hub, "/stages")).json as Array<{ role: string }>).filter((s) => s.role === "validator").length;
+  const FULL = "a".repeat(40);
+
+  test("a 39-character sha, an upper-case sha and no commit are refused; no validator stage; stage running", async () => {
+    for (const commit of ["a".repeat(39), "A".repeat(40), undefined]) {
+      const r = await send(commit);
+      expect(r.status).toBe(400);
+      expect((r.json as { errors: string[] }).errors).toEqual(["context.commit must be the full 40-character commit sha"]);
+    }
+    expect(await validatorStages()).toBe(0);
+    expect(((await getJson(hub, `/stages/${stageId}`)).json as { status: string }).status).toBe("running");
+  });
+
+  test("the same result sent again with the full sha is recorded and creates the validator stage", async () => {
+    expect((await send(FULL)).status).toBe(201);
+    expect(await validatorStages()).toBe(1);
+  });
+});

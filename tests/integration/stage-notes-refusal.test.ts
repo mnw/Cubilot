@@ -64,7 +64,7 @@ describe("a stage result without context.notes is refused (every role)", () => {
           const sha = git("commit-tree", `${tip}^{tree}`, "-p", tip, "-m", "work");
           git("update-ref", `refs/heads/ticket/${ticketId}`, sha);
           return sha;
-        })() : undefined;
+        })() : role === "tester" ? "0123456789abcdef0123456789abcdef01234567" : undefined;
 
         const before = await handoffCount(hub);
         for (const notes of [undefined, "", over400]) {
