@@ -48,7 +48,7 @@ When `docs/PRIMER.md` is missing, the first message SHALL say "primer missing" i
 
 ### Requirement: The hub builds the context pack before the launch with no model
 
-The hub SHALL build the context pack in the stage's worktree before it queues the launch. The pack SHALL hold a graphify query result with a budget of 1,500 tokens, built from the ticket title and criteria, and the symbol signatures of the files that the ticket and the spec name. The hub SHALL NOT call a model to build the pack.
+The hub SHALL build the context pack before it queues the launch. graphify SHALL read the graph of the room's project folder, and the graph describes the room base, not the ticket branch; the other pack commands run in the stage worktree. The pack SHALL hold a graphify query result with a budget of 1,500 tokens, built from the ticket title and criteria, and the symbol signatures of the files that the ticket and the spec name. The hub SHALL NOT call a model to build the pack.
 
 #### Scenario: Pack for a Worker
 

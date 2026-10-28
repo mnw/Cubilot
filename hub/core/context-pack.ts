@@ -1,6 +1,7 @@
 // Context pack (context-pack 3.1, 3.2, 3.4, 3.5): what the hub puts in the first message besides the ticket, built with
-// code only. No model call, no shell string: every command is an argv array that runs in the stage worktree. A command
-// has its own limit (COMMAND_LIMIT_MS) and the commands run one after another, so the worst-case delay of a launch is
+// code only. No model call, no shell string: every command is an argv array. The graph commands run in the room's project
+// folder, the others in the stage worktree. A command has its own limit (COMMAND_LIMIT_MS) and the commands run one
+// after another, so the worst-case delay of a launch is
 // `packCommandCount(role) x COMMAND_LIMIT_MS`. A command that fails or passes its limit marks only its part missing.
 
 import { existsSync, realpathSync, statSync } from "node:fs";
@@ -13,6 +14,7 @@ export const COMMAND_LIMIT_MS = 20_000;
 /** graphify `--budget`, in tokens. The output is also cut at 4 bytes per token (the estimate used elsewhere). */
 export const GRAPH_BUDGET_TOKENS = 1500;
 const GRAPH_QUESTION_MAX = 2000;
+export const GRAPH_BASE_NOTE = "The graph describes the room base, not the ticket branch.";
 
 export type GraphStatus = "fresh" | "stale" | "missing";
 export type CommandResult = { ok: true; stdout: string } | { ok: false; timedOut: boolean };
@@ -92,19 +94,24 @@ export function packCommandCount(role: string, review?: string | null): number {
   return n;
 }
 
-/** Graph status and query text (3.1, 3.2). `missing` gives no text at all. */
-async function graphPart(question: string, worktree: string, run: Runner, limit: number): Promise<{ status: GraphStatus; text?: string }> {
-  const graph = join(worktree, "graphify-out", "graph.json");
+/**
+ * Graph status and query text (3.1, 3.2). `missing` gives no text at all. The graph is the one of the room's project
+ * folder (graphify-out/ is excluded from git, so a stage worktree has none) and describes the room base, not the ticket
+ * branch. Without a project folder no command runs.
+ */
+async function graphPart(question: string, projectFolder: string | null | undefined, run: Runner, limit: number): Promise<{ status: GraphStatus; text?: string }> {
+  if (!projectFolder) return { status: "missing" };
+  const graph = join(projectFolder, "graphify-out", "graph.json");
   const bin = findGraphify();
   if (!bin || !existsSync(graph)) return { status: "missing" };
-  // Fresh when the graph is not older than the commit at HEAD. If git cannot say, the graph is not shown as fresh.
-  const head = await run(["git", "log", "-1", "--format=%ct", "HEAD"], worktree, limit);
+  // Fresh when the graph is not older than the commit at HEAD of the folder. If git cannot say, the graph is not shown as fresh.
+  const head = await run(["git", "log", "-1", "--format=%ct", "HEAD"], projectFolder, limit);
   const headSec = head.ok ? Number(head.stdout.trim()) : NaN;
   const status: GraphStatus = Number.isFinite(headSec) && statSync(graph).mtimeMs / 1000 >= headSec ? "fresh" : "stale";
   const q = question.trim().replace(/^-+/, "").slice(0, GRAPH_QUESTION_MAX);
-  const r = await run([bin, "query", q, "--budget", String(GRAPH_BUDGET_TOKENS)], worktree, limit);
+  const r = await run([bin, "query", q, "--budget", String(GRAPH_BUDGET_TOKENS)], projectFolder, limit);
   if (!r.ok || !r.stdout.trim()) return { status: "missing" };
-  return { status, text: `Graph status: ${status}\n${cutBytes(r.stdout.trim(), GRAPH_BUDGET_TOKENS * 4)}` };
+  return { status, text: `Graph status: ${status}\n${GRAPH_BASE_NOTE}\n${cutBytes(r.stdout.trim(), GRAPH_BUDGET_TOKENS * 4)}` };
 }
 
 const FILES_MAX = 20;
@@ -215,7 +222,7 @@ export async function buildPack(i: PackInput, run: Runner = runCommand): Promise
   let graphStatus: GraphStatus = "missing";
   try {
     if (depth.has("graph")) {
-      const g = await graphPart(i.question, i.worktree, run, limit);
+      const g = await graphPart(i.question, i.projectFolder, run, limit);
       graphStatus = g.status;
       if (g.text) text.graph = g.text;
     }

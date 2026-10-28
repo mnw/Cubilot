@@ -39,7 +39,7 @@ None. `stage-sessions` and `spec-review-stage` are in-flight changes, not archiv
 
 - `hub/core/first-message.ts`, `factory/<role>/first-message.md`: section order, primer, pack, notes sections.
 - `docs/PRIMER.md` (new, written by the Writer (interim: Worker, Validator review; see design.md)).
-- `hub/core/context-pack.ts` (new): runs the tools in the worktree.
+- `hub/core/context-pack.ts` (new): runs graphify in the room's project folder (the graph describes the room base) and the other tools in the stage worktree.
 - `hub/kinds/stage.ts` (`checkResult`), `hub/kinds/handoff.ts`: `notes` check. Notes read for the next stage.
 - `hub/core/migrate`: new `stage_metrics` table. Snapshot first.
 - `factory/*/*.md` role prompts: tool order text.
