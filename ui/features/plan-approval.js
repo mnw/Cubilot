@@ -7,6 +7,8 @@
 // Each block has a Collapse and a Clear button. Both are UI-only and live in localStorage per room: the collapse map
 // (request_id -> the FAIL stage it was collapsed at) and the list of cleared FAIL stage ids. A newer FAIL has a new stage
 // id, so it expands and shows the block again. Unreadable storage shows every block, expanded.
+// A third block lists the open cancel traces of the room (GET /rooms/<room>/cancel-traces): a stage cancel or sweep that failed.
+// One line each: stage, ticket, caller, error. Clear calls the human-only route and keeps the line when the call fails.
 // Loaded AFTER kind-renderer.js; shares main.js lexical scope (authedFetch, HUMAN_NAME, SELECTED_ROOM, ROOM_ALL).
 
 const PlanApproval = (() => {
@@ -16,6 +18,10 @@ const PlanApproval = (() => {
   const busy = new Set();   // request ids whose Approve is in flight
   let waiting = [];
   let needs = [];
+  let traces = [];
+  const traceBusy = new Set();       // trace ids whose Clear is in flight
+  const traceButtons = new Map();    // trace id -> its Clear button of the last render, for the focus after Clear
+  let traceFocus = null;             // trace id whose Clear button gets focus after the next render; '' = the region
 
   const root = () => document.getElementById('plan-waiting');
 
@@ -164,7 +170,69 @@ const PlanApproval = (() => {
     render();
   }
 
+  // One line per open cancel trace. The error comes from the hub and goes in as text, never as markup.
+  function traceRow(t) {
+    const el = document.createElement('div');
+    el.className = 'needs-row cancel-trace-row';
+    el.dataset.trace = t.id;
+    const head = document.createElement('div');
+    head.className = 'needs-head';
+    const text = document.createElement('div');
+    text.className = 'plan-title';
+    text.textContent = `Cancel failed: stage ${t.stage_id}, ${t.ticket_id || 'no ticket'}, ${t.caller}: ${t.error}`;
+    text.title = text.textContent;
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.className = 'needs-btn needs-clear';
+    clear.textContent = 'Clear';
+    clear.setAttribute('aria-label', `Clear cancel failure of stage ${t.stage_id}`);
+    clear.disabled = traceBusy.has(t.id);
+    clear.addEventListener('click', () => clearTrace(t));
+    traceButtons.set(t.id, clear);
+    head.append(text, clear);
+    el.appendChild(head);
+    return el;
+  }
+
+  async function clearTrace(t) {
+    if (traceBusy.has(t.id) || !room) return;
+    const r = room;
+    const i = traces.findIndex((x) => x.id === t.id);
+    const target = traces[i + 1] ?? traces[i - 1] ?? null;
+    traceBusy.add(t.id);
+    render();
+    try {
+      const res = await authedFetch(`/rooms/${encodeURIComponent(r)}/cancel-traces/${encodeURIComponent(t.id)}/clear`, {
+        method: 'POST',
+        body: JSON.stringify({ by: HUMAN_NAME }),
+      });
+      if (res.ok) {
+        if (r === room) traces = traces.filter((x) => x.id !== t.id);
+        traceFocus = target ? target.id : '';
+      } else {
+        const err = await res.json().then((j) => j?.error, () => null);
+        addMessage({ from: 'system', to: HUMAN_NAME, text: `Clearing the cancel failure of ${t.stage_id} failed: ${err || res.status}`, ts: '' });
+      }
+    } catch (e) {
+      addMessage({ from: 'system', to: HUMAN_NAME, text: `Clearing the cancel failure of ${t.stage_id} failed: ${e?.message ?? e}`, ts: '' });
+    } finally {
+      traceBusy.delete(t.id);
+      render();
+    }
+  }
+
   function applyFocus() {
+    const wantTrace = traceFocus;
+    traceFocus = null;
+    if (wantTrace !== null) {
+      const btn = wantTrace ? traceButtons.get(wantTrace) : null;
+      if (btn) { btn.focus(); return; }
+      const r = root();
+      if (r && !r.hidden) { r.focus(); return; }
+      const h = document.querySelector ? document.querySelector('#ticket-board-columns h3') : null;
+      if (h) { h.setAttribute('tabindex', '-1'); h.focus(); }
+      return;
+    }
     const want = pendingFocus;
     pendingFocus = null;
     if (want === null) return;
@@ -179,9 +247,10 @@ const PlanApproval = (() => {
     const r = root();
     if (!r) return;
     collapseButtons.clear();
+    traceButtons.clear();
     const shown = room ? visibleNeeds(room, needs) : needs;
-    r.replaceChildren(...waiting.map(row), ...shown.map(needsRow));
-    r.hidden = waiting.length === 0 && shown.length === 0;
+    r.replaceChildren(...waiting.map(row), ...shown.map(needsRow), ...traces.map(traceRow));
+    r.hidden = waiting.length === 0 && shown.length === 0 && traces.length === 0;
     applyFocus();
   }
 
@@ -194,13 +263,18 @@ const PlanApproval = (() => {
       // The rows of the old room go at once, not when the new answer arrives.
       waiting = [];
       needs = [];
+      traces = [];
       room = shown;
       render();
     }
     if (!room) return;
     try {
       const base = `/requests/${encodeURIComponent(room)}`;
-      const [res, nres] = await Promise.all([authedFetch(`${base}/waiting`), authedFetch(`${base}/needs-you`)]);
+      const [res, nres, tres] = await Promise.all([
+        authedFetch(`${base}/waiting`),
+        authedFetch(`${base}/needs-you`),
+        authedFetch(`/rooms/${encodeURIComponent(room)}/cancel-traces`),
+      ]);
       if (seq !== loadSeq) return;
       if (res.ok) {
         const body = await res.json();
@@ -211,6 +285,11 @@ const PlanApproval = (() => {
         const body = await nres.json();
         if (seq !== loadSeq) return;
         needs = Array.isArray(body?.requests) ? body.requests : [];
+      }
+      if (tres.ok) {
+        const body = await tres.json();
+        if (seq !== loadSeq) return;
+        traces = Array.isArray(body?.traces) ? body.traces : [];
       }
     } catch (e) {
       console.warn('[plan-approval] load failed:', e);
@@ -252,8 +331,9 @@ const PlanApproval = (() => {
     globalThis.syncPlanApproval = load;
     KindCardRenderer.observe('stage', onEvent);
     KindCardRenderer.observe('ticket', onEvent);
+    KindCardRenderer.observe('cancel_trace', onEvent);
     load();
   }
 
-  return { load, render, _busy: busy, _isCollapsed: isCollapsed, _setCollapsed: setCollapsed, _visibleNeeds: visibleNeeds, _clearNeed: clearNeed };
+  return { load, render, _traces: () => traces, _busy: busy, _isCollapsed: isCollapsed, _setCollapsed: setCollapsed, _visibleNeeds: visibleNeeds, _clearNeed: clearNeed };
 })();

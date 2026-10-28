@@ -47,6 +47,7 @@ function setup(first: any[], room = "r1", postStatus = 200, firstNeeds: any[] = 
   root.hidden = true;
   let waiting = first;
   let needs = firstNeeds;
+  let traces: any[] = [];
   const calls: Array<{ path: string; init?: any }> = [];
   const messages: any[] = [];
   const observers: Record<string, () => void> = {};
@@ -66,13 +67,14 @@ function setup(first: any[], room = "r1", postStatus = 200, firstNeeds: any[] = 
       }
       if (init?.method === "POST") return postStatus === 200 ? { ok: true, json: async () => ({}) } : { ok: false, status: postStatus, json: async () => ({ error: "only the human may approve a request" }) };
       if (path.endsWith("/needs-you")) return { ok: true, json: async () => ({ room, requests: needs }) };
+      if (path.endsWith("/cancel-traces")) return { ok: true, json: async () => ({ room, traces }) };
       return { ok: true, json: async () => ({ room, waiting }) };
     },
     globalThis: {} as any, setTimeout, clearTimeout, console,
   };
   // `with (g)`: the file's free names (SELECTED_ROOM ...) are looked up on g at each use, so a test can change the room.
   const api = new Function("g", "with (g) {" + readFileSync("ui/features/plan-approval.js", "utf8") + "\nreturn PlanApproval; }")(g);
-  return { api, root, heading, store, calls, messages, observers, setWaiting: (w: any[]) => { waiting = w; }, setNeeds: (n: any[]) => { needs = n; }, held, release: () => { const q = held.queue.splice(0); for (const r of q) r(); }, g };
+  return { api, root, heading, store, calls, messages, observers, setWaiting: (w: any[]) => { waiting = w; }, setNeeds: (n: any[]) => { needs = n; }, setTraces: (t: any[]) => { traces = t; }, held, release: () => { const q = held.queue.splice(0); for (const r of q) r(); }, g };
 }
 const flush = () => new Promise((r) => setTimeout(r, 5));
 
@@ -139,7 +141,7 @@ describe("plan waits for your approval (spec-review 4.4)", () => {
   test("ticket and stage events reload the list", async () => {
     const e = setup([]);
     await flush();
-    expect(Object.keys(e.observers).sort()).toEqual(["stage", "ticket"]);
+    expect(Object.keys(e.observers).sort()).toEqual(["cancel_trace", "stage", "ticket"]);
     e.setWaiting([plan("req-2", ["t_a"], ["x"])]);
     e.observers.ticket();
     await new Promise((r) => setTimeout(r, 300));
@@ -338,5 +340,54 @@ describe("Needs you collapse and clear", () => {
     expect(rows(e)).toEqual(["a"]);
     btn(e, "Collapse a").handlers.click();
     expect(btn(e, "Collapse a")).toBeTruthy();
+  });
+});
+
+describe("cancel traces in the Needs-you region (cancel-failure-trace 3, 4)", () => {
+  const trace = (id: string, over: any = {}) => ({ id, stage_id: "s_" + id, ticket_id: "t_1", caller: "ticket_cancel", error: "boom", ...over });
+  const withTraces = async (list: any[], postStatus = 200) => {
+    const e = setup([], "r1", postStatus);
+    e.setTraces(list);
+    await e.api.load();
+    return e;
+  };
+  const clears = (e: any) => e.root.all().filter((x: El) => x.tag === "button" && x.textContent === "Clear");
+
+  test("one line per open row: stage, ticket, caller, error; a null ticket shows no ticket; the error stays text", async () => {
+    const e = await withTraces([trace("ct_a"), trace("ct_b", { ticket_id: null, error: "<img src=x onerror=alert(1)>" })]);
+    expect(e.root.hidden).toBe(false);
+    const lines = e.root.all().filter((x: El) => x.className === "plan-title").map((x: El) => x.textContent);
+    expect(lines).toEqual([
+      "Cancel failed: stage s_ct_a, t_1, ticket_cancel: boom",
+      "Cancel failed: stage s_ct_b, no ticket, ticket_cancel: <img src=x onerror=alert(1)>",
+    ]);
+    expect(e.calls.map((c: any) => c.path)).toContain("/rooms/r1/cancel-traces");
+  });
+
+  test("Clear posts as the human, drops the line and moves focus to the next line", async () => {
+    const e = await withTraces([trace("ct_a"), trace("ct_b")]);
+    clears(e)[0].handlers.click();
+    await flush();
+    const post = e.calls.find((c: any) => c.init?.method === "POST")!;
+    expect(post.path).toBe("/rooms/r1/cancel-traces/ct_a/clear");
+    expect(JSON.parse(post.init.body)).toEqual({ by: "human" });
+    expect(e.root.all().filter((x: El) => x.className === "plan-title")).toHaveLength(1);
+    expect(clears(e)[0].focused).toBe(true);
+  });
+
+  test("a failed Clear keeps the line and says why in the chat", async () => {
+    const e = await withTraces([trace("ct_a")], 403);
+    clears(e)[0].handlers.click();
+    await flush();
+    expect(e.root.all().filter((x: El) => x.className === "plan-title")).toHaveLength(1);
+    expect(e.messages[0].text).toContain("failed");
+  });
+
+  test("the last Clear moves focus to the board", async () => {
+    const e = await withTraces([trace("ct_a")]);
+    clears(e)[0].handlers.click();
+    await flush();
+    expect(e.root.hidden).toBe(true);
+    expect(e.heading.focused).toBe(true);
   });
 });

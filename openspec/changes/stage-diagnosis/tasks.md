@@ -1,6 +1,6 @@
 Radius: each task names its blast radius. Low: the trace, the failure record, the category, the score, and every item of the 2026-10-27 amendment (cause keys, fixtures, metrics, burst trigger, marks, success metric). High: the automatic actions and the launch of the new role.
 
-Needs `context-pack` task 1.1 (`stage_metrics` table) and 5.1 (metrics writer), and ticket t_8c328391ae299304 (start repair of missing `stage_metrics` rows), before group 8. Each group-8 ticket has t_8c328391ae299304 in blocked_by (human msg 1476).
+Needs `context-pack` task 1.1 (`stage_metrics` table) and 5.1 (metrics writer), and ticket t_8c328391ae299304 (start repair of missing `stage_metrics` rows), before group 8. Each group-8 ticket has t_8c328391ae299304 in blocked_by (human msg 1476). Group 8 also needs ticket t_3186bc4426ddc3ab (a failed stage cancel or sweep leaves a visible trace): diagnosis needs a visible cancel failure.
 
 ## 1. Data and settings
 

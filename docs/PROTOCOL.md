@@ -572,6 +572,54 @@ A `draft` ticket is a planned ticket that is not released. It cannot be claimed.
 
 A `ticket.assigned` entry with `from: "system"` is the hub's own assignment: at a stage launch, or to the room lead after a final PASS (see "Launch ownership" and "Final PASS" under the `stage` kind). It wakes no stage session, because the first message of the session already holds the ticket. An ordinary assignee, for example the room lead, is woken as for any other assignment. The `ticket.update` of a `done` move by `system` wakes no one.
 
+## The `cancel_trace` kind
+
+A failed stage cancel or sweep leaves one row for the human. Before this kind, `cancelStage` and `sweep` only logged the failure, and the stage kept its old status. Source: `hub/kinds/cancel-trace.ts`. Spec: `openspec/changes/cancel-failure-trace`.
+
+### Lifecycle
+
+```
+(catch in cancelStage or sweep) ──► open ──► cleared   (terminal, the human clears it)
+```
+
+The hub writes a row only in the `catch` of `cancelStage` (site `cancel`) or of the sweep (site `sweep`). The stage does not change. Insert writes one `cancel_trace.created` event and one row in one transaction. `clear` writes one `cancel_trace.cleared` event and one row update in one transaction. The actor of `created` is `system`. Both events use scope `ui-only`. Their payload is the snapshot.
+
+### Snapshot schema
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `string` | `ct_` + the first 16 hex of `sha256(stage_id + "\n" + site + "\n" + status_at_failure)`. |
+| `status` | `"open" \| "cleared"` | |
+| `room` | `string` | The room of the stage. |
+| `stage_id` | `string` | |
+| `ticket_id` | `string \| null` | NULL for a spec-review stage. The UI shows "no ticket". |
+| `site` | `"cancel" \| "sweep"` | |
+| `caller` | `string` | `ticket_cancel`, `ticket_draft`, `ticket_done`, `start_sweep` or `sweep`. |
+| `status_at_failure` | `string` | The status of the stage when the call failed. |
+| `error` | `string` | The message with `<private>` parts removed, cut to 500 characters (the last 3 are `...`). |
+| `created_at` | `number` | ms. |
+| `cleared_at` | `number \| null` | ms. |
+| `version` | `number` | `events.seq` of the last event. |
+
+The same id again, open or cleared, writes no row and no event. A cleared row never reopens. A second, different status of the same stage gives a second row.
+
+### HTTP
+
+| Route | Auth | Result |
+|---|---|---|
+| `GET /rooms/<room>/cancel-traces` | bearer | `{room, traces}`: the open rows of the room, oldest first. |
+| `POST /rooms/<room>/cancel-traces/<id>/clear` | bearer | Body `{"by": "<name>"}`. 200 with `{snapshot}`. Already cleared: 200 with `idempotent: true` and no event. |
+
+Clear errors: `by` missing or not in the roster: 400. `by` is not the human: 403. No token: 401. Unknown id, or an id of another room: 404. Nothing changes on an error.
+
+### SSE events
+
+`cancel_trace.created` and `cancel_trace.cleared`. The UI reads `GET` again on these and on `stage.*` events. Old clients ignore them. There is no replay: the UI reads `GET` when the stream opens.
+
+### Logs
+
+A written trace adds no log line: the existing `[stage] cancelling <id> failed:` or `[stage] sweep of <id> failed:` line stays the only one. If the trace write throws, one more line `[stage] trace for <id> failed: <message>` follows. Nothing leaves the `catch`.
+
 ## The `stage` kind
 
 A stage is the work of one role on one ticket. The hub creates the stage, starts one session for it, checks its result and closes the session. Source: `hub/kinds/stage.ts`, `hub/core/launch-queue.ts`, `src-tauri/src/launches.rs`. Spec: `openspec/changes/stage-sessions`.
