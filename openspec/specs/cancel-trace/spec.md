@@ -1,7 +1,7 @@
 # cancel-trace Specification
 
 ## Purpose
-TBD - created by archiving change cancel-failure-trace. Update Purpose after archive.
+A failed stage cancel or sweep leaves the stage in its old status and only writes a log line, so the human sees nothing. The `cancel_trace` Kind records each failure as a visible row that the human can clear.
 
 ## Requirements
 
