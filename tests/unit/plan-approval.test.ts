@@ -16,7 +16,8 @@ class El {
   attrs: Record<string, string> = {};
   focused = false;
   setAttribute(k: string, v: string) { this.attrs[k] = v; }
-  focus() { this.focused = true; }
+  focus() { this.focused = true; El.active = this; }
+  static active: El | null = null;
   constructor(public tag = "div") {}
   append(...c: El[]) { this.children.push(...c); }
   appendChild(c: El) { this.children.push(c); return c; }
@@ -53,7 +54,7 @@ function setup(first: any[], room = "r1", postStatus = 200, firstNeeds: any[] = 
   const observers: Record<string, () => void> = {};
   const held = { hold: false, queue: [] as Array<() => void> };
   const g: any = {
-    document: { getElementById: (id: string) => (id === "plan-waiting" ? root : null), querySelector: () => heading, createElement: (t: string) => new El(t), addEventListener() {} },
+    document: { get activeElement() { return root.all().includes(El.active as El) ? El.active : null; }, getElementById: (id: string) => (id === "plan-waiting" ? root : null), querySelector: () => heading, createElement: (t: string) => new El(t), addEventListener() {} },
     localStorage: store, SELECTED_ROOM: room, ROOM_ALL: "__ALL__", HUMAN_NAME: "human",
     KindCardRenderer: { observe: (p: string, fn: () => void) => { observers[p] = fn; } },
     addMessage: (m: any) => messages.push(m),
@@ -381,6 +382,24 @@ describe("cancel traces in the Needs-you region (cancel-failure-trace 3, 4)", ()
     await flush();
     expect(e.root.all().filter((x: El) => x.className === "plan-title")).toHaveLength(1);
     expect(e.messages[0].text).toContain("failed");
+  });
+
+  test("after Clear of the middle line, a reload from the event path keeps focus on the third line's Clear", async () => {
+    const e = await withTraces([trace("ct_a"), trace("ct_b"), trace("ct_c")]);
+    clears(e)[1].handlers.click();
+    await flush();
+    e.setTraces([trace("ct_a"), trace("ct_c")]);
+    await e.api.load();
+    expect(clears(e)).toHaveLength(2);
+    expect(e.g.document.activeElement).toBe(clears(e)[1]);
+  });
+
+  test("a render with no Clear keeps focus on a focused Clear button", async () => {
+    const e = await withTraces([trace("ct_a"), trace("ct_b")]);
+    clears(e)[1].focus();
+    await e.api.load();
+    expect(e.g.document.activeElement).toBe(clears(e)[1]);
+    expect(e.g.document.activeElement.attrs["aria-label"]).toBe("Clear cancel failure of stage s_ct_b");
   });
 
   test("the last Clear moves focus to the board", async () => {

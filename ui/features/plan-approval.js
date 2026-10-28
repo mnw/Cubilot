@@ -246,11 +246,15 @@ const PlanApproval = (() => {
   function render() {
     const r = root();
     if (!r) return;
+    // A render replaces every button. A Clear button that has focus keeps it (by trace id) unless a move is pending.
+    let focused = null;
+    for (const [id, b] of traceButtons) if (b === document.activeElement) focused = id;
     collapseButtons.clear();
     traceButtons.clear();
     const shown = room ? visibleNeeds(room, needs) : needs;
     r.replaceChildren(...waiting.map(row), ...shown.map(needsRow), ...traces.map(traceRow));
     r.hidden = waiting.length === 0 && shown.length === 0 && traces.length === 0;
+    if (focused !== null && traceFocus === null && pendingFocus === null && traceButtons.has(focused)) traceFocus = focused;
     applyFocus();
   }
 
