@@ -137,6 +137,10 @@ const leadInbound = createLeadInbound({
     }
     return out;
   },
+  isLead: (name) => {
+    const room = agents.get(name)?.room;
+    return !!room && (ledgerDb ? roomLeadOf(ledgerDb, room) : "Orchestrator") === name;
+  },
 });
 
 const agents = createAgentRegistry({

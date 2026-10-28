@@ -15,6 +15,8 @@ export type LeadInboundOptions = {
   file: string;
   /** The room leads that are in the roster now. */
   leads: () => Array<{ room: string; lead: string }>;
+  /** Whether `name` is its room's lead now. Called for each entry, so it must be cheap. Default: search `leads()`. */
+  isLead?: (name: string) => boolean;
   now?: () => number;
   log?: (msg: string) => void;
 };
@@ -29,7 +31,6 @@ export type LeadInbound = {
 };
 
 const HOUR_MS = 3_600_000;
-const LEAD_CACHE_MS = 30_000;
 
 export function classifyEntry(entry: Entry): LeadInboundKind {
   if (entry.type === "briefing") return "briefing";
@@ -49,18 +50,8 @@ export function createLeadInbound(opts: LeadInboundOptions): LeadInbound {
   let timer: ReturnType<typeof setTimeout> | null = null;
   // First hour not yet written. Set by start().
   let nextHour = 0;
-  // The lead lookup may query the ledger, so enqueue reads a cached set that is at most LEAD_CACHE_MS old.
-  let leadNames = new Set<string>();
-  let leadNamesAt = -Infinity;
-
-  function isLead(name: string): boolean {
-    const t = now();
-    if (t - leadNamesAt >= LEAD_CACHE_MS || t < leadNamesAt) {
-      leadNames = new Set(opts.leads().map((l) => l.lead));
-      leadNamesAt = t;
-    }
-    return leadNames.has(name);
-  }
+  // No cache: a lead change takes effect before the next entry.
+  const isLead = opts.isLead ?? ((name: string) => opts.leads().some((l) => l.lead === name));
 
   function record(name: string, entry: Entry): void {
     try {

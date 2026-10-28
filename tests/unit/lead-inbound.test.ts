@@ -118,10 +118,19 @@ describe("lead inbound", () => {
     expect(lines(file)[0].ticket.count).toBe(1);
   });
 
-  test("enqueue does not call the lead lookup each time", () => {
-    let calls = 0;
-    const m = createLeadInbound({ file: join(tmp(), "l.jsonl"), leads: () => { calls++; return LEADS; }, now: () => HOUR });
-    for (let i = 0; i < 50; i++) m.record("Orchestrator", { kind: "ticket.new" });
-    expect(calls).toBe(1);
+  test("Lead change", () => {
+    const file = join(tmp(), "l.jsonl");
+    let lead = "old";
+    let clock = HOUR;
+    const m = createLeadInbound({ file, leads: () => [{ room: "r", lead }], now: () => clock });
+    m.record("old", { kind: "ticket.new" });
+    lead = "new";
+    clock += 1000;
+    m.record("new", { kind: "ticket.new" });
+    m.flush(HOUR);
+    const [line] = lines(file);
+    expect(line.lead).toBe("new");
+    expect(line.ticket.count).toBe(1);
+    expect(line.ticket.bytes).toBeGreaterThan(0);
   });
 });
