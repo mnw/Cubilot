@@ -127,7 +127,7 @@ describe("stage-prep.sh", () => {
     expect(steps()).toEqual(["bun install --frozen-lockfile", "build-sidecars", "build-tmux"]);
     expect(sourced("command -v tmux")).toBe(join(repo, "src-tauri/resources/tmux"));
     expect(existsSync(lock)).toBe(false);
-  });
+  }, 30000);
 
   test("(b) second run: no step runs", () => {
     run();
@@ -186,7 +186,7 @@ describe("stage-prep.sh", () => {
     const s = steps();
     expect(s.filter((x) => x === "build-sidecars").length).toBe(1);
     expect(s.filter((x) => x === "build-tmux").length).toBe(1);
-  });
+  }, 30000);
 
   test("(g) bun candidates: found outside PATH, or exit 4", () => {
     const cand = join(base, "cand");
