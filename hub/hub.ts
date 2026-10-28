@@ -4,7 +4,7 @@
 import { Database } from "bun:sqlite";
 import { chmodSync } from "node:fs";
 import { rename, unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import {
   JSON_BODY_MAX,
@@ -18,6 +18,7 @@ import {
 } from "./core/auth";
 import { DropQueue, HEARTBEAT_MS, makeSSE, type SSESend } from "./core/sse";
 import { createAgentRegistry } from "./core/agents";
+import { createLeadInbound } from "./core/lead-inbound";
 import {
   buildAllowedExtensions,
   IMAGE_URL_RE,
@@ -66,7 +67,7 @@ import {
   nutshellEntry,
   type NutshellSnapshot,
 } from "./nutshell";
-import { buildKinds } from "./kinds";
+import { buildKinds, roomLeadOf } from "./kinds";
 import {
   expireHandoff as expireHandoffK,
   findExpirable as findExpirableK,
@@ -126,7 +127,24 @@ const uiSubscribers = new Set<DropQueue<Entry>>();
 let entrySeq = 0;
 const SESSION_ID = randomId(8);
 
+const leadInbound = createLeadInbound({
+  file: join(dirname(LEDGER_DB || join(ATTACHMENTS_DIR || ".", "x")), "metrics", "lead-inbound.jsonl"),
+  leads: () => {
+    const out: Array<{ room: string; lead: string }> = [];
+    for (const a of agents.values()) {
+      if (!a.room) continue;
+      if ((ledgerDb ? roomLeadOf(ledgerDb, a.room) : "Orchestrator") === a.name) out.push({ room: a.room, lead: a.name });
+    }
+    return out;
+  },
+  isLead: (name) => {
+    const room = agents.get(name)?.room;
+    return !!room && (ledgerDb ? roomLeadOf(ledgerDb, room) : "Orchestrator") === name;
+  },
+});
+
 const agents = createAgentRegistry({
+  onEnqueue: (name, entry) => leadInbound.record(name, entry),
   defaultRoom: DEFAULT_ROOM,
   staleMs: STALE_AGENT_MS,
   queueMax: AGENT_QUEUE_MAX,
@@ -347,6 +365,8 @@ if (validName(HUMAN_NAME)) {
   console.error(`[hub] invalid CUBILOT_HUMAN_NAME "${HUMAN_NAME}" — human not registered`);
 }
 
+leadInbound.start();
+
 const sweepTimer = setInterval(() => {
   if (!ledgerEnabled || !ledgerDb) return;
   try {
@@ -363,6 +383,7 @@ const sweepTimer = setInterval(() => {
 
 function shutdown() {
   clearInterval(sweepTimer);
+  leadInbound.stop();
   briefingDispatcher.dispose();
   try { ledgerDb?.close(); } catch {}
 }
