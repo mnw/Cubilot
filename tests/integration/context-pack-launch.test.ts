@@ -16,7 +16,7 @@ describe("the hub answers while the pack builds", () => {
   const oldPath = process.env.PATH;
 
   beforeAll(async () => {
-    // A project whose commit holds graphify-out/graph.json, so the worktree has a graph and graphify runs.
+    // A project folder that holds graphify-out/graph.json, so graphify runs there.
     const project = mkdtempSync(join(tmpdir(), "cpl-proj-"));
     sh(project, "git", "init", "-q", "-b", "staging");
     sh(project, "git", "config", "user.email", "t@t");
