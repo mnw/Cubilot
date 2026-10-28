@@ -1,6 +1,6 @@
 # Part 9: accessibility and usability council
 
-Status: decision 2026-10-19. Build it after Part 4, because it uses one session for each stage. It builds the council form. The SEO council (Part 10) uses the same form.
+Status: decision 2026-10-19. At the end of the build order (decision 2026-10-28): the councils are the right direction, but they need much code and testing, so they come after everything else. It is the first council part. It builds the council form and the call rule ("Calling a council"). The design council (Part 16), the SEO council (Part 10) and the plan council (Part 17) use the same form.
 
 ## Goal
 
@@ -49,6 +49,33 @@ Not used: `mgifford/accessibility-skills`, because its license is AGPL-3.0. The 
 1. Automated tools find only part of the accessibility issues. The council result always has a list of manual checks. Examples: screen readers (NVDA, JAWS, VoiceOver), real keyboard use, 400 % zoom, text spacing, and the main user tasks. The council never states conformance. Only the human can, after the manual checks.
 2. Pages behind a log-in need a test account from the human. Else they are a gap in the evidence.
 3. Figma files, documents and pages are client data. They stay local or in the client's own Figma account. The setting `external_data_policy` (Part 10, open question 2) applies here too.
+
+## Calling a council: by code and Jev, not by the Orchestrator (decision 2026-10-28)
+
+This applies to every council: accessibility (this part), design (Part 16), SEO (Part 10), plan (Part 17), and any later council.
+
+A council can be called at any point of the work. The call must be deterministic, and it is not the Orchestrator's decision. The Orchestrator cannot call, skip or cancel a council. It sees the call and its result. The human can always call a council by hand.
+
+1. **Call points.** The hub checks the council rules at fixed events:
+   - a request is created (plan council);
+   - a plan is ready for the start Approve;
+   - a ticket reaches `in_review` (after the Tester);
+   - all tickets of a request are done (before the delivery report);
+   - a release, and a time interval set for each project (for example SEO after each release, accessibility every 30 days).
+2. **Facts, built by code.** For each call point the hub computes numbers and flags only, no ticket text and no code:
+   - the origin of the request (human or factory) and its number of tickets;
+   - the radius of each ticket, and the areas the tickets change: UI files and templates, public routes and page metadata, content, permissions, a new Kind;
+   - the size of the change (files and lines) and the number of spec requirements;
+   - the earlier FAIL counts of the request;
+   - the project type (for example a European Commission project with ECL) and the days since the last run of each council.
+3. **Step A: fixed rules.** Each council has rules in `config.yml` that say "call", "skip" or "unsure", for example:
+   - design: call when the project has no token system, a request adds a screen, or UI changes without an approved design (Part 16);
+   - accessibility: call when a ticket changes UI files or templates of a public project;
+   - SEO: call when public routes, page metadata or content change, and after each release;
+   - plan: call for a request with origin human that has a high-radius ticket, a new Kind, or more than a set number of tickets.
+4. **Step B: Jev.** After step A has run for at least 50 calls of one council, the hub asks Jev one typed question for each "unsure" result: "call" or "skip", with a probability. Jev gets only the facts of item 2. Code applies the limits: a rule that says "call" always wins; Jev cannot skip it. Jev decides only the "unsure" zone. Jev uses the shared access of Part 6, item 6. Jev stays on only when it beats the rule (fewer missed findings for the same cost).
+5. **Record.** For each call point: the facts, the rule result, Jev's answer and probability, and the council result (number of accepted findings). This is the measure of the rules and of Jev. The delivery report shows the councils that ran and why.
+6. **Effect.** A called council gets its ticket from the hub (for example `[a11y]` or `[seo]`), not from the Orchestrator. The Orchestrator turns the council's accepted actions into draft tickets, as before.
 
 ## Effect on other parts
 

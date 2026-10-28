@@ -1,6 +1,6 @@
 # Part 10: SEO council
 
-Status: decision 2026-10-19. Build it after Part 9. It uses the council form that Part 9 builds.
+Status: decision 2026-10-19. At the end of the build order (decision 2026-10-28): the councils are the right direction, but they need much code and testing, so they come after everything else. Build it after Part 9 and Part 16. It uses the council form that Part 9 builds.
 
 ## Goal
 
@@ -20,6 +20,8 @@ The role file is `factory/seo/seo.md`. The seats are in `factory/seo/council.yam
 All seats use the same role file. The first message names the seat.
 
 ## Flow of an `[seo]` ticket
+
+The hub calls the council by its rules and Jev (Part 9, "Calling a council"). The Orchestrator does not call it.
 
 1. The ticket goes through spec review like all tickets (Part 4, item 9).
 2. The hub launches `seo-capture`. It writes `<ticket folder>/evidence/` and `evidence/manifest.json` (source, date and SHA-256 of each file, and the gaps).

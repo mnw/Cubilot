@@ -141,7 +141,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
 <div class="wrap">
 
 <header>
-  <div class="eyebrow">Cubilot · The Continuous Software Foundry · state on 27 October 2026</div>
+  <div class="eyebrow">Cubilot · The Continuous Software Foundry · state on 28 October 2026</div>
   <h1>Cubilot Factory Map</h1>
   <p class="sub">The whole factory on one page: what runs in the code today, what is defined in the <code>factory/</code> folder, what the implementation brief plans, and which ideas are only saved. Click a status to highlight it.</p>
   <div class="legend" role="group" aria-label="Highlight by status">
@@ -163,7 +163,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
     <div class="layer"><div class="lname">Human<small>you</small></div>
       <div class="row">
         <div class="n built"><span class="t">Desktop app window</span><span class="d">macOS, Apple Silicon only</span></div>
-        <div class="n planned"><span class="t">Browser and phone access</span><span class="d">Hub serves the UI; over Tailscale, pairing by QR code</span><span class="ref">§12</span></div>
+        <div class="n planned"><span class="t">Browser and phone access</span><span class="d">Hub serves the UI; over the internet behind a TLS front with sign-in (passkey, step-up), or Tailscale; pairing by QR code</span><span class="ref">§12</span></div>
         <div class="n built"><span class="t">Approval gate</span><span class="d">High blast-radius tickets need your Allow</span></div>
       </div></div>
 
@@ -176,7 +176,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
         <div class="n planned"><span class="t">Setup and admin screen</span><span class="d">Choose components, see the plan, approve, live log; accounts, projects, backup, updates, checks (Doctor)</span><span class="ref">§8 §7</span></div>
         <div class="n planned"><span class="t">Dashboard tab</span><span class="d">Waiting for you, Stuck, Flow, Quality, Cost</span><span class="ref">§11</span></div>
         <div class="n built"><span class="t">Agent column</span><span class="d">Agents on the left in every view; reload one agent; skill switches</span><span class="ref">§4a</span></div>
-        <div class="n planned"><span class="t">UI redesign</span><span class="d">One title bar, compact chat, tab bar, roster view</span><span class="ref">§14</span></div>
+        <div class="n planned"><span class="t">UI redesign</span><span class="d">Top bar, section tabs, every screen on desktop and phone, dark and light; mockups done (design/mockups)</span><span class="ref">§14</span></div>
       </div></div>
 
     <div class="layer"><div class="lname">Shell<small>src-tauri/ Rust</small></div>
@@ -328,13 +328,26 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
       <dt>never</dt><dd>changes code or content, ranking guarantees, one SEO score</dd></dl>
     </article>
 
+    <article class="n idea role">
+      <div class="head"><h3>Plan council</h3><span class="model">Claude + OpenAI</span></div>
+      <span class="track">Planning · 2 seats · needs work</span>
+      <p class="job">For each request you ask for, a Claude member (opus) and an OpenAI member (openai-codex on Pi) write the plan blind. Code compares them: agreed, single (checked by the other), conflict (arbiter; scope to you). Claude merges; you approve one plan.</p>
+      <dl><dt>skills</dt><dd>planning-and-task-breakdown, spec-driven-development, intent-driven-development, constraint-driven-development</dd>
+      <dt>never</dt><dd>changes product code, decides conflicts, plans factory follow-ups</dd></dl>
+    </article>
+
+    <article class="n built role">
+      <div class="head"><h3>Design system and mockups</h3><span class="model">done with you · claude.ai</span></div>
+      <span class="track">Design · done 28 Oct · no design team</span>
+      <p class="job">Cubilot's token system (design/system: three themes, six type sizes, contrast fixed) and every Part 14 screen, desktop and phone, dark and light (design/mockups: clickable prototype, coverage of 89 features). The design council takes them over.</p>
+      <dl><dt>until the council</dt><dd>the Validator checks built UI against the mockups</dd></dl>
+    </article>
+
     <article class="n planned role">
-      <div class="head"><h3>Design team</h3><span class="model">Claude + 2nd model</span></div>
-      <span class="track">Design track · 2 roles</span>
-      <p class="job">Designer (opus for new work, sonnet for changes) makes UI designs in OpenPencil before the build (free, MIT, local files in git, MCP server), the project design system as a library file and exported tokens (ECL for EC projects) and SVG assets. Design reviewer (a different model) checks designs, then the built UI against the approved design.</p>
-      <dl><dt>tool</dt><dd>OpenPencil (MCP, CLI export); trial first, Penpot self-hosted as fallback</dd>
-      <dt>skills</dt><dd>OpenPencil skill (after trial), ui-designer, ux-architect, design-system, frontend-design-direction, frontend-ui-engineering; reviewer: ui-finish-gate-reviewer</dd>
-      <dt>never</dt><dd>changes product code, approves its own work, copies brand marks</dd></dl>
+      <div class="head"><h3>Design council (16)</h3><span class="model">Claude + OpenAI</span></div>
+      <span class="track">Design · 4 seats · called by rules and Jev</span>
+      <p class="job">The target form, after Part 9. Capture collects the input; two members (opus, openai-codex on Pi) propose blind in OpenPencil; chair merges. Looks conflicts go to you side by side. Takes over the token system and the mockups.</p>
+      <dl><dt>never</dt><dd>is called by the Orchestrator, decides looks for you</dd></dl>
     </article>
 
     <article class="n defined role">
@@ -416,15 +429,25 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
   </div>
 
   <div class="panel">
-    <h3>Design track</h3>
+    <h3>Plan council (needs work)</h3>
     <div class="flow">
-      <div class="n planned"><span class="t">[design] ticket</span><span class="d">request with a UI change; code tickets wait for it</span></div><span class="arrow">→</span>
-      <div class="n planned"><span class="t">Designer</span><span class="d">screens in OpenPencil on the library, .pen files, screenshots and tokens in the repo</span></div><span class="arrow">→</span>
-      <div class="n planned"><span class="t">Design reviewer</span><span class="d">PASS or CHANGES; 2 CHANGES: arbiter</span></div><span class="arrow">→</span>
-      <div class="n planned"><span class="t">Plan + design</span><span class="d">one Approve at the start</span><span class="gate">you approve the plan and the design</span></div><span class="arrow">→</span>
-      <div class="n planned"><span class="t">Design review of built UI</span><span class="d">after the Tester on UI tickets: layout, states, tokens</span><span class="ref">§16</span></div>
+      <div class="n idea"><span class="t">Your request</span><span class="d">features defined by you</span></div><span class="arrow">→</span>
+      <div class="n idea"><span class="t">Members, blind</span><span class="d">plan-claude ∥ plan-openai, same input; each passes validate and the plan check</span></div><span class="arrow">→</span>
+      <div class="n idea"><span class="t">Code compares</span><span class="d">agreed · single (other member checks) · conflict</span></div><span class="arrow">→</span>
+      <div class="n idea"><span class="t">Merge</span><span class="d">Claude merges; arbiter decides conflicts</span><span class="gate">scope conflicts and the plan: your one Approve</span><span class="ref">§17</span></div>
     </div>
-    <p class="loop">Accessibility stays with the accessibility council (§9). For European Commission projects the design system is ECL.</p>
+    <p class="loop">Factory follow-ups with only low-radius tickets get no council. The merged plan still goes through the Validator spec review.</p>
+  </div>
+
+  <div class="panel">
+    <h3>Design council (16, after Part 9)</h3>
+    <div class="flow">
+      <div class="n planned"><span class="t">Hub calls</span><span class="d">no token system, new screen, UI without approved design; rules, then Jev</span></div><span class="arrow">→</span>
+      <div class="n planned"><span class="t">Design capture</span><span class="d">current tokens, screenshots, constraints (ECL, themes, contrast)</span></div><span class="arrow">→</span>
+      <div class="n planned"><span class="t">Members, blind</span><span class="d">design-claude ∥ design-openai in OpenPencil</span></div><span class="arrow">→</span>
+      <div class="n planned"><span class="t">Design chair</span><span class="d">agreed · single (checked) · conflict; merges, exports tokens and screenshots</span><span class="gate">looks conflicts and the design: your one Approve</span><span class="ref">§16</span></div>
+    </div>
+    <p class="loop">The token system and the Part 14 mockups are done (design/system, design/mockups); no design team is built. Until the council exists, the Validator checks built UI against the mockups. The design review of built UI is one check stage by rule, not a council. Accessibility stays with §9.</p>
   </div>
 
   <div class="panel">
@@ -470,6 +493,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
         <tr class="n planned" style="display:table-row;border:0;background:none"><td>Orchestrator checkpoint</td><td>checkpoint now or wait, at a due point</td><td><span class="pill none">numbers only</span></td><td><span class="pill planned" style="border-color:var(--planned);color:var(--planned)">planned §6</span></td></tr>
         <tr class="n idea" style="display:table-row;border:0;background:none"><td>Loop escalation</td><td>will this FAIL loop converge, or escalate now?</td><td><span class="pill none">counts only</span></td><td><span class="pill idea" style="border-color:var(--idea);color:var(--idea)">idea</span></td></tr>
         <tr class="n planned" style="display:table-row;border:0;background:none"><td>Model routing</td><td>model × effort for each Worker stage</td><td><span class="pill code">numbers only</span></td><td><span class="pill planned" style="border-color:var(--planned);color:var(--planned)">planned §6</span></td></tr>
+        <tr class="n planned" style="display:table-row;border:0;background:none"><td>Council call</td><td>call or skip a council (a11y, SEO, plan) when the fixed rule says unsure</td><td><span class="pill none">numbers and flags only</span></td><td><span class="pill planned" style="border-color:var(--planned);color:var(--planned)">planned §9</span></td></tr>
         <tr class="n idea" style="display:table-row;border:0;background:none"><td>Stuck detection</td><td>stuck, looping or slow?</td><td><span class="pill none">activity metrics</span></td><td><span class="pill idea" style="border-color:var(--idea);color:var(--idea)">idea §11</span></td></tr>
         <tr class="n idea" style="display:table-row;border:0;background:none"><td>Notification priority</td><td>notify the phone now, or batch?</td><td><span class="pill none">metadata</span></td><td><span class="pill idea" style="border-color:var(--idea);color:var(--idea)">idea §12</span></td></tr>
         <tr class="n idea" style="display:table-row;border:0;background:none"><td>Triage pre-check</td><td>four readiness states, as a hint</td><td><span class="pill code">request text</span></td><td><span class="pill idea" style="border-color:var(--idea);color:var(--idea)">idea §6</span></td></tr>
@@ -482,7 +506,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
 <!-- 6 BUILD ORDER -->
 <section class="sec" aria-labelledby="h-seq">
   <h2 id="h-seq"><span class="num">06</span>Build order</h2>
-  <p class="intro">The migration comes first, then the rebrand, so Cubilot runs beside the previous app without touching it. Parts 1 to 4 give a working factory with fresh sessions, and 4a gives the agent column that Part 4 needs for its tests. Part 6 comes next, before Part 5 (decision 2026-10-26): review format and model routing make the agents more reliable, and delivery and backup is a local item that can wait. Part 12 follows Part 6 (decision 2026-10-27): the desktop app approach is limiting, so the hub serves the UI to any browser and can run on Linux before the later parts are built. Part 16 (design team) follows Part 12 and makes the mockups; Part 14 builds them, so the redesign is done once, on the browser UI (decisions 2026-10-28). Parts 7 to 10 add toolchain, setup and the two councils; 11 and 13 improve it.</p>
+  <p class="intro">The migration comes first, then the rebrand, so Cubilot runs beside the previous app without touching it. Parts 1 to 4 give a working factory with fresh sessions, and 4a gives the agent column that Part 4 needs for its tests. Part 6 comes next, before Part 5 (decision 2026-10-26): review format and model routing make the agents more reliable, and delivery and backup is a local item that can wait. Part 12 follows Part 6 (decision 2026-10-27): the desktop app approach is limiting, so the hub serves the UI to any browser and can run on Linux before the later parts are built. The token system and the mockups are done (28 Oct, design/); Part 14 builds them after Part 12, so the redesign is done once, on the browser UI. The design team step is folded into the design council (decision 2026-10-28). Parts 7 and 8 add toolchain and setup; 11 and 13 improve it. The councils (9, 16, 10, 17) come last: the right direction, but much code and testing (decision 2026-10-28).</p>
   <div class="seq">
     <div class="n built first"><span class="step">Step 0</span><span class="t">Migrate to new repo</span><span class="d">done: mnw/Cubilot, fresh history</span></div>
     <div class="n built"><span class="step">1</span><span class="t">Rebrand to Cubilot</span><span class="d">done: own identifier and data folder, side by side with the previous app</span><span class="ref">§1</span></div>
@@ -491,22 +515,23 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
     <div class="n built"><span class="step">4</span><span class="t">Session per ticket stage</span><span class="d">done 28 Oct: stage sessions, spec review and context pack archived; stage diagnosis proposed (after Part 6 items 11 and 7)</span><span class="ref">§4</span></div>
     <div class="n built"><span class="step">4a</span><span class="t">Agent column</span><span class="d">done: built to test Part 4; reload one agent, skill switches</span><span class="ref">§4a</span></div>
     <div class="n planned"><span class="step">6</span><span class="t">Touchpoints, checkpoint, guards, routing</span><span class="d">in planning (human-touchpoints-checkpoint): human only at start and delivery (arbiter, delivery report) with the Orchestrator checkpoint; then plan check, flow report, stop rules; then model × effort; triage, spec stage, review.json</span><span class="ref">§6</span></div>
-    <div class="n planned"><span class="step">12</span><span class="t">Hub-first, browser, Linux</span><span class="d">after Part 6: hub serves the UI, terminal layer into the hub, browser access and pairing, Linux</span><span class="ref">§12</span></div>
-    <div class="n planned"><span class="step">16</span><span class="t">Design team</span><span class="d">after Part 12, before 14: OpenPencil trial, then the design track; makes the mockups for the redesign</span><span class="ref">§16</span></div>
-    <div class="n planned"><span class="step">14</span><span class="t">UI redesign</span><span class="d">after Parts 12 and 16, from the design team's mockups: title bar, tab bar, roster view; WCAG 2.2 AA (agent rail done in 4a)</span><span class="ref">§14</span></div>
+    <div class="n planned"><span class="step">12</span><span class="t">Hub-first, browser, Linux</span><span class="d">after Part 6: hub serves the UI, terminal layer into the hub, browser access, sign-in for internet access, pairing, Linux</span><span class="ref">§12</span></div>
+    <div class="n planned"><span class="step">14</span><span class="t">UI redesign</span><span class="d">after Part 12, from design/mockups (done 28 Oct): top bar, section tabs, every screen on desktop and phone, dark and light; WCAG 2.2 AA</span><span class="ref">§14</span></div>
     <div class="n planned"><span class="step">5</span><span class="t">Delivery and backup</span><span class="d">after Part 14: internal remote, Deliver step, leak gate, hourly backup</span><span class="ref">§5</span></div>
     <div class="n planned"><span class="step">7</span><span class="t">Toolchain</span><span class="d">bundled tools, worktrees, Serena limits</span><span class="ref">§7</span></div>
     <div class="n planned"><span class="step">8</span><span class="t">Setup and admin</span><span class="d">components, accounts, projects, Doctor</span><span class="ref">§8</span></div>
-    <div class="n planned"><span class="step">9</span><span class="t">Accessibility council</span><span class="d">builds the council form; axe-core, Figma</span><span class="ref">§9</span></div>
-    <div class="n planned"><span class="step">10</span><span class="t">SEO council</span><span class="d">same council form</span><span class="ref">§10</span></div>
     <div class="n planned"><span class="step">11</span><span class="t">Dashboard</span><span class="d">waiting for you, stuck, flow, quality, cost</span><span class="ref">§11</span></div>
     <div class="n planned"><span class="step">13</span><span class="t">Mutation testing</span><span class="d">advisory first, opt-in, the most risk</span><span class="ref">§13</span></div>
+    <div class="n planned"><span class="step">9</span><span class="t">Accessibility council</span><span class="d">at the end: first council, builds the council form and the call rule</span><span class="ref">§9</span></div>
+    <div class="n planned"><span class="step">16</span><span class="t">Design council</span><span class="d">after Part 9: council form, called by rules and Jev; takes over the token system and mockups</span><span class="ref">§16</span></div>
+    <div class="n planned"><span class="step">10</span><span class="t">SEO council</span><span class="d">same council form</span><span class="ref">§10</span></div>
+    <div class="n idea"><span class="step">17</span><span class="t">Plan council</span><span class="d">needs work (first draft); after Part 10: Claude and OpenAI write each plan blind; code compares; one merged plan to approve</span><span class="ref">§17</span></div>
     <div class="n built"><span class="step">15</span><span class="t">Ticket card and dialog</span><span class="d">done: replaces the card tickets of Part 14</span><span class="ref">§15</span></div>
   </div>
 </section>
 
 <footer>
-  <span>Sources: <code>factory/README.md</code>, <code>factory/brief/</code> (index + 17 part files; §N = <code>brief/NN-*.md</code>), and <code>MIGRATION.md</code> for the source of the code.</span>
+  <span>Sources: <code>factory/README.md</code>, <code>factory/brief/</code> (index + 18 part files; §N = <code>brief/NN-*.md</code>), and <code>MIGRATION.md</code> for the source of the code.</span>
   <span>Model names are defaults. Check the OpenAI model with <code>pi --list-models</code> before release.</span>
 </footer>
 
