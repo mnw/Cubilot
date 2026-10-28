@@ -21,6 +21,7 @@ Read this file when work stops: a plan has two FAILs, a ticket has no movement, 
 
 - At the second FAIL of a plan, or the second FAIL or CHANGES of a ticket, do not send it to review again. Escalate to the human (step 4).
 - Do not resend a plan to get a PASS. Only the human can allow a third review.
+- When you change a plan while its spec review runs, cancel that review first. A review of an old version still counts as a FAIL and wastes a cycle (human, 2026-10-28, t_1d56). Until G5 is built, a cancel does not stop the running stage: tell the human its stage id.
 
 ### 2. Sort each open finding
 
