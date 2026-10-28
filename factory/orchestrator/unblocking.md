@@ -44,7 +44,11 @@ After a merge conflict on a high-radius ticket that the human has allowed, the A
 - An OpenSpec change is archived only if it is in `openspec/changes/archive/`.
 - A cause is proven only if a test or a trace reproduces it.
 
-### 4. Escalate in one message
+### 4a. Decide (interim rule, human, 2026-10-27)
+
+When the decision does not change the scope or a feature and can be undone, do not escalate. Choose your recommended option, write it as a ticket note "Ruling (Orchestrator, interim): <option>, because <reason>", and act. List all rulings of the day in one summary to the human. This holds until the arbiter of Part 6, item 11 is built. If the hub needs the human for the next step (Approve, Allow, third spec review), ask for that action only, in one line, with the command.
+
+### 4. Escalate in one message (only for scope, features, actions that cannot be undone, security)
 
 The message to the human has these parts:
 1. **Block:** one sentence. What stops, since when.

@@ -1,6 +1,6 @@
-# Part 6: patterns from the Warp cloud factory, model routing, the Orchestrator checkpoint and process guards
+# Part 6: patterns from the Warp cloud factory, model routing, the Orchestrator checkpoint, process guards and human touchpoints
 
-Status: planned. Build order inside this part (decision 2026-10-27): item 7 (Orchestrator checkpoint), then items 8 to 10 (process guards), then item 6 (model routing), then items 1 to 5. Part 12 comes directly after this part.
+Status: planned. Build order inside this part (decision 2026-10-27): item 11 (human touchpoints) and item 7 (Orchestrator checkpoint) first, then items 8 to 10 (process guards), then item 6 (model routing), then items 1 to 5. Part 12 comes directly after this part.
 
 ## Findings from real use (2026-10-27)
 
@@ -16,6 +16,7 @@ The response, in this part:
 - Item 8 checks each plan with code before the spec review.
 - Item 9 gives a flow report from the hub.
 - Item 10 moves the stop rules into the hub.
+- Item 11 limits the human to two points: the start of a request and the delivery. The factory decides everything between them and records each decision.
 
 Rule for all items: a fact about the work ("done", "merged", "archived", "blocked") comes from the hub or from git. A report that states such a fact without a commit hash or a hub record does not count.
 
@@ -300,21 +301,91 @@ Status: decision 2026-10-27 (human). Several of these are open tickets already. 
 
 Rule for new role-file rules: when a rule protects the flow (a limit, a stop, an order), add the check in code or add a row to this table with the reason why code cannot check it.
 
+### 11. Human touchpoints: start and delivery only
+
+Status: decision 2026-10-27 (human). Build it first in this part, with item 7. The interim rule below applies now.
+
+#### Goal
+
+The human takes part at two points only:
+1. **Start.** The human defines the features of a request and approves its plan once.
+2. **Delivery.** The human tests the result on staging and merges staging into main, or opens a fix request.
+
+Between these two points the factory decides alone. It records each decision, and the delivery report shows them. On 2026-10-27 the human had to act many times per ticket (queue, Approve, Allow, radius, third reviews, decisions after FAILs). That made the factory slower than doing the work by hand.
+
+#### Today's human actions and their replacement
+
+| Today | Replacement |
+|---|---|
+| Approve a request with a high-radius ticket, and again after each edit of a ticket | One Approve for each request, at the start. An edit inside the approved scope needs no new Approve. A scope change (a new or removed ticket, a removed criterion) needs one. |
+| Allow on each high-radius ticket before the merge | High radius means stricter checks, not a human gate: the Tester runs the full suite, and a second review comes from a different model (OpenAI on Pi when available, else opus). The merge message names both PASSes. The delivery report lists every high-radius change. Main stays protected: only the human merges staging into main. |
+| The human sets or changes the radius | Code sets the radius from the radius rule (item 8). The Orchestrator can raise it. A radius below the rule needs the arbiter. The start Approve shows the radius of each ticket. |
+| Decisions after two FAILs, waivers, contradictory criteria, a third review | An arbiter stage decides (see below). |
+| The install time | The Orchestrator installs in a clean window, with the backup and the full checks (already the rule). |
+
+#### The arbiter
+
+- A stage with role `arbiter`: Claude, opus with effort high, read-only, a new session each time.
+- First message: the ticket, its criteria and notes, all findings, the FAIL history, earlier rulings, `factory/orchestrator/unblocking.md` and the decision tree of `factory/validator/validator.md`.
+- Result (schema-checked): one option from a fixed list (rework with a named scope, waiver with its text, third review with its scope, follow-up ticket, cancel, human), the reasons, and the rule it applied.
+- Code applies the result: it writes the ruling as a ticket note, sends the rework, starts the review or makes the draft ticket.
+- Limits: one arbiter for each ticket and FAIL count. The arbiter cannot change the scope or the features. It cannot rule on implementation details without a code reference.
+
+#### When the human is asked
+
+Only when:
+- a decision changes a feature or the scope that the human defined;
+- an action cannot be undone (data loss, a delete outside the factory, an external effect, secrets);
+- the arbiter returns `human`;
+- a security finding has no fix in scope.
+
+Each such question uses the escalation format of `unblocking.md` and comes as one "Needs you" line.
+
+#### Delivery report
+
+When all tickets of a request are done, code builds the report from the ledger and git:
+- the tickets and their merge commits;
+- the arbiter rulings, the waivers and the known limits;
+- the high-radius changes with their two PASSes;
+- the test counts on staging;
+- how to test the feature by hand.
+
+The human tests and merges staging into main, or opens a fix request. Each ruling that the human overrules is recorded, and it is a measure of the arbiter.
+
+#### Interim rule (effective 2026-10-27, until this item is built)
+
+- The Orchestrator decides the options it would bring to the human, by its own recommendation, when the decision does not change the scope and can be undone. It writes each as a ticket note "Ruling (Orchestrator, interim)" with the reason, and lists them in one summary at the end of the day.
+- Rulings on implementation details stay forbidden (`unblocking.md`, step 2).
+- The hub still asks the human for the Approve and the Allow of high-radius tickets and for a third spec review. Until item 11 is built, apply the radius rule strictly, so that few tickets are high.
+
+#### Tests
+
+1. A request approved at the start: an edit inside its scope queues without a new Approve. A new ticket in the request needs one.
+2. A high-radius ticket with two PASSes merges without a human Allow. The merge message names both PASSes.
+3. After a second FAIL, an arbiter stage starts. Its result is a ticket note, and code applies it. The human gets no "Needs you" line.
+4. An arbiter result that changes the scope is refused, and the decision goes to the human.
+5. The delivery report lists every ruling, waiver and high-radius change of the request.
+
+#### Open questions
+
+1. The second model: OpenAI on Pi is not set up yet (Part 2, finding 6). Until then, the second review is opus on Claude, in a new session.
+2. Does an arbiter replace the human well enough? Measure it with the overrules in the delivery reports.
+
 ## Ideas for later
 
-### 11. Learning from the human's corrections
+### 12. Learning from the human's corrections
 
 Skill: `.agents/skills/improve-review-pr/SKILL.md`. A daily job reads how humans reacted to automated review comments. It opens a change to the review skill when it finds knowledge that the reviewer must keep.
 
 For the factory: when the human overrules a Validator or Reviewer verdict, record it with the reason. A scheduled job proposes changes to the role file or the skills. The human approves each change.
 
-### 12. Video evidence of UI behaviour
+### 13. Video evidence of UI behaviour
 
 Skill: `.agents/skills/verify-behavior/SKILL.md`. It checks each user story in a separate run, and records video and screenshots. It uses the Oz platform.
 
 For the factory: the Tester records Playwright video for UI tickets and attaches it to the ticket. One check for each user story in the spec, in parallel. This is useful for Drupal UI changes and for accessibility checks.
 
-### 13. Tests for skills
+### 14. Tests for skills
 
 File: `.agents/skills/triage/evals/evals.json`. Each entry has a prompt and the expected behaviour. Skill descriptions decide when skills load (Part 2, finding 4), so test the important skills with prompts like these. The `skill-creator` skill can run such tests.
 

@@ -42,7 +42,7 @@ The validator reviews your plan for each request before any work starts (spec re
      - `claimed`, `in_progress` or `in_review`: you cannot change its `blocked_by`. Ask the human to change it.
      - `done` or `cancelled`: do not change it.
 9. Triage every unassigned ticket in your Briefing.
-10. Watch for stalls: a ticket without movement, a pending handoff, two FAIL or CHANGES loops on one ticket, or a validator-worker dispute. Decide, or escalate to the human with the options. When work stops, follow `factory/orchestrator/unblocking.md`. A memory note never overrides this file.
+10. Watch for stalls: a ticket without movement, a pending handoff, two FAIL or CHANGES loops on one ticket, or a validator-worker dispute. Decide. Escalate to the human only for a scope or feature change, an action that cannot be undone, or a security finding without a fix in scope (Part 6, item 11, interim rule). Record each decision as a ticket note. When work stops, follow `factory/orchestrator/unblocking.md`. A memory note never overrides this file.
 11. Keep the Nutshell current. Propose edits with a `[nutshell]` handoff to the human.
 12. When all tickets of a request reach `done`, post a short summary to the human: tickets, results, open risks.
 
