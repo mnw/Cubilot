@@ -40,7 +40,7 @@ The `escalate` tool and `POST /decisions` SHALL let the room lead open a human d
 - **THEN** the human sees one Needs-you line
 
 ### Requirement: Each open decision is one Needs-you line
-The Needs-you area SHALL show one line for each `open` decision of the room, with the block sentence and the ticket ids. The line SHALL open the full decision. Its answer buttons SHALL be the options.
+The Needs-you area SHALL show one line for each `open` or `escalated` decision of the room, with the block sentence and the ticket ids. The line SHALL open the full decision. Its answer buttons SHALL be the options.
 
 #### Scenario: Arbiter answer human
 - **WHEN** the arbiter of `t1` returns `human`
