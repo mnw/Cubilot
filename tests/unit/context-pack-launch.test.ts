@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { giveProject } from "../helpers/repo";
-import { repoWithBranch, stubGraphify, withEnv } from "../helpers/pack-fixture";
+import { repoWithBranch, stubGraphify, withEnv, writeGraph } from "../helpers/pack-fixture";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createTicketKind } from "../../hub/kinds/ticket";
 import { createStageRuntime } from "../../hub/kinds/stage";
@@ -155,11 +155,9 @@ describe("pack at the launch seam (3.5)", () => {
   });
 
   test("a failing graphify still launches, with no graph section", async () => {
-    const e = makeEnv(async (i) => {
-      Bun.spawnSync(["mkdir", "-p", join(i.worktree, "graphify-out")]);
-      writeFileSync(join(i.worktree, "graphify-out", "graph.json"), "{}");
-      return buildPack(i);
-    });
+    const { project } = repoWithBranch();
+    writeGraph(project);
+    const e = makeEnv((i) => buildPack({ ...i, projectFolder: project }));
     const bin = stubGraphify("exit 7");
     const s = e.stage("worker");
     await withEnv({ PATH: `${bin}:${PATH}` }, async () => {
@@ -172,11 +170,9 @@ describe("pack at the launch seam (3.5)", () => {
   });
 
   test("a stub that sleeps past the limit is stopped and the launch continues", async () => {
-    const e = makeEnv(async (i) => {
-      Bun.spawnSync(["mkdir", "-p", join(i.worktree, "graphify-out")]);
-      writeFileSync(join(i.worktree, "graphify-out", "graph.json"), "{}");
-      return buildPack({ ...i, limitMs: 300 });
-    });
+    const { project } = repoWithBranch();
+    writeGraph(project);
+    const e = makeEnv((i) => buildPack({ ...i, projectFolder: project, limitMs: 300 }));
     const bin = stubGraphify("sleep 30");
     const s = e.stage("worker");
     const t0 = Date.now();
