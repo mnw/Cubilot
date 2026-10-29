@@ -933,8 +933,10 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
         }
         // The Approve rule holds at creation too: the lead creates a queued ticket only with a request that needs no
         // Approve (a new ticket always adds to the scope). Intake is the human's and the lead's alone, as for a move.
-        if (status === "queued" && !isHuman(by, cap) && by === roomLead(cap, room)) {
+        if (status === "queued" && !isHuman(by, cap)) {
           if (requestId === null) return Response.json({ error: "a ticket without a request_id: only the human may queue it" }, { status: 403 });
+        }
+        if (status === "queued" && requestId !== null && !isHuman(by, cap) && by === roomLead(cap, room)) {
           const facts = requestFacts(db, room, requestId);
           if (facts && needsApprove(facts)) return Response.json({ error: "the request needs the human's Approve: create the ticket as draft" }, { status: 403 });
         }

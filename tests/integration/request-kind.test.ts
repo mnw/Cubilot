@@ -101,7 +101,7 @@ describe("request kind", () => {
     expect((await create({ request_id: "f-5", origin: "factory", source: withReq, parent_request_id: "p-2" })).status).toBe(400);
     // An unknown source, and a source of another room.
     expect((await create({ request_id: "f-4", origin: "factory", source: "t_0123456789abcdef" })).status).toBe(400);
-    const foreign = (await postJson(hub, "/tickets", { by: "rk-other", title: "T", acceptance_criteria: "c", blast_radius: "low" })).json as any;
+    const foreign = (await postJson(hub, "/tickets", { by: "rk-other", title: "T", acceptance_criteria: "c", blast_radius: "low", status: "draft" })).json as any;
     expect((await create({ request_id: "f-5", origin: "factory", source: foreign.snapshot.id })).status).toBe(400);
     // An unknown parent.
     expect((await create({ request_id: "f-6", origin: "factory", source: loneId, parent_request_id: "nope" })).status).toBe(400);
@@ -142,6 +142,14 @@ describe("request kind", () => {
     expect(lead.status).toBe(403);
     expect(rows("SELECT status FROM tickets WHERE id = ?", id)[0].status).toBe("draft");
     expect((await postJson(hub, `/tickets/${id}/transition`, { by: hub.humanName, to: "queued" })).status).toBe(200);
+  });
+
+  test("a plain non-lead agent creates a queued ticket without request_id: 403, and nothing is written", async () => {
+    const before = rows("SELECT COUNT(*) AS n FROM tickets")[0].n;
+    const r = await ticket({ status: "queued" }, "rk-worker");
+    expect(r.status).toBe(403);
+    expect(rows("SELECT COUNT(*) AS n FROM tickets")[0].n).toBe(before);
+    expect((await ticket({ status: "queued", room: "rk" }, hub.humanName)).status).toBe(201);
   });
 
   test("GET /requests lists the requests of a room with their scope change", async () => {
