@@ -357,6 +357,8 @@ export type StageHooks = {
   onTicketCancelled(ticketId: string, cap: HubCapabilities): void;
   /** G10: the ticket kind calls this after the commit of a move to draft or done: each queued stage of the ticket is cancelled. It never throws. */
   onTicketParked(ticketId: string, to: "draft" | "done", cap: HubCapabilities): void;
+  /** L2: the ticket kind calls this after the commit of a criteria edit: a launch of the ticket that the shell has not received gets the new criteria. It never throws. */
+  onTicketEdited?(ticketId: string): void;
   /**
    * The schema check of a result handoff (5.1; spec stages 3.1). A handoff from the session of a `running` stage is a result.
    * Returns null when `from` is no such session, else the list of errors (empty = valid). Errors also go to the same
@@ -767,6 +769,8 @@ export function createStageRuntime(
   const inflight = new Map<string, { id: string; session: string }>();
   /** Launches whose context pack is being built (stage -> request id): launching, not queued yet. Memory only. */
   const building = new Map<string, string>();
+  /** L2: how to render the first message again for a launch (stage -> request id and render), so an edit reaches a launch the shell has not received. Memory only. */
+  const rerender = new Map<string, { id: string; render: () => string }>();
   /**
    * G4: a stage cancelled while its launch is in flight. Its session name, slot and worktree stay reserved until a close ack
    * arrives with no launch in flight (and, once a late launch end queued the last close, only that close's ack).
@@ -803,6 +807,7 @@ export function createStageRuntime(
       if (req.kind !== "launch") return;
       const fromRoleModels = roleModelLaunches.delete(req.id);
       if (inflight.get(req.stage_id)?.id === req.id) inflight.delete(req.stage_id);
+      if (rerender.get(req.stage_id)?.id === req.id) rerender.delete(req.stage_id);
       try {
         const cancelled = api.load(req.stage_id);
         if (cancelled?.status === "cancelled") {
@@ -1266,14 +1271,8 @@ export function createStageRuntime(
     if (ready.length > 0) created.push(api.create({ ticket_id: ticketId, role: ready[0].role }, "system", cap));
     if (eopts.launch) {
       const room = db.query<{ room: string }, [string]>("SELECT room FROM tickets WHERE id = ?").get(ticketId)!.room;
-      for (const stage of created) {
-        // TODO(4.3, 4.5): the real first message and the worktree path. Until then the launch has no prompt and no cwd.
-        const r = enqueueLaunch(
-          { stage_id: stage.id, session: nextSessionName(stage.role, stage.id), room, harness: roleHarness(stage.role), cwd: null, prompt: "" },
-          cap,
-        );
-        if (!r.ok) console.log(`[stage] ${stage.id} stays queued: ${r.reason}`);
-      }
+      // A retrying or older queued stage of the role goes before the new one (startWaiting order), inside the limit.
+      for (const role of new Set(created.map((c) => c.role))) startWaiting(role, room, cap);
     }
     return created;
   }
@@ -1419,7 +1418,15 @@ export function createStageRuntime(
       if (t) {
         const fm = { stable: stableFor(input.room), notes: earlierNotes(db, t.id), stageId: input.stage_id, role: stage.role, ticket: t, branch, worktree: cwd, reason: input.reason, recipient: leadOfRoom(input.room), handoff: startingHandoff(stage.id, stage.ticket_id, stage.role) ?? undefined };
         prompt = renderFirstMessage(fm);
-        renderWithPack = (pack) => renderFirstMessage({ ...fm, pack });
+        // The ticket row is read again at each render: an edit between the launch request and the delivery is not lost (L2).
+        renderWithPack = (pack) => {
+          const now = db
+            .query<{ id: string; title: string; acceptance_criteria: string; blast_radius: string; request_id: string | null }, [string]>(
+              "SELECT id, title, acceptance_criteria, blast_radius, request_id FROM tickets WHERE id = ?",
+            )
+            .get(t.id);
+          return renderFirstMessage({ ...fm, ticket: now ?? t, pack });
+        };
         packQuestion = `${t.title} ${t.acceptance_criteria}`;
         // Named files: paths in the criteria, then the spec paths of the request (context-pack design item 4). Once each; containment is in buildPack.
         packFiles = [...new Set([...namedPaths(t.acceptance_criteria), ...specPathsOf(stage.id, t.request_id, input.room)])];
@@ -1482,8 +1489,12 @@ export function createStageRuntime(
       },
     };
     if (models.entry) roleModelLaunches.add(req.id);
-    const push = () => {
+    const push = (pack?: PackText) => {
       queue.push(req);
+      if (renderWithPack) {
+        const r = renderWithPack;
+        rerender.set(req.stage_id, { id: req.id, render: () => r(pack as PackText) });
+      }
       opts.launchRecord?.bind(req.session, req.stage_id);
       inflight.set(req.stage_id, { id: req.id, session: req.session });
     };
@@ -1514,7 +1525,7 @@ export function createStageRuntime(
           return;
         }
         req.prompt = render(pack.text);
-        push();
+        push(pack.text);
       } catch (e) {
         building.delete(req.stage_id);
         roleModelLaunches.delete(req.id);
@@ -1817,6 +1828,11 @@ export function createStageRuntime(
 
   const module: KindModule = {
     kind: "stage",
+    // The human saved the limits of a room: start the waiting stages of every role that has a free slot now. A lowered limit
+    // starts nothing and stops nothing: enqueueLaunch checks the limit again.
+    onRoomLimitsChanged(room, cap) {
+      for (const role of STAGE_ROLES) startWaiting(role, room, cap);
+    },
     migrate: (d: Database) => entity.migrate(d),
     routes: withLedgerRequired(routes),
     // A stage is the hub's own bookkeeping: agents never get a stage replayed on reconnect.
@@ -1966,13 +1982,48 @@ export function createStageRuntime(
       base = mb.out;
     }
     if (base === commit) return refuse("The commit is not new work: it equals the base.");
+    const older = runGit(project, ["merge-base", "--is-ancestor", commit, base]);
+    if (older.code === 0) return refuse("The commit is not new work: it does not descend from the base: it is an ancestor of it.");
+    if (older.code !== 1) return refuse(`Git: ${older.err || "merge-base failed"}`);
     const fromBase = runGit(project, ["merge-base", "--is-ancestor", base, commit]);
-    if (fromBase.code === 1) return refuse("The commit is not new work: it does not descend from the base.");
-    if (fromBase.code !== 0) return refuse(`Git: ${fromBase.err || "merge-base failed"}`);
-    return null;
+    if (fromBase.code === 0) return null;
+    if (fromBase.code !== 1) return refuse(`Git: ${fromBase.err || "merge-base failed"}`);
+    // The base is not an ancestor: a rebase or a reset. A rebase moves the fork point to newer staging, or keeps the patches of the base; a reset does neither.
+    const forkOf = (sha: string): { sha?: string; refusal?: string } => {
+      const f = runGit(project, ["merge-base", sha, "refs/heads/staging"]);
+      if (f.code !== 0 || !FULL_SHA_RE.test(f.out)) return { refusal: `Git: no merge-base with staging. ${f.err}`.trim() };
+      return { sha: f.out };
+    };
+    const forkNew = forkOf(commit);
+    if (forkNew.refusal) return refuse(forkNew.refusal);
+    const forkOld = forkOf(base);
+    if (forkOld.refusal) return refuse(forkOld.refusal);
+    if (forkNew.sha === commit) return refuse("The commit is not new work: it holds no commit beyond staging.");
+    if (forkNew.sha !== forkOld.sha) {
+      const newer = runGit(project, ["merge-base", "--is-ancestor", forkOld.sha!, forkNew.sha!]);
+      if (newer.code === 0) return null;
+      if (newer.code !== 1) return refuse(`Git: ${newer.err || "merge-base failed"}`);
+    }
+    // Same or older fork point: accept only a rewrite that keeps a patch of the base ("- ") and adds new work ("+ ").
+    const cherry = runGit(project, ["cherry", base, commit]);
+    if (cherry.code !== 0) return refuse(`Git: ${cherry.err || "cherry failed"}`);
+    const marks = cherry.out.split("\n");
+    if (marks.some((l) => l.startsWith("- ")) && marks.some((l) => l.startsWith("+ "))) return null;
+    return refuse("The commit is not new work: it does not descend from the base.");
   }
 
   const hooks: StageHooks = {
+    onTicketEdited(ticketId) {
+      try {
+        for (const s of db.query<{ id: string }, [string]>("SELECT id FROM stage WHERE ticket_id = ? AND status = 'launching'").all(ticketId)) {
+          const r = rerender.get(s.id);
+          const pending = r && queue.undelivered(r.id);
+          if (r && pending && pending.kind === "launch") pending.prompt = r.render();
+        }
+      } catch (e) {
+        console.error(`[stage] refresh of the pending launch of ${ticketId} failed:`, e);
+      }
+    },
     completedStage(from, context) {
       const id = context && typeof context === "object" && !Array.isArray(context) ? (context as Record<string, unknown>).stage_id : undefined;
       if (typeof id !== "string") return null;

@@ -23,6 +23,7 @@ import { insertEvent } from "../core/events";
 import { ts, validRoomLabel } from "../core/ids";
 import { validateBlockedBy } from "./ticket-blockers";
 import { STAGE_ROLES, getRoomSettings, type StageRole } from "../core/ledger";
+import { ruleRadius } from "../core/radius-rule";
 import { createPermissionWithSideEffect, dismissPendingPermission } from "./permission";
 import type { StageHooks } from "./stage";
 
@@ -47,12 +48,20 @@ const TARGET_STATUSES = new Set<string>(["draft", "queued", "in_progress", "in_r
 /** The columns a ticket may be created in. */
 const CREATE_STATUSES = new Set<string>(["draft", "queued", "in_progress", "in_review", "done"]);
 
+export type RadiusSource = "rule" | "raised" | "arbiter" | "human";
+
 export type TicketSnapshot = {
   id: string;
   room: string;
   title: string;
   acceptance_criteria: string;
   blast_radius: BlastRadius;
+  /** The lowest radius the radius rule gives the title, criteria and planning note; blast_radius is never below it. */
+  radius_rule: BlastRadius;
+  /** The terms and paths that matched. */
+  radius_reasons: string[];
+  /** Who set blast_radius: the rule, a raise by the lead or the creator, an arbiter waiver, or the human. */
+  radius_source: RadiusSource;
   priority: TicketPriority;
   creator: string;
   assignee: string | null;
@@ -116,6 +125,20 @@ function mintPermissionId(): string {
 
 // ---------- StateMachine declaration ----------
 
+const RADIUS_SOURCES: ReadonlySet<string> = new Set(["rule", "raised", "arbiter", "human"]);
+const isRadiusSource = (v: unknown): v is RadiusSource => typeof v === "string" && RADIUS_SOURCES.has(v);
+function parseReasons(v: unknown): string[] {
+  try {
+    const a = JSON.parse(typeof v === "string" ? v : "[]");
+    return Array.isArray(a) ? a.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** The radius rule over the text an agent reads: title, criteria and planning note. */
+const ruleOf = (title: string, criteria: string, note: string | null) => ruleRadius([title, criteria, note ?? ""].join("\n"));
+
 const ticketDecl: StateMachineDecl<TicketSnapshot> = {
   kind: "ticket",
   table: "tickets",
@@ -125,6 +148,9 @@ const ticketDecl: StateMachineDecl<TicketSnapshot> = {
     title: "TEXT",
     acceptance_criteria: "TEXT",
     blast_radius: "TEXT",
+    radius_rule: "TEXT_NULL",
+    radius_reasons: "JSON",
+    radius_source: "TEXT_NULL",
     priority: "INTEGER",
     creator: "TEXT",
     assignee: "TEXT_NULL",
@@ -146,6 +172,9 @@ const ticketDecl: StateMachineDecl<TicketSnapshot> = {
     title: row.title as string,
     acceptance_criteria: row.acceptance_criteria as string,
     blast_radius: row.blast_radius as BlastRadius,
+    radius_rule: row.radius_rule === "high" ? "high" : "low",
+    radius_reasons: parseReasons(row.radius_reasons),
+    radius_source: isRadiusSource(row.radius_source) ? row.radius_source : "human",
     priority: priorityName(row.priority),
     creator: row.creator as string,
     assignee: row.assignee == null ? null : (row.assignee as string),
@@ -167,6 +196,7 @@ const ticketDecl: StateMachineDecl<TicketSnapshot> = {
       out[k] = (snap as Record<string, unknown>)[k];
     }
     if (snap.priority !== undefined) out.priority = PRIORITY_RANK[snap.priority];
+    if (snap.radius_reasons !== undefined) out.radius_reasons = JSON.stringify(snap.radius_reasons);
     return out;
   },
 };
@@ -306,12 +336,19 @@ const createTicketVerb: VerbDecl<TicketSnapshot, CreateInput> = {
     const blockers = validateBlockedBy(cap.db, payload.room, null, payload.blocked_by);
     if (blockers.error !== undefined) return { kind: "conflict", httpStatus: 400, message: blockers.error };
     const now = Date.now();
+    // The stored radius is the higher of the rule radius and the requested one. A raise above the rule is the creator's.
+    const rule = ruleOf(payload.title, payload.acceptance_criteria, payload.planning_note);
+    const blastRadius: BlastRadius = rule.radius === "high" ? "high" : payload.blast_radius;
+    const radiusSource: RadiusSource = rule.radius === "high" ? "rule" : blastRadius === "high" ? (isHuman(actor, cap) ? "human" : "raised") : "rule";
     const initial: TicketSnapshot = {
       id: payload.id,
       room: payload.room,
       title: payload.title,
       acceptance_criteria: payload.acceptance_criteria,
-      blast_radius: payload.blast_radius,
+      blast_radius: blastRadius,
+      radius_rule: rule.radius,
+      radius_reasons: rule.reasons,
+      radius_source: radiusSource,
       priority: payload.priority,
       creator: actor,
       assignee: payload.assignee,
@@ -334,6 +371,8 @@ const createTicketVerb: VerbDecl<TicketSnapshot, CreateInput> = {
         room: post.room,
         title: post.title,
         blast_radius: post.blast_radius,
+        radius_rule: post.radius_rule,
+        radius_source: post.radius_source,
         priority: post.priority,
         external_ref: post.external_ref,
         request_id: post.request_id,
@@ -542,11 +581,15 @@ const editTicketVerb: VerbDecl<TicketSnapshot, EditInput> = {
     if (!prior) return { kind: "conflict", httpStatus: 404, message: "not found" };
     if (!inRoom(actor, prior.room, cap)) return forbidden("ticket is in another room");
     const human = isHuman(actor, cap);
-    if (payload.blast_radius !== undefined && !human) return forbidden("only the human may change blast_radius");
+    const lead = roomLead(cap, prior.room);
+    if (payload.blast_radius !== undefined && !human && actor !== prior.creator && actor !== lead) {
+      return forbidden("only the human, the room lead or the creator may change blast_radius");
+    }
     // The grouping fields (request_id, blocked_by, role) are edited by the human, the creator or the room lead, not the assignee.
     // The other fields keep their rule: the human, the creator or the assignee.
     const grouping = payload.request_id !== undefined || payload.blocked_by !== undefined || payload.role !== undefined;
-    const other = payload.title !== undefined || payload.acceptance_criteria !== undefined || payload.blast_radius !== undefined
+    // blast_radius has its own gate above: the human, the room lead or the creator.
+    const other = payload.title !== undefined || payload.acceptance_criteria !== undefined
       || payload.priority !== undefined || payload.external_ref !== undefined;
     if (other && !human && actor !== prior.creator && actor !== prior.assignee) {
       return forbidden("only the human, the creator or the assignee may edit a ticket");
@@ -568,27 +611,47 @@ const editTicketVerb: VerbDecl<TicketSnapshot, EditInput> = {
     if (payload.acceptance_criteria !== undefined && payload.acceptance_criteria !== prior.acceptance_criteria) {
       changes.acceptance_criteria = payload.acceptance_criteria;
     }
-    if (payload.blast_radius !== undefined && payload.blast_radius !== prior.blast_radius) changes.blast_radius = payload.blast_radius;
     if (payload.priority !== undefined && payload.priority !== prior.priority) changes.priority = payload.priority;
     if (payload.external_ref !== undefined && payload.external_ref !== prior.external_ref) changes.external_ref = payload.external_ref;
     if (payload.planning_note !== undefined && payload.planning_note !== prior.planning_note) changes.planning_note = payload.planning_note;
     if (payload.request_id !== undefined && payload.request_id !== prior.request_id) changes.request_id = payload.request_id;
     if (payload.role !== undefined && payload.role !== prior.role) changes.role = payload.role;
+    // The radius: the rule runs over the text as it will be. The stored radius is never below the rule; an agent cannot go
+    // below it; the human can. A raise by the lead or the creator has the source `raised`, a human choice has `human`.
+    const rule = ruleOf(changes.title ?? prior.title, changes.acceptance_criteria ?? prior.acceptance_criteria, changes.planning_note !== undefined ? changes.planning_note : prior.planning_note);
+    if (rule.radius !== prior.radius_rule) changes.radius_rule = rule.radius;
+    if (JSON.stringify(rule.reasons) !== JSON.stringify(prior.radius_reasons)) changes.radius_reasons = rule.reasons;
+    let radius: BlastRadius = prior.blast_radius;
+    let source: RadiusSource = prior.radius_source;
+    if (payload.blast_radius !== undefined && payload.blast_radius !== prior.blast_radius) {
+      if (payload.blast_radius === "low" && rule.radius === "high" && !human) {
+        return forbidden("a radius below the rule needs an arbiter ruling");
+      }
+      radius = payload.blast_radius;
+      source = human ? "human" : radius === "high" && rule.radius === "low" ? "raised" : "rule";
+    }
+    // A human or arbiter radius below a rule that was already high stays; every other low radius is raised to the rule.
+    const waived = (source === "human" || source === "arbiter") && prior.radius_rule === "high";
+    if (rule.radius === "high" && radius === "low" && !waived) {
+      radius = "high";
+      source = "rule";
+    }
+    if (radius !== prior.blast_radius) changes.blast_radius = radius;
+    if (source !== prior.radius_source) changes.radius_source = source;
     // The blocker list is replaced whole. It is not a snapshot field: it changes only when the set differs.
     let blockersChanged = false;
+    let blockersFrom: string[] = [];
+    let blockersTo: string[] = [];
     if (payload.blocked_by !== undefined) {
       const v = validateBlockedBy(cap.db, prior.room, prior.id, payload.blocked_by);
       if (v.error !== undefined) return { kind: "conflict", httpStatus: 400, message: v.error };
       const stored = cap.db.query<{ blocker_id: string }, [string]>("SELECT blocker_id FROM ticket_blockers WHERE ticket_id = ?").all(prior.id).map((r) => r.blocker_id);
       blockersChanged = stored.length !== v.ids!.length || v.ids!.some((id) => !stored.includes(id));
+      blockersFrom = stored;
+      blockersTo = v.ids!;
     }
     if (Object.keys(changes).length === 0 && !blockersChanged) return { kind: "idempotent" };
     const next: Partial<TicketSnapshot> = { ...changes, updated_at_ms: Date.now() };
-    // Spec review passed a queued ticket as written: new criteria, role or blockers send it back to draft, in this same
-    // transaction. A claimed, in_progress or in_review ticket keeps its status.
-    const backToDraft = prior.status === "queued"
-      && (changes.acceptance_criteria !== undefined || changes.role !== undefined || blockersChanged);
-    if (backToDraft) next.status = "draft";
     // The human allowed the work as it was written: new criteria, or a lower radius, void that approval.
     if ((changes.acceptance_criteria !== undefined || changes.blast_radius === "low") && prior.approval_request_id) {
       next.approval_request_id = null;
@@ -599,8 +662,11 @@ const editTicketVerb: VerbDecl<TicketSnapshot, EditInput> = {
       eventKind: "ticket.edited",
       payload: () => ({
         fields: [...Object.keys(changes), ...(blockersChanged ? ["blocked_by"] : [])],
+        ...(changes.radius_source ? { radius_source: { from: prior.radius_source, to: changes.radius_source } } : {}),
         ...(changes.blast_radius ? { blast_radius: { from: prior.blast_radius, to: changes.blast_radius } } : {}),
-        ...(backToDraft ? { status: { from: prior.status, to: "draft" } } : {}),
+        ...(changes.acceptance_criteria !== undefined ? { acceptance_criteria: { from: prior.acceptance_criteria, to: changes.acceptance_criteria } } : {}),
+        ...(changes.role !== undefined ? { role: { from: prior.role, to: changes.role } } : {}),
+        ...(blockersChanged ? { blocked_by: { from: blockersFrom, to: blockersTo } } : {}),
       }),
       entry: (post) => ticketEntry(cap.db, post, "ticket.update", actor),
     };
@@ -789,7 +855,7 @@ function conflictResponse(e: LedgerConflict): Response {
   return Response.json(body, { status: e.httpStatus });
 }
 
-export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicketChanged"> & Partial<Pick<StageHooks, "onTicketCancelled" | "onTicketParked">>): KindModule {
+export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicketChanged"> & Partial<Pick<StageHooks, "onTicketCancelled" | "onTicketParked" | "onTicketEdited">>): KindModule {
   const entity = createLedgerEntity({ decl: ticketDecl, db });
 
   // Rework, cancel, a direct done and a reassignment leave the ticket's `ticket:done` request moot.
@@ -1347,8 +1413,7 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
           if (r.emitted) {
             cap.briefing.refresh();
             retireStaleApproval(before, r.snapshot, a.name, cap);
-            // G10: a criteria, role or blocker edit sent a queued ticket back to draft.
-            if (before?.status === "queued" && r.snapshot.status === "draft") stage?.onTicketParked?.(params.id, "draft", cap);
+            stage?.onTicketEdited?.(params.id);
           }
           return Response.json({ snapshot: r.snapshot, ...(r.emitted ? {} : { idempotent: true }) });
         } catch (e) {
@@ -1608,6 +1673,11 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
       if (!d.query<{ name: string }, []>("PRAGMA table_info(tickets)").all().some((c) => c.name === "planning_note")) {
         d.exec(`ALTER TABLE "tickets" ADD COLUMN "planning_note" TEXT`);
       }
+      // P6-03: the radius rule. Existing tickets keep NULL, read as rule low, no reasons, source human (their radius was set by hand).
+      const hasColumn = (c: string) => d.query<{ name: string }, []>("PRAGMA table_info(tickets)").all().some((x) => x.name === c);
+      if (!hasColumn("radius_rule")) d.exec(`ALTER TABLE "tickets" ADD COLUMN "radius_rule" TEXT`);
+      if (!hasColumn("radius_reasons")) d.exec(`ALTER TABLE "tickets" ADD COLUMN "radius_reasons" TEXT`);
+      if (!hasColumn("radius_source")) d.exec(`ALTER TABLE "tickets" ADD COLUMN "radius_source" TEXT`);
       d.exec(`CREATE INDEX IF NOT EXISTS "idx_tickets_room_status" ON "tickets" ("room", "status")`);
       // Blocker links: a ticket cannot be claimed while a blocker is not done.
       d.exec(`CREATE TABLE IF NOT EXISTS "ticket_blockers" ("ticket_id" TEXT NOT NULL, "blocker_id" TEXT NOT NULL, PRIMARY KEY ("ticket_id", "blocker_id"))`);

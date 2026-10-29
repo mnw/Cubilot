@@ -90,7 +90,7 @@ function makeEnv() {
 const spec = (over: Record<string, unknown> = {}) => ({
   by: "alice",
   title: "Fix login",
-  acceptance_criteria: "Login works with a valid token.",
+  acceptance_criteria: "Login works with a valid password.",
   blast_radius: "low",
   ...over,
 });
@@ -1786,13 +1786,13 @@ describe("edit", () => {
 
   test("the creator, the assignee and the human edit title and criteria: one ticket.edited event, room scope, refresh", async () => {
     const id = await create({ assignee: "bob" });            // creator alice, assignee bob
-    for (const [by, title] of [["alice", "T-creator"], ["bob", "T-assignee"], [HUMAN, "T-human"]] as const) {
+    for (const [by, title] of [["alice", "T-creator"], ["bob", "T-second"], [HUMAN, "T-human"]] as const) {
       const events = t.events(id).length;
       const refreshed = t.refreshes();
       const r = await edit(id, by, { title, acceptance_criteria: `criteria by ${by}` });
       expect(r.status).toBe(200);
-      // New criteria on a queued ticket send it back to draft (spec-review-stage 5.1); the later edits find it draft.
-      expect(r.json.snapshot).toMatchObject({ title, acceptance_criteria: `criteria by ${by}`, status: "draft", blast_radius: "low" });
+      // New criteria keep the queued status (lean flow L2).
+      expect(r.json.snapshot).toMatchObject({ title, acceptance_criteria: `criteria by ${by}`, status: "queued", blast_radius: "low" });
       expect(t.events(id).length).toBe(events + 1);
       expect(t.events(id).at(-1)).toEqual({ kind: "ticket.edited", actor: by });
       expect(t.emitted.at(-1)!.entry).toMatchObject({ kind: "ticket.update", ticket_id: id, snapshot: { title } });
@@ -1811,15 +1811,15 @@ describe("edit", () => {
     expect(t.events(id).length).toBe(events);
   });
 
-  test("an agent that sends blast_radius gets 403, even the creator and with the same value; nothing changes", async () => {
+  test("the assignee that sends blast_radius gets 403; the creator may raise it; nothing else changes", async () => {
     const id = await create({ assignee: "bob" });
     const events = t.events(id).length;
-    for (const by of ["alice", "bob"]) {
-      expect((await edit(id, by, { blast_radius: "high" })).status).toBe(403);
-      expect((await edit(id, by, { title: "new", blast_radius: "low" })).status).toBe(403);
-    }
+    expect((await edit(id, "bob", { blast_radius: "high" })).status).toBe(403);
+    expect((await edit(id, "bob", { title: "new", blast_radius: "low" })).status).toBe(403);
+    expect((await edit(id, "carol", { blast_radius: "high" })).status).toBe(403);
     expect(t.row(id)).toMatchObject({ blast_radius: "low", title: "Fix login" });
     expect(t.events(id).length).toBe(events);
+    expect((await edit(id, "alice", { blast_radius: "high" })).json.snapshot).toMatchObject({ blast_radius: "high", radius_source: "raised" });
   });
 
   test("the human changes blast_radius", async () => {
@@ -1896,7 +1896,7 @@ describe("edit", () => {
     }
     expect(t.events(id).length).toBe(events);
     const refreshed = t.refreshes();
-    const same = await edit(id, "alice", { title: "Fix login", acceptance_criteria: "Login works with a valid token." });
+    const same = await edit(id, "alice", { title: "Fix login", acceptance_criteria: "Login works with a valid password." });
     expect(same.status).toBe(200);
     expect(same.json.idempotent).toBe(true);
     expect(t.events(id).length).toBe(events);
