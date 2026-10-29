@@ -559,7 +559,7 @@ export type NeedsYouRequest = {
  * A newer open spec review of the request does not hide it: the human sent it, and the request stays listed until a PASS.
  */
 /**
- * The spec FAIL state of one request IN ONE ROOM: the FAIL stages created after the newest PASS stage, all read by room.
+ * The spec FAIL state of one request IN ONE ROOM: the FAIL stages created after the newest PASS stage or the human's Approve, all read by room.
  * A request id is a label the Orchestrator chooses, so two rooms may use the same one: a count or a PASS of another room
  * must never count here. `latest` is the newest of those FAIL stages (by created_seq), or null.
  */
@@ -570,12 +570,18 @@ export function specFailState(db: Database, room: string, requestId: string): { 
         `SELECT MAX(s.created_seq) AS n FROM stage s WHERE s.review = 'spec' AND s.request_id = ?1 AND s.verdict = 'PASS' AND ${STAGE_ROOM_SQL} = ?2`,
       )
       .get(requestId, room)?.n ?? 0;
+  // The human's Approve of the request in this room starts the count again, like a PASS: the later of the two ends the old run.
+  const lastApprove =
+    db
+      .query<{ n: number | null }, [string]>("SELECT MAX(e.seq) AS n FROM events e WHERE e.entity_id = ?1 AND e.kind = 'request.approved'")
+      .get(`request:${room}:${requestId}`)?.n ?? 0;
+  const since = Math.max(lastPass, lastApprove);
   const fails = db
     .query<{ id: string }, [string, string, number]>(
       `SELECT s.id FROM stage s WHERE s.review = 'spec' AND s.request_id = ?1 AND s.verdict = 'FAIL' AND s.created_seq > ?3 AND ${STAGE_ROOM_SQL} = ?2
         ORDER BY s.created_seq DESC, s.rowid DESC`,
     )
-    .all(requestId, room, lastPass);
+    .all(requestId, room, since);
   return { fails: fails.length, latest: fails[0]?.id ?? null };
 }
 
