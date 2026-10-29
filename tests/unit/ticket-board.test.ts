@@ -1382,6 +1382,20 @@ describe("ticket view dialog", () => {
     expect(cols.innerHTML).not.toContain("PASS ");
   });
 
+  test("a Validator PASS stage event refreshes the PASS marks of an open board", async () => {
+    await board(T({ blast_radius: "high", validator_passes: 0 }));
+    expect(cols.innerHTML).toContain("PASS 0/2");
+    list = [T({ blast_radius: "high", validator_passes: 1 })];                 // the hub counts the new PASS
+    expect(observers.stage).toBe(ctx.TicketBoard.onStage);
+    ctx.TicketBoard.onStage({ kind: "stage.passed", snapshot: { role: "validator", ticket_id: "t_9", verdict: "PASS", review: null } });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(cols.innerHTML).toContain("PASS 1/2");
+    list = [T({ blast_radius: "high", validator_passes: 0 })];                 // a rework clears the marks
+    ctx.TicketBoard.onStage({ kind: "stage.queued", snapshot: { role: "worker", ticket_id: "t_9", review: null } });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(cols.innerHTML).toContain("PASS 0/2");
+  });
+
   test("a click on the card opens the dialog with the whole ticket", async () => {
     const cards = await board(T({ blast_radius: "high", approval_request_id: null }));
     click(cards.t_9);

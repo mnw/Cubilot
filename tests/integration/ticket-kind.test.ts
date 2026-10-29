@@ -1498,7 +1498,25 @@ describe("attachments", () => {
 });
 
 describe("list", () => {
+  test("room required; priority DESC then age; open hides terminal; no approval field", async () => {
+    expect((await t.call("GET", "/tickets")).status).toBe(400);
+    const a = await create({ title: "p5-old", priority: "highest" });
+    const b = await create({ title: "p1", priority: "lowest" });
+    await create({ title: "p5-new", priority: "highest" });
+    await create({ title: "other room", by: HUMAN, room: "r2", priority: "high" });
+    t.db.run("UPDATE tickets SET created_at_ms = created_at_ms - 1000 WHERE id = ?", [a]);
 
+    const open = await t.call("GET", "/tickets?room=r1");
+    expect(open.status).toBe(200);
+    expect(open.json.map((x: any) => x.title)).toEqual(["p5-old", "p5-new", "p1"]);
+    expect(open.json.every((x: any) => !("approval" in x))).toBe(true);
+
+    await claim(b, "bob");
+    await as(b, "bob", "cancelled");
+    expect((await t.call("GET", "/tickets?room=r1")).json.length).toBe(2);
+    expect((await t.call("GET", "/tickets?room=r1&status=all")).json.length).toBe(3);
+    expect((await t.call("GET", "/tickets?room=r1&status=bogus")).status).toBe(400);
+  });
 });
 
 describe("edit", () => {

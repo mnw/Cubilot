@@ -136,6 +136,18 @@ const TicketBoard = (() => {
     try { return JSON.parse(event.text || '{}'); } catch { return null; }
   }
 
+  // A Validator PASS adds a PASS mark and a new worker stage clears them. Neither writes a ticket event, so one list read
+  // (debounced) refreshes the count of that ticket's card.
+  let passReload = null;
+  function onStage(event) {
+    const snap = event?.snapshot;
+    if (!snap?.ticket_id || !tickets.has(snap.ticket_id) || snap.review) return;
+    const passed = snap.role === 'validator' && event.kind === 'stage.passed' && snap.verdict === 'PASS';
+    if (!passed && !(snap.role === 'worker' && event.kind === 'stage.queued')) return;
+    clearTimeout(passReload);
+    passReload = setTimeout(load, 200);
+  }
+
   function onTicket(event) {
     if (event.kind === 'ticket.noted') { onNoted(event); return; }
     if (event.kind === 'ticket.attached') { onAttached(event); return; }
@@ -1978,8 +1990,9 @@ const TicketBoard = (() => {
   globalThis.refreshRoomLead = () => { renderLead(); if (room) render(); };
 
   KindCardRenderer.observe('ticket', onTicket);
+  KindCardRenderer.observe('stage', onStage);
   KindCardRenderer.observe('room', onRoomLead);
   if (typeof document !== 'undefined' && document.getElementById) wire();
 
-  return { load, onTicket, openNew, setFilter, matchesFilter, sanitizeFilter, readFilter, setLead, onRoomLead, archiveAllDone, setFilterPanel, attachFiles, addPendingFiles, applyMarkdownAction, mdHtml, applyToCriteria, onCriteriaKeydown, openView, closeView, _commitBlockers: (ids) => commitBlockers(ids), onNoted, lightOf, parseTitle, criteriaProgress, priorityBars, statusLine, _tickets: tickets, _filter: () => filter, _lead: () => lead };
+  return { load, onTicket, onStage, openNew, setFilter, matchesFilter, sanitizeFilter, readFilter, setLead, onRoomLead, archiveAllDone, setFilterPanel, attachFiles, addPendingFiles, applyMarkdownAction, mdHtml, applyToCriteria, onCriteriaKeydown, openView, closeView, _commitBlockers: (ids) => commitBlockers(ids), onNoted, lightOf, parseTitle, criteriaProgress, priorityBars, statusLine, _tickets: tickets, _filter: () => filter, _lead: () => lead };
 })();
