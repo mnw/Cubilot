@@ -170,6 +170,8 @@ export const DIGEST_MS = 10 * 60 * 1000;
 // A ticket entry the lead must read at once: a FAIL with count 2 or more, or a request that waits for approval.
 // A decision entry is not a `ticket.*` kind, so it never waits.
 export function isUrgentTicket(evt: BridgeEvent): boolean {
+  // No snapshot (ticket.held): the text is the only source of ticket ids and reason, and a digest line would lose it.
+  if (!evt.snapshot) return true;
   const fails = evt.fail_count ?? evt.snapshot?.fail_count;
   if (typeof fails === "number" && fails >= 2) return true;
   return evt.snapshot?.status === "in_review" && !!evt.snapshot.approval_request_id;

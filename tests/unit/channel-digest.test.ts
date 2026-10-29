@@ -189,6 +189,17 @@ describe("ticket digest for the room lead", () => {
     t.bridge.stop();
   });
 
+  test("a ticket.held entry has no snapshot: it comes at once with its full text", async () => {
+    const t = setup("Orchestrator");
+    const text = "These tickets stayed draft because their role has no hub stage chain:\n- t_aaaaaaaaaaaaaaaa (role writer)";
+    t.push({ id: 11, from: "system", to: "Orchestrator", room: "r1", kind: "ticket.held", text });
+    await t.until(() => t.delivered.length === 1);
+    expect(t.delivered[0].text).toContain("t_aaaaaaaaaaaaaaaa");
+    expect(t.delivered[0].text).toContain("no hub stage chain");
+    expect(t.delivered[0].text).not.toContain("digest");
+    t.bridge.stop();
+  });
+
   test("a FAIL count of 2 or more comes at once; a count of 1 waits", async () => {
     const t = setup("Orchestrator");
     t.push(ticket(1, {}, { fail_count: 1 }));
