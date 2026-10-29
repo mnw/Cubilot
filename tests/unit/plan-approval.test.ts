@@ -48,6 +48,7 @@ function setup(first: any[], room = "r1", postStatus = 200, firstNeeds: any[] = 
   root.hidden = true;
   let waiting = first;
   let needs = firstNeeds;
+  let waits: any[] = [];
   let traces: any[] = [];
   const calls: Array<{ path: string; init?: any }> = [];
   const messages: any[] = [];
@@ -67,7 +68,7 @@ function setup(first: any[], room = "r1", postStatus = 200, firstNeeds: any[] = 
         return { ok: true, json: async () => snapshot };
       }
       if (init?.method === "POST") return postStatus === 200 ? { ok: true, json: async () => ({}) } : { ok: false, status: postStatus, json: async () => ({ error: "only the human may approve a request" }) };
-      if (path.endsWith("/needs-you")) return { ok: true, json: async () => ({ room, requests: needs }) };
+      if (path.endsWith("/needs-you")) return { ok: true, json: async () => ({ room, requests: needs, waiting: waits }) };
       if (path.endsWith("/cancel-traces")) return { ok: true, json: async () => ({ room, traces }) };
       return { ok: true, json: async () => ({ room, waiting }) };
     },
@@ -75,7 +76,7 @@ function setup(first: any[], room = "r1", postStatus = 200, firstNeeds: any[] = 
   };
   // `with (g)`: the file's free names (SELECTED_ROOM ...) are looked up on g at each use, so a test can change the room.
   const api = new Function("g", "with (g) {" + readFileSync("ui/features/plan-approval.js", "utf8") + "\nreturn PlanApproval; }")(g);
-  return { api, root, heading, store, calls, messages, observers, setWaiting: (w: any[]) => { waiting = w; }, setNeeds: (n: any[]) => { needs = n; }, setTraces: (t: any[]) => { traces = t; }, held, release: () => { const q = held.queue.splice(0); for (const r of q) r(); }, g };
+  return { api, root, heading, store, calls, messages, observers, setWaiting: (w: any[]) => { waiting = w; }, setNeeds: (n: any[]) => { needs = n; }, setWaits: (w: any[]) => { waits = w; }, setTraces: (t: any[]) => { traces = t; }, held, release: () => { const q = held.queue.splice(0); for (const r of q) r(); }, g };
 }
 const flush = () => new Promise((r) => setTimeout(r, 5));
 
@@ -231,6 +232,48 @@ describe("plan waits for your approval (spec-review 4.4)", () => {
 });
 
 // Needs you: Collapse and Clear (state in localStorage per room).
+describe("Waits for you (P6-15c)", () => {
+  const item = (over: Record<string, unknown> = {}) => ({
+    ticket_id: "t_aaaaaaaaaaaaaaaa", title: "Plan A", request_id: "req-9", case: "allow",
+    commit: "a".repeat(40), permission_id: "p_1", question: "Allow done of t_aaaaaaaaaaaaaaaa?", ...over,
+  });
+
+  test("waits for you lines", async () => {
+    const e = setup([], "r1");
+    e.setWaits([item(), item({ ticket_id: "t_bbbbbbbbbbbbbbbb", case: "approve", commit: null, permission_id: null, question: "Approve request req-9?" })]);
+    await e.api.load();
+    expect(e.root.hidden).toBe(false);
+    const sec = e.root.children.find((c) => c.className.includes("waits-for-you"))!;
+    expect(sec.children[0].tag).toBe("h3");
+    expect(sec.children[0].textContent).toBe("Waits for you");
+    const ul = sec.children[1];
+    expect(ul.tag).toBe("ul");
+    expect(ul.children.map((c) => c.tag)).toEqual(["li", "li"]);
+    const t0 = ul.children[0].textContent;
+    for (const part of ["Allow done of t_aaaaaaaaaaaaaaaa?", "t_aaaaaaaaaaaaaaaa", "Plan A", "req-9", "allow", "a".repeat(40), "p_1"]) expect(t0).toContain(part);
+    expect(ul.children[1].textContent).toContain("Approve request req-9?");
+    expect(ul.children[1].textContent).toContain("commit none");
+    expect(ul.children[1].textContent).toContain("permission none");
+    for (const x of sec.all()) expect("tabindex" in x.attrs).toBe(false);
+  });
+
+  test("a hostile title shows as text and creates no img", async () => {
+    const e = setup([], "r1");
+    e.setWaits([item({ title: "<img src=x onerror=alert(1)>" })]);
+    await e.api.load();
+    const all = e.root.all();
+    expect(all.some((x) => x.tag === "img")).toBe(false);
+    expect(e.root.text()).toContain("<img src=x onerror=alert(1)>");
+  });
+
+  test("an empty list shows no section", async () => {
+    const e = setup([], "r1");
+    await e.api.load();
+    expect(e.root.all().some((x) => x.className.includes("waits-for-you"))).toBe(false);
+    expect(e.root.hidden).toBe(true);
+  });
+});
+
 describe("Needs you collapse and clear", () => {
   const need = (id: string, stage: string) => ({
     request_id: id, fail_count: 2, latest_fail_stage_id: stage,
