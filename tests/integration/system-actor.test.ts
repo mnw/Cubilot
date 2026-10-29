@@ -54,6 +54,8 @@ const ROUTES: R[] = [
   { method: "POST", path: "/rooms/sw/clear-transcript", body: {} },
   { method: "POST", path: `/launches/${L}/ack`, body: {} },
   { method: "POST", path: "/requests/sw/req-1/approve", body: {} },
+  { method: "POST", path: "/requests", body: { request_id: "req-1" } },
+  { method: "POST", path: "/requests/sw/req-1/edit", body: { features: ["x"] } },
   { method: "POST", path: "/stages/s_0123456789abcdef/turn-end", body: {} },
   { method: "POST", path: "/rooms/sw/cancel-traces/ct_0123456789abcdef/clear", body: {} },
   // spec-review-stage 3.5: the spec-review handoff (a role handoff with review spec) and every field a PASS path could read an actor from
