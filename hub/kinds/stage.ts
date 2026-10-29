@@ -1945,10 +1945,34 @@ export function createStageRuntime(
       base = mb.out;
     }
     if (base === commit) return refuse("The commit is not new work: it equals the base.");
+    const older = runGit(project, ["merge-base", "--is-ancestor", commit, base]);
+    if (older.code === 0) return refuse("The commit is not new work: it does not descend from the base: it is an ancestor of it.");
+    if (older.code !== 1) return refuse(`Git: ${older.err || "merge-base failed"}`);
     const fromBase = runGit(project, ["merge-base", "--is-ancestor", base, commit]);
-    if (fromBase.code === 1) return refuse("The commit is not new work: it does not descend from the base.");
-    if (fromBase.code !== 0) return refuse(`Git: ${fromBase.err || "merge-base failed"}`);
-    return null;
+    if (fromBase.code === 0) return null;
+    if (fromBase.code !== 1) return refuse(`Git: ${fromBase.err || "merge-base failed"}`);
+    // The base is not an ancestor: a rebase or a reset. A rebase moves the fork point to newer staging, or keeps the patches of the base; a reset does neither.
+    const forkOf = (sha: string): { sha?: string; refusal?: string } => {
+      const f = runGit(project, ["merge-base", sha, "refs/heads/staging"]);
+      if (f.code !== 0 || !FULL_SHA_RE.test(f.out)) return { refusal: `Git: no merge-base with staging. ${f.err}`.trim() };
+      return { sha: f.out };
+    };
+    const forkNew = forkOf(commit);
+    if (forkNew.refusal) return refuse(forkNew.refusal);
+    const forkOld = forkOf(base);
+    if (forkOld.refusal) return refuse(forkOld.refusal);
+    if (forkNew.sha === commit) return refuse("The commit is not new work: it holds no commit beyond staging.");
+    if (forkNew.sha !== forkOld.sha) {
+      const newer = runGit(project, ["merge-base", "--is-ancestor", forkOld.sha!, forkNew.sha!]);
+      if (newer.code === 0) return null;
+      if (newer.code !== 1) return refuse(`Git: ${newer.err || "merge-base failed"}`);
+    }
+    // Same or older fork point: accept only a rewrite that keeps a patch of the base ("- ") and adds new work ("+ ").
+    const cherry = runGit(project, ["cherry", base, commit]);
+    if (cherry.code !== 0) return refuse(`Git: ${cherry.err || "cherry failed"}`);
+    const marks = cherry.out.split("\n");
+    if (marks.some((l) => l.startsWith("- ")) && marks.some((l) => l.startsWith("+ "))) return null;
+    return refuse("The commit is not new work: it does not descend from the base.");
   }
 
   const hooks: StageHooks = {
