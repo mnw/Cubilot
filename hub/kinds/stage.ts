@@ -840,6 +840,21 @@ export function createStageRuntime(
     return { id: r.id, from: r.from_agent, task: r.task, context };
   };
 
+  /**
+   * L4: Validator PASS stages of a code ticket since its latest worker stage. A high ticket closes on the second one.
+   * A rework starts a new worker stage, so the count restarts there.
+   */
+  const validatorPasses = (ticketId: string): number =>
+    db
+      .query<{ n: number }, [string, string]>(
+        `SELECT COUNT(*) AS n FROM stage
+          WHERE ticket_id = ?1 AND role = 'validator' AND review IS NULL AND status = 'passed' AND verdict = 'PASS'
+            AND created_seq > COALESCE((SELECT MAX(created_seq) FROM stage WHERE ticket_id = ?2 AND role = 'worker'), 0)`,
+      )
+      .get(ticketId, ticketId)!.n;
+  const isHighTicket = (ticketId: string): boolean =>
+    db.query<{ b: string }, [string]>("SELECT blast_radius AS b FROM tickets WHERE id = ?").get(ticketId)?.b === "high";
+
   // Sessions of passed stages whose close is not queued yet (memory only: a hub restart forgets them).
   const awaitingClose = new Set<string>();
   // End-of-turn reports per running stage that came without a result (memory only; 5.3 reads it for the stop rule).
@@ -1955,6 +1970,11 @@ export function createStageRuntime(
           if (refusal) errors.push(refusal);
         } else if (c.ticket_id !== stage.ticket_id) errors.push(`context.ticket_id must be ${stage.ticket_id}`);
         if (stage.role === "tester" && (typeof c.commit !== "string" || !FULL_SHA_RE.test(c.commit))) errors.push("context.commit must be the full 40-character commit sha");
+        if (stage.role === "validator" && stage.ticket_id && c.verdict === "PASS" && isHighTicket(stage.ticket_id) && validatorPasses(stage.ticket_id) >= 1) {
+          // L4: the second PASS of a high ticket is for the commit of the first one.
+          const expected = handoffCommit(stage.id, stage.ticket_id, "validator");
+          if (expected && c.commit !== expected) errors.push(`context.commit must be ${expected}, the commit of the first Validator PASS`);
+        }
         if (REVIEW_ROLES.has(stage.role)) {
           if (typeof c.verdict !== "string" || !VERDICTS.has(c.verdict)) errors.push("context.verdict must be PASS or FAIL (upper case)");
           if (!Array.isArray(c.findings)) errors.push("context.findings must be a list of {ticket_id, text}");
@@ -2015,20 +2035,31 @@ export function createStageRuntime(
         } else {
           // A final PASS of a validator or reviewer closes its ticket in the same transaction (the third cross-kind one).
           const ticketId = stage.ticket_id;
-          const closes = !!ticketId && c.verdict === "PASS" && (stage.role === "validator" || stage.role === "reviewer");
+          // L4: a high ticket closes on the second Validator PASS. The first one starts a second Validator stage.
+          const highValidator = !!ticketId && c.verdict === "PASS" && stage.role === "validator" && isHighTicket(ticketId);
+          const secondPass = highValidator && validatorPasses(ticketId!) >= 1;
+          const closes = !!ticketId && c.verdict === "PASS" && (stage.role === "reviewer" || (stage.role === "validator" && (!highValidator || secondPass)));
           let closed: ReturnType<typeof closeReviewedBySystemInTx> = null;
           api.move(
             stage.id,
             { to: "passed", verdict: typeof c.verdict === "string" ? c.verdict : undefined },
             "system",
             cap,
-            closes ? () => void (closed = closeReviewedBySystemInTx(db, cap, ticketId!)) : undefined,
+            closes ? () => void (closed = closeReviewedBySystemInTx(db, cap, ticketId!, { doneHigh: secondPass })) : undefined,
             () => {
               if (!closed) return;
               cap.sse.emit(closed.entry, { kind: "room", room: closed.snapshot.room });
               cap.briefing.refresh();
             },
           );
+          if (highValidator && !secondPass && db.query<{ s: string }, [string]>("SELECT status AS s FROM tickets WHERE id = ?").get(ticketId!)?.s === "in_review") {
+            // Same commit: the starting handoff of the first stage is the newest one before this stage too.
+            const second = api.create({ ticket_id: ticketId!, role: "validator" }, "system", cap);
+            const room = roomOfStage(second.id);
+            // The first session keeps its name until its close is acked, so the second stage gets another name and waits for the slot.
+            const r = room ? enqueueLaunch({ stage_id: second.id, session: nextSessionName("validator"), room, harness: roleHarness("validator"), cwd: null, prompt: "" }, cap) : { ok: false as const, reason: "no room" };
+            if (!r.ok) console.log(`[stage] ${second.id} stays queued: ${r.reason}`);
+          }
           // A ticket that became done frees the tickets that wait for it.
           const done = closed as ReturnType<typeof closeReviewedBySystemInTx>;
           if (done?.snapshot.status === "done") {
