@@ -227,6 +227,18 @@ describe("pack at the launch seam (3.5)", () => {
     expect(e.rt.queue.pendingCloses()).toEqual([]);
   });
 
+  test("cancel leaves no re-render entry", async () => {
+    const e = makeEnv(async () => ({ text: {}, graphStatus: "missing" }));
+    const s = e.stage("worker");
+    e.launch(s.id, "worker-1");
+    await sleep(50);
+    expect(e.launches()).toHaveLength(1);
+    expect(e.rt.pendingRerenders()).toBe(1);
+    e.rt.hooks.onTicketCancelled(s.ticket, e.cap);
+    expect(e.rt.api.load(s.id)!.status).toBe("cancelled");
+    expect(e.rt.pendingRerenders()).toBe(0);
+  });
+
   test("grep: context-pack.ts and the stage seam call no model", () => {
     const src = readFileSync(new URL("../../hub/core/context-pack.ts", import.meta.url), "utf8");
     expect([...src.matchAll(/^import .* from "([^"]+)"/gm)].map((m) => m[1]).filter((m) => /adapter|model|claude|anthropic/i.test(m))).toEqual([]);

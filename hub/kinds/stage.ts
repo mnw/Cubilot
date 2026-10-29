@@ -430,6 +430,8 @@ export type StageRuntime = {
   module: KindModule;
   /** How many launch requests wait with values from role_models (tests: the set empties when a launch ends). */
   pendingRoleModelLaunches(): number;
+  /** Test count: stages with a prompt kept for a re-render. */
+  pendingRerenders(): number;
   /** Resolves when the deferred metrics writes of ended stages are done (tests). */
   metricsIdle(): Promise<void>;
   api: StageApi;
@@ -1041,6 +1043,7 @@ export function createStageRuntime(
       turnEnds.delete(stageId);
       refused.delete(stageId);
       runningSeen.delete(stageId);
+      rerender.delete(stageId);
       const session = stage.session;
       let releaseAtOnce = false;
       if (stage.status === "launching" && building.has(stageId)) {
@@ -2270,7 +2273,7 @@ export function createStageRuntime(
       }
     },
   };
-  return { module, api, evaluateStages, hooks, enqueueLaunch, queue, passSpecStage, sweep, pendingRoleModelLaunches: () => roleModelLaunches.size, metricsIdle: async () => void (await Promise.all([...pendingMetrics])) };
+  return { module, api, evaluateStages, hooks, enqueueLaunch, queue, passSpecStage, sweep, pendingRoleModelLaunches: () => roleModelLaunches.size, pendingRerenders: () => rerender.size, metricsIdle: async () => void (await Promise.all([...pendingMetrics])) };
 }
 
 export function createStageKind(db: Database): KindModule {
