@@ -2,9 +2,11 @@
 // after the merge into staging, with no human Allow.
 // In-process hub kinds, like tests/unit/stage-final-pass.test.ts.
 
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { giveProject, projectRepo } from "../helpers/repo";
+import { giveProject, giveProjectHttp, projectRepo } from "../helpers/repo";
+import { spawnHub, type HubHandle } from "../helpers/hub";
+import { authedFetch, openSSE, postJson, registerAgent } from "../helpers/fetch";
 import { insertEvent } from "../../hub/core/events";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createPermissionKind } from "../../hub/kinds/permission";
@@ -134,27 +136,6 @@ describe("high ticket: two Validator PASSes", () => {
     expect(e.doneEvents(t.id)).toHaveLength(0);
   });
 
-  test("FAIL in first goes to worker", () => {
-    const e = makeEnv();
-    const t = e.ticket("high");
-    e.rt.hooks.onResult("validator-1", { stage_id: t.first, verdict: "FAIL", findings: [] }, e.cap);
-    expect(e.row(t.id).status).toBe("in_review");
-    expect(e.validators(t.id)).toHaveLength(1);
-    expect(e.doneEvents(t.id)).toHaveLength(0);
-  });
-
-  test("FAIL in second goes to worker", () => {
-    const e = makeEnv();
-    const t = e.ticket("high");
-    e.rt.hooks.onResult("validator-1", { stage_id: t.first, verdict: "PASS" }, e.cap);
-    const second = e.startSecond(t.id);
-    e.rt.hooks.onResult("validator-2", { stage_id: second, verdict: "FAIL", findings: [] }, e.cap);
-    expect(e.row(t.id).status).toBe("in_review");
-    expect(e.validators(t.id)).toHaveLength(2);
-    expect(e.validators(t.id)[1]).toMatchObject({ status: "passed", verdict: "FAIL" });
-    expect(e.doneEvents(t.id)).toHaveLength(0);
-  });
-
   test("a later Validator handoff does not change the commit of the second PASS", async () => {
     const e = makeEnv();
     const t = e.ticket("high");
@@ -171,16 +152,6 @@ describe("high ticket: two Validator PASSes", () => {
     expect(e.rt.hooks.checkResult("validator-2", { stage_id: second, ticket_id: t.id, verdict: "PASS", findings: [], notes: "ok", commit: C1 }, e.cap)).toEqual([]);
     e.rt.hooks.onResult("validator-2", { stage_id: second, verdict: "PASS" }, e.cap);
     expect((await e.leadDone(t.id)).status).toBe(200);
-  });
-
-  test("second PASS on other commit refused", () => {
-    const e = makeEnv();
-    const t = e.ticket("high");
-    e.rt.hooks.onResult("validator-1", { stage_id: t.first, verdict: "PASS" }, e.cap);
-    const second = e.startSecond(t.id);
-    const errors = e.rt.hooks.checkResult("validator-2", { stage_id: second, ticket_id: t.id, verdict: "PASS", findings: [], notes: "ok", commit: C2 }, e.cap);
-    expect(errors!.join(" ")).toContain(C1);
-    expect(e.row(t.id).status).toBe("in_review");
   });
 });
 
@@ -254,5 +225,126 @@ describe("L4: PASS leaves in_review, the lead closes after the merge", () => {
     const r = await e.leadDone(t.id);
     expect(r.status).toBe(409);
     expect(r.error).toContain("merged into staging");
+  });
+});
+
+// The same three cases through the real hub: the Validator result goes in over POST /handoffs, as the route checks it.
+describe("high ticket through POST /handoffs", () => {
+  const ROOM = "l4h";
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  let hub: HubHandle;
+  let stream: ReturnType<typeof openSSE>;
+  const launches: any[] = [];
+  const open: Array<{ close: () => void }> = [];
+  type Stage = { id: string; role: string; status: string; verdict: string | null; session: string | null };
+
+  beforeAll(async () => {
+    hub = await spawnHub();
+    await giveProjectHttp(hub, ROOM);
+    open.push(await registerAgent(hub, "Orchestrator", { room: ROOM }));
+    open.push(await registerAgent(hub, "l4h-alice", { room: ROOM }));
+    const put = await authedFetch(hub, `/rooms/${ROOM}/settings`, { method: "PUT", body: JSON.stringify({ role_limits: { worker: 10, tester: 10, validator: 10, writer: 10 } }) });
+    expect(put.status).toBe(200);
+    stream = openSSE(hub, "/launches/stream");
+    void (async () => { try { for await (const e of stream.events) launches.push(e); } catch { /* closed */ } })();
+    await sleep(200);
+  });
+  afterAll(async () => {
+    stream.close();
+    for (const c of open) c.close();
+    await hub.kill();
+  });
+
+  const ledger = <T>(fn: (db: Database) => T): T => {
+    const db = new Database(hub.ledgerPath, { readonly: true });
+    try { return fn(db); } finally { db.close(); }
+  };
+  const stages = (id: string) => ledger((db) => db.query("SELECT id, role, status, verdict, session FROM stage WHERE ticket_id = ? ORDER BY created_seq").all(id) as Stage[]);
+  const ticketStatus = (id: string) => ledger((db) => db.query<{ status: string }, [string]>("SELECT status FROM tickets WHERE id = ?").get(id)!.status);
+  const handoffsTo = (id: string, to: string) =>
+    ledger((db) => db.query<{ id: string }, [string, string]>("SELECT id FROM handoffs WHERE to_agent = ? AND json_extract(context_json, '$.ticket_id') = ?").all(to, id));
+
+  /** Acks the launch of a stage as spawned and connects its session: the stage is running. */
+  const run = async (stageId: string) => {
+    let req: any;
+    for (let i = 0; i < 100 && !(req = launches.find((r) => r.kind === "launch" && r.stage_id === stageId)); i++) await sleep(50);
+    expect(req).toBeDefined();
+    expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+    open.push(await registerAgent(hub, req.session, { room: ROOM }));
+    return req.session as string;
+  };
+  /** Ends the turn of a session and acks its close, which frees its name and its slot for the next stage. */
+  const closeSession = async (stageId: string, session: string) => {
+    expect((await postJson(hub, `/stages/${stageId}/turn-end`, { agent: session })).status).toBeLessThan(300);
+    let req: any;
+    for (let i = 0; i < 100 && !(req = launches.find((r) => r.kind === "close" && r.session === session)); i++) await sleep(50);
+    expect(req).toBeDefined();
+    expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+    await sleep(300);
+  };
+  const result = (from: string, stage: Stage, ticket: string, verdict: "PASS" | "FAIL", commit: string, to: Record<string, string>) =>
+    postJson(hub, "/handoffs", {
+      from, task: "result", ...to,
+      context: { notes: "n", stage_id: stage.id, ticket_id: ticket, verdict, findings: verdict === "FAIL" ? [{ ticket_id: ticket, text: "x" }] : [], commit },
+    });
+  const toLead = { to: "l4h-alice" };
+  const toWorker = { to_role: "worker" };
+
+  /** A high ticket in_review with its first Validator stage running on C1. */
+  const startFirst = async () => {
+    const r = await postJson(hub, "/tickets", { by: "l4h-alice", title: "t", acceptance_criteria: "c", blast_radius: "high", role: null });
+    expect(r.status).toBe(201);
+    const id = (r.json as { snapshot: { id: string } }).snapshot.id;
+    expect((await postJson(hub, `/tickets/${id}/claim`, { by: "l4h-alice" })).status).toBe(200);
+    expect((await postJson(hub, `/tickets/${id}/transition`, { by: "l4h-alice", to: "in_progress" })).status).toBe(200);
+    expect((await postJson(hub, `/tickets/${id}/transition`, { by: "l4h-alice", to: "in_review", note: "built" })).status).toBe(200);
+    expect((await postJson(hub, "/handoffs", { from: "l4h-alice", to_role: "validator", task: "validate", context: { ticket_id: id, commit: C1 } })).status).toBe(201);
+    await sleep(400);
+    const first = stages(id)[0];
+    return { id, first, session: await run(first.id) };
+  };
+  /** The first PASS on C1, the close of its session, and the second Validator stage running. */
+  const startSecond = async () => {
+    const t = await startFirst();
+    expect((await result(t.session, t.first, t.id, "PASS", C1, toLead)).status).toBe(201);
+    await closeSession(t.first.id, t.session);
+    const second = stages(t.id).find((s) => s.role === "validator" && s.id !== t.first.id)!;
+    expect(second).toBeDefined();
+    return { ...t, second, secondSession: await run(second.id) };
+  };
+  /** The Worker stage and handoff that a Validator FAIL leaves: the ticket stays in_review and is not done. */
+  const expectWorker = async (id: string) => {
+    expect(handoffsTo(id, "role:worker")).toHaveLength(1);
+    await sleep(400);
+    expect(stages(id).filter((s) => s.role === "worker")).toHaveLength(1);
+    expect(ticketStatus(id)).not.toBe("done");
+  };
+
+  test("FAIL in first goes to worker", async () => {
+    const t = await startFirst();
+    expect((await result(t.session, t.first, t.id, "FAIL", C1, toWorker)).status).toBe(201);
+    await closeSession(t.first.id, t.session);
+    await expectWorker(t.id);
+    expect(stages(t.id).filter((s) => s.role === "validator")).toMatchObject([{ status: "passed", verdict: "FAIL" }]);
+  });
+
+  test("FAIL in second goes to worker", async () => {
+    const t = await startSecond();
+    expect((await result(t.secondSession, t.second, t.id, "FAIL", C1, toWorker)).status).toBe(201);
+    await closeSession(t.second.id, t.secondSession);
+    await expectWorker(t.id);
+    expect(stages(t.id).filter((s) => s.role === "validator")).toMatchObject([{ verdict: "PASS" }, { verdict: "FAIL" }]);
+  });
+
+  test("second PASS on other commit refused", async () => {
+    const t = await startSecond();
+    const before = stages(t.id);
+    const handoffsBefore = ledger((db) => db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM handoffs").get()!.n);
+    const res = await result(t.secondSession, t.second, t.id, "PASS", C2, toLead);
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.json)).toContain(C1);
+    expect(ticketStatus(t.id)).toBe("in_review");
+    expect(stages(t.id)).toEqual(before);
+    expect(ledger((db) => db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM handoffs").get()!.n)).toBe(handoffsBefore);
   });
 });
