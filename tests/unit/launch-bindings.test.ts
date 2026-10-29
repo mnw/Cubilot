@@ -1,5 +1,9 @@
 import { describe, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
+import { mkdtempSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { openLedger } from "../../hub/core/ledger";
 import { buildKinds } from "../../hub/kinds";
 import { createLaunchRecord, loadLaunchBindings } from "../../hub/core/launch-record";
 
@@ -37,5 +41,35 @@ describe("stage session bindings in the ledger", () => {
     expect(db.query<{ v: number | null }, []>("SELECT session_released_at_ms AS v FROM stage WHERE id = 's_old'").get()!.v).toBe(stamp);
     expect(db.query<{ v: number | null }, []>("SELECT session_released_at_ms AS v FROM stage WHERE id = 's_new'").get()!.v).toBeNull();
     expect([...loadLaunchBindings(db)]).toEqual([["worker-2", "s_new"]]);
+  });
+
+  test("a version-18 ledger is copied before the column is added; the copy has the old schema; a second start changes nothing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sess-rel-"));
+    const path = join(dir, "ledger.db");
+    const snaps = join(dir, "snapshots");
+    const seed = openLedger(path, join(dir, "unused")).db!;
+    const kinds = buildKinds(seed);
+    for (const k of kinds) k.migrate(seed);
+    seed.exec("ALTER TABLE stage DROP COLUMN session_released_at_ms");
+    seed.run("UPDATE meta SET value='18' WHERE key='schema_version'");
+    seed.close();
+
+    const db = openLedger(path, snaps).db!;
+    const files = readdirSync(snaps);
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatch(/18to19\.db$/);
+    const snap = new Database(join(snaps, files[0]));
+    expect(cols(snap)).not.toContain("session_released_at_ms");
+    snap.close();
+    expect(cols(db)).not.toContain("session_released_at_ms"); // the kind migrate adds it, after the copy
+    for (const k of buildKinds(db)) k.migrate(db);
+    expect(cols(db)).toContain("session_released_at_ms");
+    const first = db.query<{ sql: string }, []>("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name").all();
+    db.close();
+
+    const again = openLedger(path, snaps).db!;
+    for (const k of buildKinds(again)) k.migrate(again);
+    expect(readdirSync(snaps)).toHaveLength(1);
+    expect(again.query<{ sql: string }, []>("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name").all()).toEqual(first);
   });
 });

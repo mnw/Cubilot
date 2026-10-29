@@ -804,9 +804,10 @@ export function createStageRuntime(
         cancelHolds.delete(session);
       }
       // The session is gone: its role slot is free. Start what waits for it (a relaunch of a retrying stage first).
+      // The durable release goes first: when it throws, nothing else changed and the close ack can be sent again.
+      db.run("UPDATE stage SET session_released_at_ms = ? WHERE session = ? AND session_released_at_ms IS NULL", [Date.now(), session]);
       const held = closing.get(session);
       closing.delete(session);
-      db.run("UPDATE stage SET session_released_at_ms = ? WHERE session = ? AND session_released_at_ms IS NULL", [Date.now(), session]);
       opts.launchRecord?.release(session);
       // 6.5 fix: the session is closed, so its temporary worktree can go. A stage that ended (passed, retrying, failed) stays
       // in its old session's worktree until here: the close is only queued when the stage moves, and the session may still run.

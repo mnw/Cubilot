@@ -85,7 +85,7 @@ describe("lead briefing and stage sessions across a hub restart", () => {
   const RROOM = "lbr";
   type Case = { name: string; sql: string | null; expectQuiet: boolean };
 
-  async function firstRun(): Promise<{ hub: HubHandle; session: string; stageId: string }> {
+  async function firstRun(ack = true): Promise<{ hub: HubHandle; session: string; stageId: string }> {
     const hub = await spawnHub();
     await giveProjectHttp(hub, RROOM);
     const launches: any[] = [];
@@ -96,7 +96,7 @@ describe("lead briefing and stage sessions across a hub restart", () => {
     const ticket = (t.json as any).snapshot.id;
     await postJson(hub, "/handoffs", { from: "Orchestrator", to_role: "worker", task: `work ${ticket}`, context: { ticket_id: ticket } });
     const req = await until(() => launches.find((l) => l.kind === "launch"));
-    expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+    if (ack) expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
     await sleep(300);
     lead.close();
     s.close();
@@ -105,8 +105,8 @@ describe("lead briefing and stage sessions across a hub restart", () => {
 
   // Kills the first hub, edits the stage row, boots a second hub on the same ledger. Returns the lead briefing count after
   // the stage session reconnects (after the lead has its briefing and the debounce is over).
-  async function afterRestart(sql: string | null, sendStage: boolean, nameOverride?: string): Promise<number> {
-    const first = await firstRun();
+  async function afterRestart(sql: string | null, sendStage: boolean, nameOverride?: string, ack = true): Promise<number> {
+    const first = await firstRun(ack);
     await first.hub.kill();
     if (sql) {
       const db = new Database(first.hub.ledgerPath);
@@ -132,6 +132,9 @@ describe("lead briefing and stage sessions across a hub restart", () => {
 
   test("(a) a running stage keeps the lead signature when its session reconnects after the restart", async () => {
     expect(await afterRestart(null, true)).toBe(0);
+  });
+  test("(b) a launching stage (no ack before the kill) keeps the lead signature when its session reconnects", async () => {
+    expect(await afterRestart(null, true, undefined, false)).toBe(0);
   });
   test("(c) a retrying stage with an unreleased session keeps the lead signature", async () => {
     expect(await afterRestart("UPDATE stage SET status = 'retrying', attempt = 2 WHERE id = '$ID'", true)).toBe(0);

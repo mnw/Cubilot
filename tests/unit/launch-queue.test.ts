@@ -8,6 +8,7 @@ import { giveProject } from "../helpers/repo";
 import { migrateLedger, setRoomSettings } from "../../hub/core/ledger";
 import { createTicketKind } from "../../hub/kinds/ticket";
 import { createStageRuntime, type LaunchInput, type StageRuntime } from "../../hub/kinds/stage";
+import { createLaunchRecord } from "../../hub/core/launch-record";
 import type { LaunchRequest } from "../../hub/core/launch-queue";
 import { createLaunchRecord, type LaunchRecord } from "../../hub/core/launch-record";
 import type { Entry, HubCapabilities, Scope } from "../../hub/core/types";
@@ -257,6 +258,42 @@ describe("close requests (4.1 review)", () => {
     expect(errors.some((m) => /close tester-1 has no ack/.test(m))).toBe(true);
     expect(e.rt.queue.size().retained).toBe(0); // not finished
     e.stop();
+  });
+
+  test("a close ack whose durable release fails is refused, then a retry persists the mark and releases the record", () => {
+    const record = createLaunchRecord(new Map());
+    const db = new Database(":memory:");
+    const e = makeEnv({ db });
+    // makeEnv does not pass a record: build a second runtime on the same db with one.
+    e.stop();
+    const rt = createStageRuntime(db, { ackMs: ACK_MS, launchRecord: record });
+    const cap = e.cap;
+    const sent: LaunchRequest[] = [];
+    rt.queue.attach((r) => sent.push(r), new AbortController().signal, cap);
+    const s = rt.api.create({ ticket_id: e.ticket(), role: "worker" }, "system", cap);
+    rt.enqueueLaunch(e.input(s.id), cap);
+    rt.queue.ack(sent[0].id, { result: "spawned" }, cap);
+    expect(rt.api.load(s.id)!.status).toBe("running");
+    expect(record.sessions()).toContain("worker-1");
+    const close: LaunchRequest = { id: "l_00000000000000cc", kind: "close", session: "worker-1" };
+    rt.queue.push(close);
+    db.exec("CREATE TRIGGER fail_release BEFORE UPDATE OF session_released_at_ms ON stage BEGIN SELECT RAISE(ABORT, 'forced'); END");
+    const orig = console.error;
+    console.error = () => {};
+    try {
+      expect(rt.queue.ack(close.id, { result: "spawned" }, cap).status).toBe("error");
+      expect(db.query<{ v: number | null }, []>("SELECT session_released_at_ms AS v FROM stage").get()!.v).toBeNull();
+      expect(record.sessions()).toContain("worker-1");
+      expect(rt.queue.pendingCloses()).toEqual(["worker-1"]);
+      db.exec("DROP TRIGGER fail_release");
+      expect(rt.queue.ack(close.id, { result: "spawned" }, cap).status).toBe("ok");
+    } finally {
+      console.error = orig;
+    }
+    expect(db.query<{ v: number | null }, []>("SELECT session_released_at_ms AS v FROM stage").get()!.v).not.toBeNull();
+    expect(record.sessions()).not.toContain("worker-1");
+    expect(rt.queue.pendingCloses()).toEqual([]);
+    rt.module.dispose!();
   });
 
   test("an error ack keeps a close pending (it is sent again); only 'the session is absent' completes it", () => {
