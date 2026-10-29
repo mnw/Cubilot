@@ -878,6 +878,7 @@ const TicketBoard = (() => {
     return blockerIds(t).filter((id) => {
       const b = tickets.get(id);
       if (b && b.status === 'done') return false;
+      if (b && b.status === 'cancelled') return true;
       return serverOpen ? serverOpen.includes(id) : true;
     });
   }
