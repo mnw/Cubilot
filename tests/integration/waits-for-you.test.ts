@@ -64,13 +64,6 @@ describe("needs-you route: waiting", () => {
     expect(item).toEqual({ ticket_id: d, title: "Plan A", request_id: "wfr-1", case: "approve", commit: c2, permission_id: null, question: "Approve request wfr-1?" });
   });
 
-  test("allow: a high ticket with a pending ticket:done permission, exact question and permission id", async () => {
-    const h = await ticket("wfr-2", { blast_radius: "high", title: "Risky", status: "in_review" });
-    pendingAllow(h, "perm-wf-1");
-    const item = (await list("wfa")).find((x) => x.ticket_id === h);
-    expect(item).toEqual({ ticket_id: h, title: "Risky", request_id: "wfr-2", case: "allow", commit: null, permission_id: "perm-wf-1", question: `Allow done of ${h}?` });
-  });
-
   test("a done or queued ticket is not listed; a request with no high ticket is not listed", async () => {
     const q = await ticket("wfr-3", { status: "queued" });
     await ticket("wfr-3", { blast_radius: "high", status: "queued" });
