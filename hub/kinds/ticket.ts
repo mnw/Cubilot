@@ -511,17 +511,17 @@ export type SystemClose = { snapshot: TicketSnapshot; entry: Entry } | null;
 
 /**
  * The hub's move after the final PASS of a validator or reviewer stage, with actor `system`. Only an `in_review` ticket moves.
- * Low radius: `ticket.done`. High radius: `ticket.assigned` to the room lead (the hub never writes `done` on a high ticket);
- * no lead means no change. Like assignBySystemInTx it opens no transaction: it runs inside the transaction of `stage.passed`.
+ * Low radius: `ticket.done`. High radius: `ticket.done` only with `doneHigh` (the second Validator PASS, L4); else `ticket.assigned`
+ * to the room lead; no lead means no change. Like assignBySystemInTx it opens no transaction: it runs inside the transaction of `stage.passed`.
  * The caller emits the entry after the commit.
  */
-export function closeReviewedBySystemInTx(db: Database, cap: HubCapabilities, ticketId: string): SystemClose {
+export function closeReviewedBySystemInTx(db: Database, cap: HubCapabilities, ticketId: string, opts: { doneHigh?: boolean } = {}): SystemClose {
   const row = db.query<Record<string, unknown>, [string]>("SELECT * FROM tickets WHERE id = ?").get(ticketId);
   if (!row) throw new Error(`final pass: no such ticket ${ticketId}`);
   const prior = ticketDecl.rowToSnapshot(row);
   if (prior.status !== "in_review") return null;
   const now = Date.now();
-  if (prior.blast_radius === "low") {
+  if (prior.blast_radius === "low" || opts.doneHigh) {
     const seq = insertEvent(db, ticketId, "ticket.done", SYSTEM_ACTOR, { from: "in_review", to: "done" }, now);
     db.run("UPDATE tickets SET status = 'done', updated_at_ms = ?, version = ? WHERE id = ?", [now, seq, ticketId]);
     const snapshot: TicketSnapshot = { ...prior, status: "done", updated_at_ms: now, version: seq };

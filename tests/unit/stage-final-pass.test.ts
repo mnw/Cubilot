@@ -1,4 +1,4 @@
-// A final validator or reviewer PASS closes the ticket: low radius goes to done, high radius goes to the room lead.
+// A final validator or reviewer PASS closes the ticket: low radius goes to done; high radius needs a second validator PASS (L4).
 // `stage.passed` and the ticket event are one transaction (the third cross-kind transaction).
 
 import { describe, expect, test } from "bun:test";
@@ -89,39 +89,42 @@ describe("final validator PASS closes the ticket", () => {
     expect(e.ticket(t.id).status).toBe("done");
   });
 
-  test("high ticket: assigned to the room lead, not done", () => {
+  test("high ticket: the first PASS leaves the ticket in review and starts a second validator stage (L4)", () => {
     const e = makeEnv();
     const t = e.running({ radius: "high" });
     e.rt.hooks.onResult(t.session, { stage_id: t.stage, verdict: "PASS" }, e.cap);
     expect(e.rt.api.load(t.stage)!.status).toBe("passed");
-    expect(e.ticket(t.id)).toEqual({ status: "in_review", assignee: "lead-1" });
-    expect(e.events(t.id).at(-1)).toEqual({ kind: "ticket.assigned", actor: "system" });
-    expect(e.events(t.id).some((x) => x.kind === "ticket.done")).toBe(false);
-    const ev = e.emitted.find((x) => x.entry.ticket_id === t.id && (x.entry as { kind?: string }).kind === "ticket.assigned")!;
-    expect((ev.entry as { from?: string }).from).toBe("system");
-    expect(ev.scope).toEqual({ kind: "room", room: "r1" });
+    expect(e.ticket(t.id)).toEqual({ status: "in_review", assignee: "validator-1" });
+    expect(e.events(t.id).some((x) => x.kind === "ticket.done" || x.kind === "ticket.assigned")).toBe(false);
+    expect(e.db.query("SELECT 1 FROM stage WHERE ticket_id = ? AND role = 'validator' AND id != ?").all(t.id, t.stage)).toHaveLength(1);
   });
 
-  test("high ticket: the lead asks the approval, the human allows, and done succeeds (the gate is unchanged)", async () => {
+  test("high ticket: the second PASS makes it done with no Allow (L4)", () => {
     const e = makeEnv();
     const t = e.running({ radius: "high" });
     e.rt.hooks.onResult(t.session, { stage_id: t.stage, verdict: "PASS" }, e.cap);
-    expect(e.ticket(t.id)).toEqual({ status: "in_review", assignee: "lead-1" });
-    // the hub never wrote done: without an Allow the lead's move is refused
+    const second = e.db.query<{ id: string }, [string, string]>("SELECT id FROM stage WHERE ticket_id = ? AND id != ?").get(t.id, t.stage)!.id;
+    e.db.run("UPDATE stage SET status = 'running', session = 'validator-2' WHERE id = ?", [second]);
+    e.rt.hooks.onResult("validator-2", { stage_id: second, verdict: "PASS" }, e.cap);
+    expect(e.ticket(t.id).status).toBe("done");
+    expect(e.events(t.id).at(-1)).toEqual({ kind: "ticket.done", actor: "system" });
+  });
+
+  test("high ticket: a manual done by an agent still needs the human's Allow (the gate is unchanged)", async () => {
+    const e = makeEnv();
+    const t = e.running({ radius: "high" });
+    e.db.run("UPDATE tickets SET assignee = 'lead-1' WHERE id = ?", [t.id]);
     expect((await e.call("POST", `/tickets/${t.id}/transition`, { by: "lead-1", to: "done" })).status).toBe(409);
     const ask = await e.call("POST", `/tickets/${t.id}/approval`, { by: "lead-1" });
     expect(ask.status).toBe(200);
     const rid = ask.json.request_id as string;
-    // an Allow from the lead does not open the gate; the human's does
     expect((await e.call("POST", `/tickets/${t.id}/transition`, { by: "lead-1", to: "done" })).status).toBe(409);
     expect((await e.call("POST", `/permissions/${rid}/verdict`, { by: "human", behavior: "allow" })).status).toBe(200);
-    const done = await e.call("POST", `/tickets/${t.id}/transition`, { by: "lead-1", to: "done" });
-    expect(done.status).toBe(200);
-    expect(e.ticket(t.id).status).toBe("done");
+    expect((await e.call("POST", `/tickets/${t.id}/transition`, { by: "lead-1", to: "done" })).status).toBe(200);
     expect(e.events(t.id).at(-1)).toEqual({ kind: "ticket.done", actor: "lead-1" });
   });
 
-  test("high ticket in a room with no lead: nothing changes on the ticket, the stage still passes", () => {
+  test("high ticket in a room with no lead: the first PASS leaves the ticket as it is", () => {
     const e = makeEnv();
     const t = e.running({ radius: "high", lead: false });
     e.rt.hooks.onResult(t.session, { stage_id: t.stage, verdict: "PASS" }, e.cap);
