@@ -511,9 +511,9 @@ Room-scoped work items that exist before they have an owner. Lifecycle `draft â†
 - Cancel: the assignee, the creator or the human.
 - Cross-room creation or claim by a non-human â†’ 403.
 
-### Planning note
+### Agent notes
 
-`planning_note` is an optional text field of the ticket (`string | null`, default null). The Orchestrator writes it to give the reason and the decisions. It is the first note in the "Earlier notes" part of each later stage message. `create_ticket` and `edit_ticket` accept it, and `GET /tickets` returns it. Only the human, the creator of the ticket or the room lead can edit it. Other callers get 403 and nothing changes.
+The agent notes are an optional text field of the ticket (`string | null`, default null). The field name is `planning_note`, for compatibility: it is the same column, with no data migration. The Orchestrator or an agent writes the facts that a new agent session needs: files, lines, findings, the base commit. The start message of every stage role holds the agent notes once, under "## Agent notes", after the ticket fields and before "## Earlier notes". A spec review has one "## Agent notes" heading and one "### <ticket id> <title>" subheading for each ticket in scope that has notes. No notes, no heading. `create_ticket` and `edit_ticket` accept the field, and `GET /tickets` returns it. The human, the creator of the ticket, the room lead and the assignee can edit it. The assignee gets no other new right. Other callers get 403 and nothing changes. The ticket view shows the notes in a closed `details` element named "For the agents". The board card does not show them.
 
 ### Approval for `high` radius
 

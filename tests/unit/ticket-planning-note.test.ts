@@ -32,7 +32,7 @@ describe("ticket planning_note", () => {
 
   beforeAll(async () => {
     hub = await spawnHub();
-    for (const n of ["alice", "bob", "carol"]) open.push(await registerAgent(hub, n, { room: "r1" }));
+    for (const n of ["alice", "bob", "carol", "dave"]) open.push(await registerAgent(hub, n, { room: "r1" }));
     expect((await postJson(hub, "/rooms/r1/lead", { by: hub.humanName, agent: "carol" })).status).toBe(200);
     const s = openSSE(hub, "/agent-stream?agent=bob&room=r1");
     sse = s;
@@ -67,10 +67,33 @@ describe("ticket planning_note", () => {
     expect(stored(id)).toBeNull();
   });
 
-  test("an assignee who is not the creator or the lead gets 403 and nothing changes", async () => {
+  test("assignee edits agent notes", async () => {
     const id = snapOf(await make({ planning_note: "keep", assignee: "bob" })).id;
-    expect((await edit(id, "bob", "mine")).status).toBe(403);
+    const r = await edit(id, "bob", "mine");
+    expect(r.status).toBe(200);
+    expect(stored(id)).toBe("mine");
+  });
+
+  test("assignee edit of the grouping fields still 403, with or without agent notes", async () => {
+    const id = snapOf(await make({ planning_note: "keep", assignee: "bob" })).id;
+    for (const extra of [{ request_id: "r-9" }, { role: "worker" }, { blocked_by: [] }]) {
+      expect((await postJson(hub, `/tickets/${id}/edit`, { by: "bob", ...extra })).status).toBe(403);
+      expect((await postJson(hub, `/tickets/${id}/edit`, { by: "bob", planning_note: "sneaky", ...extra })).status).toBe(403);
+    }
     expect(stored(id)).toBe("keep");
+  });
+
+  test("other agent edit of agent notes 403", async () => {
+    const id = snapOf(await make({ planning_note: "keep", assignee: "bob" })).id;
+    expect((await edit(id, "dave", "mine")).status).toBe(403);
+    expect(stored(id)).toBe("keep");
+  });
+
+  test("existing planning_note shows unchanged", async () => {
+    const id = snapOf(await make({ planning_note: "old text" })).id;
+    const list = await getJson(hub, `/tickets?room=r1&status=all&token=${hub.token}`);
+    expect((list.json as Snap[]).find((t) => t.id === id)!.planning_note).toBe("old text");
+    expect(stored(id)).toBe("old text");
   });
 
   test("a number, an empty string, blanks and 4001 characters get 400 on create and edit; 4000 passes", async () => {
