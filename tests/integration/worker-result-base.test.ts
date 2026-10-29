@@ -77,7 +77,9 @@ describe("worker result base check", () => {
   test("rebased rework accepted", async () => {
     const { ticketId, ref, a, stage2, session } = await reworkSetup();
     // Rebase: B is built on staging, not on A, then gets one new commit. A is no longer an ancestor of the branch.
-    const b = commitOn(commitOn(git("rev-parse", "staging"), "rebased work"), "rework");
+    const moved = commitOn(git("rev-parse", "staging"), "staging moved");
+    git("update-ref", "refs/heads/staging", moved);
+    const b = commitOn(commitOn(moved, "rebased work"), "rework");
     git("update-ref", ref, b);
     expect(Bun.spawnSync(["git", "-C", projectRepo(), "merge-base", "--is-ancestor", a, b]).exitCode).toBe(1);
     const r = await send(session, stage2, ticketId, b);

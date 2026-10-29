@@ -1883,15 +1883,25 @@ export function createStageRuntime(
     }
     if (base === commit) return refuse("The commit is not new work: it equals the base.");
     const older = runGit(project, ["merge-base", "--is-ancestor", commit, base]);
-    if (older.code === 0) return refuse("The commit is not new work: it is an ancestor of the base.");
+    if (older.code === 0) return refuse("The commit is not new work: it does not descend from the base: it is an ancestor of it.");
     if (older.code !== 1) return refuse(`Git: ${older.err || "merge-base failed"}`);
     const fromBase = runGit(project, ["merge-base", "--is-ancestor", base, commit]);
     if (fromBase.code === 0) return null;
     if (fromBase.code !== 1) return refuse(`Git: ${fromBase.err || "merge-base failed"}`);
-    // The base is not an ancestor: the branch was rebased. The commit is new work when it holds commits beyond staging.
-    const fork = runGit(project, ["merge-base", commit, "refs/heads/staging"]);
-    if (fork.code !== 0 || !FULL_SHA_RE.test(fork.out)) return refuse(`Git: no merge-base with staging. ${fork.err}`.trim());
-    if (fork.out === commit) return refuse("The commit is not new work: it holds no commit beyond staging.");
+    // The base is not an ancestor: a rebase or a reset. A rebase moves the fork point to a newer staging commit; a reset does not.
+    const forkOf = (sha: string): { sha?: string; refusal?: string } => {
+      const f = runGit(project, ["merge-base", sha, "refs/heads/staging"]);
+      if (f.code !== 0 || !FULL_SHA_RE.test(f.out)) return { refusal: `Git: no merge-base with staging. ${f.err}`.trim() };
+      return { sha: f.out };
+    };
+    const forkNew = forkOf(commit);
+    if (forkNew.refusal) return refuse(forkNew.refusal);
+    const forkOld = forkOf(base);
+    if (forkOld.refusal) return refuse(forkOld.refusal);
+    if (forkNew.sha === commit) return refuse("The commit is not new work: it holds no commit beyond staging.");
+    const newer = forkNew.sha !== forkOld.sha ? runGit(project, ["merge-base", "--is-ancestor", forkOld.sha!, forkNew.sha!]) : null;
+    if (newer && newer.code !== 0 && newer.code !== 1) return refuse(`Git: ${newer.err || "merge-base failed"}`);
+    if (!newer || newer.code === 1) return refuse("The commit is not new work: it does not descend from the base.");
     return null;
   }
 
