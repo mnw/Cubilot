@@ -458,6 +458,8 @@ body.board-open .board-col {
 #ticket-view .modal { position: relative; }
 .ticket-view-light { position: absolute; top: 14px; right: 16px; }
 .ticket-board-empty { color: var(--text-muted); }
+.ticket-move-status { flex: none; color: var(--text-muted); }
+.ticket-move-status:empty { display: none; }
 .ticket-add {
   width: 100%; background: none; border: 1px dashed var(--border, #444); border-radius: 6px;
   color: var(--text-muted); padding: 4px; cursor: pointer; font-size: 0.85em;
