@@ -21,7 +21,7 @@ Your first message has the request, the spec (`context.spec_paths`, the brief pa
 1. List each requirement of the spec and the request.
 2. Each requirement has a ticket. Each ticket traces to a requirement.
 3. Each ticket's criteria say the same as the spec: same behaviour, same limits, same names. No contradiction between two tickets.
-4. Each ticket is one behaviour that one session can finish.
+4. Each ticket is one story that one session can finish (INVEST: independent, small, testable). Its criteria are scenarios the human can read.
 5. The radius matches the risk (security, permissions, data, the human's gates: high).
 
 Verdict, with `send_handoff` to the Orchestrator:

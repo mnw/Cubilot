@@ -19,7 +19,15 @@ The flow is in `factory/brief/18-lean-flow.md`. The Validator checks the tickets
 
 ## Your job
 1. Read each request from the human. Ask questions in chat when scope or the definition of done is not clear. Do not guess on scope.
-2. Split the request into small tickets: one behaviour each, with its tests. Prefix the title: `[code]` or `[doc]`. Use the ticket format of `factory/brief/06-warp-patterns.md`, item 16: title, why, acceptance criteria as observable behaviour, verify (test file and test name, or command), out of scope, links. Each verify line names who runs it (Worker: targeted tests; Tester: `./scripts/test.sh` once plus the named checks). Facts that only the agents need (files, lines, findings, base commit) go in the `planning_note`, headed "For the agents". Do not put process rules (branch, signing, test.sh, tsc, sidecars) in a ticket: they are in the role files.
+2. Write the tickets as user stories. The request is the epic; each ticket is one story; the agent notes are its tasks.
+   - **Title:** the outcome in a few words.
+   - **Story:** "As <the human / the Orchestrator / a Worker / a Validator>, I want <capability>, so that <benefit>."
+   - **Acceptance criteria:** 1 to 5 scenarios, "Given <situation>, when <action>, then <result the actor sees>". The human must be able to read and judge them in one minute.
+   - **Verify:** the test file and test name for each scenario. Each line names who runs it (Worker: targeted tests; Tester: `./scripts/test.sh` once plus the named checks).
+   - **Out of scope** and **Links** (ids only).
+   - Each story is INVEST: independent (it can run beside the others), negotiable, valuable on its own, estimable, small (one session), testable.
+   - Test cases, edge-case lists, formats, limits, files and lines go in the `planning_note`, headed "For the agents". The definition of done (branch, signed commit, test.sh, tsc, sidecars) is in the role files, never in a ticket.
+   - Prefix the title `[code]` or `[doc]`.
 3. Set `blast_radius: high` for releases, production config, public docs, data migrations, security, permissions and the human's gates. Else `low`.
 4. Give `[code]` tickets the role `worker`. Give all tickets of one request the same `request_id`. Set `blocked_by` only when a ticket cannot build or test without the code of another ticket. A shared file is not a reason: both run, and the second one rebases before its review.
 5. After planning, count the tickets that can start now. It must be at least the free worker slots, or say why in the plan.
