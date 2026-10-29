@@ -10,6 +10,7 @@ import { migrateLedger } from "../../hub/core/ledger";
 import { createPermissionKind } from "../../hub/kinds/permission";
 import { createTicketKind } from "../../hub/kinds/ticket";
 import { createStageRuntime } from "../../hub/kinds/stage";
+import type { LaunchRequest } from "../../hub/core/launch-queue";
 import type { Entry, HubCapabilities, Scope } from "../../hub/core/types";
 
 const git = (...a: string[]) => {
@@ -46,6 +47,9 @@ function makeEnv() {
     events: { insert: insertEvent },
     config: { humanName: "human" },
   } as unknown as HubCapabilities;
+  // A fake shell: reads every request the hub queues.
+  const sent: LaunchRequest[] = [];
+  rt.queue.attach((r) => sent.push(r), new AbortController().signal, cap);
   let n = 0;
   /** An in_review ticket with a Tester handoff to the Validator on C1 and a running first Validator stage. */
   const ticket = (radius: "low" | "high", commit = C1) => {
@@ -87,7 +91,7 @@ function makeEnv() {
     db.run("UPDATE stage SET status = 'running', session = 'validator-2' WHERE id = ?", [second.id]);
     return second.id;
   };
-  return { db, rt, cap, ticket, leadDone, row, validators, doneEvents, startSecond };
+  return { db, rt, cap, sent, ticket, leadDone, row, validators, doneEvents, startSecond };
 }
 
 describe("high ticket: two Validator PASSes", () => {
@@ -104,6 +108,19 @@ describe("high ticket: two Validator PASSes", () => {
     // another session name than the first Validator
     const second = e.db.query<{ session: string | null }, [string]>("SELECT session FROM stage WHERE id = ?").get(v[1].id)!.session;
     if (second) expect(second).not.toBe("validator-1");
+  });
+
+  test("second validator gets another session name after the first session closes", async () => {
+    const e = makeEnv();
+    const t = e.ticket("high");
+    e.rt.hooks.onResult("validator-1", { stage_id: t.first, verdict: "PASS" }, e.cap);
+    const turnEnd = e.rt.module.routes.find((r) => r.method === "POST" && String(r.path).includes("turn-end"))!;
+    await turnEnd.handler(new Request("http://x/", { method: "POST", body: JSON.stringify({ agent: "validator-1" }) }), e.cap, { id: t.first });
+    for (const r of e.sent) if (r.kind === "close") e.rt.queue.ack(r.id, { result: "spawned" }, e.cap);
+    const second = e.validators(t.id)[1];
+    const launch = [...e.sent].reverse().find((r) => r.kind === "launch" && r.stage_id === second.id) as { session: string } | undefined;
+    expect(launch).toBeDefined();
+    expect(launch!.session).not.toBe("validator-1");
   });
 
   test("second PASS keeps in_review and hands the ticket to the lead", () => {

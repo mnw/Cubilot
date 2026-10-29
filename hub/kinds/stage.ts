@@ -1132,7 +1132,7 @@ export function createStageRuntime(
   }
 
   /** `<role>-<n>` with the lowest n that no live session (launching or running, in any room) of the role uses. */
-  function nextSessionName(role: string): string {
+  function nextSessionName(role: string, stageId?: string): string {
     // A name whose close has no ack is not free: the old session may still exist.
     const reserved = queue.pendingCloses();
     const used = new Set(
@@ -1142,6 +1142,14 @@ export function createStageRuntime(
         .map((r) => r.session),
     );
     for (const name of reserved) used.add(name);
+    // A later stage of the same ticket and role (the second Validator) never reuses the session name of an earlier one.
+    if (stageId) {
+      for (const r of db
+        .query<{ session: string }, [string, string, string]>(
+          "SELECT s.session FROM stage s WHERE s.role = ? AND s.session IS NOT NULL AND s.id != ? AND s.review IS NULL AND s.ticket_id = (SELECT ticket_id FROM stage WHERE id = ?)",
+        )
+        .all(role, stageId, stageId)) used.add(r.session);
+    }
     for (const name of cancelHolds.keys()) used.add(name);
     // A passed stage keeps its session until its turn ends: the name is not free yet.
     for (const name of awaitingClose) if (name.startsWith(`${role}-`)) used.add(name);
@@ -1200,7 +1208,7 @@ export function createStageRuntime(
       for (const stage of created) {
         // TODO(4.3, 4.5): the real first message and the worktree path. Until then the launch has no prompt and no cwd.
         const r = enqueueLaunch(
-          { stage_id: stage.id, session: nextSessionName(stage.role), room, harness: roleHarness(stage.role), cwd: null, prompt: "" },
+          { stage_id: stage.id, session: nextSessionName(stage.role, stage.id), room, harness: roleHarness(stage.role), cwd: null, prompt: "" },
           cap,
         );
         if (!r.ok) console.log(`[stage] ${stage.id} stays queued: ${r.reason}`);
@@ -1251,7 +1259,7 @@ export function createStageRuntime(
         .all(role, room);
       for (const { id } of waiting) {
         const r = enqueueLaunch(
-          { stage_id: id, session: nextSessionName(role), room, harness: roleHarness(role), cwd: null, prompt: "", reason: api.load(id)?.status === "retrying" ? reasonOf(id) : undefined },
+          { stage_id: id, session: nextSessionName(role, id), room, harness: roleHarness(role), cwd: null, prompt: "", reason: api.load(id)?.status === "retrying" ? reasonOf(id) : undefined },
           cap,
         );
         if (!r.ok) console.log(`[stage] ${id} stays queued: ${r.reason}`);
@@ -2057,7 +2065,7 @@ export function createStageRuntime(
             const second = api.create({ ticket_id: ticketId!, role: "validator" }, "system", cap);
             const room = roomOfStage(second.id);
             // The first session keeps its name until its close is acked, so the second stage gets another name and waits for the slot.
-            const r = room ? enqueueLaunch({ stage_id: second.id, session: nextSessionName("validator"), room, harness: roleHarness("validator"), cwd: null, prompt: "" }, cap) : { ok: false as const, reason: "no room" };
+            const r = room ? enqueueLaunch({ stage_id: second.id, session: nextSessionName("validator", second.id), room, harness: roleHarness("validator"), cwd: null, prompt: "" }, cap) : { ok: false as const, reason: "no room" };
             if (!r.ok) console.log(`[stage] ${second.id} stays queued: ${r.reason}`);
           }
         }
