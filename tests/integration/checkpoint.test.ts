@@ -187,6 +187,43 @@ describe("checkpoint failures", () => {
     }
   });
 
+  test("the note command is shell-safe for a factory path with spaces", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cubilot factory "));
+    mkdirSync(join(dir, "v1", "orchestrator"), { recursive: true });
+    const t = await boot({ CUBILOT_FACTORY_DIR: dir, CUBILOT_FACTORY_VERSION: "v1" });
+    try {
+      writeContext(t.hub, 10);
+      await t.start();
+      const before = t.leadGot.length;
+      await t.turnEnd();
+      await waitFor(() => t.leadGot.length > before);
+      const text = JSON.stringify(t.leadGot.slice(before));
+      const m = text.match(/Run: (bash '[^']+')/);
+      expect(m).not.toBeNull();
+      // The shell reads the quoted path as one word.
+      const argv = Bun.spawnSync(["bash", "-c", `set -- ${m![1].slice(5)}; echo $#`]).stdout.toString().trim();
+      expect(argv).toBe("1");
+      expect(m![1]).toContain(join(dir, "v1", "orchestrator", "hooks", "checkpoint-note.sh"));
+    } finally {
+      await t.close();
+    }
+  });
+
+  test("an agent route refuses an empty, malformed or foreign body", async () => {
+    const t = await boot();
+    try {
+      for (const path of ["turn-end", "checkpoint-note"]) {
+        const url = `/agents/${encodeURIComponent(LEAD)}/${path}`;
+        expect((await postJson(t.hub, url, {})).status).toBe(403);
+        expect((await postJson(t.hub, url, { by: "someone-else" })).status).toBe(403);
+        const bad = await fetch(`${t.hub.url}${url}`, { method: "POST", body: "{", headers: { Authorization: `Bearer ${t.hub.token}` } });
+        expect(bad.status).toBe(400);
+      }
+    } finally {
+      await t.close();
+    }
+  });
+
   test("Pi lead", async () => {
     const dir = mkdtempSync(join(tmpdir(), "cubilot-factory-"));
     mkdirSync(join(dir, "v1", "orchestrator"), { recursive: true });

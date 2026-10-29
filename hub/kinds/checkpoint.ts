@@ -87,6 +87,9 @@ const dataDir = () => process.env.CUBILOT_DATA_DIR || join(homedir(), "Library",
 export const checkpointsDir = () => join(dataDir(), "checkpoints");
 const summaryPath = (agent: string) => join(checkpointsDir(), `${agent}.md`);
 
+/** Single-quote a path for the shell: the factory path holds spaces on an installed app. */
+const shellQuote = (p: string) => `'${p.replace(/'/g, `'\\''`)}'`;
+
 /** The note script the lead runs: the staged role plugin when the app set it, else the repository copy. */
 function noteScript(): string {
   const dir = process.env.CUBILOT_FACTORY_DIR?.trim();
@@ -336,7 +339,7 @@ export function createCheckpointKind(db: Database, deps: CheckpointDeps): Checkp
         image: null,
         text:
           `Checkpoint ${cp.id}: write a note of at most ${NOTE_MAX_WORDS} words with the open points that are not on the board. ` +
-          `Run: bash ${noteScript()} "<note>". Then end your turn. The hub clears your context after that turn and gives you the note and the state summary.`,
+          `Run: bash ${shellQuote(noteScript())} "<note>". Then end your turn. The hub clears your context after that turn and gives you the note and the state summary.`,
       },
       { kind: "to-agents", agents: [cp.agent] },
     );
@@ -344,9 +347,10 @@ export function createCheckpointKind(db: Database, deps: CheckpointDeps): Checkp
   /** Turn ends and notes are posted by the lead's own hooks: `by` is self-asserted and must be the agent in the path. */
   async function agentCall(req: Request, name: string): Promise<{ body: Record<string, unknown> } | Response> {
     if (!validName(name)) return Response.json({ error: "invalid agent" }, { status: 400 });
-    const raw: unknown = await req.json().catch(() => ({}));
-    const body = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
-    if (body.by !== undefined && body.by !== name) return Response.json({ error: "by must be the agent in the path" }, { status: 403 });
+    const raw: unknown = await req.json().catch(() => null);
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return Response.json({ error: "a JSON object is required" }, { status: 400 });
+    const body = raw as Record<string, unknown>;
+    if (body.by !== name) return Response.json({ error: "by must be the agent in the path" }, { status: 403 });
     return { body };
   }
 
