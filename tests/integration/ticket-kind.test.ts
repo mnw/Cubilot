@@ -87,7 +87,7 @@ function makeEnv() {
 const spec = (over: Record<string, unknown> = {}) => ({
   by: "alice",
   title: "Fix login",
-  acceptance_criteria: "Login works with a valid token.",
+  acceptance_criteria: "Login works with a valid password.",
   blast_radius: "low",
   ...over,
 });
@@ -1775,7 +1775,7 @@ describe("edit", () => {
 
   test("the creator, the assignee and the human edit title and criteria: one ticket.edited event, room scope, refresh", async () => {
     const id = await create({ assignee: "bob" });            // creator alice, assignee bob
-    for (const [by, title] of [["alice", "T-creator"], ["bob", "T-assignee"], [HUMAN, "T-human"]] as const) {
+    for (const [by, title] of [["alice", "T-creator"], ["bob", "T-second"], [HUMAN, "T-human"]] as const) {
       const events = t.events(id).length;
       const refreshed = t.refreshes();
       const r = await edit(id, by, { title, acceptance_criteria: `criteria by ${by}` });
@@ -1800,15 +1800,15 @@ describe("edit", () => {
     expect(t.events(id).length).toBe(events);
   });
 
-  test("an agent that sends blast_radius gets 403, even the creator and with the same value; nothing changes", async () => {
+  test("the assignee that sends blast_radius gets 403; the creator may raise it; nothing else changes", async () => {
     const id = await create({ assignee: "bob" });
     const events = t.events(id).length;
-    for (const by of ["alice", "bob"]) {
-      expect((await edit(id, by, { blast_radius: "high" })).status).toBe(403);
-      expect((await edit(id, by, { title: "new", blast_radius: "low" })).status).toBe(403);
-    }
+    expect((await edit(id, "bob", { blast_radius: "high" })).status).toBe(403);
+    expect((await edit(id, "bob", { title: "new", blast_radius: "low" })).status).toBe(403);
+    expect((await edit(id, "carol", { blast_radius: "high" })).status).toBe(403);
     expect(t.row(id)).toMatchObject({ blast_radius: "low", title: "Fix login" });
     expect(t.events(id).length).toBe(events);
+    expect((await edit(id, "alice", { blast_radius: "high" })).json.snapshot).toMatchObject({ blast_radius: "high", radius_source: "raised" });
   });
 
   test("the human changes blast_radius", async () => {
@@ -1883,7 +1883,7 @@ describe("edit", () => {
     }
     expect(t.events(id).length).toBe(events);
     const refreshed = t.refreshes();
-    const same = await edit(id, "alice", { title: "Fix login", acceptance_criteria: "Login works with a valid token." });
+    const same = await edit(id, "alice", { title: "Fix login", acceptance_criteria: "Login works with a valid password." });
     expect(same.status).toBe(200);
     expect(same.json.idempotent).toBe(true);
     expect(t.events(id).length).toBe(events);

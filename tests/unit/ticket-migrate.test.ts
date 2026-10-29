@@ -37,3 +37,20 @@ describe("ticket migrate: request_id and ticket_blockers", () => {
     expect(schema(d)).toEqual(once);
   });
 });
+
+describe("ticket migrate: radius rule columns", () => {
+  test("an old ledger gains the three columns, keeps its rows, and a second run changes nothing", () => {
+    const d = new Database(":memory:");
+    const kind = createTicketKind(d);
+    kind.migrate(d);
+    for (const c of ["radius_rule", "radius_reasons", "radius_source"]) d.exec(`ALTER TABLE "tickets" DROP COLUMN "${c}"`);
+    d.exec(`INSERT INTO "tickets" ("id","room","title","acceptance_criteria","blast_radius","priority","creator","status","created_at_ms","updated_at_ms","version")
+            VALUES ('t_1','r','T','c','high','medium','a','queued',1,1,1)`);
+    kind.migrate(d);
+    const once = schema(d);
+    expect(columns(d, "tickets")).toEqual(expect.arrayContaining(["radius_rule", "radius_reasons", "radius_source"]));
+    expect(d.query("SELECT blast_radius FROM tickets WHERE id='t_1'").get()).toEqual({ blast_radius: "high" });
+    kind.migrate(d);
+    expect(schema(d)).toEqual(once);
+  });
+});
