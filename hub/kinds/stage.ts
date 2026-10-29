@@ -23,6 +23,7 @@ import type {
 } from "../core/types";
 import { createLedgerEntity, ledgerConflictResponse, withLedgerRequired } from "../core/ledger-entity";
 import { validName, validRoomLabel } from "../core/ids";
+import { openBlockerIds } from "./ticket-blockers";
 import { getRoomSettings, DEFAULT_ROLE_LIMITS, DEFAULT_STAGE_TIMEOUT_MIN, STAGE_ROLES, type StageRole } from "../core/ledger";
 import { LedgerConflict } from "../core/types";
 import type { LaunchRecord } from "../core/launch-record";
@@ -444,7 +445,7 @@ export type StageRuntime = {
    * decide; a stage that cannot start stays `queued`). This is the only caller of enqueueLaunch besides the retry
    * path (5.3).
    */
-  evaluateStages(ticketId: string, cap: HubCapabilities, handoffs?: RoleHandoff[], opts?: { launch?: boolean }): StageSnapshot[];
+  evaluateStages(ticketId: string, cap: HubCapabilities, handoffs?: RoleHandoff[], opts?: { launch?: boolean; fresh?: boolean }): StageSnapshot[];
   /** The hook the handoff kind calls for a `to_role` handoff: evaluates the ticket and starts the new stages. */
   hooks: StageHooks;
   /**
@@ -991,6 +992,24 @@ export function createStageRuntime(
       awaitingSince.delete(session);
       queue.push({ id: mintLaunchId(), kind: "close", session });
     }
+    // L3: staging may have moved. A ticket that waits for a blocker is checked again, with no ticket event.
+    try {
+      const waiting = db
+        .query<{ id: string }, []>(
+          `SELECT DISTINCT b.ticket_id AS id FROM ticket_blockers b JOIN tickets t ON t.id = b.ticket_id
+            WHERE t.status IN ('queued', 'claimed', 'in_progress', 'in_review') ORDER BY b.ticket_id`,
+        )
+        .all();
+      for (const { id } of waiting) {
+        if (openBlockerIds(db, id, { now, fresh: true }).length > 0) continue;
+        const queued = db.query<{ id: string; role: string }, [string]>("SELECT id, role FROM stage WHERE ticket_id = ? AND status = 'queued'").all(id);
+        const room = db.query<{ room: string }, [string]>("SELECT room FROM tickets WHERE id = ?").get(id)?.room;
+        if (queued.length && room) for (const role of new Set(queued.map((q) => q.role))) startWaiting(role, room, cap);
+        else evaluateStages(id, cap, [], { launch: true });
+      }
+    } catch (e) {
+      console.error("[stage] blocker re-check failed:", e);
+    }
     const running = db.query<{ id: string }, []>("SELECT id FROM stage WHERE status = 'running' AND session IS NOT NULL").all();
     const ids = new Set(running.map((r) => r.id));
     for (const id of runningSeen.keys()) if (!ids.has(id)) runningSeen.delete(id);
@@ -1135,14 +1154,10 @@ export function createStageRuntime(
     return `${role}-${n}`;
   }
 
-  function evaluateStages(ticketId: string, cap: HubCapabilities, handoffs: RoleHandoff[] = [], eopts: { launch?: boolean } = {}): StageSnapshot[] {
+  function evaluateStages(ticketId: string, cap: HubCapabilities, handoffs: RoleHandoff[] = [], eopts: { launch?: boolean; fresh?: boolean } = {}): StageSnapshot[] {
     const t = db.query<{ status: string; role: string | null }, [string]>("SELECT status, role FROM tickets WHERE id = ?").get(ticketId);
     if (!t || t.status === "draft" || t.status === "done" || t.status === "cancelled") return [];
-    const openBlocker = db
-      .query<{ blocker_id: string }, [string]>(
-        "SELECT b.blocker_id FROM ticket_blockers b LEFT JOIN tickets x ON x.id = b.blocker_id WHERE b.ticket_id = ? AND COALESCE(x.status, '') != 'done' LIMIT 1",
-      )
-      .get(ticketId);
+    const openBlocker = openBlockerIds(db, ticketId, { fresh: eopts.fresh })[0];
     if (openBlocker) return [];
 
     // G9: one live stage per ticket, of any role. Spec-review stages have no ticket_id and never count here.
@@ -1257,12 +1272,8 @@ export function createStageRuntime(
       const t = db.query<{ status: string }, [string]>("SELECT status FROM tickets WHERE id = ?").get(stage.ticket_id);
       if (!t) return { ok: false, reason: "no such ticket" };
       if (t.status === "draft" || t.status === "done" || t.status === "cancelled") return { ok: false, reason: `ticket is ${t.status}` };
-      const open = db
-        .query<{ blocker_id: string }, [string]>(
-          "SELECT b.blocker_id FROM ticket_blockers b LEFT JOIN tickets t ON t.id = b.blocker_id WHERE b.ticket_id = ? AND COALESCE(t.status, '') != 'done' LIMIT 1",
-        )
-        .get(stage.ticket_id);
-      if (open) return { ok: false, reason: `blocked by ${open.blocker_id}` };
+      const open = openBlockerIds(db, stage.ticket_id)[0];
+      if (open) return { ok: false, reason: `blocked by ${open}` };
     }
     // One live spec stage per request (spec-review-stage 2.3): a later one stays queued until the live one ends.
     if (stage.review === "spec") {
