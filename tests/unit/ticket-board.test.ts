@@ -3570,6 +3570,12 @@ describe("request label and blockers (6.2, 6.3)", () => {
     expect(card("a")).toContain("<i></i><i></i><i></i><i></i></span>Lowest");                  // no bars on
   });
 
+  test("a card with radius_source rule shows it as text", async () => {
+    await show(cardOf({ blast_radius: "high", radius_source: "rule" }), mk("b", "queued"));
+    expect(card("a")).toContain('<span class="ticket-chip ticket-radius-source">Radius: rule</span>');
+    expect(card("b")).not.toContain("Radius:");
+  });
+
   test("15.3 chips: request, external ref and High radius; no meta line; a chip is one nowrap block", async () => {
     await show(cardOf({ request_id: "r-1", external_ref: "GH-142", blast_radius: "high" }), mk("b", "queued"));
     const c = card("a");

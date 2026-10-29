@@ -86,7 +86,7 @@ function makeEnv() {
 const spec = (over: Record<string, unknown> = {}) => ({
   by: "alice",
   title: "Fix login",
-  acceptance_criteria: "Login works with a valid token.",
+  acceptance_criteria: "Login works with a valid password.",
   blast_radius: "low",
   ...over,
 });
