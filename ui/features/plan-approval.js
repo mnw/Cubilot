@@ -18,6 +18,7 @@ const PlanApproval = (() => {
   const busy = new Set();   // request ids whose Approve is in flight
   let waiting = [];
   let needs = [];
+  let waits = [];   // tickets that wait for the human (needs-you `waiting`)
   let traces = [];
   const traceBusy = new Set();       // trace ids whose Clear is in flight
   const traceButtons = new Map();    // trace id -> its Clear button of the last render, for the focus after Clear
@@ -158,6 +159,26 @@ const PlanApproval = (() => {
     return el;
   }
 
+  // "Waits for you": one li per ticket that waits for the human. Every field goes in as text, never as markup.
+  function waitsSection() {
+    const el = document.createElement('section');
+    el.className = 'needs-row waits-for-you';
+    const h = document.createElement('h3');
+    h.className = 'plan-title';
+    h.textContent = 'Waits for you';
+    const list = document.createElement('ul');
+    list.className = 'needs-findings';
+    for (const w of waits) {
+      const li = document.createElement('li');
+      li.className = 'needs-finding';
+      li.dataset.ticket = w.ticket_id;
+      li.textContent = `${w.question} ${w.ticket_id} ${w.title} (request ${w.request_id ?? 'none'}, ${w.case}, commit ${w.commit ?? 'none'}${w.permission_id ? `, permission ${w.permission_id}` : ''})`;
+      list.appendChild(li);
+    }
+    el.append(h, list);
+    return el;
+  }
+
   // Clear hides the block for its FAIL stage. Focus moves to the next block's Collapse button, else the previous one's,
   // else the first column heading of the board.
   function clearBlock(n) {
@@ -252,8 +273,8 @@ const PlanApproval = (() => {
     collapseButtons.clear();
     traceButtons.clear();
     const shown = room ? visibleNeeds(room, needs) : needs;
-    r.replaceChildren(...waiting.map(row), ...shown.map(needsRow), ...traces.map(traceRow));
-    r.hidden = waiting.length === 0 && shown.length === 0 && traces.length === 0;
+    r.replaceChildren(...waiting.map(row), ...(waits.length ? [waitsSection()] : []), ...shown.map(needsRow), ...traces.map(traceRow));
+    r.hidden = waiting.length === 0 && waits.length === 0 && shown.length === 0 && traces.length === 0;
     if (focused !== null && traceFocus === null && pendingFocus === null && traceButtons.has(focused)) traceFocus = focused;
     applyFocus();
   }
@@ -267,6 +288,7 @@ const PlanApproval = (() => {
       // The rows of the old room go at once, not when the new answer arrives.
       waiting = [];
       needs = [];
+      waits = [];
       traces = [];
       room = shown;
       render();
@@ -289,6 +311,7 @@ const PlanApproval = (() => {
         const body = await nres.json();
         if (seq !== loadSeq) return;
         needs = Array.isArray(body?.requests) ? body.requests : [];
+        waits = Array.isArray(body?.waiting) ? body.waiting : [];
       }
       if (tres.ok) {
         const body = await tres.json();
