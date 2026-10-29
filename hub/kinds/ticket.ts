@@ -582,19 +582,18 @@ const editTicketVerb: VerbDecl<TicketSnapshot, EditInput> = {
     if (payload.role !== undefined && payload.role !== prior.role) changes.role = payload.role;
     // The blocker list is replaced whole. It is not a snapshot field: it changes only when the set differs.
     let blockersChanged = false;
+    let blockersFrom: string[] = [];
+    let blockersTo: string[] = [];
     if (payload.blocked_by !== undefined) {
       const v = validateBlockedBy(cap.db, prior.room, prior.id, payload.blocked_by);
       if (v.error !== undefined) return { kind: "conflict", httpStatus: 400, message: v.error };
       const stored = cap.db.query<{ blocker_id: string }, [string]>("SELECT blocker_id FROM ticket_blockers WHERE ticket_id = ?").all(prior.id).map((r) => r.blocker_id);
       blockersChanged = stored.length !== v.ids!.length || v.ids!.some((id) => !stored.includes(id));
+      blockersFrom = stored;
+      blockersTo = v.ids!;
     }
     if (Object.keys(changes).length === 0 && !blockersChanged) return { kind: "idempotent" };
     const next: Partial<TicketSnapshot> = { ...changes, updated_at_ms: Date.now() };
-    // Spec review passed a queued ticket as written: new criteria, role or blockers send it back to draft, in this same
-    // transaction. A claimed, in_progress or in_review ticket keeps its status.
-    const backToDraft = prior.status === "queued"
-      && (changes.acceptance_criteria !== undefined || changes.role !== undefined || blockersChanged);
-    if (backToDraft) next.status = "draft";
     // The human allowed the work as it was written: new criteria, or a lower radius, void that approval.
     if ((changes.acceptance_criteria !== undefined || changes.blast_radius === "low") && prior.approval_request_id) {
       next.approval_request_id = null;
@@ -606,7 +605,9 @@ const editTicketVerb: VerbDecl<TicketSnapshot, EditInput> = {
       payload: () => ({
         fields: [...Object.keys(changes), ...(blockersChanged ? ["blocked_by"] : [])],
         ...(changes.blast_radius ? { blast_radius: { from: prior.blast_radius, to: changes.blast_radius } } : {}),
-        ...(backToDraft ? { status: { from: prior.status, to: "draft" } } : {}),
+        ...(changes.acceptance_criteria !== undefined ? { acceptance_criteria: { from: prior.acceptance_criteria, to: changes.acceptance_criteria } } : {}),
+        ...(changes.role !== undefined ? { role: { from: prior.role, to: changes.role } } : {}),
+        ...(blockersChanged ? { blocked_by: { from: blockersFrom, to: blockersTo } } : {}),
       }),
       entry: (post) => ticketEntry(cap.db, post, "ticket.update", actor),
     };
@@ -1307,8 +1308,6 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
           if (r.emitted) {
             cap.briefing.refresh();
             retireStaleApproval(before, r.snapshot, a.name, cap);
-            // G10: a criteria, role or blocker edit sent a queued ticket back to draft.
-            if (before?.status === "queued" && r.snapshot.status === "draft") stage?.onTicketParked?.(params.id, "draft", cap);
           }
           return Response.json({ snapshot: r.snapshot, ...(r.emitted ? {} : { idempotent: true }) });
         } catch (e) {

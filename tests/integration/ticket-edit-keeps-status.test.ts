@@ -1,5 +1,5 @@
-// spec-review-stage 5.1: an edit that changes a queued ticket's criteria, role or blockers sends it back to draft in the
-// same transaction. In-process harness copied from ticket-kind.test.ts.
+// Lean flow L2: an edit of a queued ticket's criteria, role or blockers keeps its status. The ticket.edited event holds the
+// old and the new value of each changed field. In-process harness copied from ticket-kind.test.ts.
 
 import { describe, test, expect, beforeEach } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -119,27 +119,61 @@ async function toReview(over: Record<string, unknown> = {}): Promise<string> {
   return id;
 }
 
-describe("queued ticket edited returns to draft", () => {
+describe("queued ticket edited keeps its status", () => {
   const edit = (id: string, body: Record<string, unknown>, by = "alice") => t.call("POST", `/tickets/${id}/edit`, { by, ...body });
   const status = (id: string) => (t.row(id) as { status: string }).status;
   const editedEvents = (id: string) => t.events(id).filter((e) => e.kind === "ticket.edited");
   const blockers = (id: string) =>
     t.db.query<{ blocker_id: string }, [string]>("SELECT blocker_id FROM ticket_blockers WHERE ticket_id = ?").all(id).map((r) => r.blocker_id);
 
-  test("new criteria, a role change and a blocker change each move a queued ticket to draft with one ticket.edited event", async () => {
+  const payloadOf = (id: string) =>
+    JSON.parse(t.db.query<{ payload_json: string }, [string]>("SELECT payload_json FROM events WHERE entity_id = ? AND kind = 'ticket.edited'").get(id)!.payload_json);
+
+  test("criteria edit stays queued", async () => {
+    const id = await create();
+    const r = await edit(id, { acceptance_criteria: "Different criteria." });
+    expect(r.status).toBe(200);
+    expect(r.json.snapshot.status).toBe("queued");
+    expect(status(id)).toBe("queued");
+    expect(editedEvents(id)).toHaveLength(1);
+    expect((t.row(id) as { acceptance_criteria: string }).acceptance_criteria).toBe("Different criteria.");
+  });
+
+  test("role edit stays queued", async () => {
+    const id = await create();
+    const r = await edit(id, { role: "tester" });
+    expect(r.status).toBe(200);
+    expect(r.json.snapshot.status).toBe("queued");
+    expect(status(id)).toBe("queued");
+    expect(editedEvents(id)).toHaveLength(1);
+  });
+
+  test("blocker edit stays queued", async () => {
     const other = await create();
-    for (const body of [{ acceptance_criteria: "Different criteria." }, { role: "tester" }, { blocked_by: [other] }]) {
-      const id = await create();
-      expect(status(id)).toBe("queued");
-      const r = await edit(id, body);
-      expect(r.status).toBe(200);
-      expect(r.json.snapshot.status).toBe("draft");
-      expect(status(id)).toBe("draft");
-      expect(editedEvents(id)).toHaveLength(1);
-      expect(t.db.query("SELECT payload_json FROM events WHERE entity_id = ? AND kind = 'ticket.edited'").get(id)).toMatchObject({
-        payload_json: expect.stringContaining('"status":{"from":"queued","to":"draft"}'),
-      });
-    }
+    const id = await create();
+    const r = await edit(id, { blocked_by: [other] });
+    expect(r.status).toBe(200);
+    expect(r.json.snapshot.status).toBe("queued");
+    expect(status(id)).toBe("queued");
+    expect(blockers(id)).toEqual([other]);
+    expect(editedEvents(id)).toHaveLength(1);
+  });
+
+  test("event holds old and new", async () => {
+    const other = await create();
+    const first = await create({ role: "worker" });
+    await edit(first, { blocked_by: [other] });
+    const id = await create({ role: "worker" });
+    expect((await edit(id, { blocked_by: [other] })).status).toBe(200);
+    expect((await edit(id, { acceptance_criteria: "New criteria.", role: "tester", blocked_by: [] })).status).toBe(200);
+    const events = t.db.query<{ payload_json: string }, [string]>("SELECT payload_json FROM events WHERE entity_id = ? AND kind = 'ticket.edited' ORDER BY seq").all(id).map((e) => JSON.parse(e.payload_json));
+    expect(events[0]).toEqual({ fields: ["blocked_by"], blocked_by: { from: [], to: [other] } });
+    expect(events[1].fields.sort()).toEqual(["acceptance_criteria", "blocked_by", "role"]);
+    expect(events[1].acceptance_criteria).toEqual({ from: spec().acceptance_criteria, to: "New criteria." });
+    expect(events[1].role).toEqual({ from: "worker", to: "tester" });
+    expect(events[1].blocked_by).toEqual({ from: [other], to: [] });
+    expect(events[1].status).toBeUndefined();
+    expect(payloadOf(first).blocked_by).toEqual({ from: [], to: [other] });
   });
 
   test("the room lead changes the role of another agent's ticket and gets 200; the assignee still gets 403", async () => {
@@ -182,7 +216,7 @@ describe("queued ticket edited returns to draft", () => {
     }
   });
 
-  test("the edit and the move roll back together on a forced failure", async () => {
+  test("the edit rolls back as a whole on a forced failure", async () => {
     const blocker = await create();
     const id = await create();
     t.db.exec(`CREATE TRIGGER fail_blockers BEFORE INSERT ON ticket_blockers BEGIN SELECT RAISE(ABORT, 'forced'); END`);
