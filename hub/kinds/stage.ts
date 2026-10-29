@@ -670,7 +670,7 @@ export function waitsForYou(db: Database, room: string): WaitsForYou[] {
     .query<Row, [string]>(
       `SELECT t.id, t.title, t.request_id, p.id AS permission_id FROM tickets t
         JOIN permissions p ON p.id = t.approval_request_id AND p.tool_name = 'ticket:done' AND p.status = 'pending'
-        WHERE t.room = ?1 AND t.blast_radius = 'high' AND t.status NOT IN ('done', 'cancelled')
+        WHERE t.room = ?1 AND t.blast_radius = 'high' AND t.status NOT IN ('done', 'cancelled', 'queued')
         ORDER BY t.created_at_ms, t.id`,
     )
     .all(room)

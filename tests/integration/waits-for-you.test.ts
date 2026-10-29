@@ -65,7 +65,7 @@ describe("needs-you route: waiting", () => {
   });
 
   test("allow: a high ticket with a pending ticket:done permission, exact question and permission id", async () => {
-    const h = await ticket("wfr-2", { blast_radius: "high", title: "Risky", status: "queued" });
+    const h = await ticket("wfr-2", { blast_radius: "high", title: "Risky", status: "in_review" });
     pendingAllow(h, "perm-wf-1");
     const item = (await list("wfa")).find((x) => x.ticket_id === h);
     expect(item).toEqual({ ticket_id: h, title: "Risky", request_id: "wfr-2", case: "allow", commit: null, permission_id: "perm-wf-1", question: `Allow done of ${h}?` });
@@ -74,12 +74,14 @@ describe("needs-you route: waiting", () => {
   test("a done or queued ticket is not listed; a request with no high ticket is not listed", async () => {
     const q = await ticket("wfr-3", { status: "queued" });
     await ticket("wfr-3", { blast_radius: "high", status: "queued" });
+    const qh = await ticket("wfr-3", { blast_radius: "high", status: "queued" });
+    pendingAllow(qh, "perm-wf-q");
     const lone = await ticket("wfr-4"); // draft, no high ticket in its request
     const hd = await ticket("wfr-5", { blast_radius: "high", status: "queued" });
     pendingAllow(hd, "perm-wf-2");
     sql((db) => db.run("UPDATE tickets SET status = 'done' WHERE id = ?", [hd]));
     const ids = (await list("wfa")).map((x) => x.ticket_id);
-    for (const id of [q, lone, hd]) expect(ids).not.toContain(id);
+    for (const id of [q, qh, lone, hd]) expect(ids).not.toContain(id);
   });
 
   test("a resolved permission is not listed; a high draft of a request counts as approve", async () => {

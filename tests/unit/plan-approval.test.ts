@@ -253,6 +253,7 @@ describe("Waits for you (P6-15c)", () => {
     for (const part of ["Allow done of t_aaaaaaaaaaaaaaaa?", "t_aaaaaaaaaaaaaaaa", "Plan A", "req-9", "allow", "a".repeat(40), "p_1"]) expect(t0).toContain(part);
     expect(ul.children[1].textContent).toContain("Approve request req-9?");
     expect(ul.children[1].textContent).toContain("commit none");
+    expect(ul.children[1].textContent).toContain("permission none");
     for (const x of sec.all()) expect("tabindex" in x.attrs).toBe(false);
   });
 

@@ -172,7 +172,7 @@ const PlanApproval = (() => {
       const li = document.createElement('li');
       li.className = 'needs-finding';
       li.dataset.ticket = w.ticket_id;
-      li.textContent = `${w.question} ${w.ticket_id} ${w.title} (request ${w.request_id ?? 'none'}, ${w.case}, commit ${w.commit ?? 'none'}${w.permission_id ? `, permission ${w.permission_id}` : ''})`;
+      li.textContent = `${w.question} ${w.ticket_id} ${w.title} (request ${w.request_id ?? 'none'}, ${w.case}, commit ${w.commit ?? 'none'}, permission ${w.permission_id ?? 'none'})`;
       list.appendChild(li);
     }
     el.append(h, list);
