@@ -9,6 +9,7 @@ function ledger(): Database {
     CREATE TABLE ticket_blockers (ticket_id TEXT, blocker_id TEXT);
     CREATE TABLE decisions (id TEXT, room TEXT, ticket_id TEXT, request_id TEXT, decider TEXT, reason TEXT, status TEXT, created_at_ms INTEGER, body TEXT);
     CREATE TABLE stage (id TEXT, ticket_id TEXT, request_id TEXT, role TEXT, status TEXT, session TEXT, created_seq INTEGER);
+    CREATE TABLE stage_scope (stage_id TEXT, ticket_id TEXT);
   `);
   return db;
 }
@@ -41,6 +42,29 @@ describe("state summary", () => {
     expect(at.every((i) => i >= 0)).toBe(true);
     expect([...at].sort((a, b) => a - b)).toEqual(at);
     expect(text).toContain("open point");
+  });
+
+  test("a live spec stage of another room stays out", () => {
+    const db = ledger();
+    ticket(db, 1, { room: "other" });
+    ticket(db, 2, { room: "r" });
+    db.run("INSERT INTO stage VALUES ('s_other',NULL,'r-1','validator','running','validator-secret',1)");
+    db.run("INSERT INTO stage_scope VALUES ('s_other',?)", [`t_${hex(1)}`]);
+    db.run("INSERT INTO stage VALUES ('s_mine',NULL,'r-1','validator','running','validator-mine',2)");
+    db.run("INSERT INTO stage_scope VALUES ('s_mine',?)", [`t_${hex(2)}`]);
+    const text = buildStateSummary(db, "r");
+    expect(text).not.toContain("s_other");
+    expect(text).not.toContain("validator-secret");
+    expect(text).toContain("s_mine");
+  });
+
+  test("an escalated arbiter ruling shows in the escalations", () => {
+    const db = ledger();
+    db.run("INSERT INTO decisions VALUES ('d_arb','r',NULL,NULL,'arbiter','x','answered',1,NULL)");
+    db.run("INSERT INTO decisions VALUES ('d_rec','r',NULL,NULL,'arbiter','x','applied',2,NULL)");
+    const text = buildStateSummary(db, "r");
+    expect(text.split("escalations")[1].split("Stage sessions")[0]).toContain("d_arb");
+    expect(text.split("escalations")[1].split("Stage sessions")[0]).not.toContain("d_rec");
   });
 
   test("the same ledger gives the same text", () => {

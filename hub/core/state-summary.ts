@@ -72,7 +72,7 @@ function escalationsPart(db: Database, room: string): Part {
   const rows = db
     .query<DecisionRow, [string, number]>(
       `SELECT id, status, reason, ticket_id, request_id, decider FROM decisions
-       WHERE room = ? AND decider = 'human' ORDER BY created_at_ms DESC, id DESC LIMIT ?`,
+       WHERE room = ? AND (decider = 'human' OR status IN ('escalated','answered')) ORDER BY created_at_ms DESC, id DESC LIMIT ?`,
     )
     .all(room, ESCALATIONS_SHOWN);
   return { title: `Last ${ESCALATIONS_SHOWN} escalations`, items: rows.map(decisionLine), more: "GET /decisions?room=<room>", empty: "none" };
@@ -82,13 +82,14 @@ type StageRow = { id: string; ticket_id: string | null; request_id: string | nul
 
 function stagesPart(db: Database, room: string): Part {
   const rows = db
-    .query<StageRow, [string, string]>(
+    .query<StageRow, [string]>(
       `SELECT s.id, s.ticket_id, s.request_id, s.role, s.status, s.session FROM stage s
-       LEFT JOIN tickets t ON t.id = s.ticket_id
-       WHERE s.status IN ('launching','running','retrying') AND COALESCE(t.room, ?) = ?
+       WHERE s.status IN ('launching','running','retrying') AND COALESCE(
+         (SELECT room FROM tickets WHERE id = s.ticket_id),
+         (SELECT t.room FROM stage_scope sc JOIN tickets t ON t.id = sc.ticket_id WHERE sc.stage_id = s.id ORDER BY sc.ticket_id LIMIT 1)) = ?
        ORDER BY s.created_seq, s.id`,
     )
-    .all(room, room);
+    .all(room);
   return {
     title: "Stage sessions that run",
     items: rows.map((s) => `  ${s.id} ${s.role} ${s.status} ${s.ticket_id ?? s.request_id ?? ""}${s.session ? ` ${s.session}` : ""}`),
