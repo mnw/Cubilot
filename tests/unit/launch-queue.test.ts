@@ -335,6 +335,22 @@ describe("a closed session name is not reused before its close is acked (4.1 rev
     expect(e.rt.api.load(made[0].id)).toMatchObject({ status: "launching", session: "worker-2" });
     e.stop();
   });
+
+  test("a handoff stage starts after the retrying stage of its role, inside the limit (criterion 2)", () => {
+    const e = makeEnv();
+    e.connect();
+    setRoomSettings(e.db, "r1", { role_limits: { worker: 1 } });
+    const retrying = e.stageFor(e.ticket());
+    e.db.run("UPDATE stage SET status = 'retrying' WHERE id = ?", [retrying.id]);
+    expect(e.rt.api.load(retrying.id)!.status).toBe("retrying");
+    const made = e.rt.evaluateStages(e.ticket(), e.cap, [{ role: "worker", seq: 1_000_000 }], { launch: true });
+    expect(made).toHaveLength(1);
+    // one free slot: the retrying stage takes it, the new stage waits
+    expect(e.rt.api.load(retrying.id)!.status).toBe("launching");
+    expect(e.rt.api.load(made[0].id)!.status).toBe("queued");
+    expect(e.sent.filter((r) => r.kind === "launch")).toHaveLength(1);
+    e.stop();
+  });
 });
 
 describe("finished requests do not stay in memory (4.1 review)", () => {
@@ -545,18 +561,22 @@ describe("only the stage logic queues launches", () => {
     expect(users).toEqual(["hub/kinds/stage.ts"]);
   });
 
-  test("inside stage.ts, enqueueLaunch is called only from evaluateStages and drainQueue (the retry path, 5.3, adds a caller)", () => {
+  test("inside stage.ts, enqueueLaunch is called only from startWaiting (drainQueue, evaluateStages and a saved limit all go through it)", () => {
     const src = readFileSync(join(import.meta.dir, "../../hub/kinds/stage.ts"), "utf8");
     const code = src.split("\n").filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*") && !l.trim().startsWith("/*"));
     const calls = code.map((l, i) => ({ l, i })).filter(({ l }) => /\benqueueLaunch\(/.test(l) && !/function enqueueLaunch\(/.test(l) && !/^\s*enqueueLaunch\(input/.test(l));
-    expect(calls).toHaveLength(2);
-    const start = code.findIndex((l) => /function evaluateStages\(/.test(l));
-    const drain = code.findIndex((l, i) => i > start && /function drainQueue\(/.test(l));
+    expect(calls).toHaveLength(1);
+    const start = code.findIndex((l) => /function startWaiting\(/.test(l));
     const end = code.findIndex((l, i) => i > start && /^  function enqueueLaunch\(/.test(l));
     expect(calls[0].i).toBeGreaterThan(start);
-    expect(calls[0].i).toBeLessThan(drain);
-    expect(calls[1].i).toBeGreaterThan(drain);
-    expect(calls[1].i).toBeLessThan(end);
+    expect(calls[0].i).toBeLessThan(end);
+    // the two other launch paths reach it through startWaiting
+    const body = (name: string) => {
+      const from = code.findIndex((l) => new RegExp(`function ${name}\\(`).test(l));
+      return code.slice(from, from + 80).join("\n");
+    };
+    expect(body("drainQueue")).toMatch(/startWaiting\(/);
+    expect(body("evaluateStages")).toMatch(/startWaiting\(/);
   });
 
   test("inside stage.ts, a launch is queued only from enqueueLaunch (the other pushes are closes: 5.2, 5.3)", () => {
