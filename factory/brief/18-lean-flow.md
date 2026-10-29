@@ -1,6 +1,6 @@
 # Part 18: lean flow
 
-Status: decision of the human, 2026-10-29. Build it first. It replaces the spec review per ticket and the human gates between the Approve and the delivery. Where an older part disagrees, this part wins.
+Status: decision of the human, 2026-10-29. Build it first. It replaces the spec review against the code and the human gates between the Approve and the delivery. Where an older part disagrees, this part wins.
 
 ## Why: what the ledger shows
 
@@ -31,12 +31,13 @@ The slots were never the limit. There was almost never a ticket that could run.
 ## The flow
 
 ```
-Human: request  ->  Orchestrator: tickets (short, ticket format)  ->  Human: one Approve
-  -> per ticket, in parallel:  Worker -> Tester -> Validator (high: two Validators) -> merge into staging
+Human: request  ->  Orchestrator: tickets (short, ticket format)  ->  Validator: tickets against the spec (once per request)  ->  Human: one Approve
+  -> per ticket, in parallel:  Worker -> Tester -> Validator (high: two Validators): PASS to the Orchestrator
+  -> Orchestrator: checks the PASS, merges into staging, runs the staging suite, moves the ticket to done
   -> Human: delivery test, merge staging into main
 ```
 
-1. **No spec review per ticket.** The plan is checked once, by the human, at the Approve: a list of tickets with title, why, radius and blockers. The Orchestrator may ask one Validator for an advisory plan check on a large request. Its findings are notes, never a FAIL.
+1. **One spec review per request, against the spec (four eyes).** Before the Approve, a Validator challenges the Orchestrator's plan: it finds what the plan missed and proposes the fix (the ticket to add or the change). The Orchestrator reviews each proposal and answers: accepted, changed differently (with why), or rejected (with the spec section). Neither side's view wins by default: the goal is a correct plan. An open disagreement goes to the human; the tickets it does not touch go on. The Validator checks that the tickets match the spec: each requirement has a ticket, each ticket traces to a requirement, no ticket contradicts the spec or another ticket. It does not check the tickets against the code. It fails only for those three faults; all else is a suggestion. One re-check of only the earlier findings; after a second FAIL the open findings go to the human with the Approve list (decision of the human, 2026-10-29).
 2. **The code is the place of judgement.** The Tester runs the tests. The Validator reviews the diff against the ticket criteria, the tests and security (validator.md decision tree). A finding outside the criteria is a suggestion or a follow-up ticket.
 3. **Tickets in the ticket format** (Part 6, item 16): title, why, criteria as behaviour, verify, out of scope, links. Facts for the agents go in agent notes. Process rules stay in the role files.
 4. **A blocker only for code.** Ticket B waits for A only when B cannot build or test without A's code. A shared file is not a blocker: the second ticket rebases before its review. A blocker clears when A is merged into staging.
@@ -54,7 +55,7 @@ One request, four independent tickets, no blockers between them (they share `hub
 | L1, high | After the human approves a request, the lead may queue and re-queue any ticket of that request. The approval is stored for the request. A new ticket added later needs no new Approve unless the human asks for it. | `hub/kinds/ticket.ts`, "The lead may not queue a request that holds a high blast_radius ticket" |
 | L2, high | A criteria, role or blocker edit keeps the ticket status. The `ticket.edited` event keeps the old and new text. | `hub/kinds/ticket.ts`, `backToDraft` |
 | L3, high | A blocker counts as cleared when it is `done`, or when the commit of its last tester PASS is an ancestor of staging. If the check fails, the blocker stays (fail closed). The hub checks again when staging moves. | `hub/kinds/stage.ts`, `enqueueLaunch`, "blocked by" query |
-| L4, high | A high ticket gets a second Validator stage after the first PASS, in a new session, on the same commit. The second PASS closes the ticket. This replaces the human Allow for `done`. | `hub/kinds/ticket.ts`, `APPROVAL_BLOCK_MESSAGE`; `hub/kinds/stage.ts`, final PASS closes the ticket |
+| L4, high | A Validator PASS no longer closes the ticket: it stays `in_review` and the PASS goes to the Orchestrator. A high ticket gets a second Validator stage after the first PASS, in a new session, on the same commit. The lead may move `in_review` to `done` only when the ticket has its PASSes (one, or two for high) on the commit that is merged into staging; else 409 with the missing item. This replaces the human Allow for `done`. | `hub/kinds/stage.ts`, "A final PASS of a validator or reviewer closes its ticket"; `hub/kinds/ticket.ts`, `APPROVAL_BLOCK_MESSAGE` |
 
 Later, low: a flow measure route (`GET /rooms/<room>/flow`): slot use per role, tickets ready now, ticket-hours by wait reason, FAIL rate per role. It is the data of the table above, for the dashboard (Part 11).
 
@@ -65,7 +66,7 @@ The spec review code (one live spec stage per request, the FAIL stop) stays in t
 1. A request with a high ticket, approved by the human: the lead queues each ticket (200). Before the Approve: 403.
 2. A queued ticket with a criteria edit stays `queued`. The event has the old and new criteria.
 3. Ticket B blocked by A: A is merged into staging but not `done`; B's stage launches. If git cannot answer, B stays blocked.
-4. A high ticket: the first Validator PASS starts a second Validator stage in a new session. The second PASS moves the ticket to `done` with no human Allow. A FAIL in either goes back to the Worker.
+4. A low ticket: a Validator PASS leaves it `in_review`; the lead's move to `done` succeeds after the merge, and fails (409) before it. A high ticket: the first PASS starts a second Validator stage in a new session; the lead's move to `done` fails with one PASS and succeeds with two on the merged commit, with no human Allow. A FAIL in either goes back to the Worker.
 
 ## Until L1 to L4 are merged
 

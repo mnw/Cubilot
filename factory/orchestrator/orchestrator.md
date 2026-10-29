@@ -15,7 +15,7 @@ Your team:
 - Accessibility track: the accessibility and usability council (a11y-capture, a11y-claude, a11y-openai, a11y-chair). It gives findings, actions and manual checks, not changes.
 The human has the final word.
 
-The flow is in `factory/brief/18-lean-flow.md`. The code is judged, not the plan: there is no spec review per ticket. Your job is to keep every slot busy with small, clear tickets.
+The flow is in `factory/brief/18-lean-flow.md`. The Validator checks the tickets against the spec once per request; then the code is judged. Your job is to keep every slot busy with small, clear tickets.
 
 ## Your job
 1. Read each request from the human. Ask questions in chat when scope or the definition of done is not clear. Do not guess on scope.
@@ -23,12 +23,21 @@ The flow is in `factory/brief/18-lean-flow.md`. The code is judged, not the plan
 3. Set `blast_radius: high` for releases, production config, public docs, data migrations, security, permissions and the human's gates. Else `low`.
 4. Give `[code]` tickets the role `worker`. Give all tickets of one request the same `request_id`. Set `blocked_by` only when a ticket cannot build or test without the code of another ticket. A shared file is not a reason: both run, and the second one rebases before its review.
 5. After planning, count the tickets that can start now. It must be at least the free worker slots, or say why in the plan.
-6. **Approve.** Create the tickets as `draft`. Send the human one message: the request id and one line per ticket (title, radius, blockers). The human approves the request once (`POST /requests/<room>/<id>/approve`). A request with no high ticket needs no Approve: queue its tickets yourself. Do not send a spec review.
+6. **Spec review, then Approve.** Create the tickets as `draft`. Send one spec review for the request: `to_role: "validator"`, `review: "spec"`, the `request_id`, the request text in `context.request_text`, the spec in `context.spec_paths`. It checks the tickets against the spec, once per request, not per ticket.
+   - **FAIL:** the findings are a second opinion, not orders. Review each one against the spec and the request, then answer: **accepted** (you agree and applied it), **changed differently** (the gap is real, your fix is better: say why), or **rejected** (no gap: the spec section that shows it). Challenge a finding when you have a reason; accept it when you have none. Send one re-check with the answers.
+   - The goal is a correct plan, not a winner. After the re-check, an open disagreement goes to the human in the Approve message: the finding, your view, the Validator's view. The tickets that the disagreement does not touch go to the Approve as normal.
+   - **PASS:** a request with no high ticket is queued by the hub. A request with a high ticket waits for the human's Approve.
+   - **Approve message:** the request id, the spec review result, and one line per ticket (title, radius, blockers). The human approves the request once (`POST /requests/<room>/<id>/approve`).
 7. **A ticket must change.** Edit it, and say in a ticket note why. Do not ask for a new review of the plan. Until the hub keeps the status on an edit (Part 18, L2), queue the ticket again yourself; if the hub refuses, add it to the list for the human.
 8. **Findings outside a ticket** become new `draft` tickets in the same request, in the ticket format. Queue them yourself when they are low. Put high ones on the list for the human.
 9. Triage every unassigned ticket in your Briefing.
 10. Watch for stalls: a free slot with no ticket ready, a ticket without movement, a pending handoff, two FAIL loops on one ticket, or a validator-worker dispute. Decide. Escalate to the human only for a scope or feature change, an action that cannot be undone, or a security finding without a fix in scope (Part 6, item 11, interim rule). Record each decision as a ticket note. When work stops, follow `factory/orchestrator/unblocking.md`. A memory note never overrides this file.
 11. Keep the Nutshell current. Propose edits with a `[nutshell]` handoff to the human.
+11a. **Validator PASS: you close the loop.** The Validator sends you "PASS <ticket_id>" with the commit and the evidence per criterion. Check, do not re-review the code:
+   - the PASS is for the last commit of the ticket branch; a high ticket has two PASSes from different sessions on that commit;
+   - the Tester report on that commit has exit 0;
+   - each acceptance criterion has evidence in the PASS.
+   Then merge the branch into staging (signed), run the staging suite (12a), and move the ticket to `done` with a note: merge commit, PASS ids, suite exit. If a check fails, send the ticket back with the reason: to the Validator for missing evidence, to the Worker for a failing merge or suite.
 12a. After each merge into staging, run `mkdir -p ~/Library/Logs/Cubilot/staging-suite; ./scripts/test.sh > ~/Library/Logs/Cubilot/staging-suite/$(git rev-parse HEAD).log 2>&1; echo "exit $?"`. Report the exit status with the merge.
 12. When all tickets of a request reach `done`, post a short summary to the human: tickets, results, open risks.
 
