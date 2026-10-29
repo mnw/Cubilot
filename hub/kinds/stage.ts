@@ -475,7 +475,7 @@ export type StageRuntime = {
 };
 
 export const NO_PROJECT_FOLDER = "room has no project folder: set it in New factory room";
-const BRANCH_ROLES = new Set(["worker", "writer"]);
+const BRANCH_ROLES = new Set(["worker", "writer", "editor"]);
 const pathSegment = (x: string) => x.replace(/[^A-Za-z0-9_.-]/g, "_");
 
 /**
@@ -818,7 +818,11 @@ export function createStageRuntime(
       } catch (e) {
         console.error(`[stage] removing the worktree of ${session} failed:`, e);
       }
-      if (held?.room) startWaiting(held.role, held.room, cap);
+      if (held?.room) {
+        startWaiting(held.role, held.room, cap);
+        // The next branch-role stage of the same ticket (Writer -> Editor) waited for this close.
+        if (BRANCH_ROLES.has(held.role)) for (const r of BRANCH_ROLES) if (r !== held.role) startWaiting(r, held.room, cap);
+      }
     },
     onLaunchEnd(req, end: LaunchEnd, cap) {
       if (req.kind !== "launch") return;
@@ -1402,6 +1406,15 @@ export function createStageRuntime(
     // The previous session of this very stage must be closed first, whatever slot is free: both would use one worktree (5.3c).
     for (const [session, c] of closing) {
       if (c.stageId === stage.id) return { ok: false, reason: `the close of ${session} is not acked yet` };
+    }
+    // A branch role shares the ticket worktree with the earlier branch-role session of the same ticket (the Editor continues
+    // on the Writer's work): it waits for that session's close ack, whatever slot is free.
+    if (stage.ticket_id && BRANCH_ROLES.has(stage.role)) {
+      for (const [session, c] of closing) {
+        if (c.stageId === stage.id || !BRANCH_ROLES.has(c.role)) continue;
+        const same = db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM stage WHERE id = ? AND ticket_id = ?").get(c.stageId, stage.ticket_id)!.n;
+        if (same) return { ok: false, reason: `the close of ${session} (same ticket) is not acked yet` };
+      }
     }
     // A session that ended but is not closed yet still holds its slot and its worktree (5.3b).
     const closingNow = [...closing.values()].filter((c) => c.role === stage.role && c.room === input.room).length;
