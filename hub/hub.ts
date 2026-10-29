@@ -51,7 +51,7 @@ import {
   readSummariserConfigFromEnv,
   type Summariser,
 } from "./core/summariser";
-import { createLaunchRecord } from "./core/launch-record";
+import { createLaunchRecord, loadLaunchBindings } from "./core/launch-record";
 import {
   createBriefingBuilder,
   briefingSignature as computeBriefingSignature,
@@ -236,6 +236,7 @@ const fanout = createFanout({
   nextEntryId: () => ++entrySeq,
 });
 
+// Filled below, after the Kind migrations and before the server listens (no agent stream is open yet).
 const launchRecord = createLaunchRecord();
 // Lazy-init: depends on KINDS, defined below in source order.
 let _briefingBuilder: BriefingBuilder | null = null;
@@ -281,6 +282,7 @@ const KINDS: readonly KindModule[] = buildKinds(ledgerDb, launchRecord);
 
 if (ledgerDb) {
   for (const k of KINDS) k.migrate(ledgerDb);
+  launchRecord.load(loadLaunchBindings(ledgerDb));
   for (const k of KINDS) k.start?.(buildCap());
 }
 
