@@ -257,4 +257,6 @@ export type KindModule = HubFeature & {
   dispose?: () => void;
   /** Runs once when the hub has started, after migrate, with a capabilities object (e.g. to settle work a restart interrupted). */
   start?: (cap: HubCapabilities) => void;
+  /** Called after the commit of a room settings change that can free role slots (role_limits). It never throws. */
+  onRoomLimitsChanged?: (room: string, cap: HubCapabilities) => void;
 };
