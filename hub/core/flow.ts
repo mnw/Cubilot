@@ -3,7 +3,7 @@
 // no stored state.
 
 import type { Database } from "bun:sqlite";
-import { getRoomSettings, STAGE_ROLES, type StageRole } from "./ledger";
+import { DEFAULT_ROLE_LIMITS, getRoomSettings, STAGE_ROLES, type StageRole } from "./ledger";
 import { STAGE_ROOM_SQL } from "../kinds/stage";
 import { git, openBlockerIds } from "../kinds/ticket-blockers";
 
@@ -43,6 +43,31 @@ function stagingCommits(project: string | null | undefined): Merges {
   return out;
 }
 
+type Run = { role: string; from: number; to: number };
+
+/** Time inside [from, to) in which at least `limit` runs of `role` overlap: every slot of the role is in use. */
+function fullMs(runs: Run[], role: string, limit: number, from: number, to: number): number {
+  if (to <= from) return 0;
+  const marks: Array<[number, number]> = [];
+  for (const r of runs) {
+    if (r.role !== role) continue;
+    const a = Math.max(r.from, from);
+    const b = Math.min(r.to, to);
+    if (b > a) marks.push([a, 1], [b, -1]);
+  }
+  marks.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+  let count = 0;
+  let last = from;
+  let total = 0;
+  for (const [at, d] of marks) {
+    if (count >= limit) total += at - last;
+    count += d;
+    last = at;
+  }
+  if (count >= limit) total += to - last;
+  return total;
+}
+
 type Segment = { status: string; from: number; to: number };
 
 /** The status of a ticket over time, from its events. The last segment runs to `end`. */
@@ -68,7 +93,7 @@ export type FlowReport = ReturnType<typeof flowReport>;
 export function flowReport(db: Database, room: string, since: number, until: number, now: number = Date.now()) {
   const settings = getRoomSettings(db, room);
   const project = settings?.project_folder;
-  const limits = settings?.role_limits;
+  const limits = settings?.role_limits ?? DEFAULT_ROLE_LIMITS;
   const end = Math.min(until, now);
 
   // 1. Slot use per role: run time of the stage attempts, clipped to the window.
@@ -81,19 +106,26 @@ export function flowReport(db: Database, room: string, since: number, until: num
     .all(room);
   const runMs: Record<string, number> = Object.fromEntries(STAGE_ROLES.map((r) => [r, 0]));
   const openSince = new Map<string, { role: string; at: number }>();
+  const runs: Run[] = [];
   for (const e of stageEvents) {
     if (e.kind === "stage.launching") openSince.set(e.entity_id, { role: e.role, at: e.at_ms });
     else {
       const o = openSince.get(e.entity_id);
-      if (o) runMs[o.role] += overlap(o.at, e.at_ms, since, until);
+      if (o) {
+        runMs[o.role] += overlap(o.at, e.at_ms, since, until);
+        runs.push({ role: o.role, from: o.at, to: e.at_ms });
+      }
       openSince.delete(e.entity_id);
     }
   }
-  for (const o of openSince.values()) runMs[o.role] += overlap(o.at, end, since, until);
+  for (const o of openSince.values()) {
+    runMs[o.role] += overlap(o.at, end, since, until);
+    runs.push({ role: o.role, from: o.at, to: Math.max(end, o.at) });
+  }
   const windowMs = until - since;
   const slot_use = Object.fromEntries(
     STAGE_ROLES.map((role: StageRole) => {
-      const limit = limits?.[role] ?? 0;
+      const limit = limits[role];
       return [role, { run_hours: hours(runMs[role]), limit, slot_hours: hours(limit * windowMs), percent: percent(runMs[role], limit * windowMs) }];
     }),
   );
@@ -110,7 +142,7 @@ export function flowReport(db: Database, room: string, since: number, until: num
 
   // 3. Ticket-hours by one wait reason each.
   const git_ = stagingCommits(project);
-  const tickets = db.query<{ id: string; request_id: string | null; blast_radius: string }, [string]>("SELECT id, request_id, blast_radius FROM tickets WHERE room = ?").all(room);
+  const tickets = db.query<{ id: string; request_id: string | null; blast_radius: string; status: string }, [string]>("SELECT id, request_id, blast_radius, status FROM tickets WHERE room = ?").all(room);
   const ticketEvents = new Map<string, Ev[]>();
   for (const e of db
     .query<Ev, [string]>(
@@ -123,7 +155,8 @@ export function flowReport(db: Database, room: string, since: number, until: num
   }
   const doneAt = new Map<string, number>();
   for (const [id, evs] of ticketEvents) for (const e of evs) if (e.kind === "ticket.done") doneAt.set(id, e.at_ms);
-  const roomHasHigh = new Set(tickets.filter((t) => t.blast_radius === "high").map((t) => t.request_id));
+    // Only a non-terminal high ticket holds a request for the human (the rule of WAITING_FOR_APPROVAL_SQL).
+  const roomHasHigh = new Set(tickets.filter((t) => t.blast_radius === "high" && t.status !== "done" && t.status !== "cancelled").map((t) => t.request_id));
   // The first spec PASS that covered a ticket: from then a draft ticket of a request with a high ticket waits for the human.
   const specPassAt = new Map<string, number>();
   for (const r of db
@@ -155,7 +188,8 @@ export function flowReport(db: Database, room: string, since: number, until: num
       } else if (s.status === "queued") {
         const cut = Math.min(Math.max(s.from, clearedAt), s.to);
         wait.blocked += overlap(s.from, cut, since, until);
-        wait.no_slot += overlap(cut, s.to, since, until);
+        // A ticket with no uncleared blocker waits for a slot only while every worker slot is in use.
+        wait.no_slot += fullMs(runs, "worker", limits.worker, Math.max(cut, since), Math.min(s.to, until));
       }
     }
   }

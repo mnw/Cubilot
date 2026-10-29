@@ -54,10 +54,10 @@ describe("GET /rooms/<room>/flow", () => {
     const d = new Database(hub.ledgerPath);
     try { return fn(d); } finally { d.close(); }
   };
-  async function room(project: string | null = null) {
+  async function room(project: string | null = null, withSettings = true) {
     const name = `fl${++n}`;
     const body = project ? { project_folder: project } : {};
-    expect((await authedFetch(hub, `/rooms/${name}/settings`, { method: "PUT", body: JSON.stringify(body) })).status).toBe(200);
+    if (withSettings) expect((await authedFetch(hub, `/rooms/${name}/settings`, { method: "PUT", body: JSON.stringify(body) })).status).toBe(200);
     const alice = `${name}-alice`;
     open.push(await registerAgent(hub, alice, { room: name }));
     return { name, alice };
@@ -109,6 +109,15 @@ describe("GET /rooms/<room>/flow", () => {
     expect(f.slot_use.worker).toEqual({ run_hours: 2, limit: 2, slot_hours: 20, percent: 10 });
     expect(f.slot_use.tester).toEqual({ run_hours: 2, limit: 2, slot_hours: 20, percent: 10 });
     expect(f.slot_use.validator.run_hours).toBe(0);
+  });
+
+  test("room without settings uses the default limits", async () => {
+    const r = await room(null, false);
+    const t = await mk(r);
+    stage({ ticket: t, role: "worker", verdict: "PASS", launch: 1, end: 3 });
+    const f = await flow(r);
+    expect(f.slot_use.worker).toEqual({ run_hours: 2, limit: 2, slot_hours: 20, percent: 10 });
+    expect(f.slot_use.validator.limit).toBe(1);
   });
 
   test("ready tickets", async () => {
@@ -163,10 +172,36 @@ describe("GET /rooms/<room>/flow", () => {
     timeline(high, "draft", [["ticket.created", 0, { status: "draft" }]]);
     timeline(p, "claimed", [["ticket.created", 0, { status: "draft" }], ["ticket.queued", 4], ["ticket.claimed", 5]]);
     stage({ request: "rq-wait", scope: [p], role: "validator", verdict: "PASS", launch: 0, end: 1 });
+    // both worker slots (default limit 2) are in use for the whole window
+    stage({ ticket: p, role: "worker", status: "running", launch: 0 });
+    stage({ ticket: p, role: "worker", status: "running", launch: 0 });
     const f = await flow(r);
     // `high` is a draft for the whole window (10 h) and is not in the scope of the spec PASS, so it is plain draft.
     // The blocker was queued with no blocker and no slot from 0 to 5 (5 h).
     expect(f.wait_hours).toEqual({ draft: 2 + 1 + 10, waiting_approval: 3, blocked: 3, no_slot: 2 + 1 + 5 });
+  });
+
+  test("queued time with a free slot counts for no reason", async () => {
+    const r = await room();
+    const w = await mk(r, { status: "queued" });
+    timeline(w, "claimed", [["ticket.created", 0, { status: "queued" }], ["ticket.claimed", 4]]);
+    // one of two worker slots is busy from 0 to 2, both from 1 to 2
+    stage({ ticket: w, role: "worker", verdict: "PASS", launch: 0, end: 2 });
+    stage({ ticket: w, role: "worker", verdict: "PASS", launch: 1, end: 2 });
+    const f = await flow(r);
+    expect(f.wait_hours).toEqual({ draft: 0, waiting_approval: 0, blocked: 0, no_slot: 1 });
+  });
+
+  test("terminal high ticket does not hold approval", async () => {
+    const r = await room();
+    const high = await mk(r, { status: "draft", request_id: "rq-term", blast_radius: "high" });
+    const p = await mk(r, { status: "draft", request_id: "rq-term" });
+    timeline(high, "done", [["ticket.created", 0, { status: "draft" }], ["ticket.done", 1]]);
+    timeline(p, "draft", [["ticket.created", 0, { status: "draft" }]]);
+    stage({ request: "rq-term", scope: [p], role: "validator", verdict: "PASS", launch: 0, end: 1 });
+    const f = await flow(r);
+    expect(f.wait_hours.waiting_approval).toBe(0);
+    expect(f.wait_hours.draft).toBe(11);
   });
 
   test("FAIL rate per role", async () => {
