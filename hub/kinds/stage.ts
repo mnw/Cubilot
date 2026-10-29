@@ -953,6 +953,23 @@ export function createStageRuntime(
             AND created_seq > COALESCE((SELECT MAX(created_seq) FROM stage WHERE ticket_id = ?2 AND role = 'worker'), 0)`,
       )
       .get(ticketId, ticketId)!.n;
+  /** The full_suite and commit of the newest Tester result of a ticket since its latest worker stage, else null. */
+  const lastFullSuite = (ticketId: string): { full_suite: unknown; commit: unknown } | null => {
+    const r = db
+      .query<{ c: string | null }, [string, string]>(
+        `SELECT h.context_json AS c FROM stage s
+           JOIN handoffs h ON json_extract(h.context_json, '$.stage_id') = s.id AND h.from_agent = s.session
+          WHERE s.ticket_id = ?1 AND s.role = 'tester' AND s.review IS NULL
+            AND s.created_seq > COALESCE((SELECT MAX(created_seq) FROM stage WHERE ticket_id = ?2 AND role = 'worker'), 0)
+          ORDER BY s.created_seq DESC, h.rowid DESC LIMIT 1`,
+      )
+      .get(ticketId, ticketId);
+    try {
+      if (!r?.c) return null;
+      const c = JSON.parse(r.c) as { full_suite?: unknown; commit?: unknown };
+      return { full_suite: c.full_suite, commit: c.commit };
+    } catch { return null; }
+  };
   const isHighTicket = (ticketId: string): boolean =>
     db.query<{ b: string }, [string]>("SELECT blast_radius AS b FROM tickets WHERE id = ?").get(ticketId)?.b === "high";
 
@@ -2151,6 +2168,23 @@ export function createStageRuntime(
           if (refusal) errors.push(refusal);
         } else if (c.ticket_id !== stage.ticket_id) errors.push(`context.ticket_id must be ${stage.ticket_id}`);
         if (stage.role === "tester" && (typeof c.commit !== "string" || !FULL_SHA_RE.test(c.commit))) errors.push("context.commit must be the full 40-character commit sha");
+        if (stage.role === "tester" && stage.ticket_id && isHighTicket(stage.ticket_id)) {
+          // High radius: the Tester result carries the full suite run (command, exit_code, pass, fail, log_path) for the commit that started this stage.
+          const started = handoffCommit(stage.id, stage.ticket_id, "tester");
+          if (started && c.commit !== started) errors.push(`context.commit must be ${started}, the commit of the handoff that started this stage`);
+          const fs = c.full_suite && typeof c.full_suite === "object" && !Array.isArray(c.full_suite) ? (c.full_suite as Record<string, unknown>) : null;
+          if (!fs) errors.push("context.full_suite is required for a high-radius ticket: {command, exit_code, pass, fail, log_path}");
+          else {
+            const bad = (k: string) => (k === "command" || k === "log_path" ? typeof fs[k] !== "string" || !(fs[k] as string).trim() : !Number.isInteger(fs[k]));
+            for (const k of ["command", "exit_code", "pass", "fail", "log_path"]) if (bad(k)) errors.push(`context.full_suite.${k} is missing or invalid`);
+          }
+        }
+        if (stage.role === "validator" && stage.ticket_id && c.verdict === "PASS" && isHighTicket(stage.ticket_id)) {
+          const last = lastFullSuite(stage.ticket_id);
+          const fs = last?.full_suite;
+          if (!fs || typeof fs !== "object" || (fs as Record<string, unknown>).exit_code !== 0) errors.push("a high-radius PASS needs a full suite with exit code 0");
+          else if (last!.commit !== c.commit) errors.push(`context.commit must be ${String(last!.commit)}, the commit of the full suite run`);
+        }
         if (stage.role === "validator" && stage.ticket_id && c.verdict === "PASS" && isHighTicket(stage.ticket_id) && validatorPasses(stage.ticket_id) >= 1) {
           // L4: the second PASS of a high ticket is for the commit of the first one.
           const expected = handoffCommit(stage.id, stage.ticket_id, "validator");

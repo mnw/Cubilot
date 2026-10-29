@@ -148,6 +148,7 @@ export function renderFirstMessage(i: FirstMessageInput, template: string = load
     return k! in v ? v[k!] : m;
   });
   if (!text.endsWith("\n")) text += "\n";
+  if (i.role === "tester" && i.ticket.blast_radius === "high") text += "\nThis ticket has high blast radius. Run the full suite with ./scripts/test.sh. Put it in context.full_suite: command, exit_code, pass, fail, log_path.\n";
   if (i.handoff) text += renderHandoffSection(i.handoff, i.stageId);
   if (i.reason) text += `\nNote: the earlier session of this stage stopped: ${oneLine(i.reason)}\n`;
   return (i.stable ?? "") + text;
