@@ -113,17 +113,19 @@ async function held(room: string, shell = true) {
 }
 
 describe("a move to draft or done cancels the queued stages", () => {
-  test("(a) criteria edit: ticket draft, stage cancelled with the draft reason, no launch, no failure trail; (e) draft -> queued gives one new queued stage", async () => {
+  test("(a) criteria edit keeps the ticket queued and its queued stage (lean flow L2); (e) draft -> queued gives one new queued stage", async () => {
     const { hub, shell, t2 } = await held("da");
     const old = await stageOf(hub, t2);
     expect(await editCriteria(hub, t2)).toBe(200);
     await sleep(150);
-    expect(tstatus(hub, t2)).toBe("draft");
-    expect(await stageOf(hub, t2)).toMatchObject({ id: old.id, status: "cancelled", reason: `${ST} draft` });
+    expect(tstatus(hub, t2)).toBe("queued");
+    expect(await stageOf(hub, t2)).toMatchObject({ id: old.id, status: "queued" });
     expect(shell.launches()).toHaveLength(1);
     expect(shell.reqs.filter((r) => r.kind === "close")).toHaveLength(0);
     await expectNoFailureTrail(hub, "da");
-    // (e)
+    // (e) the human parks the ticket, then queues it again
+    expect(await move(hub, t2, "draft", human(hub))).toBe(200);
+    await sleep(150);
     expect(await move(hub, t2, "queued", human(hub))).toBe(200);
     await sleep(150);
     const all = rows(hub, t2);

@@ -3277,7 +3277,7 @@ describe("moving tickets: the Move to select and drag and drop", () => {
   async function show(...tickets: any[]) {
     selects = {}; cards = {}; columns = {};
     for (const t of tickets) {
-      selects[t.id] = Object.assign(el(), { dataset: { ticket: t.id }, value: "" });
+      selects[t.id] = Object.assign(el(), { dataset: { ticket: t.id }, value: "", focus() { active = this; } });
       cards[t.id] = Object.assign(el(), { dataset: { ticket: t.id } });
     }
     for (const k of ["queued", "in_progress", "in_review", "done", ""]) columns[k] = Object.assign(el(), { dataset: { status: k } });
@@ -3396,7 +3396,8 @@ describe("moving tickets: the Move to select and drag and drop", () => {
     expect(own.prevented).toBe(false);                             // no highlight on its own column
     const cancelled = ev();
     columns[""].handlers.dragover(cancelled);
-    expect(cancelled.prevented).toBe(false);
+    expect(cancelled.prevented).toBe(true);                        // enabled so the browser sends drop, which shows the failure line
+    expect(columns[""].cls.has("drop-target")).toBe(false);       // but never highlighted
     columns.queued.handlers.drop(ev());
     columns[""].handlers.drop(ev());
     expect(posts.filter((p) => p.path.endsWith("/transition"))).toEqual([]);
@@ -3462,6 +3463,186 @@ describe("moving tickets: the Move to select and drag and drop", () => {
     const over = ev();
     columns.in_progress.handlers.dragover(over);
     expect(over.prevented).toBe(false);                            // nothing is being dragged
+  });
+
+  describe("failed move shows its error", () => {
+    let status: any;
+    let timers: Array<{ fn: () => void; ms: number; live: boolean }>;
+    beforeEach(() => {
+      status = el();
+      status.textContent = "";
+      status.innerHTML = "";
+      els["ticket-move-status"] = status;
+      timers = [];
+      ctx.setTimeout = (fn: () => void, ms: number) => { timers.push({ fn, ms, live: true }); return timers.length; };
+      ctx.clearTimeout = (id: number) => { if (timers[id - 1]) timers[id - 1].live = false; };
+    });
+    afterEach(() => { ctx.setTimeout = setTimeout; ctx.clearTimeout = clearTimeout; delete els["ticket-move-status"]; });
+    const fire = () => timers.filter((t) => t.live).forEach((t) => { t.live = false; t.fn(); });
+    const hold = () => {
+      const normal = ctx.authedFetch;
+      let release!: () => void;
+      const held = new Promise<void>((r) => { release = r; });
+      ctx.authedFetch = async (path: string, init?: any) => { if (path.endsWith("/transition")) await held; return normal(path, init); };
+      return release;
+    };
+
+    test("reproduced path: a drag from In review to Done that the hub refuses shows a board line, not only a chat line", async () => {
+      await show(T("a", "in_review"));
+      postOk = false;
+      refuseText = "needs a tester PASS";
+      cards.a.handlers.dragstart(ev());
+      columns.done.handlers.drop(ev());
+      await settle();
+      expect(messages.at(-1).text).toBe("Ticket move to done failed: needs a tester PASS");   // the chat line stays
+      expect(status.textContent).toBe("Move of T a failed: needs a tester PASS");
+    });
+
+    test("(a) a hub refusal from the Move control shows the hub text", async () => {
+      await show(T("a", "queued"));
+      postOk = false;
+      selects.a.value = "done";
+      await selects.a.handlers.change();
+      expect(status.textContent).toBe("Move of T a failed: upload refused");
+    });
+
+    test("(b) a network error shows the error text", async () => {
+      await show(T("a", "queued"));
+      ctx.authedFetch = async () => { throw new Error("Failed to fetch"); };
+      selects.a.value = "done";
+      await selects.a.handlers.change();
+      expect(status.textContent).toBe("Move of T a failed: Failed to fetch");
+    });
+
+    test("(c) a drop on a column that refuses the ticket shows a fixed text; a drop on its own column shows nothing", async () => {
+      await show(T("a", "queued"));
+      cards.a.handlers.dragstart(ev());
+      const over = ev();
+      columns[""].handlers.dragover(over);                         // browser order: drop reaches only a target whose dragover was cancelled
+      if (over.prevented) columns[""].handlers.drop(ev());
+      expect(over.prevented).toBe(true);
+      expect(status.textContent).toBe("Move of T a failed: that column does not take tickets");
+      expect(posts.filter((p) => p.path.endsWith("/transition")).length).toBe(0);
+      status.textContent = "";
+      cards.a.handlers.dragstart(ev());
+      columns.queued.handlers.drop(ev());
+      expect(status.textContent).toBe("");
+    });
+
+    test("(d1) a Move-control change while a move is in flight shows a fixed text and focus returns to the Move control", async () => {
+      await show(T("a", "queued"));
+      const release = hold();
+      selects.a.value = "in_progress";
+      const first = selects.a.handlers.change();
+      selects.a.value = "done";
+      await selects.a.handlers.change();
+      expect(status.textContent).toBe("Move of T a failed: a move is in flight");
+      expect(active).toBe(selects.a);
+      release();
+      await first;
+    });
+
+    test("(d2) a drag start while a move is in flight is cancelled and shows a fixed text; focus does not move", async () => {
+      await show(T("a", "queued"));
+      const release = hold();
+      selects.a.value = "in_progress";
+      const first = selects.a.handlers.change();
+      active = "elsewhere";
+      const e = ev();
+      cards.a.handlers.dragstart(e);
+      expect(e.prevented).toBe(true);
+      expect(status.textContent).toBe("Move of T a failed: a move is in flight");
+      expect(active).toBe("elsewhere");
+      release();
+      await first;
+    });
+
+    test("a failed Move-control change returns focus to the Move control; a failed drag does not move focus", async () => {
+      await show(T("a", "queued"));
+      postOk = false;
+      active = "elsewhere";
+      selects.a.value = "done";
+      await selects.a.handlers.change();
+      expect(active).toBe(selects.a);
+      active = "elsewhere";
+      cards.a.handlers.dragstart(ev());
+      columns.done.handlers.drop(ev());
+      await settle();
+      expect(active).toBe("elsewhere");
+    });
+
+    test("two concurrent failing moves of different tickets each show their own reason", async () => {
+      await show(T("a", "queued"), T("b", "queued"));
+      const normal = ctx.authedFetch;
+      const gates: Record<string, () => void> = {};
+      ctx.authedFetch = async (path: string, init?: any) => {
+        if (!path.endsWith("/transition")) return normal(path, init);
+        const id = path.split("/")[2];
+        await new Promise<void>((r) => { gates[id] = r; });
+        return { ok: false, json: async () => ({}), text: async () => `reason ${id}` };
+      };
+      ctx.parseErrorBody = async (r: any) => r.text();
+      selects.a.value = "done"; selects.b.value = "done";
+      const pa = selects.a.handlers.change();
+      const pb = selects.b.handlers.change();
+      gates.a(); await pa;
+      expect(status.textContent).toBe("Move of T a failed: reason a");
+      gates.b(); await pb;
+      expect(status.textContent).toBe("Move of T b failed: reason b");
+      ctx.parseErrorBody = async () => refuseText;
+    });
+
+    test("hostile hub text and title show as text, never as markup", async () => {
+      await show(T("a", "queued", { title: "<b>x</b>" }));
+      postOk = false;
+      refuseText = "<img src=x onerror=alert(1)>";
+      selects.a.value = "done";
+      await selects.a.handlers.change();
+      expect(status.textContent).toBe("Move of <b>x</b> failed: <img src=x onerror=alert(1)>");
+      expect(status.innerHTML).toBe("");
+    });
+
+    test("the line clears 10 s after it shows; a new failure replaces it and restarts the 10 s", async () => {
+      await show(T("a", "queued"));
+      postOk = false;
+      selects.a.value = "done";
+      await selects.a.handlers.change();
+      expect(timers.filter((t) => t.live).map((t) => t.ms)).toEqual([10000]);
+      refuseText = "second";
+      selects.a.value = "done";
+      await selects.a.handlers.change();                           // clears at the attempt, then shows the new failure
+      expect(status.textContent).toBe("Move of T a failed: second");
+      expect(timers.filter((t) => t.live).length).toBe(1);          // the first timer is gone, one new timer runs
+      fire();
+      expect(status.textContent).toBe("");
+    });
+
+    test("the next move attempt of the same ticket clears the line; a move of another ticket does not", async () => {
+      await show(T("a", "queued"), T("b", "queued"));
+      postOk = false;
+      selects.a.value = "done";
+      await selects.a.handlers.change();
+      expect(status.textContent).not.toBe("");
+      postOk = true;
+      selects.b.value = "done";
+      await selects.b.handlers.change();
+      expect(status.textContent).toBe("Move of T a failed: upload refused");
+      selects.a.value = "in_progress";
+      await selects.a.handlers.change();
+      expect(status.textContent).toBe("");
+    });
+
+    test("the status region is the same element after a re-render", async () => {
+      await show(T("a", "queued"));
+      const before = ctx.document.getElementById("ticket-move-status");
+      postOk = false;
+      selects.a.value = "done";
+      await selects.a.handlers.change();
+      expect(ctx.document.getElementById("ticket-move-status")).toBe(before);
+      expect(cols.innerHTML).not.toContain("ticket-move-status");   // the board re-render does not write it
+      const html = readFileSync("ui/index.html", "utf8");
+      expect(html).toMatch(/<div[^>]*id="ticket-move-status"[^>]*role="status"[^>]*aria-live="polite"|<div[^>]*role="status"[^>]*aria-live="polite"[^>]*id="ticket-move-status"/);
+    });
   });
 
   // t_2a272087075e960f: the Draft column sits 4 px from the 6 px splitter, so a splitter drag used to pick up a card.
@@ -3575,6 +3756,17 @@ describe("request label and blockers (6.2, 6.3)", () => {
     expect(card("a")).not.toContain("ticket-tag");
     expect(card("a")).not.toContain("ticket-sub");
     expect(card("a")).toContain("<i></i><i></i><i></i><i></i></span>Lowest");                  // no bars on
+  });
+
+  test("a card with radius_source rule shows it as text", async () => {
+    await show(cardOf({ blast_radius: "high", radius_source: "rule" }), mk("b", "queued"));
+    expect(card("a")).toContain('<span class="ticket-chip ticket-radius-source">Radius: rule</span>');
+    expect(card("b")).not.toContain("Radius:");
+  });
+
+  test("a low card with radius_source shows it as text", async () => {
+    await show(cardOf({ blast_radius: "low", radius_source: "human" }));
+    expect(card("a")).toContain('<span class="ticket-chip ticket-radius-source">Radius: human</span>');
   });
 
   test("15.3 chips: request, external ref and High radius; no meta line; a chip is one nowrap block", async () => {

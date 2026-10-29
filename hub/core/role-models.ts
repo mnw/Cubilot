@@ -2,10 +2,7 @@
 // file at each stage launch (an edit applies at the next launch, no Reload) and puts the values in the launch request.
 // The shell only passes them on; pty_spawn checks the values as it checks a modal choice.
 
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { parse } from "yaml";
+import { isMap, readConfig } from "./config-file";
 
 export type RoleModel = { harness?: "claude" | "pi"; model?: string; provider?: string; effort?: string };
 
@@ -14,27 +11,10 @@ export type RoleModelLookup = { entry: RoleModel | null } | { error: string };
 
 const FIELDS = ["harness", "model", "provider", "effort"] as const;
 
-const configPath = () => join(process.env.CUBILOT_DATA_DIR || join(homedir(), "Library", "Application Support", "Cubilot"), "config.yml");
-
-const isMap = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-
 /** The role_models map, or {} (and one log line) when the file or the key cannot be used. Never throws. */
 function readMap(): Record<string, unknown> {
-  let text: string;
-  try {
-    text = readFileSync(configPath(), "utf8");
-  } catch (e) {
-    console.log(`[role-models] config.yml not read, no role models: ${(e as Error).message}`);
-    return {};
-  }
-  let doc: unknown;
-  try {
-    doc = parse(text);
-  } catch (e) {
-    console.log(`[role-models] config.yml is not valid YAML, no role models: ${(e as Error).message.split("\n")[0]}`);
-    return {};
-  }
-  if (!isMap(doc) || !("role_models" in doc)) return {};
+  const doc = readConfig("role-models");
+  if (!("role_models" in doc)) return {};
   const m = doc.role_models;
   if (!isMap(m)) {
     console.log("[role-models] role_models is not a map, no role models");

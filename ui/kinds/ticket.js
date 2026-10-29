@@ -209,7 +209,7 @@ const TicketBoard = (() => {
   }
 
   let lastActError = '';   // the text of the last refused call, for inline display
-  async function act(path, body, label) {
+  async function act(path, body, label, out = null) {   // `out.reason`: this call's own refusal text (lastActError is shared)
     lastActError = '';
     try {
       const r = await authedFetch(path, {
@@ -220,9 +220,11 @@ const TicketBoard = (() => {
       if (r.ok) return (await r.json().catch(() => null)) ?? {};
       const err = await parseErrorBody(r);
       lastActError = String(err);
+      if (out) out.reason = lastActError;
       addMessage({ from: 'system', to: HUMAN_NAME, text: `Ticket ${label} failed: ${err}`, ts: '' });
     } catch (e) {
       lastActError = String(e?.message ?? e);
+      if (out) out.reason = lastActError;
       addMessage({ from: 'system', to: HUMAN_NAME, text: `Ticket ${label} error: ${e?.message ?? e}`, ts: '' });
     }
     return null;
@@ -242,16 +244,46 @@ const TicketBoard = (() => {
     return `<label class="ticket-move-label">${escHtml(label)} <select class="ticket-move" data-ticket="${escAttr(t.id)}" data-current="${escAttr(cur)}" aria-label="Move ${escAttr(t.title)} to column">${options}</select></label>`;
   }
 
+  // A failed move shows one line in the persistent status region (static markup in index.html: a re-render never replaces it).
+  // It clears at the next move attempt of the same ticket, or 10 s after it shows; a new failure replaces it and restarts the 10 s.
+  const MOVE_LINE_MS = 10000;
+  let moveLineFor = null;
+  let moveLineTimer = null;
+  function clearMoveLine() {
+    if (moveLineTimer != null) clearTimeout(moveLineTimer);
+    moveLineTimer = null;
+    moveLineFor = null;
+    const line = document.getElementById('ticket-move-status');
+    if (line) line.textContent = '';
+  }
+  function failMove(id, reason) {
+    const line = document.getElementById('ticket-move-status');
+    if (!line) return;
+    if (moveLineTimer != null) clearTimeout(moveLineTimer);
+    moveLineFor = id;
+    line.textContent = `Move of ${tickets.get(id)?.title ?? id} failed: ${reason}`;
+    moveLineTimer = setTimeout(clearMoveLine, MOVE_LINE_MS);
+  }
+
   // Send the human move. Nothing moves on screen until the hub's event arrives, so a refused move
-  // (the hub error goes to the chat) only redraws the board: the card and the select are back where they were.
+  // (the hub error goes to the chat and to the board line) only redraws the board: the card and the select are back where they were.
+  // `fromControl`: the Move select started it, so a failure puts the keyboard back on that card's select.
   const moving = new Set();   // tickets with a move in flight: a second move waits for the hub's answer
-  async function moveTicket(id, to) {
+  async function moveTicket(id, to, fromControl = false) {
     const t = tickets.get(id);
-    if (!t || !movable(t) || columnStatus(t) === to || moving.has(id)) return;
+    if (!t || !movable(t) || columnStatus(t) === to) return;
+    if (moveLineFor === id) clearMoveLine();
+    const refocus = () => {
+      if (!fromControl) return;
+      const board = document.getElementById('ticket-board-columns');
+      [...(board?.querySelectorAll?.('.ticket-move') ?? [])].find((s) => s.dataset.ticket === id)?.focus?.();
+    };
+    if (moving.has(id)) { failMove(id, 'a move is in flight'); refocus(); return; }
     moving.add(id);
     try {
-      const ok = await act(`/tickets/${encodeURIComponent(id)}/transition`, { to }, `move to ${to}`);
-      if (!ok) render();
+      const out = { reason: '' };
+      const ok = await act(`/tickets/${encodeURIComponent(id)}/transition`, { to }, `move to ${to}`, out);
+      if (!ok) { failMove(id, out.reason); render(); refocus(); }
     } finally {
       moving.delete(id);
     }
@@ -884,6 +916,7 @@ const TicketBoard = (() => {
       t.request_id ? `<span class="ticket-chip">${icon('layers')}<span class="ticket-request-label">${escHtml(t.request_id)}</span></span>` : '',
       t.external_ref ? `<span class="ticket-chip">${escHtml(t.external_ref)}</span>` : '',
       t.blast_radius === 'high' ? '<span class="ticket-chip ticket-radius">High radius</span>' : '',
+      t.radius_source ? `<span class="ticket-chip ticket-radius-source">Radius: ${escHtml(t.radius_source)}</span>` : '',
       t.archived_at_ms ? '<span class="ticket-chip">archived</span>' : '',
     ].join('');
     const who = t.assignee
@@ -930,7 +963,8 @@ const TicketBoard = (() => {
   function wireDrag(el) {
     el.querySelectorAll('.ticket-card[draggable="true"]').forEach((card) => {
       card.addEventListener('dragstart', (e) => {
-        if (e.target?.closest?.(INTERACTIVE) || moving.has(card.dataset.ticket) || nearSplitter(e)) { e.preventDefault(); return; }   // a control is not a drag handle
+        if (moving.has(card.dataset.ticket)) { e.preventDefault(); failMove(card.dataset.ticket, 'a move is in flight'); return; }
+        if (e.target?.closest?.(INTERACTIVE) || nearSplitter(e)) { e.preventDefault(); return; }   // a control is not a drag handle
         dragId = card.dataset.ticket;
         card.classList.add('dragging');
         if (e.dataTransfer) { e.dataTransfer.setData('text/plain', dragId); e.dataTransfer.effectAllowed = 'move'; }
@@ -944,16 +978,24 @@ const TicketBoard = (() => {
         return !!(t && movable(t) && col.dataset.status && columnStatus(t) !== col.dataset.status);
       };
       col.addEventListener('dragover', (e) => {
-        if (!accepts()) return;
+        // A browser sends `drop` only to a target whose dragover was cancelled, so a refusing column is enabled too:
+        // its drop shows the failure line. Only an accepting column is highlighted; the card's own column stays a no-op.
+        const dragged = dragId ? tickets.get(dragId) : null;
+        if (!dragged || (!accepts() && columnStatus(dragged) === col.dataset.status)) return;
         e.preventDefault();
         if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-        col.classList.add('drop-target');
+        if (accepts()) col.classList.add('drop-target');
       });
       col.addEventListener('dragleave', (e) => {
         if (!col.contains?.(e.relatedTarget)) col.classList.remove('drop-target');
       });
       col.addEventListener('drop', (e) => {
-        if (!accepts()) return;
+        if (!accepts()) {
+          // Dropped on its own column is a no-op; any other refusal (the Cancelled strip, a closed ticket) says why.
+          const t = dragId ? tickets.get(dragId) : null;
+          if (t && !(movable(t) && columnStatus(t) === col.dataset.status)) failMove(t.id, 'that column does not take tickets');
+          return;
+        }
         e.preventDefault();
         const id = dragId, to = col.dataset.status;
         endDrag();
@@ -1008,7 +1050,7 @@ const TicketBoard = (() => {
       });
     });
     root.querySelectorAll('.ticket-move').forEach((sel) => {
-      sel.addEventListener('change', () => moveTicket(sel.dataset.ticket, sel.value));
+      sel.addEventListener('change', () => moveTicket(sel.dataset.ticket, sel.value, true));
     });
     root.querySelectorAll('.ticket-archive').forEach((btn) => {
       btn.addEventListener('click', () => act(`/tickets/${encodeURIComponent(btn.dataset.ticket)}/archive`, { archived: btn.dataset.archive === 'true' }, 'archive'));

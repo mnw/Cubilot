@@ -49,9 +49,16 @@ test("a fake clock that never ends", () => { const tick = stepLimit("endless clo
   f("ignore-term.test.ts", `test("ignore term", () => { process.on("SIGTERM", () => {}); const p = Bun.spawn(["sh", "-c", "trap 'echo > $TERMFILE' TERM; while :; do sleep 0.05; done"]); writeFileSync(process.env.PIDFILE!, String(p.pid)); for (;;) {} });`);
   f("memory.test.ts", `test("memory", async () => {
   const p = Bun.spawn(["sleep", "300"]); writeFileSync(process.env.PIDFILE!, String(p.pid));
+  // Random data does not compress, and every page is written again at each step: under host memory pressure the macOS
+  // compressor cannot take these pages out of the RSS of the group.
   const keep: Buffer[] = [];
-  for (let i = 0; i < 8; i++) { keep.push(Buffer.alloc(50 * 1024 * 1024, 1)); await Bun.sleep(300); }   // about 400 MB in steps
-  await Bun.sleep(60000);
+  const touch = () => { for (const b of keep) for (let o = 0; o < b.length; o += 4096) b[o] ^= 1; };
+  for (let i = 0; i < 8; i++) {   // about 400 MB in steps
+    const b = Buffer.allocUnsafe(50 * 1024 * 1024);
+    for (let o = 0; o < b.length; o += 65536) crypto.getRandomValues(b.subarray(o, o + 65536));
+    keep.push(b); touch(); await Bun.sleep(300);
+  }
+  for (let i = 0; i < 600; i++) { touch(); await Bun.sleep(100); }
 }, 120000);`);
 });
 

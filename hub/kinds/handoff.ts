@@ -18,6 +18,7 @@ import { mintHandoffId, ts, validName, validRoomLabel } from "../core/ids";
 import { pausedRefusal } from "../core/auth";
 import { getRoomSettings, STAGE_ROLES } from "../core/ledger";
 import { ROLE_RECIPIENT_PREFIX, specFailState, type StageHooks } from "./stage";
+import { roomLead } from "./ticket";
 import {
   writeNutshellInTx,
   nutshellEntry,
@@ -160,6 +161,7 @@ export function handoffEntry(
   snapshot: HandoffSnapshot,
   eventKind: "handoff.new" | "handoff.update",
   replay = false,
+  lead: string | null = null,
 ): Entry {
   return {
     from: snapshot.from_agent,
@@ -174,6 +176,8 @@ export function handoffEntry(
     expires_at_ms: snapshot.expires_at_ms,
     replay,
     snapshot,
+    // The room lead: the bridge of the lead shows a result as a summary (human-touchpoints-checkpoint 13.1).
+    ...(lead ? { lead } : {}),
   };
 }
 
@@ -187,6 +191,7 @@ type CreateInput = {
   context?: unknown;
   ttl_seconds: number;
   room: string;
+  lead?: string | null;
 };
 
 const createHandoffVerb: VerbDecl<HandoffSnapshot, CreateInput> = {
@@ -222,7 +227,7 @@ const createHandoffVerb: VerbDecl<HandoffSnapshot, CreateInput> = {
         context: payload.context ?? null,
         ttl_seconds: payload.ttl_seconds,
       }),
-      entry: (post) => handoffEntry(post, "handoff.new"),
+      entry: (post) => handoffEntry(post, "handoff.new", false, payload.lead ?? null),
     };
   },
   scope: (post) => ({ kind: "to-agents", agents: [post.to_agent] }),
@@ -366,7 +371,7 @@ const SPEC_REQUEST_TEXT_MAX = 20_000;
 export function createSystemHandoff(db: Database, cap: HubCapabilities, h: { to: string; task: string; context: unknown; room: string }): HandoffSnapshot {
   const entity = createLedgerEntity({ decl: handoffDecl, db });
   const id = mintHandoffId();
-  return entity.apply(id, createHandoffVerb, { id, from: "system", to: h.to, task: h.task, context: h.context, ttl_seconds: HANDOFF_TTL_DEFAULT_SECONDS, room: h.room }, "system", cap).snapshot;
+  return entity.apply(id, createHandoffVerb, { id, from: "system", to: h.to, task: h.task, context: h.context, ttl_seconds: HANDOFF_TTL_DEFAULT_SECONDS, room: h.room, lead: roomLead(cap, h.room) }, "system", cap).snapshot;
 }
 
 export function createHandoffKind(db: Database, stage?: StageHooks): KindModule {
@@ -576,7 +581,7 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
           const r = entity.apply(
             id,
             createHandoffVerb,
-            { id, from, to, task, context: storedContext, ttl_seconds: ttl, room: handoffRoom },
+            { id, from, to, task, context: storedContext, ttl_seconds: ttl, room: handoffRoom, lead: roomLead(cap, handoffRoom) },
             from,
             cap,
           );
@@ -747,6 +752,28 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
     },
 
     {
+      // The full handoff, for the `read_handoff` tool. Room-scoped: the human reads every room, an agent only its own.
+      // `agent` is self-asserted like every `by`; the bearer token is the hub's auth.
+      method: "GET",
+      path: /^\/handoffs\/([^/]+)$/,
+      auth: "read",
+      handler: (req, cap, params) => {
+        const id = params.id;
+        if (!HANDOFF_ID_RE.test(id)) return Response.json({ error: "invalid handoff id" }, { status: 400 });
+        const name = (new URL(req.url).searchParams.get("agent") ?? "").trim();
+        if (!validName(name)) return Response.json({ error: "invalid agent" }, { status: 400 });
+        const caller = cap.agents.get(name);
+        if (!caller) return Response.json({ error: `unknown agent: ${name}` }, { status: 400 });
+        const snap = entity.load(id);
+        if (!snap) return Response.json({ error: "not found" }, { status: 404 });
+        if (name !== cap.config.humanName && caller.room !== snap.room) {
+          return Response.json({ error: "handoff is in another room" }, { status: 403 });
+        }
+        return Response.json(snap);
+      },
+    },
+
+    {
       method: "GET",
       path: "/handoffs",
       auth: "read",
@@ -789,7 +816,7 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
     return entity
       .listByStatus({ status: "pending", limit: 1000 })
       .filter((s) => s.from_agent === agent.name || s.to_agent === agent.name)
-      .map((s) => handoffEntry(s, "handoff.new", true));
+      .map((s) => handoffEntry(s, "handoff.new", true, roomLead(_cap, s.room)));
   }
 
   return {
@@ -797,7 +824,7 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
     migrate: (d: Database) => entity.migrate(d),
     routes: withLedgerRequired(routes),
     pendingFor,
-    toolNames: ["send_handoff", "accept_handoff", "decline_handoff", "cancel_handoff"],
+    toolNames: ["send_handoff", "accept_handoff", "decline_handoff", "cancel_handoff", "read_handoff"],
   };
 }
 
