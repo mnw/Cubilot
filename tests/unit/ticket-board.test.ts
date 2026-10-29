@@ -3725,6 +3725,20 @@ describe("request label and blockers (6.2, 6.3)", () => {
     expect(lock("a")).toBe("2");
   });
 
+  test("merged blocker shows no lock", async () => {
+    await show(mk("a", "queued", { blocked_by: ["b"], open_blockers: [] }), mk("b", "in_review"));   // b is not done, the hub cleared it (merged into staging)
+    expect(lock("a")).toBeNull();
+    await show(mk("a", "queued", { blocked_by: ["b"], open_blockers: ["b"] }), mk("b", "cancelled"));
+    expect(lock("a")).toBe("1");                         // a cancelled blocker still blocks
+  });
+
+  test("merged then cancelled blocker shows a lock", async () => {
+    await show(mk("a", "queued", { blocked_by: ["b"], open_blockers: [] }), mk("b", "in_review"));
+    expect(lock("a")).toBeNull();                        // merged: the hub cleared it
+    ev(mk("b", "cancelled"), 9);
+    expect(lock("a")).toBe("1");                         // cancelled still blocks, with no fresh list for a
+  });
+
   test("a blocker the board does not hold keeps the server's result; absence never counts as done", async () => {
     await show(mk("a", "queued", { blocked_by: ["x", "y"], open_blockers: ["x"] }));
     expect(lock("a")).toBe("1");                         // x open on the server, y done on the server

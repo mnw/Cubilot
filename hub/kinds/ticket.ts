@@ -21,7 +21,7 @@ import { createLedgerEntity, ledgerConflictResponse, withLedgerRequired } from "
 import { IMAGE_URL_RE, imageUrlToPath } from "../core/attachments";
 import { insertEvent } from "../core/events";
 import { ts, validRoomLabel } from "../core/ids";
-import { validateBlockedBy } from "./ticket-blockers";
+import { validateBlockedBy, openBlockerIds } from "./ticket-blockers";
 import { STAGE_ROLES, type StageRole } from "../core/ledger";
 import { ruleRadius } from "../core/radius-rule";
 import { createPermissionWithSideEffect, dismissPendingPermission } from "./permission";
@@ -210,14 +210,10 @@ function planningNoteValue(v: unknown): string | undefined {
   return t && [...t].length <= TICKET_PLANNING_NOTE_MAX_CHARS ? t : undefined;
 }
 
-/** A ticket's blocker ids and the ones still open (status other than done: the claim gate's rule). */
+/** A ticket's blocker ids and the ones still open (the one hub rule: done, or merged into staging). */
 export function blockerFields(db: Database, ticketId: string): { blocked_by: string[]; open_blockers: string[] } {
-  const rows = db
-    .query<{ blocker_id: string; status: string | null }, [string]>(
-      "SELECT b.blocker_id, t.status FROM ticket_blockers b LEFT JOIN tickets t ON t.id = b.blocker_id WHERE b.ticket_id = ? ORDER BY b.rowid",
-    )
-    .all(ticketId);
-  return { blocked_by: rows.map((r) => r.blocker_id), open_blockers: rows.filter((r) => r.status !== "done").map((r) => r.blocker_id) };
+  const rows = db.query<{ blocker_id: string }, [string]>("SELECT blocker_id FROM ticket_blockers WHERE ticket_id = ? ORDER BY rowid").all(ticketId);
+  return { blocked_by: rows.map((r) => r.blocker_id), open_blockers: openBlockerIds(db, ticketId) };
 }
 
 export function ticketEntry(
@@ -398,15 +394,12 @@ const claimTicketVerb: VerbDecl<TicketSnapshot, Record<string, never>> = {
     }
     // Assigned while queued: only the assignee claims it (the human reassigns with the assign verb).
     if (prior.assignee !== null && prior.assignee !== actor) return conflict(`assigned to ${prior.assignee}`);
-    // A blocker that is not done keeps the ticket unclaimable. A cancelled blocker still blocks (the human or the
+    // A blocker that is not done or merged into staging keeps the ticket unclaimable. A cancelled blocker still blocks (the human or the
     // lead removes it from the list). The human is not gated. Read here, outside the write transaction: the hub is
     // the single writer (design decision 3).
     if (!isHuman(actor, cap)) {
-      const open = cap.db
-        .query<{ id: string; status: string }, [string]>(
-          "SELECT t.id, t.status FROM ticket_blockers b JOIN tickets t ON t.id = b.blocker_id WHERE b.ticket_id = ? AND t.status != 'done' ORDER BY b.rowid LIMIT 1",
-        )
-        .get(prior.id);
+      const openId = openBlockerIds(cap.db, prior.id)[0];
+      const open = openId ? { id: openId, status: cap.db.query<{ status: string }, [string]>("SELECT status FROM tickets WHERE id = ?").get(openId)?.status ?? "missing" } : undefined;
       if (open) return conflict(`blocked by ${open.id} (${open.status})`);
     }
     return {
@@ -1587,11 +1580,7 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
         const request = t.request_id ? ` request ${t.request_id}` : "";
         out.push(`- ${t.id} [${t.status}] (${t.blast_radius} radius, priority ${t.priority}${request ? "," + request : ""}) ${oneLine(t.title)}`);
         out.push(`  Done when: ${criteria}`);
-        const open = cap.db
-          .query<{ id: string; status: string }, [string]>(
-            "SELECT b.blocker_id AS id, COALESCE(t.status, 'missing') AS status FROM ticket_blockers b LEFT JOIN tickets t ON t.id = b.blocker_id WHERE b.ticket_id = ? AND COALESCE(t.status, '') != 'done' ORDER BY b.rowid",
-          )
-          .all(t.id);
+        const open = openBlockerIds(cap.db, t.id).map((id) => ({ id, status: cap.db.query<{ status: string }, [string]>("SELECT status FROM tickets WHERE id = ?").get(id)?.status ?? "missing" }));
         if (open.length) out.push(`  Blocked by: ${open.map((b) => `${b.id} (${b.status})`).join(", ")}`);
       }
       return out;
