@@ -84,6 +84,9 @@ Today the human and the agents use the same token. The bridge reads `hub.token` 
 1. A human action takes its identity from the session, not from `by`. The hub ignores a `by` that names the human when the caller has an agent token.
 2. The routes that only the human may call (Approve, Allow, rulings and overrule, radius raise, room settings, Pause room, launch and remove agents) refuse an agent token with 403.
 3. An agent token never opens the UI. A UI session never gets the agent tools.
+4. When the human is a separate caller, an Allow or an Approve can come from the phone: one tap on the "Needs you" line, with the passkey step-up. Then a wait for the human no longer means a wait until the human is at the terminal (decision 2026-10-29; see Part 6, item 15).
+
+Until this is built, only the auto-mode classifier of the agent sessions stops an agent that sends a human action through `curl` (seen on 2026-10-29: the classifier refused the Orchestrator's Allow on P6-01). That is not a hub check.
 
 ### Tests
 

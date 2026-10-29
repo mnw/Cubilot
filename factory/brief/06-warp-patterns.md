@@ -372,6 +372,38 @@ The human tests and merges staging into main, or opens a fix request. Each rulin
 1. The second model: OpenAI on Pi is not set up yet (Part 2, finding 6). Until then, the second review is opus on Claude, in a new session.
 2. Does an arbiter replace the human well enough? Measure it with the overrules in the delivery reports.
 
+### 15. Work continues while a ticket waits
+
+Status: decision 2026-10-29 (human). Build it before item 11, because it is smaller.
+
+#### Goal
+
+A ticket that waits for the human, or that fails, stops only that ticket. All other work continues. On the night of 2026-10-28 the factory did no work for 7 hours with free slots (worker 4, tester 2): every open Part 6 ticket waited for one Allow on P6-01, which was already merged on staging, or for a spec review that the hub accepted only from the human.
+
+Warp Factories (checked 2026-10-29) has the same human gates (spec approval, human merge), but each task ends as its own pull request, so a waiting task blocks nothing else. The reviewer can also return "needs a human decision" instead of a FAIL.
+
+#### Hub changes
+
+| Rule | Code | Ticket |
+|---|---|---|
+| A ticket blocked by another ticket can start when the blocker is merged into staging. The done status is not needed. New ticket branches are cut from staging, so the merged code is in them. | Ticket blockers: a blocker counts as cleared when its branch is merged into staging (the hub checks `git merge-base --is-ancestor`) or when it is done | new |
+| The spec-review stop counts FAILs per ticket, not per request. A spec review that the human starts sets the count to 0. A new follow-up ticket starts at 0. | Spec review start (change to t_65a8) | new |
+| A ticket that waits for the human goes on one "Waits for you" list with its facts (ids, commits, PASSes, the question). The Orchestrator then continues with every ticket that does not depend on it. | "Needs you" line plus Orchestrator rule | with item 9 |
+
+#### Orchestrator rules (role file)
+
+1. **Review scope is fixed.** A review checks the ticket criteria, the tests and security. Any other finding becomes a follow-up ticket and does not fail the review. A finding that repeats the same defect as the ticket's purpose stays blocking.
+2. **Park, do not loop.** After two FAILs on one ticket, the ticket goes to "Waits for you" (until the arbiter of item 11 exists). The Orchestrator does not wait for the answer before it starts other tickets.
+3. **Unclear instruction: continue.** When a human message is unclear, the Orchestrator continues under the last clear rule and asks one question. It does not read an unclear message as a stop of all work.
+4. **No self-approval.** An agent never approves its own permission and never acts as the human (Part 12, "Human and agent are different callers"). The Orchestrator asks, and works on other tickets while it waits.
+
+#### Tests
+
+1. Ticket B blocked by A: A is merged into staging but not done; B can be queued and its stage starts.
+2. A request with 5 spec FAILs on ticket X: a spec review of a new ticket Y in the same request starts (no 409).
+3. After a human-started spec review, the FAIL count of that ticket is 0.
+4. With one ticket waiting for the human and three free tickets, three worker stages run.
+
 ## Ideas for later
 
 ### 12. Learning from the human's corrections
