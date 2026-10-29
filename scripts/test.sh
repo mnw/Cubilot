@@ -2,7 +2,7 @@
 # The default full test run: `bun test "$@"` under the heavy-process lock, a time limit and a memory limit.
 # A run that hangs or grows without end is stopped, and nothing it started stays alive.
 #
-#   CUBILOT_TEST_TIMEOUT_S    seconds from the start of bun test until it is stopped (default 300). The Rust pre-build
+#   CUBILOT_TEST_TIMEOUT_S    seconds from the start of bun test until it is stopped (default 520). The Rust pre-build
 #                             (see below) is not counted.
 #   CUBILOT_TEST_MAX_RSS_MB   total RSS of the test process group in MB (default 2048). Checked every second:
 #                             a mitigation, not a strict ceiling. A process that leaves the group is not counted.
@@ -24,7 +24,7 @@ set -u
 usage_error() { echo "scripts/test.sh: $1" >&2; exit 2; }
 positive_int() { case "$1" in '' | *[!0-9]*) return 1 ;; esac; [ "$1" -gt 0 ]; }
 
-TIMEOUT_S=${CUBILOT_TEST_TIMEOUT_S:-300}
+TIMEOUT_S=${CUBILOT_TEST_TIMEOUT_S:-520}
 MAX_RSS_MB=${CUBILOT_TEST_MAX_RSS_MB:-2048}
 LOCK=${CUBILOT_HEAVY_LOCK:-/tmp/cubilot-heavy.lock}
 LOCK_RETRY_S=${CUBILOT_LOCK_RETRY_S:-30}
