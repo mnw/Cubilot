@@ -1882,9 +1882,16 @@ export function createStageRuntime(
       base = mb.out;
     }
     if (base === commit) return refuse("The commit is not new work: it equals the base.");
+    const older = runGit(project, ["merge-base", "--is-ancestor", commit, base]);
+    if (older.code === 0) return refuse("The commit is not new work: it is an ancestor of the base.");
+    if (older.code !== 1) return refuse(`Git: ${older.err || "merge-base failed"}`);
     const fromBase = runGit(project, ["merge-base", "--is-ancestor", base, commit]);
-    if (fromBase.code === 1) return refuse("The commit is not new work: it does not descend from the base.");
-    if (fromBase.code !== 0) return refuse(`Git: ${fromBase.err || "merge-base failed"}`);
+    if (fromBase.code === 0) return null;
+    if (fromBase.code !== 1) return refuse(`Git: ${fromBase.err || "merge-base failed"}`);
+    // The base is not an ancestor: the branch was rebased. The commit is new work when it holds commits beyond staging.
+    const fork = runGit(project, ["merge-base", commit, "refs/heads/staging"]);
+    if (fork.code !== 0 || !FULL_SHA_RE.test(fork.out)) return refuse(`Git: no merge-base with staging. ${fork.err}`.trim());
+    if (fork.out === commit) return refuse("The commit is not new work: it holds no commit beyond staging.");
     return null;
   }
 
