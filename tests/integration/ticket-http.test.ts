@@ -36,7 +36,7 @@ describe("ticket kind over HTTP", () => {
 
     const blocked = await postJson(hub, `/tickets/${id}/transition`, { by: "bob", to: "done" });
     expect(blocked.status).toBe(409);
-    expect((blocked.json as { approval_request_id: unknown }).approval_request_id).toBeNull();
+    expect((blocked.json as { error: string }).error).toContain("Validator PASS");   // L4: the missing item, no approval key
 
     const ask = await postJson(hub, `/tickets/${id}/approval`, { by: "bob" });
     expect(ask.status).toBe(200);
@@ -51,7 +51,9 @@ describe("ticket kind over HTTP", () => {
     const verdictVersion = (verdict.json as { version?: number; snapshot?: { version?: number } }).snapshot?.version
       ?? (verdict.json as { version?: number }).version;
     expect(typeof verdictVersion).toBe("number");
-    const done = await postJson(hub, `/tickets/${id}/transition`, { by: "bob", to: "done" });
+    // L4: the Allow does not close the ticket for an agent. The human's own move does.
+    expect((await postJson(hub, `/tickets/${id}/transition`, { by: "bob", to: "done" })).status).toBe(409);
+    const done = await postJson(hub, `/tickets/${id}/transition`, { by: hub.humanName, to: "done" });
     expect(done.status).toBe(200);
 
     const all = await getJson(hub, `/tickets?room=r1&status=all&token=${hub.token}`);

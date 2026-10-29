@@ -653,15 +653,17 @@ describe("only the stage logic queues launches", () => {
     expect(users).toEqual(["hub/kinds/stage.ts"]);
   });
 
-  test("inside stage.ts, enqueueLaunch is called only from startWaiting (drainQueue, evaluateStages and a saved limit all go through it)", () => {
+  test("inside stage.ts, enqueueLaunch is called only from startWaiting (drainQueue, evaluateStages and a saved limit all go through it) and the second Validator start (L4)", () => {
     const src = readFileSync(join(import.meta.dir, "../../hub/kinds/stage.ts"), "utf8");
     const code = src.split("\n").filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*") && !l.trim().startsWith("/*"));
     const calls = code.map((l, i) => ({ l, i })).filter(({ l }) => /\benqueueLaunch\(/.test(l) && !/function enqueueLaunch\(/.test(l) && !/^\s*enqueueLaunch\(input/.test(l));
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
     const start = code.findIndex((l) => /function startWaiting\(/.test(l));
     const end = code.findIndex((l, i) => i > start && /^  function enqueueLaunch\(/.test(l));
     expect(calls[0].i).toBeGreaterThan(start);
     expect(calls[0].i).toBeLessThan(end);
+    expect(calls[1].i).toBeGreaterThan(end);
+    expect(calls[1].l).toContain('roleHarness("validator")');
     // the two other launch paths reach it through startWaiting
     const body = (name: string) => {
       const from = code.findIndex((l) => new RegExp(`function ${name}\\(`).test(l));

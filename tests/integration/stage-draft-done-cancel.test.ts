@@ -200,7 +200,7 @@ describe("a move to draft or done cancels the queued stages", () => {
     expect(shell.reqs.filter((r) => r.kind === "close")).toHaveLength(0);
   });
 
-  test("(i) a Validator PASS moves a low ticket to done and cancels its queued stage of another role, after stage.passed commits", async () => {
+  test("(i) a Validator PASS no longer moves a low ticket to done: the ticket goes to the lead and its queued stage stays (L4)", async () => {
     const { hub, shell } = await boot("di", { limits: { validator: 3, tester: 3 } });
     const t = await postJson(hub, "/tickets", { by: "Orchestrator", title: "r", acceptance_criteria: "c", blast_radius: "low", role: null, status: "in_review" });
     const id = (t.json as { snapshot: { id: string } }).snapshot.id;
@@ -221,13 +221,12 @@ describe("a move to draft or done cancels the queued stages", () => {
     await sleep(300);
     const all = rows(hub, id);
     expect(all.find((s) => s.id === v.id)!.status).toBe("passed");
-    expect(await api(hub, "s_00000000000000aa")).toMatchObject({ status: "cancelled", reason: `${ST} done` });
+    expect(await api(hub, "s_00000000000000aa")).toMatchObject({ status: "queued" });
     const db = new Database(hub.ledgerPath, { readonly: true });
     try {
       const ev = db.query("SELECT seq, kind FROM events WHERE kind IN ('stage.passed', 'ticket.done', 'stage.cancelled') ORDER BY seq").all() as Array<{ seq: number; kind: string }>;
-      expect(ev.map((e) => e.kind)).toEqual(["stage.passed", "ticket.done", "stage.cancelled"].sort((a, b) => ev.findIndex((e) => e.kind === a) - ev.findIndex((e) => e.kind === b)));
-      expect(ev[ev.length - 1].kind).toBe("stage.cancelled");
-      expect((db.query("SELECT status FROM tickets WHERE id = ?").get(id) as { status: string }).status).toBe("done");
+      expect(ev.map((e) => e.kind)).toEqual(["stage.passed"]);
+      expect((db.query("SELECT status FROM tickets WHERE id = ?").get(id) as { status: string }).status).toBe("in_review");
     } finally { db.close(); }
     expect(shell.launches()).toHaveLength(1);
   });
