@@ -421,6 +421,67 @@ The factory works on many tickets at the same time. One ticket that waits or fai
 5. **Width, not length.** At each point of the plan, at least as many tickets can start as there are free worker slots, or the request says why not. The longest chain of blockers is 3 links or fewer, unless the request says why.
 6. **A failing ticket does not hold its dependents.** When ticket A fails twice, its dependents continue against the contract (rule 2). Only their merge waits for A.
 
+#### Ticket format
+
+A ticket describes a result for a reader who knows the product, not a message from one agent to another. History, review ids, message numbers and process rules do not go in the ticket.
+
+```
+Title: <the behaviour, in a few words>         e.g. "A decision answer survives a failed send"
+Why: <one or two sentences: the problem for the user or the factory>
+Acceptance criteria:
+  - <observable behaviour, one per line, each testable>
+Verify:
+  - <test file and test name, or command>
+Out of scope:
+  - <what this ticket does not change>
+Links: <request, parent ticket, review that found it>   (one line, ids only)
+```
+
+Rules:
+1. **Criteria describe behaviour,** not steps and not code: "When the send fails, the answer stays undelivered and the next lead session gets it once," not "mark delivered after the SSE enqueue in decision.ts."
+2. **Process rules live in the role files,** not in tickets: the branch, signing, `./scripts/test.sh`, `tsc`, the sidecar build, what to do when signing fails. Every ticket gets them from the role files.
+3. **No waivers in criteria.** A known failing test has its own ticket. The Tester names that ticket in its report.
+4. **Where it came from goes in Links,** as ids. The words "the human's request", "msg 813", "rework 4", "Plan: current staging" do not go in the text.
+5. **Plan check (item 8):** a criterion with a commit command, a path to a binary, a message number or the word "waiver" gives a `warning`.
+
+Two views of one ticket:
+
+1. **The ticket** (what the human reads on the board and in the ticket view): only the fields above.
+2. **The agent start message** (what a new agent session reads): the hub builds it at launch from three parts, in this order:
+   - the role file of the stage (worker, tester, validator), with the fixed process rules;
+   - the ticket fields;
+   - the agent notes of the ticket: the facts a new session needs to work, such as the file and line of a finding, the review findings to fix, the base commit. Short lines, facts only.
+
+   The context pack of Part 4 carries this message. The human does not need to read it.
+
+The agent notes are a separate field. The ticket view shows them folded, under "For the agents", and the board does not show them. An agent writes its own handover there for the next stage (for example the Worker for the Tester), not in the criteria.
+
+Example, t_3fcb4f3833b1c31b written in this format:
+
+```
+Title: A decision answer survives a failed send
+Why: An answer can be marked delivered and then lost if the send to the lead's stream fails. The human's answer must reach the Orchestrator.
+Acceptance criteria:
+  - When the send to the lead stream fails, the answer stays undelivered.
+  - The next lead session that connects receives the answer once.
+  - Answers that were sent before are not sent again.
+Verify:
+  - tests/integration/decision-kind.test.ts, test "claim-to-send"
+  - tests/integration/decision-kind.test.ts, existing exact-once tests unchanged
+Out of scope:
+  - Decision permissions and state transitions.
+  - Acknowledgement from the lead after it reads the answer.
+Links: request r-2026-10-28-part6-touchpoints, parent P6-01 (t_a2466a1bed95cda9), review h_825f6a88063bc39e
+```
+
+Agent notes for the same ticket (folded in the ticket view):
+
+```
+- Finding: the stream marks the decision delivered before the SSE enqueue (review h_0818f7b5b400240d).
+- Code: hub/kinds/decision.ts (delivery claim), hub/features/streams.ts (enqueue).
+- Base: staging after 07135f1 (P6-01 merge).
+```
+
 #### For the current Part 6 plan
 
 The Orchestrator checks each open `blocked_by` against rule 1 and removes each link that is only a shared file. It reports the links it removed and the links it kept, with the code each kept link needs.

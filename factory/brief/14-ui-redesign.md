@@ -68,6 +68,7 @@ Most screens show data the hub has today (checked against `hub/` on 2026-10-28).
 
 | Screen | Element | Delivered by |
 |---|---|---|
+| Ticket view | Ticket fields first (title, why, criteria, verify, out of scope, links); agent notes folded under "For the agents"; the board card shows the title only | Part 6, item 16 (ticket format, agent notes field) |
 | Decisions, Room, Ticket | Decision cards, questions with options, rulings, Overrule, "Decided without you" | Part 6 (`decision` Kind: `POST /decisions`, `/answer`, `/overrule`) |
 | Request | Plan with radius source, features, scope changes since the Approve | Part 6 (P6-02, P6-03) |
 | Delivery | Delivery report: done tickets, rulings, criteria edits, suite result, live-check steps | Part 6 (`GET /requests/<room>/<id>/delivery`, P6-08) |
