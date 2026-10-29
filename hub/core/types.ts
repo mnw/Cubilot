@@ -148,6 +148,8 @@ export type Entry = {
   room?: string | null;
   /** Called by the agent stream just before it sends this entry. False skips the send. Not serialised. */
   claim?: () => boolean;
+  /** Called when the send after a true claim() did not enqueue (stream closed). Undoes the claim. Not serialised. */
+  unclaim?: () => void;
   [extra: string]: unknown;
 };
 

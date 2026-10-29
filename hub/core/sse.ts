@@ -99,7 +99,8 @@ export class DropQueue<T> {
   }
 }
 
-export type SSESend = (obj: unknown, id?: number | string) => void;
+// Returns true when the frame was enqueued, false when the stream was closed or the enqueue threw.
+export type SSESend = (obj: unknown, id?: number | string) => boolean;
 
 export function makeSSE(
   setup: (send: SSESend, signal: AbortSignal) => void | Promise<void>,
@@ -111,14 +112,16 @@ export function makeSSE(
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const send: SSESend = (obj, id) => {
-        if (closed) return;
+        if (closed) return false;
         try {
           const idLine = id !== undefined ? `id: ${id}\n` : "";
           controller.enqueue(
             encoder.encode(`${idLine}data: ${JSON.stringify(obj)}\n\n`),
           );
+          return true;
         } catch {
           closed = true;
+          return false;
         }
       };
       try {

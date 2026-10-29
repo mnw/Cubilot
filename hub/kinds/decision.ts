@@ -293,8 +293,10 @@ export function createDecisionKind(db: Database): DecisionKind {
     markDelivered(id);
     return true;
   };
+  // The send after a claim did not enqueue: the answer was not delivered, so the next lead session gets it from pendingFor.
+  const unclaimFor = (id: string) => () => { db.run("DELETE FROM decision_deliveries WHERE decision_id = ?", [id]); };
   const leadEntry = (d: DecisionSnapshot, lead: string, from: string): Entry =>
-    ({ from, to: lead, room: d.room, ts: ts(), image: null, text: leadText(d), claim: claimFor(d.id) });
+    ({ from, to: lead, room: d.room, ts: ts(), image: null, text: leadText(d), claim: claimFor(d.id), unclaim: unclaimFor(d.id) });
 
   const answerPrefix = (d: DecisionSnapshot) => `Decision ${d.id} answered:`;
 

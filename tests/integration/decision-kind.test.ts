@@ -4,6 +4,7 @@ import { Database } from "bun:sqlite";
 import { migrateLedger } from "../../hub/core/ledger";
 import { insertEvent } from "../../hub/core/events";
 import { createDecisionKind, parseEscalation, type DecisionStatus } from "../../hub/kinds/decision";
+import { deliverEntry } from "../../hub/features/streams";
 import { createTicketKind } from "../../hub/kinds/ticket";
 import { LedgerConflict } from "../../hub/core/types";
 import { spawnHub, type HubHandle } from "../helpers/hub";
@@ -454,5 +455,30 @@ describe("decision kind: rework 4, delivery needs a lead stream", () => {
     } finally {
       await hub.kill();
     }
+  });
+});
+
+describe("decision kind: claim-to-send", () => {
+  test("a send that fails after the claim leaves the answer undelivered; the next stream gets it once", () => {
+    const { kind, cap, emitted, create, db } = setup();
+    const id = create("open").id;
+    kind.api.move(cap, id, "answered", "human", { option: "A" } as any);
+    const entry = () => kind.pendingFor({ name: "boss", room: "r1", permanent: false } as any, cap)[0] as any;
+    const first = entry();
+    expect(first).toBeDefined();
+    let sends = 0;
+    deliverEntry(first, () => { sends++; return false; });            // claim passed, enqueue failed
+    expect(sends).toBe(1);
+    expect(db.query("SELECT 1 FROM decision_deliveries WHERE decision_id = ?").get(id)).toBeNull();
+    const got: unknown[] = [];
+    const ok = (o: unknown) => { got.push(o); return true; };
+    const second = entry();
+    expect(second).toBeDefined();
+    deliverEntry(second, ok);
+    expect(got).toHaveLength(1);
+    expect(kind.pendingFor({ name: "boss", room: "r1", permanent: false } as any, cap)).toHaveLength(0);
+    deliverEntry(second, ok);                                          // a second copy is skipped
+    expect(got).toHaveLength(1);
+    void emitted;
   });
 });

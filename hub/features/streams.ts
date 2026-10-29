@@ -8,6 +8,12 @@ import type { RoomHydrator } from "../core/room-hydrator";
 import type { RoomSummariser } from "../core/room-summariser";
 import type { BriefingPayload } from "../core/briefing";
 
+/** Claim, then send. If the send did not enqueue, undo the claim so the next stream gets the entry again. */
+export function deliverEntry(out: Entry, send: (obj: unknown) => boolean): void {
+  if (out.claim?.() === false) return;
+  if (!send(out)) out.unclaim?.();
+}
+
 export type StreamsDeps = {
   sessionId: string;
   uiQueueMax: number;
@@ -140,7 +146,7 @@ export function createStreamHandlers(deps: StreamsDeps): StreamHandlers {
             for (const entry of k.pendingFor(ctx, cap)) {
               if (entry.room != null && entry.room !== myRoom) continue;
               const out = agents.forDelivery(agent, entry);   // a pause that started while the agent was away still applies
-              if (out && out.claim?.() !== false) send(out);
+              if (out) deliverEntry(out, send);
             }
           }
         } catch (e) {
@@ -154,7 +160,7 @@ export function createStreamHandlers(deps: StreamsDeps): StreamHandlers {
         for await (const lease of agents.subscribeLeased(agent, live)) {
           if (!lease.take()) break;
           const out = lease.deliverable();   // the pause may have started since the lease was yielded
-          if (out && out.claim?.() !== false) send(out);
+          if (out) deliverEntry(out, send);
         }
       } finally {
         agents.releaseLiveStream(self, mine);
