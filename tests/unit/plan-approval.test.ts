@@ -119,7 +119,7 @@ describe("plan waits for your approval (spec-review 4.4)", () => {
     await flush();
     const post = e.calls.find((c) => c.init?.method === "POST")!;
     expect(post.path).toBe("/requests/r1/req-1/approve");
-    expect(JSON.parse(post.init.body)).toEqual({ by: "human" });
+    expect(JSON.parse(post.init.body)).toMatchObject({ by: "human", scope: { features: [], tickets: [] } });
     expect(e.root.hidden).toBe(true);
     expect(e.messages).toHaveLength(0);
   });
@@ -143,7 +143,7 @@ describe("plan waits for your approval (spec-review 4.4)", () => {
   test("ticket and stage events reload the list", async () => {
     const e = setup([]);
     await flush();
-    expect(Object.keys(e.observers).sort()).toEqual(["cancel_trace", "stage", "ticket"]);
+    expect(Object.keys(e.observers).sort()).toEqual(["cancel_trace", "request", "stage", "ticket"]);
     e.setWaiting([plan("req-2", ["t_a"], ["x"])]);
     e.observers.ticket();
     await new Promise((r) => setTimeout(r, 300));

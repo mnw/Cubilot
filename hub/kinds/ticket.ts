@@ -26,7 +26,7 @@ import { STAGE_ROLES, getRoomSettings, type StageRole } from "../core/ledger";
 import { ruleRadius } from "../core/radius-rule";
 import { createPermissionWithSideEffect, dismissPendingPermission } from "./permission";
 import type { StageHooks } from "./stage";
-import { approveRequest, ensureRequestsTable, needsFirstApprove, requestExists } from "./request";
+import { approveRequest, currentScope, ensureRequestsTable, needsApprove, needsFirstApprove, requestExists, requestFacts } from "./request";
 
 // ---------- Types ----------
 
@@ -931,6 +931,13 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
           }
           status = body.status as CreateInput["status"];
         }
+        // The Approve rule holds at creation too: the lead creates a queued ticket only with a request that needs no
+        // Approve (a new ticket always adds to the scope). Intake is the human's and the lead's alone, as for a move.
+        if (status === "queued" && !isHuman(by, cap) && by === roomLead(cap, room)) {
+          if (requestId === null) return Response.json({ error: "a ticket without a request_id: only the human may queue it" }, { status: 403 });
+          const facts = requestFacts(db, room, requestId);
+          if (facts && needsApprove(facts)) return Response.json({ error: "the request needs the human's Approve: create the ticket as draft" }, { status: 403 });
+        }
         let assignee: string | null = null;
         if (body.assignee !== undefined && body.assignee !== null && body.assignee !== "") {
           if (typeof body.assignee !== "string") return Response.json({ error: "invalid assignee" }, { status: 400 });
@@ -1071,6 +1078,13 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
         if (!isHuman(a.name, cap)) return Response.json({ error: "only the human may approve a request" }, { status: 403 });
         const known = db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM tickets WHERE request_id = ? AND room = ?").get(requestId, room)!.n;
         if (known === 0 && !requestExists(db, room, requestId)) return Response.json({ error: `no request ${requestId} in room ${room}` }, { status: 404 });
+        // The card names the scope it shows. A lead edit after the card loaded changes the scope: the Approve then waits for a new look.
+        if (body.scope !== undefined && body.scope !== null) {
+          const now = currentScope(db, room, requestId);
+          if (now && JSON.stringify(body.scope) !== JSON.stringify(now)) {
+            return Response.json({ error: "the scope of the request changed since the card loaded: reload and look again" }, { status: 409 });
+          }
+        }
         // The Approve is its own transaction (one request.approved event with the scope). The queue transaction follows it.
         // A crash between the two leaves an approval and drafts: a repeated Approve queues the drafts that are left.
         try {

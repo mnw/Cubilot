@@ -376,6 +376,7 @@ export function createRequestKind(db: Database): RequestKind {
           const owner = sourceRoom(db, source);
           if (owner === null || owner.room !== who.room) return Response.json({ error: "source is not a record of this room" }, { status: 400 });
           if (owner.request_id && parent === null) return Response.json({ error: "the source belongs to a request: name parent_request_id" }, { status: 400 });
+          if (owner.request_id && parent !== owner.request_id) return Response.json({ error: "parent_request_id must be the request of the source" }, { status: 400 });
         }
         try {
           const snapshot = api.create(cap, { room: who.room, request_id: b.request_id, origin, features, parent_request_id: parent, source }, who.by);
@@ -468,7 +469,9 @@ function sourceRoom(db: Database, source: string): { room: string; request_id: s
     return (
       db
         .query<{ room: string; request_id: string | null }, [string]>(
-          "SELECT t.room AS room, s.request_id AS request_id FROM stage s JOIN tickets t ON t.id = s.ticket_id WHERE s.id = ?",
+          `SELECT COALESCE((SELECT room FROM tickets WHERE id = s.ticket_id),
+                           (SELECT t.room FROM stage_scope sc JOIN tickets t ON t.id = sc.ticket_id WHERE sc.stage_id = s.id ORDER BY sc.ticket_id LIMIT 1)) AS room,
+                   s.request_id AS request_id FROM stage s WHERE s.id = ?`,
         )
         .get(source) ?? null
     );
