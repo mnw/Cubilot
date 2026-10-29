@@ -233,6 +233,9 @@ Note (2026-10-27): the Orchestrator's own note (design step 5) and its memory ar
 
 ### 8. Plan check before the spec review
 
+Changed by Part 18 (lean flow, 2026-10-29): there is no spec review per ticket; the plan check never blocks.
+
+
 Status: decision 2026-10-27 (human). Build it after item 7.
 
 #### Goal
@@ -374,6 +377,9 @@ The human tests and merges staging into main, or opens a fix request. Each rulin
 
 ### 15. Work continues while a ticket waits
 
+Superseded by Part 18 (lean flow, 2026-10-29), except the "Waits for you" list.
+
+
 Status: decision 2026-10-29 (human). Build it before item 11, because it is smaller.
 
 #### Goal
@@ -405,6 +411,9 @@ Warp Factories (checked 2026-10-29) has the same human gates (spec approval, hum
 4. With one ticket waiting for the human and three free tickets, three worker stages run.
 
 ### 16. Plans for parallel work
+
+Partly superseded by Part 18 (lean flow, 2026-10-29). The ticket format and rule 1 (a blocker only for code) stay.
+
 
 Status: decision 2026-10-29 (human). Applies to every plan from now on, before the code of item 8 exists.
 
