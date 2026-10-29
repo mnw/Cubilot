@@ -203,7 +203,11 @@ export function createLaunchQueue(opts: LaunchQueueOpts): LaunchQueue {
         try {
           opts.onCloseEnd?.(entry.req.session, cap, id);
         } catch (e) {
-          console.error("[launch-queue] close-done handler failed:", e);
+          // The durable release failed: the close stays pending so the shell can ack again.
+          console.error("[launch-queue] close-done handler failed, close stays pending:", e);
+          entry.done = null;
+          arm(entry);
+          return { status: "error", message: "could not record the close; send it again" };
         }
       }
       return { status: "ok" };

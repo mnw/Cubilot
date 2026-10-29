@@ -491,6 +491,20 @@ const worktreeKey = (s: { ticket_id: string | null; request_id: string | null; r
 
 const isRole = (r: string): r is StageRole => (STAGE_ROLES as readonly string[]).includes(r);
 
+/**
+ * `session_released_at_ms`: set when the hub saw the session closed (close ack) or never started (final launch-error ack);
+ * cleared by the move to `launching`. The one nullable column is added here (not in `stageDecl`: the snapshot does not carry it).
+ * Rows that exist when the column is added get a release time, so no old row counts as bound. A second run changes nothing.
+ */
+function migrateSessionReleased(db: Database): void {
+  const has = db.query<{ name: string }, []>("PRAGMA table_info(stage)").all().some((c) => c.name === "session_released_at_ms");
+  if (has) return;
+  db.transaction(() => {
+    db.exec("ALTER TABLE stage ADD COLUMN session_released_at_ms INTEGER");
+    db.run("UPDATE stage SET session_released_at_ms = ?", [Date.now()]);
+  })();
+}
+
 /** A launch that did not start a session: attempt 1 goes to `retrying` (5.3 relaunches), attempt 2 is final. */
 function endLaunchAttempt(api: StageApi, stageId: string, cap: HubCapabilities, why: string): void {
   const stage = api.load(stageId);
@@ -790,6 +804,8 @@ export function createStageRuntime(
         cancelHolds.delete(session);
       }
       // The session is gone: its role slot is free. Start what waits for it (a relaunch of a retrying stage first).
+      // The durable release goes first: when it throws, nothing else changed and the close ack can be sent again.
+      db.run("UPDATE stage SET session_released_at_ms = ? WHERE session = ? AND session_released_at_ms IS NULL", [Date.now(), session]);
       const held = closing.get(session);
       closing.delete(session);
       opts.launchRecord?.release(session);
@@ -828,8 +844,16 @@ export function createStageRuntime(
           // A value that came from role_models and was refused by pty_spawn names its source (role-models 4). A later
           // tmux or filesystem error does not: the value was fine.
           const why = end.by === "ack" && fromRoleModels && VALUE_REFUSAL.test(raw) ? `role_models.${req.role}: ${raw}` : raw;
-          if (end.by === "ack") opts.launchRecord?.release(req.session); // the shell says no session started
-          endLaunchAttempt(api, req.stage_id, cap, why);
+          if (end.by === "ack") {
+            // The shell says no session started: the release mark and the stage move commit together.
+            db.transaction(() => {
+              db.run("UPDATE stage SET session_released_at_ms = ? WHERE id = ?", [Date.now(), req.stage_id]);
+              endLaunchAttempt(api, req.stage_id, cap, why);
+            })();
+            // A retry the move started has bound the session again: only a session with no launch in flight is released.
+            // A waiting stage may hold the name now: only a binding of this stage is released.
+            if (!inflight.has(req.stage_id)) opts.launchRecord?.release(req.session, req.stage_id);
+          } else endLaunchAttempt(api, req.stage_id, cap, why);
           reportFinalFailure(req.stage_id, `the launch did not start: ${why}`, cap);
         }
       } catch (e) {
@@ -1410,6 +1434,8 @@ export function createStageRuntime(
         "system",
         cap,
         (ctx) => {
+          // The bind: the same transaction as stage.launching clears the release mark.
+          ctx.tx.run("UPDATE stage SET session_released_at_ms = NULL WHERE id = ?", [input.stage_id]);
           input.extra?.(ctx);
           // stage.launching and ticket.assigned (actor system) commit together: the one cross-kind transaction.
           // A spec-review stage has no ticket and skips this. A failure here rolls the launch back.
@@ -1796,7 +1822,10 @@ export function createStageRuntime(
     onRoomLimitsChanged(room, cap) {
       for (const role of STAGE_ROLES) startWaiting(role, room, cap);
     },
-    migrate: (d: Database) => entity.migrate(d),
+    migrate: (d: Database) => {
+      entity.migrate(d);
+      migrateSessionReleased(d);
+    },
     routes: withLedgerRequired(routes),
     // A stage is the hub's own bookkeeping: agents never get a stage replayed on reconnect.
     pendingFor: (_agent: AgentCtx, _cap: HubCapabilities) => [],

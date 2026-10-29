@@ -15,7 +15,7 @@ const schema = (d: Database) =>
 
 describe("decisions migration (P6-01)", () => {
   test("a version-17 ledger gets a snapshot first, then the decisions table; a second run changes nothing", () => {
-    expect(LEDGER_SCHEMA_VERSION).toBe(18);
+    expect(LEDGER_SCHEMA_VERSION).toBe(19);
     const dir = mkdtempSync(join(tmpdir(), "dec-mig-"));
     const path = join(dir, "ledger.db");
     const snaps = join(dir, "snapshots");
@@ -29,10 +29,10 @@ describe("decisions migration (P6-01)", () => {
     const r = openLedger(path, snaps);
     expect(r.enabled).toBe(true);
     const db = r.db!;
-    expect(version(db)).toBe(18);
+    expect(version(db)).toBe(LEDGER_SCHEMA_VERSION);
     const files = readdirSync(snaps);
     expect(files).toHaveLength(1);
-    expect(files[0]).toMatch(/^ledger-\d{8}T\d{6}Z-17to18\.db$/);
+    expect(files[0]).toMatch(/^ledger-\d{8}T\d{6}Z-17to19\.db$/);
     const snap = new Database(join(snaps, files[0]));
     expect(version(snap)).toBe(17);
     expect(hasTable(snap)).toBe(false); // the copy is from before the new table
