@@ -140,7 +140,7 @@ const PlanApproval = (() => {
     btn.className = 'plan-approve';
     btn.textContent = 'Approve';
     btn.disabled = busy.has(w.request_id);
-    btn.addEventListener('click', () => approve(w.request_id, btn));
+    btn.addEventListener('click', () => approve(w, btn));
     el.append(text, btn);
     return el;
   }
@@ -353,14 +353,22 @@ const PlanApproval = (() => {
     render();
   }
 
-  async function approve(requestId, btn) {
+  async function approve(w, btn) {
+    const requestId = w.request_id;
     if (busy.has(requestId) || !room) return;
     busy.add(requestId);
     btn.disabled = true;
     try {
       const res = await authedFetch(`/requests/${encodeURIComponent(room)}/${encodeURIComponent(requestId)}/approve`, {
         method: 'POST',
-        body: JSON.stringify({ by: HUMAN_NAME }),
+        body: JSON.stringify({
+          by: HUMAN_NAME,
+          // The scope the card shows: the hub refuses the Approve when a lead edit changed it since the card loaded.
+          scope: {
+            features: w.features || [],
+            tickets: (w.tickets || []).map((t) => ({ id: t.id, radius: t.radius })).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
+          },
+        }),
       });
       if (!res.ok) {
         const err = await res.json().then((j) => j?.error, () => null);
@@ -386,6 +394,7 @@ const PlanApproval = (() => {
     globalThis.syncPlanApproval = load;
     KindCardRenderer.observe('stage', onEvent);
     KindCardRenderer.observe('ticket', onEvent);
+    KindCardRenderer.observe('request', onEvent);
     KindCardRenderer.observe('cancel_trace', onEvent);
     load();
   }

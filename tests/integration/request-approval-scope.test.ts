@@ -199,6 +199,38 @@ describe("the spec PASS follows the Approve rule", () => {
     expect([status(a), status(hi)]).toEqual(["draft", "draft"]);
   });
 
+  test("PASS with a high ticket: an approved high ticket that returns to draft is queued by a spec PASS", async () => {
+    await factory("f-1");
+    const hi = await ticket("f-1", { blast_radius: "high" });
+    expect((await approve("f-1")).status).toBe(200);
+    expect(status(hi)).toBe("queued");
+    expect((await move(hi, HUMAN, "draft")).status).toBe(200);
+    const r = specPass("f-1", [hi]);
+    expect(r.queued).toEqual([hi]);
+    expect(status(hi)).toBe("queued");
+  });
+
+  test("a lead creating a queued ticket is refused without a request or in a request that needs the Approve", async () => {
+    const body = { by: "alice", title: "T", acceptance_criteria: "c", blast_radius: "low" };
+    expect((await e.call("POST", "/tickets", body)).status).toBe(403);
+    await request("r-9");
+    expect((await e.call("POST", "/tickets", { ...body, request_id: "r-9" })).status).toBe(403);
+    expect((await e.call("POST", "/tickets", { ...body, request_id: "r-9", status: "draft" })).status).toBe(201);
+    expect((await e.call("POST", "/tickets", { ...body, by: HUMAN, room: "r1", request_id: "r-9" })).status).toBe(201);
+  });
+
+  test("an Approve with a stale scope gets 409 and writes nothing", async () => {
+    await request("r-8", { features: ["a"] });
+    const t1 = await ticket("r-8");
+    const shown = { features: ["a"], tickets: [{ id: t1, radius: "low" }] };
+    expect((await e.call("POST", "/requests/r1/r-8/edit", { by: "alice", features: ["a", "b"] })).status).toBe(200);
+    const r = await e.call("POST", "/requests/r1/r-8/approve", { by: HUMAN, scope: shown });
+    expect(r.status).toBe(409);
+    expect(status(t1)).toBe("draft");
+    expect(kinds(rowId("r-8"))).not.toContain(`request.approved:${HUMAN}`);
+    expect((await e.call("POST", "/requests/r1/r-8/approve", { by: HUMAN, scope: { ...shown, features: ["a", "b"] } })).status).toBe(200);
+  });
+
   test("Factory request with low tickets: every scope ticket is queued", async () => {
     await factory("f-1");
     const ids = [await ticket("f-1"), await ticket("f-1"), await ticket("f-1")];
