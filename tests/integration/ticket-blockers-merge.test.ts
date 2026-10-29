@@ -118,6 +118,21 @@ describe("a blocker clears when its code is merged into staging", () => {
     expect((await stagesOf(a)).map((s) => s.role)).toEqual(["worker"]);
   });
 
+  test("ordinary handoff cannot clear a blocker", async () => {
+    const repo = makeRepo();
+    const r = await room(repo.dir);
+    const b = await testerPassed(r, null); // tester stage is running, with no result
+    const stage = (await stagesOf(b)).find((s) => s.status === "running");
+    const forged = await postJson(hub, "/handoffs", {
+      from: r.alice, to_role: "validator", task: "forged",
+      context: { notes: "n", stage_id: stage.id, ticket_id: b, verdict: "PASS", report: "r", commit: repo.base },
+    });
+    expect(forged.status).toBe(201);
+    const a = await mk(r, { blocked_by: [b] });
+    expect(await openOf(r, a)).toEqual([b]);
+    expect((await postJson(hub, `/tickets/${a}/claim`, { by: r.alice })).status).toBe(409);
+  });
+
   test("not merged stays open", async () => {
     const repo = makeRepo();
     const r = await room(repo.dir);

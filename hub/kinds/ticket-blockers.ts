@@ -87,9 +87,9 @@ function testerPassCommit(db: Database, ticketId: string): string | null {
   const row = db
     .query<{ c: string | null }, [string]>(
       `SELECT json_extract(h.context_json, '$.commit') AS c
-         FROM handoffs h JOIN stage s ON s.id = json_extract(h.context_json, '$.stage_id')
+         FROM handoffs h JOIN stage s ON s.id = json_extract(h.context_json, '$.stage_id') AND h.from_agent = s.session
         WHERE json_extract(h.context_json, '$.ticket_id') = ?1 AND s.role = 'tester' AND s.ticket_id = ?1
-          AND json_extract(h.context_json, '$.verdict') = 'PASS'
+          AND s.status = 'passed' AND s.verdict = 'PASS' AND json_extract(h.context_json, '$.verdict') = 'PASS'
         ORDER BY (SELECT MIN(e.seq) FROM events e WHERE e.entity_id = h.id) DESC LIMIT 1`,
     )
     .get(ticketId);
