@@ -883,6 +883,25 @@ The hub builds the first message of a stage with no model call. The parts come i
 
 The editor gets no pack part. A template cannot widen the parts of a role (`hub/core/pack-depth.ts`). The other pack commands (`ctags`, `git diff`) run in the stage worktree. Each command stops after 20 s. A command that fails or stops marks only its own part `missing` and the launch continues. A `missing` graph part adds no text. Without a usable `ctags`, the signatures part says `missing`. The Agent notes section and the Earlier notes section are each cut at 32 KiB, and the pack parts together at 16 KiB. Source: `hub/core/context-pack.ts`, `hub/core/first-message.ts`, `hub/core/primer.ts`.
 
+### Room flow
+
+| Method and path | Auth | Answer |
+|---|---|---|
+| `GET /rooms/<room>/flow?since=<ms>&until=<ms>` | bearer or `?token=` | Read only. Default window: the last 24 hours. `since` must be less than `until`, else 400. No token: 401. |
+
+The hub computes the answer from the ledger and git on each call. It uses no model and stores nothing. The fields are:
+
+| Field | Meaning |
+|---|---|
+| `limits` | Always `"current"`. The ledger records no limit changes, so `slot_hours` use the role limit of now. |
+| `slot_use.<role>` | `run_hours` (stage launch to end, clipped to the window), `limit`, `slot_hours` (`limit` times the window) and `percent`. |
+| `ready_tickets` | Queued tickets with no uncleared blocker and no live stage. A blocker is cleared as in L3: done, or merged into `staging`. |
+| `wait_hours` | Ticket-hours in the window, one reason for each hour: `draft`, `waiting_approval`, `blocked` (queued, uncleared blocker), `no_slot` (queued, no blocker). `waiting_approval` is the part of a draft after the spec PASS, when the request holds a high ticket. The blocker list is the current list. |
+| `reviews.spec`, `reviews.validator`, `reviews.reviewer` | `pass`, `fail` and `fail_percent` of the verdicts that ended in the window. |
+| `done_without_merge` | Done tickets with no merge commit on `staging` (two or more parents, message names the ticket id). `named_by_non_merge_commit` is true when only a plain commit names it. `null` when git cannot answer (`staging` is `"unavailable"`). |
+
+Tickets and stages of another room do not count.
+
 ### Stage metrics
 
 After a stage ends as `passed` or `failed`, the hub writes one `stage_metrics` row for each attempt. The write happens outside the stage transaction. A failure of the write logs one line and never changes the stage.
