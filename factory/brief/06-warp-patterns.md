@@ -244,9 +244,9 @@ Find the faults that code can find before a plan goes to spec review. The spec r
 1. **A hub command and a route.** `GET /requests/<id>/check` returns a list of findings for the draft tickets of one request. The Orchestrator runs it before it sends the plan to spec review. The hub also runs it when the spec review starts, and puts the result in the Validator's first message.
 2. **Checks.** Each check gives `error` or `warning`:
    - The role of each ticket runs on the hub (today: not writer, editor, reviewer). `error`.
-   - Each `blocked_by` names a ticket of the room that is open or done, and gives a reason: the output it needs, or the file that both tickets edit. `error` without a reason.
+   - Each `blocked_by` names a ticket of the room that is open or done, and gives a reason: the code or output it needs to build or test. A file that both tickets edit is not a reason (item 16). `error` without a valid reason.
    - The longest chain of `blocked_by` links. More than 5 links without a reason in the request: `warning`.
-   - The number of tickets that can start now, compared with the free slots of each role. Fewer than the free slots: `warning`, with the links that block them.
+   - The number of tickets that can start now, compared with the free slots of each role. Fewer than the free slots: `error` unless the request gives a reason (item 16), with the links that block them.
    - Each acceptance criterion has a verify line that names a test file or a command. A human-only check is marked `[human]` and is in one final live-check ticket. `error`.
    - The radius follows the radius rule (high for launch, ownership, permissions, read-only worktrees, data). A ticket that names one of these areas with radius low: `warning` for the human.
    - The OpenSpec change of the request passes `openspec validate --strict` with the pinned version. `error`.
@@ -403,6 +403,34 @@ Warp Factories (checked 2026-10-29) has the same human gates (spec approval, hum
 2. A request with 5 spec FAILs on ticket X: a spec review of a new ticket Y in the same request starts (no 409).
 3. After a human-started spec review, the FAIL count of that ticket is 0.
 4. With one ticket waiting for the human and three free tickets, three worker stages run.
+
+### 16. Plans for parallel work
+
+Status: decision 2026-10-29 (human). Applies to every plan from now on, before the code of item 8 exists.
+
+#### Goal
+
+The factory works on many tickets at the same time. One ticket that waits or fails stops only the tickets that really need its code. On 2026-10-28 and 2026-10-29 the Part 6 plan was a chain: P6-02, P6-03, P6-14 and a follow-up waited for P6-01; P6-10 and P6-12 waited for P6-09b; P6-15c waits for P6-15b. With worker 4, one worker ran for most of the morning.
+
+#### Rules for the plan (Orchestrator, plan council)
+
+1. **A blocker only for code.** Ticket B is blocked by A only when B cannot build or test without code from A. A file that both tickets edit is not a blocker: both run, and the second one rebases before its review. The hub already cuts each branch from the current staging.
+2. **Contract first.** When several tickets need a new type, route, table or tool, one small contract ticket comes first: the types, the route with a stub answer, the migration and the test fixtures. It is small, so it passes fast. All other tickets then run in parallel against the contract.
+3. **Merge behind a switch.** A part of a feature that is not complete merges into staging behind a setting that is off by default. A ticket never waits for a sibling only to keep staging complete. The delivery report lists the switches; the last ticket of the request turns them on.
+4. **Small tickets.** A ticket changes one behaviour, with its tests. A FAIL then costs one small rework, not a large one that holds its dependents. A ticket with more than about 400 changed lines, or more than three behaviours, is split.
+5. **Width, not length.** At each point of the plan, at least as many tickets can start as there are free worker slots, or the request says why not. The longest chain of blockers is 3 links or fewer, unless the request says why.
+6. **A failing ticket does not hold its dependents.** When ticket A fails twice, its dependents continue against the contract (rule 2). Only their merge waits for A.
+
+#### For the current Part 6 plan
+
+The Orchestrator checks each open `blocked_by` against rule 1 and removes each link that is only a shared file. It reports the links it removed and the links it kept, with the code each kept link needs.
+
+#### Tests (with item 8)
+
+1. A `blocked_by` with the reason "both edit hub/kinds/decision.ts" gives an `error`.
+2. A plan of 6 tickets where 1 can start and 4 worker slots are free gives an `error` without a reason in the request.
+3. A chain of 4 links without a reason gives an `error`.
+4. A ticket that names a contract ticket as its blocker, and no other, passes.
 
 ## Ideas for later
 

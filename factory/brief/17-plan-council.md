@@ -24,7 +24,7 @@ Both members are read-only for the product code. Each writes only its own plan f
 
 ## Output of each member
 
-An OpenSpec change in `openspec/changes/<change>-<seat>/`: `proposal.md`, `design.md`, the spec deltas and `tasks.md`, with tickets (title, radius with reason, `blocked_by` with reason, criteria with verify lines). It must pass `openspec validate --strict` with the pinned version and the plan check.
+An OpenSpec change in `openspec/changes/<change>-<seat>/`: `proposal.md`, `design.md`, the spec deltas and `tasks.md`, with tickets (title, radius with reason, `blocked_by` with reason, criteria with verify lines). The plan follows the rules for parallel work in Part 6, item 16. It must pass `openspec validate --strict` with the pinned version and the plan check.
 
 ## Comparison and merge
 
