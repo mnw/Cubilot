@@ -30,7 +30,7 @@ describe("request kind", () => {
   const create = (body: Record<string, unknown>, by = "rk-lead") => postJson(hub, "/requests", { by, ...body });
   // Raw ticket POST: no request is created for the caller.
   const ticket = (body: Record<string, unknown>, by = "rk-lead") =>
-    postJson(hub, "/tickets", { by, title: "T", acceptance_criteria: "c", blast_radius: "low", noSeed: true, ...body });
+    postJson(hub, "/tickets", { by, title: "T", acceptance_criteria: "c", blast_radius: "low", status: "draft", noSeed: true, ...body });
 
   test("Default origin: the room lead creates a request with two features and no origin: origin human", async () => {
     const r = await create({ request_id: "r-1", features: ["Export", "Import"] });
@@ -96,6 +96,9 @@ describe("request kind", () => {
     expect((await create({ request_id: "f-2", origin: "factory", source: withReq, parent_request_id: "p-1" })).status).toBe(201);
     // A source without a request needs no parent.
     expect((await create({ request_id: "f-3", origin: "factory", source: loneId })).status).toBe(201);
+    // The parent must be the request of the source.
+    await create({ request_id: "p-2" });
+    expect((await create({ request_id: "f-5", origin: "factory", source: withReq, parent_request_id: "p-2" })).status).toBe(400);
     // An unknown source, and a source of another room.
     expect((await create({ request_id: "f-4", origin: "factory", source: "t_0123456789abcdef" })).status).toBe(400);
     const foreign = (await postJson(hub, "/tickets", { by: "rk-other", title: "T", acceptance_criteria: "c", blast_radius: "low" })).json as any;
