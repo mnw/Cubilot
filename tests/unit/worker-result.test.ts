@@ -282,10 +282,11 @@ describe("refusals", () => {
 });
 
 describe("other roles are unchanged", () => {
-  test("a writer and a validator result need no commit; a tester result needs the full commit sha", () => {
+  test("a writer result needs a new commit (writing-chain-commits.test.ts); a validator result needs none; a tester result needs the full commit sha", () => {
     const e = makeEnv();
     const w = e.running("writer", "writer-1");
-    expect(e.rt().hooks.checkResult("writer-1", { notes: "n", stage_id: w, ticket_id: TID }, e.cap, "Orchestrator")).toEqual([]);
+    expect(e.rt().hooks.checkResult("writer-1", { notes: "n", stage_id: w, ticket_id: TID, commit: e.repo.c1 }, e.cap, "role:editor")).toEqual([]);
+    expect(e.rt().hooks.checkResult("writer-1", { notes: "n", stage_id: w, ticket_id: TID }, e.cap, "role:editor")).toEqual([expect.stringContaining("40-character")]);
     const t = e.running("tester", "tester-1");
     expect(e.rt().hooks.checkResult("tester-1", { notes: "n", stage_id: t, ticket_id: TID }, e.cap, "role:validator")).toEqual([
       "context.commit must be the full 40-character commit sha",
