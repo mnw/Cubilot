@@ -1,21 +1,30 @@
 // G2 base check through the real hub: a rebased rework is new work, a same or older commit is not, and a git failure refuses.
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, renameSync } from "node:fs";
+import { mkdtempSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnHub, type HubHandle } from "../helpers/hub";
-import { giveProjectHttp, projectRepo } from "../helpers/repo";
 import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
 
 describe("worker result base check", () => {
   let hub: HubHandle;
   let seq = 0;
   const open: Array<{ close: () => void }> = [];
+  // Own repository: these tests move the staging ref, which the shared per-process repo of other files must not see.
+  const repoDir = mkdtempSync(join(tmpdir(), "wrb-"));
   const git = (...a: string[]) => {
-    const r = Bun.spawnSync(["git", "-C", projectRepo(), ...a], { stdout: "pipe", stderr: "pipe" });
+    const r = Bun.spawnSync(["git", "-C", repoDir, ...a], { stdout: "pipe", stderr: "pipe" });
     if (r.exitCode !== 0) throw new Error(`git ${a.join(" ")}: ${r.stderr.toString()}`);
     return r.stdout.toString().trim();
+  };
+  /** A commit on parent whose tree is the parent tree plus one file. It carries one real patch. */
+  const patchOn = (parent: string, file: string, msg: string) => {
+    const entries = git("ls-tree", parent);
+    writeFileSync(join(repoDir, ".blob"), file);
+    const sha = git("hash-object", "-w", ".blob");
+    const tree = Bun.spawnSync(["git", "-C", repoDir, "mktree"], { stdin: Buffer.from(`${entries}\n100644 blob ${sha}\t${file}\n`), stdout: "pipe", stderr: "pipe" }).stdout.toString().trim();
+    return git("commit-tree", tree, "-p", parent, "-m", msg);
   };
   const commitOn = (parent: string, msg: string) => git("commit-tree", `${parent}^{tree}`, "-p", parent, "-m", msg);
 
@@ -45,8 +54,15 @@ describe("worker result base check", () => {
 
   beforeAll(async () => {
     hub = await spawnHub();
-    await giveProjectHttp(hub, "rb1", "rb2");
-    if (Bun.spawnSync(["git", "-C", projectRepo(), "show-ref", "--verify", "--quiet", "refs/heads/staging"]).exitCode !== 0) git("branch", "staging");
+    git("init", "-q", "-b", "staging");
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    writeFileSync(join(repoDir, "a.txt"), "1");
+    git("add", ".");
+    git("commit", "-qm", "one");
+    git("branch", "main");
+    const proj = await authedFetch(hub, "/rooms/rb1/settings", { method: "PUT", body: JSON.stringify({ project_folder: repoDir }) });
+    expect(proj.status).toBe(200);
     const put = await authedFetch(hub, "/rooms/rb1/settings", { method: "PUT", body: JSON.stringify({ role_limits: { worker: 10, tester: 10 } }) });
     expect(put.status).toBe(200);
   });
@@ -56,10 +72,10 @@ describe("worker result base check", () => {
   });
 
   /** Passes the first worker stage on commit A, then opens a second running worker stage on the same ticket (a rework). */
-  async function reworkSetup() {
+  async function reworkSetup(patch = false) {
     const { ticketId, worker, stageId } = await startWorker("rb1");
     const ref = `refs/heads/ticket/${ticketId}`;
-    const a = commitOn(git("rev-parse", ref), "A");
+    const a = patch ? patchOn(git("rev-parse", ref), "p.txt", "A") : commitOn(git("rev-parse", ref), "A");
     git("update-ref", ref, a);
     expect((await send(worker, stageId, ticketId, a)).status).toBe(201);
     expect(await status(stageId)).toBe("passed");
@@ -81,7 +97,18 @@ describe("worker result base check", () => {
     git("update-ref", "refs/heads/staging", moved);
     const b = commitOn(commitOn(moved, "rebased work"), "rework");
     git("update-ref", ref, b);
-    expect(Bun.spawnSync(["git", "-C", projectRepo(), "merge-base", "--is-ancestor", a, b]).exitCode).toBe(1);
+    expect(Bun.spawnSync(["git", "-C", repoDir, "merge-base", "--is-ancestor", a, b]).exitCode).toBe(1);
+    const r = await send(session, stage2, ticketId, b);
+    expect(r.status).toBe(201);
+    expect(await status(stage2)).toBe("passed");
+  });
+
+  test("rebased rework accepted on unchanged staging", async () => {
+    const { ticketId, ref, stage2, session } = await reworkSetup(true);
+    // Rebase onto the same staging: the patch of A is replayed as B1 (new sha), then one new commit.
+    const b1 = patchOn(git("rev-parse", "staging"), "p.txt", "A again");
+    const b = patchOn(b1, "q.txt", "rework");
+    git("update-ref", ref, b);
     const r = await send(session, stage2, ticketId, b);
     expect(r.status).toBe(201);
     expect(await status(stage2)).toBe("passed");
