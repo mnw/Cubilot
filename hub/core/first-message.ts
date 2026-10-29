@@ -42,11 +42,19 @@ function cutBytes(text: string, max: number, what: string): string {
   return Buffer.from(text, "utf8").subarray(0, room).toString("utf8").replace(/\uFFFD+$/, "") + notice;
 }
 
+// The agent notes (tickets.planning_note) reach every role, whatever its depth: "## Agent notes" comes once, before the earlier notes.
+function renderAgentNotes(notes: PackNote[] | undefined): string {
+  const mine = notes?.find((n) => n.source === "planning")?.notes.trim();
+  return mine ? cutBytes(`## Agent notes\n${mine}`, NOTES_SECTION_MAX, "Agent notes") : "";
+}
+
 function renderNotes(notes: PackNote[] | undefined, depth: ReadonlySet<PackPart>): string {
-  if (!notes?.length || !depth.has("notes")) return "";
-  const label = (n: PackNote) => (n.source === "planning" ? "planning note" : n.source === "spec" ? "spec review" : n.role ?? "stage");
-  const body = notes.map((n) => `### ${label(n)}\n${n.notes.trim()}`).join("\n\n");
-  return cutBytes(`## Earlier notes\n${body}`, NOTES_SECTION_MAX, "Earlier notes");
+  const earlier = (notes ?? []).filter((n) => n.source !== "planning");
+  const agent = renderAgentNotes(notes);
+  if (!earlier.length || !depth.has("notes")) return agent;
+  const label = (n: PackNote) => (n.source === "spec" ? "spec review" : n.role ?? "stage");
+  const body = earlier.map((n) => `### ${label(n)}\n${n.notes.trim()}`).join("\n\n");
+  return (agent ? agent + "\n\n" : "") + cutBytes(`## Earlier notes\n${body}`, NOTES_SECTION_MAX, "Earlier notes");
 }
 
 const PACK_TITLES: Record<Exclude<PackPart, "notes">, string> = {
@@ -154,7 +162,7 @@ export type SpecFirstMessageInput = {
   /** From the spec handoff (context.request_text). */
   requestText: string;
   specPaths: string[];
-  scope: Array<{ id: string; title: string; acceptance_criteria: string; role?: string | null; blast_radius?: string; blocked_by?: string[] }>;
+  scope: Array<{ id: string; title: string; acceptance_criteria: string; planning_note?: string | null; role?: string | null; blast_radius?: string; blocked_by?: string[] }>;
   /** The commit the worktree is at. */
   commit?: string | null;
   /** The findings of the FAIL results of this request since its last PASS, oldest first (spec-review-stage 2.5). */
@@ -167,6 +175,13 @@ export type SpecFirstMessageInput = {
   /** Pack parts; the spec depth allows the graph query only. Empty until the pack builder exists. */
   pack?: PackText;
 };
+
+// One "## Agent notes" heading for the scope; a ticket with notes gets "### <id> <title>"; none with notes, no heading.
+function agentNotesLines(scope: SpecFirstMessageInput["scope"]): string[] {
+  const withNotes = scope.filter((t) => t.planning_note?.trim());
+  if (!withNotes.length) return [];
+  return ["## Agent notes", ...withNotes.flatMap((t) => [`### ${t.id} ${oneLine(t.title)}`, t.planning_note!.trim(), ""])];
+}
 
 /** The first message of a spec-review stage (spec-review-stage 4.1b): the request, the tickets in scope and where the result goes. */
 export function renderSpecFirstMessage(i: SpecFirstMessageInput): string {
@@ -197,6 +212,7 @@ export function renderSpecFirstMessage(i: SpecFirstMessageInput): string {
       t.acceptance_criteria.trim(),
       "",
     ]),
+    ...agentNotesLines(i.scope),
     ...(i.earlierFindings?.length
       ? [
           "## Findings of earlier reviews of this request",

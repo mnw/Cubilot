@@ -6,7 +6,7 @@ import { migrateLedger } from "../../hub/core/ledger";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_TEMPLATE, loadTemplate, renderFirstMessage } from "../../hub/core/first-message";
+import { DEFAULT_TEMPLATE, loadTemplate, renderFirstMessage, renderSpecFirstMessage } from "../../hub/core/first-message";
 import { createTicketKind } from "../../hub/kinds/ticket";
 import { createStageRuntime } from "../../hub/kinds/stage";
 import type { LaunchRequest } from "../../hub/core/launch-queue";
@@ -15,6 +15,40 @@ import type { Entry, HubCapabilities, Scope } from "../../hub/core/types";
 const ticket = { id: "t_1", title: "Fix the thing", acceptance_criteria: "It works.\nIt is tested.", blast_radius: "high", request_id: "r-1" };
 
 describe("renderFirstMessage", () => {
+  test("agent notes for each role", () => {
+    const notes = [{ source: "planning" as const, role: null, notes: "AGENT-FACT" }, { source: "stage" as const, role: "worker", notes: "STAGE-FACT" }];
+    for (const role of ["worker", "writer", "tester", "validator", "editor", "reviewer"]) {
+      const m = renderFirstMessage({ stageId: "s_1", role, ticket, branch: null, worktree: "/w", notes });
+      expect(m.split("AGENT-FACT").length).toBe(2);
+      expect(m).toContain("## Agent notes\nAGENT-FACT");
+      expect(m.indexOf("## Agent notes")).toBeGreaterThan(m.indexOf("It is tested."));
+      if (m.includes("STAGE-FACT")) expect(m.indexOf("## Agent notes")).toBeLessThan(m.indexOf("## Earlier notes"));
+    }
+    // The editor has no earlier notes, but it has the agent notes.
+    expect(renderFirstMessage({ stageId: "s_1", role: "editor", ticket, branch: null, worktree: "/w", notes })).not.toContain("STAGE-FACT");
+  });
+
+  test("no agent notes, no heading", () => {
+    const m = renderFirstMessage({ stageId: "s_1", role: "worker", ticket, branch: null, worktree: "/w", notes: [{ source: "stage", role: "worker", notes: "STAGE-FACT" }] });
+    expect(m).not.toContain("## Agent notes");
+    expect(m).toContain("## Earlier notes");
+    expect(renderFirstMessage({ stageId: "s_1", role: "worker", ticket, branch: null, worktree: "/w" })).not.toContain("## Agent notes");
+  });
+
+  test("spec review with two tickets: one heading, one subheading per ticket with its own notes", () => {
+    const scope = [
+      { id: "t_a", title: "First", acceptance_criteria: "A", planning_note: "NOTE-A" },
+      { id: "t_b", title: "Second", acceptance_criteria: "B", planning_note: null },
+      { id: "t_c", title: "Third", acceptance_criteria: "C", planning_note: "NOTE-C" },
+    ];
+    const m = renderSpecFirstMessage({ stageId: "s", requestId: "r", worktree: "/w", recipient: "O", requestText: "x", specPaths: [], scope });
+    expect(m.split("## Agent notes").length).toBe(2);
+    expect(m).toContain("## Agent notes\n### t_a First\nNOTE-A\n\n### t_c Third\nNOTE-C\n");
+    expect(m).not.toContain("### t_b Second");
+    const none = renderSpecFirstMessage({ stageId: "s", requestId: "r", worktree: "/w", recipient: "O", requestText: "x", specPaths: [], scope: [scope[1]!] });
+    expect(none).not.toContain("## Agent notes");
+  });
+
   test("holds title, criteria, radius, request, stage, branch and worktree, and no role prompt", () => {
     const m = renderFirstMessage({ stageId: "s_0123456789abcdef", role: "worker", ticket, branch: "ticket/t_1", worktree: "/w/t_1" });
     for (const part of ["t_1", "Fix the thing", "It works.\nIt is tested.", "Blast radius: high", "Request: r-1", "s_0123456789abcdef", "Branch: ticket/t_1", "Worktree: /w/t_1"]) {
