@@ -545,11 +545,11 @@ describe("only the stage logic queues launches", () => {
     expect(users).toEqual(["hub/kinds/stage.ts"]);
   });
 
-  test("inside stage.ts, enqueueLaunch is called only from evaluateStages and drainQueue (the retry path, 5.3, adds a caller)", () => {
+  test("inside stage.ts, enqueueLaunch is called only from evaluateStages, drainQueue and the second Validator start (L4)", () => {
     const src = readFileSync(join(import.meta.dir, "../../hub/kinds/stage.ts"), "utf8");
     const code = src.split("\n").filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*") && !l.trim().startsWith("/*"));
     const calls = code.map((l, i) => ({ l, i })).filter(({ l }) => /\benqueueLaunch\(/.test(l) && !/function enqueueLaunch\(/.test(l) && !/^\s*enqueueLaunch\(input/.test(l));
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
     const start = code.findIndex((l) => /function evaluateStages\(/.test(l));
     const drain = code.findIndex((l, i) => i > start && /function drainQueue\(/.test(l));
     const end = code.findIndex((l, i) => i > start && /^  function enqueueLaunch\(/.test(l));
@@ -557,6 +557,8 @@ describe("only the stage logic queues launches", () => {
     expect(calls[0].i).toBeLessThan(drain);
     expect(calls[1].i).toBeGreaterThan(drain);
     expect(calls[1].i).toBeLessThan(end);
+    expect(calls[2].i).toBeGreaterThan(end);
+    expect(calls[2].l).toContain('roleHarness("validator")');
   });
 
   test("inside stage.ts, a launch is queued only from enqueueLaunch (the other pushes are closes: 5.2, 5.3)", () => {

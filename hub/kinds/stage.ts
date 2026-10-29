@@ -2033,19 +2033,19 @@ export function createStageRuntime(
             noticeRepeatedFail(stage.id, c, fails, cap);
           }
         } else {
-          // A final PASS of a validator or reviewer closes its ticket in the same transaction (the third cross-kind one).
+          // L4: a final PASS never closes its ticket. It hands the in_review ticket to the lead in the same transaction
+          // (the third cross-kind one). The first PASS on a high ticket also starts a second Validator stage.
           const ticketId = stage.ticket_id;
-          // L4: a high ticket closes on the second Validator PASS. The first one starts a second Validator stage.
           const highValidator = !!ticketId && c.verdict === "PASS" && stage.role === "validator" && isHighTicket(ticketId);
           const secondPass = highValidator && validatorPasses(ticketId!) >= 1;
-          const closes = !!ticketId && c.verdict === "PASS" && (stage.role === "reviewer" || (stage.role === "validator" && (!highValidator || secondPass)));
+          const closes = !!ticketId && c.verdict === "PASS" && (stage.role === "validator" || stage.role === "reviewer");
           let closed: ReturnType<typeof closeReviewedBySystemInTx> = null;
           api.move(
             stage.id,
             { to: "passed", verdict: typeof c.verdict === "string" ? c.verdict : undefined },
             "system",
             cap,
-            closes ? () => void (closed = closeReviewedBySystemInTx(db, cap, ticketId!, { doneHigh: secondPass })) : undefined,
+            closes ? () => void (closed = closeReviewedBySystemInTx(db, cap, ticketId!)) : undefined,
             () => {
               if (!closed) return;
               cap.sse.emit(closed.entry, { kind: "room", room: closed.snapshot.room });
@@ -2059,14 +2059,6 @@ export function createStageRuntime(
             // The first session keeps its name until its close is acked, so the second stage gets another name and waits for the slot.
             const r = room ? enqueueLaunch({ stage_id: second.id, session: nextSessionName("validator"), room, harness: roleHarness("validator"), cwd: null, prompt: "" }, cap) : { ok: false as const, reason: "no room" };
             if (!r.ok) console.log(`[stage] ${second.id} stays queued: ${r.reason}`);
-          }
-          // A ticket that became done frees the tickets that wait for it.
-          const done = closed as ReturnType<typeof closeReviewedBySystemInTx>;
-          if (done?.snapshot.status === "done") {
-            // G10: after the commit of stage.passed and the ticket change; the stage of this PASS is passed, not queued.
-            cancelQueuedStagesOfTicket(done.snapshot.id, "done", cap);
-            const waiting = db.query<{ ticket_id: string }, [string]>("SELECT ticket_id FROM ticket_blockers WHERE blocker_id = ? ORDER BY rowid").all(done.snapshot.id);
-            for (const w of waiting) hooks.onTicketChanged(w.ticket_id, cap);
           }
         }
       } catch (e) {

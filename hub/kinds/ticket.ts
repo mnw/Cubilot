@@ -22,7 +22,7 @@ import { IMAGE_URL_RE, imageUrlToPath } from "../core/attachments";
 import { insertEvent } from "../core/events";
 import { ts, validRoomLabel } from "../core/ids";
 import { validateBlockedBy } from "./ticket-blockers";
-import { STAGE_ROLES, type StageRole } from "../core/ledger";
+import { STAGE_ROLES, getRoomSettings, type StageRole } from "../core/ledger";
 import { createPermissionWithSideEffect, dismissPendingPermission } from "./permission";
 import type { StageHooks } from "./stage";
 
@@ -510,26 +510,20 @@ export function queueDraftInTx(db: Database, cap: HubCapabilities, ticketId: str
 export type SystemClose = { snapshot: TicketSnapshot; entry: Entry } | null;
 
 /**
- * The hub's move after the final PASS of a validator or reviewer stage, with actor `system`. Only an `in_review` ticket moves.
- * Low radius: `ticket.done`. High radius: `ticket.done` only with `doneHigh` (the second Validator PASS, L4); else `ticket.assigned`
- * to the room lead; no lead means no change. Like assignBySystemInTx it opens no transaction: it runs inside the transaction of `stage.passed`.
- * The caller emits the entry after the commit.
+ * The hub's move after the final PASS of a validator or reviewer stage, with actor `system` (L4). A PASS never closes a ticket:
+ * an `in_review` ticket goes to the room lead, who moves it to done after the merge. No lead means no change. Like
+ * assignBySystemInTx it opens no transaction: it runs inside the transaction of `stage.passed`. The caller emits the entry
+ * after the commit.
  */
-export function closeReviewedBySystemInTx(db: Database, cap: HubCapabilities, ticketId: string, opts: { doneHigh?: boolean } = {}): SystemClose {
+export function closeReviewedBySystemInTx(db: Database, cap: HubCapabilities, ticketId: string): SystemClose {
   const row = db.query<Record<string, unknown>, [string]>("SELECT * FROM tickets WHERE id = ?").get(ticketId);
   if (!row) throw new Error(`final pass: no such ticket ${ticketId}`);
   const prior = ticketDecl.rowToSnapshot(row);
   if (prior.status !== "in_review") return null;
   const now = Date.now();
-  if (prior.blast_radius === "low" || opts.doneHigh) {
-    const seq = insertEvent(db, ticketId, "ticket.done", SYSTEM_ACTOR, { from: "in_review", to: "done" }, now);
-    db.run("UPDATE tickets SET status = 'done', updated_at_ms = ?, version = ? WHERE id = ?", [now, seq, ticketId]);
-    const snapshot: TicketSnapshot = { ...prior, status: "done", updated_at_ms: now, version: seq };
-    return { snapshot, entry: ticketEntry(db, snapshot, "ticket.update", SYSTEM_ACTOR) };
-  }
   const lead = roomLead(cap, prior.room);
   if (!lead) {
-    console.error(`[ticket] ${ticketId} is high radius and room ${prior.room} has no lead: it stays with ${prior.assignee} after the final PASS`);
+    console.error(`[ticket] room ${prior.room} has no lead: ${ticketId} stays with ${prior.assignee} after the final PASS`);
     return null;
   }
   if (prior.assignee === lead) return null;
@@ -647,6 +641,56 @@ const LEGAL_FROM: Record<string, ReadonlySet<string>> = {
   done: new Set(["in_review"]),
 };
 
+/**
+ * L4: commits of the Validator PASS stages of a ticket since its latest worker stage, oldest first. A commit is the context.commit
+ * of the handoff that started the stage (null when it has none). A rework starts a new worker stage, so the list restarts there.
+ */
+function validatorPassCommits(db: Database, ticketId: string): (string | null)[] {
+  const rows = db
+    .query<{ context_json: string | null }, [string, string]>(
+      `SELECT (SELECT h.context_json FROM handoffs h
+                WHERE h.to_agent = 'role:validator' AND json_extract(h.context_json, '$.ticket_id') = ?1
+                  AND (SELECT MIN(e.seq) FROM events e WHERE e.entity_id = h.id) < s.created_seq
+                  AND NOT EXISTS (SELECT 1 FROM events w WHERE w.entity_id = h.id AND w.kind IN ('handoff.cancelled', 'handoff.declined') AND w.seq < s.created_seq)
+                ORDER BY (SELECT MIN(e.seq) FROM events e WHERE e.entity_id = h.id) DESC LIMIT 1) AS context_json
+         FROM stage s
+        WHERE s.ticket_id = ?1 AND s.role = 'validator' AND s.review IS NULL AND s.status = 'passed' AND s.verdict = 'PASS'
+          AND s.created_seq > COALESCE((SELECT MAX(w.created_seq) FROM stage w WHERE w.ticket_id = ?2 AND w.role = 'worker'), 0)
+        ORDER BY s.created_seq`,
+    )
+    .all(ticketId, ticketId);
+  return rows.map((r) => {
+    try {
+      const c = JSON.parse(r.context_json ?? "null") as { commit?: unknown } | null;
+      return typeof c?.commit === "string" ? c.commit : null;
+    } catch {
+      return null;
+    }
+  });
+}
+
+/** True when `commit` is an ancestor of the staging branch of the room's project. Fails closed on any git problem. */
+function mergedIntoStaging(cap: HubCapabilities, room: string, commit: string): boolean {
+  const project = getRoomSettings(cap.db, room)?.project_folder;
+  if (!project || !/^[0-9a-f]{40}$/.test(commit)) return false;
+  try {
+    return Bun.spawnSync(["git", "-C", project, "merge-base", "--is-ancestor", commit, "refs/heads/staging"], { stdout: "pipe", stderr: "pipe", timeout: 10_000 }).exitCode === 0;
+  } catch {
+    return false;
+  }
+}
+
+/** L4: why an agent may not move this ticket to done yet, else null. One PASS for low, two for high, merged into staging. */
+function doneGateMissing(cap: HubCapabilities, t: TicketSnapshot): string | null {
+  const commits = validatorPassCommits(cap.db, t.id);
+  const need = t.blast_radius === "high" ? 2 : 1;
+  if (commits.length === 0) return "done needs a Validator PASS: none yet";
+  if (commits.length < need) return "done of a high-blast-radius ticket needs the second Validator PASS: it is missing";
+  const last = commits[commits.length - 1];
+  if (last === null || !mergedIntoStaging(cap, t.room, last)) return `done needs the PASS commit merged into staging: ${last ?? "no commit"} is not merged`;
+  return null;
+}
+
 type TransitionInput = { to: TicketStatus; note?: string };
 
 const transitionTicketVerb: VerbDecl<TicketSnapshot, TransitionInput> = {
@@ -693,18 +737,9 @@ const transitionTicketVerb: VerbDecl<TicketSnapshot, TransitionInput> = {
     if (to !== "cancelled" && !human && !intake && !LEGAL_FROM[to]?.has(prior.status)) {
       return conflict(`cannot move ${prior.status} → ${to}`);
     }
-    if (to === "done" && prior.blast_radius === "high" && !human) {
-      const ptr = prior.approval_request_id;
-      const perm = ptr
-        ? cap.db
-            .query<{ status: string; resolved_by: string | null }, [string]>(
-              "SELECT status, resolved_by FROM permissions WHERE id = ?",
-            )
-            .get(ptr)
-        : null;
-      if (!(perm && perm.status === "allowed" && perm.resolved_by === cap.config.humanName)) {
-        return conflict(APPROVAL_BLOCK_MESSAGE);
-      }
+    if (to === "done" && !human) {
+      const missing = doneGateMissing(cap, prior);
+      if (missing) return conflict(missing);
     }
     // An agent hands a ticket in for review with a note on how it was built and tested (the audit trail).
     // The human may move without one.

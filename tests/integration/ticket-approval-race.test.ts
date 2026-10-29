@@ -1,5 +1,4 @@
-// The Allow race through the real hub and the real transition_ticket tool: the human allows the
-// pending request between the blocked move and the approval call. One request, and done.
+// The real transition_ticket tool against the real hub (L4): done of a high ticket no longer waits for the human's Allow.
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { spawnHub, type HubHandle } from "../helpers/hub";
@@ -52,20 +51,10 @@ describe("transition_ticket with the Allow landing mid-call", () => {
     return id;
   }
 
-  test("the Allow lands between the 409 and the approval call: done, with one request", async () => {
+  // L4: the Allow no longer gates done. The hub answers 409 with the missing item and raises no approval request.
+  test("a done move without Validator PASSes is refused and raises no request", async () => {
     const id = await inReview();
-    // The agent's first attempt raises the request and is told to wait.
-    const first = await tool(hostWith(async () => {}), id);
-    expect(first).toContain("Wait for the human");
-    const [r1] = await pendingFor(id);
-    expect(r1).toBeDefined();
-
-    // The second attempt is blocked (R1 still pending); the human allows R1 right after.
-    const second = await tool(hostWith(async () => {
-      expect((await postJson(hub, `/permissions/${r1!.id}/verdict`, { by: hub.humanName, behavior: "allow" })).status).toBe(200);
-    }), id);
-    expect(second).toContain(`ticket ${id} is now done`);
-    expect(second).toContain(r1!.id);
-    expect(await pendingFor(id)).toHaveLength(1);   // no second card
+    await expect(tool(hostWith(async () => {}), id)).rejects.toThrow("done needs a Validator PASS");
+    expect(await pendingFor(id)).toHaveLength(0);
   });
 });

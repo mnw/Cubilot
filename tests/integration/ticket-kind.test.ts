@@ -11,6 +11,8 @@ import { migrateLedger } from "../../hub/core/ledger";
 import { insertEvent } from "../../hub/core/events";
 import { createPermissionKind } from "../../hub/kinds/permission";
 import { createTicketKind } from "../../hub/kinds/ticket";
+import { giveProject } from "../helpers/repo";
+import { seedValidatorPasses } from "../helpers/validator-pass";
 import type { Entry, HubCapabilities, KindModule, Scope } from "../../hub/core/types";
 
 const HUMAN = "human";
@@ -24,6 +26,7 @@ function makeEnv() {
   migrateLedger(db);
   const kinds: KindModule[] = [createPermissionKind(db), createTicketKind(db)];
   for (const k of kinds) k.migrate(db);
+  giveProject(db, "r1", "r2");
   const roster: Record<string, string | null> = { [HUMAN]: null };
   const emitted: { entry: Entry; scope: Scope }[] = [];
   let refreshes = 0;
@@ -109,6 +112,8 @@ async function create(over: Record<string, unknown> = {}): Promise<string> {
 // An agent's move to in_review needs a note (the audit trail); tests that are about something else get a default one.
 const as = (id: string, by: string, to: string, note?: string) =>
   t.call("POST", `/tickets/${id}/transition`, { by, to, ...(note !== undefined ? { note } : to === "in_review" && by !== HUMAN ? { note: "built and tested" } : {}) });
+// L4: an agent's done needs the required Validator PASSes (one low, two high) on a commit merged into staging.
+const passes = (id: string) => seedValidatorPasses(t.db, id, t.row(id).blast_radius === "high" ? 2 : 1);
 const claim = (id: string, by: string) => t.call("POST", `/tickets/${id}/claim`, { by });
 
 /** Drive a ticket to in_review owned by bob. */
@@ -574,6 +579,7 @@ describe("malformed bodies", () => {
 describe("one event + one tickets update per verb", () => {
   test("each verb adds exactly one event; row version = last event seq", async () => {
     const id = await create();
+    passes(id);
     const steps: [() => Promise<unknown>, string][] = [
       [() => claim(id, "bob"), "ticket.claimed"],
       [() => as(id, "bob", "in_progress"), "ticket.in_progress"],
@@ -728,15 +734,17 @@ describe("human approval gate", () => {
 
   test("low radius: done needs no permission", async () => {
     const id = await toReview({ blast_radius: "low" });
+    passes(id);
     expect((await as(id, "bob", "done")).status).toBe(200);
     expect(permCount(id)).toBe(0);
   });
 
-  test("high radius without an approval: 409 with approval_request_id null", async () => {
+  test("high radius without PASSes: 409 that names the missing PASS, no approval key (L4)", async () => {
     const id = await toReview({ blast_radius: "high" });
     const r = await as(id, "bob", "done");
     expect(r.status).toBe(409);
-    expect(r.json.approval_request_id).toBeNull();
+    expect(r.json.error).toContain("Validator PASS");
+    expect("approval_request_id" in r.json).toBe(false);
     expect(t.row(id).status).toBe("in_review");
   });
 
@@ -802,13 +810,15 @@ describe("human approval gate", () => {
   test("the human's Allow between the blocked move and the approval call is kept: same request, no new row, done succeeds", async () => {
     const id = await toReview({ blast_radius: "high" });
     const r1 = (await t.call("POST", `/tickets/${id}/approval`, { by: "bob" })).json.request_id;
-    expect((await as(id, "bob", "done")).status).toBe(409);                       // blocked, R1 pending
+    expect((await as(id, "bob", "done")).status).toBe(409);                       // no PASSes yet
     await t.call("POST", `/permissions/${r1}/verdict`, { by: HUMAN, behavior: "allow" }); // the Allow lands here
     const again = await t.call("POST", `/tickets/${id}/approval`, { by: "bob" });
     expect(again.status).toBe(200);
     expect(again.json).toEqual({ request_id: r1, created: false, status: "allowed" });
     expect(t.row(id).approval_request_id).toBe(r1);
     expect(permCount(id)).toBe(1);                                                // no second card
+    expect((await as(id, "bob", "done")).status).toBe(409);                       // the Allow is not a PASS (L4)
+    passes(id);
     expect((await as(id, "bob", "done")).status).toBe(200);
   });
 
@@ -826,13 +836,11 @@ describe("human approval gate", () => {
     expect(permCount(id)).toBe(3);
   });
 
-  test("an agent's Allow does not count; a fresh request and the human's Allow complete the ticket", async () => {
+  test("an agent's Allow does not count; a fresh request is a new row; the PASSes complete the ticket (L4)", async () => {
     const id = await toReview({ blast_radius: "high" });
     const first = (await t.call("POST", `/tickets/${id}/approval`, { by: "bob" })).json.request_id;
     expect((await t.call("POST", `/permissions/${first}/verdict`, { by: "carol", behavior: "allow" })).status).toBe(200);
-    const blocked = await as(id, "bob", "done");
-    expect(blocked.status).toBe(409);
-    expect(blocked.json.approval_request_id).toBe(first);
+    expect((await as(id, "bob", "done")).status).toBe(409);
 
     const second = await t.call("POST", `/tickets/${id}/approval`, { by: "bob" });
     expect(second.json.created).toBe(true);
@@ -840,6 +848,8 @@ describe("human approval gate", () => {
     expect(t.row(id).approval_request_id).toBe(second.json.request_id);
 
     expect((await t.call("POST", `/permissions/${second.json.request_id}/verdict`, { by: HUMAN, behavior: "allow" })).status).toBe(200);
+    expect((await as(id, "bob", "done")).status).toBe(409);
+    passes(id);
     expect((await as(id, "bob", "done")).status).toBe(200);
   });
 
@@ -857,13 +867,12 @@ describe("human approval gate", () => {
     await as(id, "bob", "in_progress");
     expect(t.row(id).approval_request_id).toBeNull();
     await as(id, "bob", "in_review");
-    const blocked = await as(id, "bob", "done");
-    expect(blocked.status).toBe(409);
-    expect(blocked.json.approval_request_id).toBeNull();
+    expect((await as(id, "bob", "done")).status).toBe(409);
 
     const fresh = (await t.call("POST", `/tickets/${id}/approval`, { by: "bob" })).json.request_id;
     expect(fresh).not.toBe(rid);
     await t.call("POST", `/permissions/${fresh}/verdict`, { by: HUMAN, behavior: "allow" });
+    passes(id);
     expect((await as(id, "bob", "done")).status).toBe(200);
   });
 
@@ -958,6 +967,7 @@ describe("a ticket:done request that stops mattering is dismissed", () => {
   test("the assignee's own done after the human's Allow does not touch the request either", async () => {
     const { id, rid } = await withRequest();
     await t.call("POST", `/permissions/${rid}/verdict`, { by: HUMAN, behavior: "allow" });
+    passes(id);
     expect((await as(id, "bob", "done")).status).toBe(200);
     expect(permStatus(rid).status).toBe("allowed");
   });
@@ -1344,6 +1354,7 @@ describe("archive", () => {
   const listIds = async (q = "") => (await t.call("GET", `/tickets?room=r1&status=all${q}`)).json.map((x: any) => x.id as string);
   const doneTicket = async (over: Record<string, unknown> = {}) => {
     const id = await toReview(over);
+    passes(id);
     expect((await as(id, "bob", "done")).status).toBe(200);
     return id;
   };
@@ -1852,7 +1863,7 @@ describe("edit", () => {
     expect(t.db.query<any, [string]>("SELECT status FROM permissions WHERE id = ?").get(rid)!.status).toBe("dismissed");
   });
 
-  test("new criteria void an allowed approval: the assignee's done move needs a new Allow", async () => {
+  test("new criteria void an allowed approval; the assignee's done needs the PASSes, not an Allow (L4)", async () => {
     const id = await toReview({ blast_radius: "high" });
     const rid = (await t.call("POST", `/tickets/${id}/approval`, { by: "bob" })).json.request_id as string;
     expect((await t.call("POST", `/permissions/${rid}/verdict`, { by: HUMAN, behavior: "allow" })).status).toBe(200);
@@ -1861,10 +1872,12 @@ describe("edit", () => {
     const done = await as(id, "bob", "done");
     expect(done.status).toBe(409);
     expect(t.row(id).status).toBe("in_review");
-    // a new request, a new Allow: now the move works
+    // a new request, a new Allow: no effect. The PASSes make the move work.
     const rid2 = (await t.call("POST", `/tickets/${id}/approval`, { by: "bob" })).json.request_id as string;
     expect(rid2).not.toBe(rid);
     await t.call("POST", `/permissions/${rid2}/verdict`, { by: HUMAN, behavior: "allow" });
+    expect((await as(id, "bob", "done")).status).toBe(409);
+    passes(id);
     expect((await as(id, "bob", "done")).status).toBe(200);
   });
 

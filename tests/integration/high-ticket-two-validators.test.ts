@@ -1,9 +1,10 @@
-// L4: a high ticket closes on two Validator PASSes on one commit, with no human Allow. A low ticket closes on one.
+// L4: a PASS never closes a ticket. A high ticket needs two Validator PASSes on one commit. The lead moves it to done
+// after the merge into staging, with no human Allow.
 // In-process hub kinds, like tests/unit/stage-final-pass.test.ts.
 
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { giveProject } from "../helpers/repo";
+import { giveProject, projectRepo } from "../helpers/repo";
 import { insertEvent } from "../../hub/core/events";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createPermissionKind } from "../../hub/kinds/permission";
@@ -11,8 +12,15 @@ import { createTicketKind } from "../../hub/kinds/ticket";
 import { createStageRuntime } from "../../hub/kinds/stage";
 import type { Entry, HubCapabilities, Scope } from "../../hub/core/types";
 
-const C1 = "a".repeat(40);
-const C2 = "b".repeat(40);
+const git = (...a: string[]) => {
+  const r = Bun.spawnSync(["git", "-C", projectRepo(), ...a], { stdout: "pipe", stderr: "pipe" });
+  if (r.exitCode !== 0) throw new Error(`git ${a.join(" ")}: ${r.stderr.toString()}`);
+  return r.stdout.toString().trim();
+};
+// C1 is on staging (merged). C2 is a commit that staging does not hold.
+git("branch", "-f", "staging", "main");
+const C1 = git("rev-parse", "main");
+const C2 = git("commit-tree", `${C1}^{tree}`, "-p", C1, "-m", "unmerged");
 
 function makeEnv() {
   const db = new Database(":memory:");
@@ -40,7 +48,7 @@ function makeEnv() {
   } as unknown as HubCapabilities;
   let n = 0;
   /** An in_review ticket with a Tester handoff to the Validator on C1 and a running first Validator stage. */
-  const ticket = (radius: "low" | "high") => {
+  const ticket = (radius: "low" | "high", commit = C1) => {
     const id = `t_${(++n).toString(16).padStart(16, "0")}`;
     db.run(
       `INSERT INTO tickets (id, room, title, acceptance_criteria, blast_radius, priority, creator, assignee, status, created_at_ms, updated_at_ms, version)
@@ -51,12 +59,23 @@ function makeEnv() {
     const hid = `h_${n}`;
     db.run(
       "INSERT INTO handoffs (id, from_agent, to_agent, task, context_json, status, created_at_ms, expires_at_ms) VALUES (?, 'tester-1', 'role:validator', 'validate', ?, 'accepted', 1, 9999999999999)",
-      [hid, JSON.stringify({ ticket_id: id, commit: C1 })],
+      [hid, JSON.stringify({ ticket_id: id, commit })],
     );
     db.run("INSERT INTO events (entity_id, kind, actor, payload_json, at_ms) VALUES (?, 'handoff.created', 'tester-1', '{}', 1)", [hid]);
     const first = rt.api.create({ ticket_id: id, role: "validator" }, "system", cap);
     db.run("UPDATE stage SET status = 'running', session = 'validator-1' WHERE id = ?", [first.id]);
     return { id, first: first.id };
+  };
+  /** The lead's move to done, through the ticket route. Returns the status and the error text. */
+  const tk = createTicketKind(db);
+  const leadDone = async (id: string): Promise<{ status: number; error?: string }> => {
+    const route = tk.routes.find((r) => r.method === "POST" && String(r.path).includes("transition"))!;
+    const res = await route.handler(
+      new Request("http://hub.test/tickets/x/transition", { method: "POST", body: JSON.stringify({ by: "lead-1", to: "done" }), headers: { "Content-Type": "application/json" } }),
+      cap,
+      { id },
+    );
+    return { status: res.status, error: ((await res.json().catch(() => null)) as { error?: string } | null)?.error };
   };
   const row = (id: string) => db.query<{ status: string; assignee: string | null }, [string]>("SELECT status, assignee FROM tickets WHERE id = ?").get(id)!;
   const validators = (id: string) =>
@@ -68,7 +87,7 @@ function makeEnv() {
     db.run("UPDATE stage SET status = 'running', session = 'validator-2' WHERE id = ?", [second.id]);
     return second.id;
   };
-  return { db, rt, cap, ticket, row, validators, doneEvents, startSecond };
+  return { db, rt, cap, ticket, leadDone, row, validators, doneEvents, startSecond };
 }
 
 describe("high ticket: two Validator PASSes", () => {
@@ -87,15 +106,15 @@ describe("high ticket: two Validator PASSes", () => {
     if (second) expect(second).not.toBe("validator-1");
   });
 
-  test("second PASS closes with no Allow", () => {
+  test("second PASS keeps in_review and hands the ticket to the lead", () => {
     const e = makeEnv();
     const t = e.ticket("high");
     e.rt.hooks.onResult("validator-1", { stage_id: t.first, verdict: "PASS" }, e.cap);
     const second = e.startSecond(t.id);
     expect(e.rt.hooks.checkResult("validator-2", { stage_id: second, ticket_id: t.id, verdict: "PASS", findings: [], notes: "ok", commit: C1 }, e.cap)).toEqual([]);
     e.rt.hooks.onResult("validator-2", { stage_id: second, verdict: "PASS" }, e.cap);
-    expect(e.row(t.id).status).toBe("done");
-    expect(e.doneEvents(t.id)).toEqual([{ actor: "system" }]);
+    expect(e.row(t.id)).toEqual({ status: "in_review", assignee: "lead-1" });
+    expect(e.doneEvents(t.id)).toHaveLength(0);
   });
 
   test("FAIL in first goes to worker", () => {
@@ -128,12 +147,77 @@ describe("high ticket: two Validator PASSes", () => {
     expect(errors!.join(" ")).toContain(C1);
     expect(e.row(t.id).status).toBe("in_review");
   });
+});
 
-  test("low ticket closes on one PASS", () => {
+describe("L4: PASS leaves in_review, the lead closes after the merge", () => {
+  const pass = (e: ReturnType<typeof makeEnv>, t: { first: string }) => e.rt.hooks.onResult("validator-1", { stage_id: t.first, verdict: "PASS" }, e.cap);
+  const passSecond = (e: ReturnType<typeof makeEnv>, id: string) => {
+    const second = e.startSecond(id);
+    e.rt.hooks.onResult("validator-2", { stage_id: second, verdict: "PASS" }, e.cap);
+  };
+
+  test("low PASS leaves in_review", () => {
     const e = makeEnv();
     const t = e.ticket("low");
-    e.rt.hooks.onResult("validator-1", { stage_id: t.first, verdict: "PASS" }, e.cap);
-    expect(e.row(t.id).status).toBe("done");
+    pass(e, t);
+    expect(e.row(t.id)).toEqual({ status: "in_review", assignee: "lead-1" });
     expect(e.validators(t.id)).toHaveLength(1);
+    expect(e.doneEvents(t.id)).toHaveLength(0);
+  });
+
+  test("low done after merge", async () => {
+    const e = makeEnv();
+    const t = e.ticket("low");
+    pass(e, t);
+    expect((await e.leadDone(t.id)).status).toBe(200);
+    expect(e.row(t.id).status).toBe("done");
+  });
+
+  test("low done before merge 409", async () => {
+    const e = makeEnv();
+    const t = e.ticket("low", C2);
+    pass(e, t);
+    const r = await e.leadDone(t.id);
+    expect(r.status).toBe(409);
+    expect(r.error).toContain("merged into staging");
+    expect(e.row(t.id).status).toBe("in_review");
+  });
+
+  test("low done with no PASS 409", async () => {
+    const e = makeEnv();
+    const t = e.ticket("low");
+    e.db.run("UPDATE tickets SET assignee = 'lead-1' WHERE id = ?", [t.id]);
+    const r = await e.leadDone(t.id);
+    expect(r.status).toBe(409);
+    expect(r.error).toContain("Validator PASS");
+  });
+
+  test("high done with one PASS 409", async () => {
+    const e = makeEnv();
+    const t = e.ticket("high");
+    pass(e, t);
+    const r = await e.leadDone(t.id);
+    expect(r.status).toBe(409);
+    expect(r.error).toContain("second Validator PASS");
+  });
+
+  test("high done with two PASSes on the merged commit, no Allow", async () => {
+    const e = makeEnv();
+    const t = e.ticket("high");
+    pass(e, t);
+    passSecond(e, t.id);
+    expect(e.row(t.id)).toEqual({ status: "in_review", assignee: "lead-1" });
+    expect((await e.leadDone(t.id)).status).toBe(200);
+    expect(e.row(t.id).status).toBe("done");
+  });
+
+  test("high done with two PASSes before the merge 409", async () => {
+    const e = makeEnv();
+    const t = e.ticket("high", C2);
+    pass(e, t);
+    passSecond(e, t.id);
+    const r = await e.leadDone(t.id);
+    expect(r.status).toBe(409);
+    expect(r.error).toContain("merged into staging");
   });
 });
