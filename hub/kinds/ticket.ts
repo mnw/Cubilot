@@ -750,7 +750,7 @@ function conflictResponse(e: LedgerConflict): Response {
   return Response.json(body, { status: e.httpStatus });
 }
 
-export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicketChanged"> & Partial<Pick<StageHooks, "onTicketCancelled" | "onTicketParked">>): KindModule {
+export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicketChanged"> & Partial<Pick<StageHooks, "onTicketCancelled" | "onTicketParked" | "onTicketEdited">>): KindModule {
   const entity = createLedgerEntity({ decl: ticketDecl, db });
 
   // Rework, cancel, a direct done and a reassignment leave the ticket's `ticket:done` request moot.
@@ -1308,6 +1308,7 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
           if (r.emitted) {
             cap.briefing.refresh();
             retireStaleApproval(before, r.snapshot, a.name, cap);
+            stage?.onTicketEdited?.(params.id);
           }
           return Response.json({ snapshot: r.snapshot, ...(r.emitted ? {} : { idempotent: true }) });
         } catch (e) {
