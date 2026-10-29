@@ -38,33 +38,47 @@ describe("a stage result without context.notes is refused (every role)", () => {
       await withHub(async (hub, open) => {
         const t = await postJson(hub, "/tickets", { by: "Orchestrator", title: "T", acceptance_criteria: "c", blast_radius: "low", priority: "medium", role: null });
         const ticketId = (t.json as { snapshot: { id: string } }).snapshot.id;
-        const sse = openSSE(hub, "/launches/stream");
-        // A role handoff starts the stage; the writing roles cannot be set as a ticket role.
-        expect((await postJson(hub, "/handoffs", { from: "Orchestrator", to_role: role, task: "start", context: { ticket_id: ticketId } })).status).toBe(201);
-        let session = "";
-        for await (const req of sse.events) {
-          session = req.session;
-          expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
-          break;
+        const newCommit = () => {
+          const tip = git("rev-parse", `refs/heads/ticket/${ticketId}`);
+          const sha = git("commit-tree", `${tip}^{tree}`, "-p", tip, "-m", "work");
+          git("update-ref", `refs/heads/ticket/${ticketId}`, sha);
+          return sha;
+        };
+        // Starts a stage by a role handoff and returns its running session and stage id.
+        const start = async (startRole: string) => {
+          const sse = openSSE(hub, "/launches/stream");
+          expect((await postJson(hub, "/handoffs", { from: "Orchestrator", to_role: startRole, task: "start", context: { ticket_id: ticketId } })).status).toBe(201);
+          let name = "";
+          for await (const req of sse.events) {
+            name = req.session;
+            expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+            break;
+          }
+          sse.close();
+          expect(name).toBe(`${startRole}-1`);
+          open.push(await registerAgent(hub, name, { room: "r1" }));
+          return name;
+        };
+        // The writing roles cannot be set as a ticket role. An editor needs a passed writer result first.
+        if (role === "editor") {
+          const w = await start("writer");
+          const wStage = ((await getJson(hub, "/stages?status=running")).json as Array<{ id: string }>)[0].id;
+          const wr = await postJson(hub, "/handoffs", { from: w, to_role: "editor", task: "result", context: { stage_id: wStage, ticket_id: ticketId, notes: "Wrote X. Checked Y. Limit: none.", commit: newCommit() } });
+          expect(wr.status).toBe(201);
+          await sleep(200);
         }
-        sse.close();
-        expect(session).toBe(`${role}-1`);
-        open.push(await registerAgent(hub, session, { room: "r1" }));
-        const stageId = ((await getJson(hub, "/stages?status=running")).json as Array<{ id: string }>)[0].id;
+        const session = await start(role);
+        const stageId = ((await getJson(hub, "/stages?status=running")).json as Array<{ id: string; role: string }>).find((x) => x.role === role)!.id;
 
         const send = (notes: unknown, commit?: string) => {
           const context: Record<string, unknown> = { stage_id: stageId, ticket_id: ticketId };
           if (notes !== undefined) context.notes = notes;
           if (REVIEW.has(role)) Object.assign(context, { verdict: "PASS", findings: [] });
           if (commit) context.commit = commit;
-          return postJson(hub, "/handoffs", role === "worker" ? { from: session, to_role: "tester", task: "result", context } : { from: session, to: "Orchestrator", task: "result", context });
+          const toRole = role === "worker" ? "tester" : role === "writer" ? "editor" : role === "editor" ? "reviewer" : null;
+          return postJson(hub, "/handoffs", toRole ? { from: session, to_role: toRole, task: "result", context } : { from: session, to: "Orchestrator", task: "result", context });
         };
-        const commit = role === "worker" ? (() => {
-          const tip = git("rev-parse", `refs/heads/ticket/${ticketId}`);
-          const sha = git("commit-tree", `${tip}^{tree}`, "-p", tip, "-m", "work");
-          git("update-ref", `refs/heads/ticket/${ticketId}`, sha);
-          return sha;
-        })() : role === "tester" ? "0123456789abcdef0123456789abcdef01234567" : undefined;
+        const commit = ["worker", "writer", "editor"].includes(role) ? newCommit() : role === "tester" ? "0123456789abcdef0123456789abcdef01234567" : undefined;
 
         const before = await handoffCount(hub);
         for (const notes of [undefined, "", over400]) {

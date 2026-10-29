@@ -494,6 +494,12 @@ const worktreeKey = (s: { ticket_id: string | null; request_id: string | null; r
 
 const isRole = (r: string): r is StageRole => (STAGE_ROLES as readonly string[]).includes(r);
 
+/** `start_commit`: the ticket/<id> head when a writer stage first started (the writer base). Nullable; added here. */
+function migrateStartCommit(db: Database): void {
+  const has = db.query<{ name: string }, []>("PRAGMA table_info(stage)").all().some((c) => c.name === "start_commit");
+  if (!has) db.exec("ALTER TABLE stage ADD COLUMN start_commit TEXT");
+}
+
 /**
  * `session_released_at_ms`: set when the hub saw the session closed (close ack) or never started (final launch-error ack);
  * cleared by the move to `launching`. The one nullable column is added here (not in `stageDecl`: the snapshot does not carry it).
@@ -1435,6 +1441,12 @@ export function createStageRuntime(
         });
         cwd = wt.path;
         branch = wt.branch;
+        // The writer base: the ticket/<id> head when the stage first starts. A relaunch keeps it.
+        if (stage.ticket_id && stage.role === "writer") {
+          const head = Bun.spawnSync(["git", "-C", project, "rev-parse", "--verify", "--quiet", `refs/heads/ticket/${stage.ticket_id}^{commit}`], { stdout: "pipe", stderr: "pipe" });
+          const sha = head.stdout.toString().trim();
+          if (head.exitCode === 0 && FULL_SHA_RE.test(sha)) db.run("UPDATE stage SET start_commit = ? WHERE id = ? AND start_commit IS NULL", [sha, stage.id]);
+        }
       } catch (e) {
         return { ok: false, reason: `worktree: ${(e as Error).message}` };
       }
@@ -1875,6 +1887,7 @@ export function createStageRuntime(
     migrate: (d: Database) => {
       entity.migrate(d);
       migrateSessionReleased(d);
+      migrateStartCommit(d);
     },
     routes: withLedgerRequired(routes),
     // A stage is the hub's own bookkeeping: agents never get a stage replayed on reconnect.
@@ -2034,10 +2047,16 @@ export function createStageRuntime(
       if (holds.code !== 0) return refuse(`Git: ${holds.err || "merge-base failed"}`);
       return null;
     }
-    // Base: the newest earlier passed result of this role (a writer also counts editor results) with a valid commit, else the fork point from staging.
+    // Base: a writer's recorded start commit (the ticket/<id> head when the stage started), else the newest earlier passed result of this role with a valid commit, else the fork point from staging.
     const earlier = earlierResults(ticketId, role === "writer" ? ["writer", "editor"] : ["worker"]);
     let base: string | null = null;
-    for (const row of earlier) {
+    const started = role === "writer" ? db.query<{ start_commit: string | null }, [string]>("SELECT start_commit FROM stage WHERE id = ?").get(stage.id)?.start_commit : null;
+    if (started && FULL_SHA_RE.test(started)) {
+      const r = resolve(started);
+      if (r.error) return refuse(r.error);
+      if (r.ok) base = started;
+    }
+    for (const row of base ? [] : earlier) {
       const prev = (JSON.parse(row.context_json) as Record<string, unknown>).commit;
       if (typeof prev !== "string" || !FULL_SHA_RE.test(prev)) continue;
       const r = resolve(prev);

@@ -67,8 +67,10 @@ function makeEnv(project?: string) {
     ]);
     db.run("INSERT INTO events (entity_id, kind, actor, payload_json, at_ms) VALUES (?, 'created', 'w', '{}', 1)", [id]);
   };
-  const send = (role: "writer" | "editor", commit: unknown, to: string) => {
+  /** `start`: the ticket/<id> head recorded when the writer stage started (the hub records it at launch). */
+  const send = (role: "writer" | "editor", commit: unknown, to: string, start: string = c0) => {
     const st = running(role);
+    if (role === "writer") db.run("UPDATE stage SET start_commit = ? WHERE id = ?", [start, st.id]);
     return rt.hooks.checkResult(st.session, { notes: "n", stage_id: st.id, ticket_id: TID, ...(commit === undefined ? {} : { commit }) }, cap, to)!;
   };
   return { dir, git, c0, c1, c2, c3, x, earlier, send };
@@ -79,6 +81,11 @@ describe("writer without new commit refused", () => {
     const e = makeEnv();
     expect(e.send("writer", e.c1, "role:editor")).toEqual([]);
   });
+  test("commits that exist before the stage are not new work", () => {
+    const e = makeEnv();
+    expect(e.send("writer", e.c1, "role:editor", e.c3)[0]).toContain("ancestor");
+    expect(e.send("writer", e.c3, "role:editor", e.c3)[0]).toContain("equals the base");
+  });
   test("equal to the base is refused and says what is missing", () => {
     const e = makeEnv();
     expect(e.send("writer", e.c0, "role:editor")[0]).toContain("equals the base");
@@ -86,9 +93,9 @@ describe("writer without new commit refused", () => {
   test("an ancestor of the base (earlier writer result) is refused", () => {
     const e = makeEnv();
     e.earlier("writer", e.c2);
-    expect(e.send("writer", e.c1, "role:editor")[0]).toContain("ancestor");
-    expect(e.send("writer", e.c2, "role:editor")[0]).toContain("equals the base");
-    expect(e.send("writer", e.c3, "role:editor")).toEqual([]);
+    expect(e.send("writer", e.c1, "role:editor", e.c2)[0]).toContain("ancestor");
+    expect(e.send("writer", e.c2, "role:editor", e.c2)[0]).toContain("equals the base");
+    expect(e.send("writer", e.c3, "role:editor", e.c2)).toEqual([]);
   });
   test("malformed, unresolved and off-branch commits are refused", () => {
     const e = makeEnv();
