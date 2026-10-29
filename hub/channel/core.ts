@@ -210,9 +210,33 @@ export function renderEnvelope(evt: BridgeEvent, room: string): string {
   return `[chatbridge ${bits.join(" ")}]`;
 }
 
+// A result handoff (context.verdict) sent to the room lead shows as one line: sender, ticket or request id, verdict,
+// finding counts and the handoff id. No finding text and no notes: the lead calls read_handoff for the full result.
+// Any other event, and any other reader, gets the full text as before.
+export function resultSummary(evt: BridgeEvent, agent: string): string | null {
+  if (evt.kind !== "handoff.new" || !evt.lead || evt.lead !== agent || evt.to !== agent || !evt.handoff_id) return null;
+  let snap: { context?: unknown };
+  try {
+    snap = JSON.parse(evt.text ?? "");
+  } catch {
+    return null;
+  }
+  const c = snap.context && typeof snap.context === "object" ? (snap.context as Record<string, unknown>) : null;
+  if (!c || typeof c.verdict !== "string") return null;
+  const subject = typeof c.ticket_id === "string" ? `ticket ${c.ticket_id}` : typeof c.request_id === "string" ? `request ${c.request_id}` : "no ticket";
+  const findings = Array.isArray(c.findings) ? c.findings : [];
+  const count = (sev: string) => findings.filter((f) => (f as { severity?: unknown } | null)?.severity === sev).length;
+  const blocking = count("blocking");
+  const suggestion = count("suggestion");
+  const bySeverity = blocking + suggestion > 0 ? ` (${blocking} blocking, ${suggestion} suggestion)` : "";
+  return `Result from ${evt.from ?? "unknown"}: ${subject}, ${c.verdict}, ${findings.length} findings${bySeverity}. Handoff ${evt.handoff_id}. Call read_handoff for the full result.`;
+}
+
 export function renderEvent(evt: BridgeEvent, agent: string, room: string): string {
   if (evt.type === "briefing") return renderBriefing(evt, agent, room);
   if (evt.type === "nutshell.updated") return `[Cubilot nutshell update]\n${evt.text ?? ""}`;
+  const summary = resultSummary(evt, agent);
+  if (summary) return `${renderEnvelope(evt, room)}\n${summary}`;
   return `${renderEnvelope(evt, room)}\n${evt.text ?? ""}`;
 }
 

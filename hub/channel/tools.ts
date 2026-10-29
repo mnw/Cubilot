@@ -290,6 +290,22 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
     },
   },
   {
+    name: "read_handoff",
+    description:
+      "Read the full handoff of your room by its id, with its context. Use it when a result summary is not enough.",
+    inputSchema: {
+      type: "object",
+      properties: { handoff_id: { type: "string", pattern: "^h_[0-9a-f]{16}$" } },
+      required: ["handoff_id"],
+    },
+    handler: async (ctx, args) => {
+      const id = String(args.handoff_id ?? "");
+      const resp = await authedGet(ctx.host, ctx.hubEnv, `/handoffs/${encodeURIComponent(id)}?agent=${encodeURIComponent(ctx.agent)}`);
+      if (resp.status !== 200) toolError(resp, "read_handoff");
+      return { content: [{ type: "text", text: resp.body }] };
+    },
+  },
+  {
     name: "send_interrupt",
     description:
       "Send a high-visibility attention flag to another participant. The recipient's channel surfaces it prominently; they acknowledge via ack_interrupt when they've read it. Use sparingly — reserve for 'wait, re-read this before continuing' moments, not for regular chat.",
