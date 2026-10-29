@@ -30,6 +30,13 @@ async function gone(pid: number, ms = 3000) {
   return !alive(pid);
 }
 
+// True when no process has `needle` in its command line (waits up to ms for the last one to end).
+async function noProcessWith(needle: string, ms = 3000) {
+  const found = () => Bun.spawnSync(["pgrep", "-f", "--", needle]).exitCode === 0;
+  for (let t = 0; t < ms && found(); t += 50) await Bun.sleep(50);
+  return !found();
+}
+
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), "cubilot-test-script-"));
   realLockBefore = lockState();
@@ -238,7 +245,9 @@ describe("scripts/test.sh", () => {
       expect(r.code).toBe(1);
       expect(r.ms).toBeLessThan(12000);
       expect(r.out).toContain("process query (ps)");
-      expect(await gone(Number(readFileSync(pidfile, "utf8")))).toBe(true);
+      // The wrapper can stop the run at its first ps check, before bun starts the test file and writes the pid file.
+      if (existsSync(pidfile)) expect(await gone(Number(readFileSync(pidfile, "utf8")))).toBe(true);
+      else expect(await noProcessWith(join(dir, "hang.test.ts"))).toBe(true);
       expect(alive(sentinel.pid)).toBe(true);
       expect(existsSync(r.lock)).toBe(false);
     }, 30000);
