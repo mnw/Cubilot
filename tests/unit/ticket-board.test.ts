@@ -3360,7 +3360,8 @@ describe("moving tickets: the Move to select and drag and drop", () => {
     expect(own.prevented).toBe(false);                             // no highlight on its own column
     const cancelled = ev();
     columns[""].handlers.dragover(cancelled);
-    expect(cancelled.prevented).toBe(false);
+    expect(cancelled.prevented).toBe(true);                        // enabled so the browser sends drop, which shows the failure line
+    expect(columns[""].cls.has("drop-target")).toBe(false);       // but never highlighted
     columns.queued.handlers.drop(ev());
     columns[""].handlers.drop(ev());
     expect(posts.filter((p) => p.path.endsWith("/transition"))).toEqual([]);
@@ -3480,7 +3481,10 @@ describe("moving tickets: the Move to select and drag and drop", () => {
     test("(c) a drop on a column that refuses the ticket shows a fixed text; a drop on its own column shows nothing", async () => {
       await show(T("a", "queued"));
       cards.a.handlers.dragstart(ev());
-      columns[""].handlers.drop(ev());
+      const over = ev();
+      columns[""].handlers.dragover(over);                         // browser order: drop reaches only a target whose dragover was cancelled
+      if (over.prevented) columns[""].handlers.drop(ev());
+      expect(over.prevented).toBe(true);
       expect(status.textContent).toBe("Move of T a failed: that column does not take tickets");
       expect(posts.filter((p) => p.path.endsWith("/transition")).length).toBe(0);
       status.textContent = "";
@@ -3529,6 +3533,27 @@ describe("moving tickets: the Move to select and drag and drop", () => {
       columns.done.handlers.drop(ev());
       await settle();
       expect(active).toBe("elsewhere");
+    });
+
+    test("two concurrent failing moves of different tickets each show their own reason", async () => {
+      await show(T("a", "queued"), T("b", "queued"));
+      const normal = ctx.authedFetch;
+      const gates: Record<string, () => void> = {};
+      ctx.authedFetch = async (path: string, init?: any) => {
+        if (!path.endsWith("/transition")) return normal(path, init);
+        const id = path.split("/")[2];
+        await new Promise<void>((r) => { gates[id] = r; });
+        return { ok: false, json: async () => ({}), text: async () => `reason ${id}` };
+      };
+      ctx.parseErrorBody = async (r: any) => r.text();
+      selects.a.value = "done"; selects.b.value = "done";
+      const pa = selects.a.handlers.change();
+      const pb = selects.b.handlers.change();
+      gates.a(); await pa;
+      expect(status.textContent).toBe("Move of T a failed: reason a");
+      gates.b(); await pb;
+      expect(status.textContent).toBe("Move of T b failed: reason b");
+      ctx.parseErrorBody = async () => refuseText;
     });
 
     test("hostile hub text and title show as text, never as markup", async () => {

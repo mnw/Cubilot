@@ -209,7 +209,7 @@ const TicketBoard = (() => {
   }
 
   let lastActError = '';   // the text of the last refused call, for inline display
-  async function act(path, body, label) {
+  async function act(path, body, label, out = null) {   // `out.reason`: this call's own refusal text (lastActError is shared)
     lastActError = '';
     try {
       const r = await authedFetch(path, {
@@ -220,9 +220,11 @@ const TicketBoard = (() => {
       if (r.ok) return (await r.json().catch(() => null)) ?? {};
       const err = await parseErrorBody(r);
       lastActError = String(err);
+      if (out) out.reason = lastActError;
       addMessage({ from: 'system', to: HUMAN_NAME, text: `Ticket ${label} failed: ${err}`, ts: '' });
     } catch (e) {
       lastActError = String(e?.message ?? e);
+      if (out) out.reason = lastActError;
       addMessage({ from: 'system', to: HUMAN_NAME, text: `Ticket ${label} error: ${e?.message ?? e}`, ts: '' });
     }
     return null;
@@ -279,8 +281,9 @@ const TicketBoard = (() => {
     if (moving.has(id)) { failMove(id, 'a move is in flight'); refocus(); return; }
     moving.add(id);
     try {
-      const ok = await act(`/tickets/${encodeURIComponent(id)}/transition`, { to }, `move to ${to}`);
-      if (!ok) { failMove(id, lastActError); render(); refocus(); }
+      const out = { reason: '' };
+      const ok = await act(`/tickets/${encodeURIComponent(id)}/transition`, { to }, `move to ${to}`, out);
+      if (!ok) { failMove(id, out.reason); render(); refocus(); }
     } finally {
       moving.delete(id);
     }
@@ -974,10 +977,13 @@ const TicketBoard = (() => {
         return !!(t && movable(t) && col.dataset.status && columnStatus(t) !== col.dataset.status);
       };
       col.addEventListener('dragover', (e) => {
-        if (!accepts()) return;
+        // A browser sends `drop` only to a target whose dragover was cancelled, so a refusing column is enabled too:
+        // its drop shows the failure line. Only an accepting column is highlighted; the card's own column stays a no-op.
+        const dragged = dragId ? tickets.get(dragId) : null;
+        if (!dragged || (!accepts() && columnStatus(dragged) === col.dataset.status)) return;
         e.preventDefault();
         if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-        col.classList.add('drop-target');
+        if (accepts()) col.classList.add('drop-target');
       });
       col.addEventListener('dragleave', (e) => {
         if (!col.contains?.(e.relatedTarget)) col.classList.remove('drop-target');
