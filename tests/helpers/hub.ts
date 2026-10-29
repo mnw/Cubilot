@@ -4,7 +4,7 @@
 
 import { mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 export type HubHandle = {
   url: string;
@@ -22,8 +22,10 @@ export async function spawnHub(opts?: {
   defaultRoom?: string;
   token?: string;
   allowedExtensions?: string;
+  /** Boots a new hub on the folders and token of a killed one (a restart on the same ledger). */
+  restartOf?: HubHandle;
 }): Promise<HubHandle> {
-  const base = mkdtempSync(join(tmpdir(), "cubilot-hub-test-"));
+  const base = opts?.restartOf ? dirname(opts.restartOf.ledgerPath) : mkdtempSync(join(tmpdir(), "cubilot-hub-test-"));
   const ledgerPath = join(base, "ledger.db");
   const attachmentsDir = join(base, "attachments");
   mkdirSync(attachmentsDir, { recursive: true });
@@ -31,7 +33,7 @@ export async function spawnHub(opts?: {
   // variable itself keeps its folder; every other hub gets one next to its ledger.
   const transcriptsDir = process.env.CUBILOT_TRANSCRIPTS_DIR || join(base, "transcripts");
 
-  const token = opts?.token ?? `tst-${Math.random().toString(36).slice(2, 10)}`;
+  const token = opts?.token ?? opts?.restartOf?.token ?? `tst-${Math.random().toString(36).slice(2, 10)}`;
   const humanName = opts?.humanName ?? "human";
   const defaultRoom = opts?.defaultRoom ?? "default";
 

@@ -5,7 +5,7 @@ import { chmodSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomId } from "./ids";
 
-export const LEDGER_SCHEMA_VERSION = 18;
+export const LEDGER_SCHEMA_VERSION = 19;
 
 export type LedgerOpenResult =
   | { db: Database; enabled: true }
@@ -462,6 +462,12 @@ export function migrateLedger(db: Database): void {
     // This step only raises the version, so that openLedger copies the ledger before the new table appears.
     db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '18')");
     console.log(`[ledger] applied migration v18`);
+  }
+  if (current < 19) {
+    // v19: the stage kind's migrate adds `stage.session_released_at_ms`. This step only raises the version,
+    // so that openLedger copies the ledger before the column appears.
+    db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '19')");
+    console.log(`[ledger] applied migration v19`);
   }
 }
 

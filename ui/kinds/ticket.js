@@ -869,16 +869,17 @@ const TicketBoard = (() => {
     root.querySelectorAll?.('.ticket-cancel-btn').forEach((btn) => btn.addEventListener('click', () => cancelClick(btn.dataset.ticket)));
   }
 
-  // Open blockers, calculated from the tickets the board holds so a card and an open dialog follow a blocker's
-  // status with no extra hub broadcast (design decision 8). A blocker is open until it is `done`: a cancelled
-  // one still blocks. A blocker the board does not hold keeps the server's answer (`open_blockers`); absence
-  // never counts as done.
+  // Open blockers: the hub's list (`open_blockers`), which also clears a blocker merged into staging. A blocker the
+  // board holds as `done` is closed at once, so a card follows it with no extra hub broadcast. A cancelled one still
+  // blocks. Absence from the hub's list never counts as done for a ticket the hub has not sent a list for.
   const blockerIds = (t) => (Array.isArray(t.blocked_by) ? t.blocked_by : []);
   function openBlockers(t) {
-    const serverOpen = Array.isArray(t.open_blockers) ? t.open_blockers : [];
+    const serverOpen = Array.isArray(t.open_blockers) ? t.open_blockers : null;
     return blockerIds(t).filter((id) => {
       const b = tickets.get(id);
-      return b ? b.status !== 'done' : serverOpen.includes(id);
+      if (b && b.status === 'done') return false;
+      if (b && b.status === 'cancelled') return true;
+      return serverOpen ? serverOpen.includes(id) : true;
     });
   }
   function lockHtml(t) {
@@ -1297,7 +1298,7 @@ const TicketBoard = (() => {
   // The blocker ids the dialog shows: the typed list in edit mode, the ticket's own list otherwise.
   const shownBlockerIds = (t) => (isEditMode(t) ? formValues(t).blockers.split(',').map((x) => x.trim()).filter(Boolean) : blockerIds(t));
   // Is this blocker still open? Done is closed; a cancelled blocker still blocks. A blocker the board does not hold keeps the server's answer.
-  const blockerOpen = (t, id) => { const b = tickets.get(id); return b ? b.status !== 'done' : Array.isArray(t.open_blockers) && t.open_blockers.includes(id); };
+  const blockerOpen = (t, id) => openBlockers({ blocked_by: [id], open_blockers: t.open_blockers }).length > 0;
 
   function blockerRowHtml(t, id, edit) {
     const b = tickets.get(id);
