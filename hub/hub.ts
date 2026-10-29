@@ -51,6 +51,7 @@ import {
   readSummariserConfigFromEnv,
   type Summariser,
 } from "./core/summariser";
+import { createLaunchRecord } from "./core/launch-record";
 import {
   createBriefingBuilder,
   briefingSignature as computeBriefingSignature,
@@ -235,6 +236,7 @@ const fanout = createFanout({
   nextEntryId: () => ++entrySeq,
 });
 
+const launchRecord = createLaunchRecord();
 // Lazy-init: depends on KINDS, defined below in source order.
 let _briefingBuilder: BriefingBuilder | null = null;
 function buildBriefing(agent: string): BriefingPayload {
@@ -244,6 +246,11 @@ function buildBriefing(agent: string): BriefingPayload {
       defaultRoom: DEFAULT_ROOM, attachmentsDir: ATTACHMENTS_DIR, humanName: HUMAN_NAME,
       factoryVersion: (process.env.CUBILOT_FACTORY_VERSION ?? "").trim() || null,
       buildCap: () => buildCap(),
+      isLead: (name) => {
+        const room = agents.get(name)?.room;
+        return !!room && (ledgerDb ? roomLeadOf(ledgerDb, room) : "Orchestrator") === name;
+      },
+      stageSessions: () => launchRecord.sessions(),
     });
   }
   return _briefingBuilder.build(agent);
@@ -270,7 +277,7 @@ const buildCap = createCapBuilder({
 });
 
 // Add a Kind: one entry in `hub/kinds/index.ts`. hub.ts unchanged.
-const KINDS: readonly KindModule[] = buildKinds(ledgerDb);
+const KINDS: readonly KindModule[] = buildKinds(ledgerDb, launchRecord);
 
 if (ledgerDb) {
   for (const k of KINDS) k.migrate(ledgerDb);
