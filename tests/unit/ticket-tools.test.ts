@@ -590,3 +590,19 @@ describe("planning_note in create_ticket and edit_ticket", () => {
     expect(Object.keys(props("edit_ticket"))).toContain("planning_note");
   });
 });
+
+describe("read_handoff", () => {
+  test("reads the full handoff through GET /handoffs/<id> with the caller name", async () => {
+    const id = "h_0123456789abcdef";
+    const { host, calls } = fake({ [`GET /handoffs/${id}?agent=alice`]: { status: 200, body: { id, context: { verdict: "FAIL" } } } });
+    const text = await run("read_handoff", host, { handoff_id: id });
+    expect(JSON.parse(text).context.verdict).toBe("FAIL");
+    expect(calls).toHaveLength(1);
+  });
+
+  test("another room gets the hub error", async () => {
+    const id = "h_0123456789abcdef";
+    const { host } = fake({ [`GET /handoffs/${id}?agent=alice`]: { status: 403, body: { error: "handoff is in another room" } } });
+    await expect(run("read_handoff", host, { handoff_id: id })).rejects.toThrow("handoff is in another room");
+  });
+});
