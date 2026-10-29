@@ -22,6 +22,12 @@ function makeEnv() {
        VALUES (?, ?, 'T', 'c', ?, 'medium', 'a', ?, ?, 1, 1, 1)`,
       [id, over.room ?? "r1", over.radius ?? "low", over.status ?? "draft", over.request ?? "req-1"],
     );
+    // The request row of the label (plan-approval): factory, no feature, so only a high ticket holds it.
+    db.run(
+      `INSERT OR IGNORE INTO requests (id, room, request_id, origin, features, status, created_by, created_at_ms, version)
+       VALUES (?, ?, ?, 'factory', '[]', 'open', 'test', 1, 1)`,
+      [`rq_${over.room ?? "r1"}_${over.request ?? "req-1"}`, over.room ?? "r1", over.request ?? "req-1"],
+    );
     return id;
   };
   /** A spec stage with the given scope, moved to `passed` with the verdict (the PASS transaction is not used: 3.2 has its own tests). */

@@ -25,6 +25,7 @@ import { validateBlockedBy } from "./ticket-blockers";
 import { STAGE_ROLES, type StageRole } from "../core/ledger";
 import { createPermissionWithSideEffect, dismissPendingPermission } from "./permission";
 import type { StageHooks } from "./stage";
+import { approveRequest, ensureRequestsTable, heldForApprove, requestExists } from "./request";
 
 // ---------- Types ----------
 
@@ -606,6 +607,7 @@ const editTicketVerb: VerbDecl<TicketSnapshot, EditInput> = {
       payload: () => ({
         fields: [...Object.keys(changes), ...(blockersChanged ? ["blocked_by"] : [])],
         ...(changes.blast_radius ? { blast_radius: { from: prior.blast_radius, to: changes.blast_radius } } : {}),
+        ...(changes.acceptance_criteria !== undefined ? { acceptance_criteria: { from: prior.acceptance_criteria, to: changes.acceptance_criteria } } : {}),
         ...(backToDraft ? { status: { from: prior.status, to: "draft" } } : {}),
       }),
       entry: (post) => ticketEntry(cap.db, post, "ticket.update", actor),
@@ -668,18 +670,11 @@ const transitionTicketVerb: VerbDecl<TicketSnapshot, TransitionInput> = {
     // The human drags a ticket to any open column (the board's moves); an agent follows LEGAL_FROM.
     // Back to queued or to draft from a later status is the human's alone.
     if ((to === "queued" || to === "draft") && !intake && !human) return forbidden(`only the human may move a ticket back to ${to}`);
-    // The lead may not queue a request that holds a high-blast-radius ticket: the human releases it. A ticket without
-    // a label is checked alone. The count includes this ticket.
+    // The lead queues only what the Approve rule lets through (plan-approval): a ticket without a request is the human's
+    // alone, and a request that needs the human's Approve and has none, or whose scope changed, waits for it.
     if (intake && to === "queued" && !human) {
-      const high =
-        prior.request_id === null
-          ? prior.blast_radius === "high"
-          : cap.db
-              .query<{ n: number }, [string, string]>(
-                "SELECT COUNT(*) AS n FROM tickets WHERE room = ? AND request_id = ? AND blast_radius = 'high' AND status NOT IN ('done','cancelled')",
-              )
-              .get(prior.room, prior.request_id)!.n > 0;
-      if (high) return forbidden("the request holds a high blast_radius ticket: only the human may queue it");
+      if (prior.request_id === null) return forbidden("a ticket without a request_id: only the human may queue it");
+      if (heldForApprove(cap.db, prior.room, prior.request_id)) return forbidden("the request needs the human's Approve");
     }
     // A state check after every authorization check: it refuses the human and the lead alike.
     if (to === "queued" && prior.role !== null && hasNoChain(prior.role)) {
@@ -823,6 +818,10 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
             return Response.json({ error: "cross-room ticket not permitted" }, { status: 403 });
           }
           room = own;
+        }
+
+        if (requestId !== null && !requestExists(db, room, requestId)) {
+          return Response.json({ error: `unknown request_id ${requestId}: create the request first` }, { status: 400 });
         }
 
         let status: CreateInput["status"] = "queued";
@@ -971,7 +970,15 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
         if (a instanceof Response) return a;
         if (!isHuman(a.name, cap)) return Response.json({ error: "only the human may approve a request" }, { status: 403 });
         const known = db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM tickets WHERE request_id = ? AND room = ?").get(requestId, room)!.n;
-        if (known === 0) return Response.json({ error: `no ticket in request ${requestId} in room ${room}` }, { status: 404 });
+        if (known === 0 && !requestExists(db, room, requestId)) return Response.json({ error: `no request ${requestId} in room ${room}` }, { status: 404 });
+        // The Approve is its own transaction (one request.approved event with the scope). The queue transaction follows it.
+        // A crash between the two leaves an approval and drafts: a repeated Approve queues the drafts that are left.
+        try {
+          approveRequest(db, cap, room, requestId, a.name);
+        } catch (e) {
+          if (e instanceof LedgerConflict) return ledgerConflictResponse(e);
+          throw e;
+        }
         const queuedNow: Array<NonNullable<SystemQueue>> = [];
         const held: HeldDraft[] = [];
         // One transaction: every draft ticket of the request gets its ticket.queued event and its row update, or none does.
@@ -1291,6 +1298,9 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
         }
         try {
           const before = entity.load(params.id);
+          if (typeof input.request_id === "string" && before && !requestExists(db, before.room, input.request_id)) {
+            return Response.json({ error: `unknown request_id ${input.request_id}: create the request first` }, { status: 400 });
+          }
           const r = entity.applyWithSideEffect(params.id, editTicketVerb, input, a.name, cap, ({ tx }) =>
             input.blocked_by === undefined ? undefined : writeBlockers(tx, params.id, input.blocked_by));
           if (r.emitted) {
@@ -1542,6 +1552,7 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
     kind: "ticket",
     migrate: (d: Database) => {
       entity.migrate(d);
+      ensureRequestsTable(d);
       // A ledger made before archiving has the table without the column: add it.
       if (!d.query<{ name: string }, []>("PRAGMA table_info(tickets)").all().some((c) => c.name === "archived_at_ms")) {
         d.exec(`ALTER TABLE "tickets" ADD COLUMN "archived_at_ms" INTEGER`);

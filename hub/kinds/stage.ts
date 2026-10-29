@@ -25,6 +25,7 @@ import { createLedgerEntity, ledgerConflictResponse, withLedgerRequired } from "
 import { validName, validRoomLabel } from "../core/ids";
 import { getRoomSettings, DEFAULT_ROLE_LIMITS, DEFAULT_STAGE_TIMEOUT_MIN, STAGE_ROLES, type StageRole } from "../core/ledger";
 import { LedgerConflict } from "../core/types";
+import { heldForApprove, requestFacts, scopeChange, type ScopeChange } from "./request";
 import { createLaunchQueue, type LaunchEnd, type LaunchQueue, type LaunchRequest } from "../core/launch-queue";
 import { roleHarness } from "../core/role-harness";
 import { roleModelFor } from "../core/role-models";
@@ -498,20 +499,19 @@ function endLaunchAttempt(api: StageApi, stageId: string, cap: HubCapabilities, 
 
 /**
  * "Waiting for approval" (spec-review-stage 3.4), derived from the tables, never stored: the request has a spec stage with
- * `verdict = 'PASS'`, one of its scope tickets is still `draft` (in this request and room), and the request holds a
- * non-terminal `high` ticket. The spec PASS then left the tickets for the human (3.2); the approve route (3.3) ends it.
+ * `verdict = 'PASS'` and one of its scope tickets is still `draft` (in this request and room). `waitingForApproval` adds the
+ * Approve rule of the request (`heldForApprove`): the request needs the human's Approve and has none, or its scope changed.
+ * The spec PASS then left the tickets for the human (3.2); the approve route (3.3) ends it.
  */
 export const WAITING_FOR_APPROVAL_SQL = `
   SELECT s.id FROM stage s
    WHERE s.request_id = ?1 AND s.review = 'spec' AND s.verdict = 'PASS'
      AND EXISTS (SELECT 1 FROM stage_scope sc JOIN tickets t ON t.id = sc.ticket_id
                   WHERE sc.stage_id = s.id AND t.status = 'draft' AND t.request_id = ?1 AND t.room = ?2)
-     AND EXISTS (SELECT 1 FROM tickets h
-                  WHERE h.request_id = ?1 AND h.room = ?2 AND h.blast_radius = 'high' AND h.status NOT IN ('done', 'cancelled'))
    LIMIT 1`;
 
 export function waitingForApproval(db: Database, room: string, requestId: string): boolean {
-  return db.query<{ id: string }, [string, string]>(WAITING_FOR_APPROVAL_SQL).get(requestId, room) !== null;
+  return db.query<{ id: string }, [string, string]>(WAITING_FOR_APPROVAL_SQL).get(requestId, room) !== null && heldForApprove(db, room, requestId);
 }
 
 export type WaitingRequest = {
@@ -522,6 +522,12 @@ export type WaitingRequest = {
   high_tickets: Array<{ id: string; title: string; status: string }>;
   /** The scope tickets of the PASS stage that are still draft. */
   draft_tickets: string[];
+  origin: "human" | "factory";
+  features: string[];
+  /** Each ticket of the request that is not cancelled. `source` and `reasons` stay empty until the radius rule (P6-03) stores them. */
+  tickets: Array<{ id: string; title: string; status: string; radius: "low" | "high"; source: string | null; reasons: string[] }>;
+  /** The changes since the newest Approve (empty lists before the first one). */
+  scope_change: ScopeChange;
 };
 
 export type NeedsYouFinding = { ticket_id: string; title: string | null; severity: "blocking" | "suggestion"; text: string };
@@ -638,10 +644,21 @@ export function waitingRequests(db: Database, room: string): WaitingRequest[] {
   const out: WaitingRequest[] = [];
   for (const { request_id } of requests) {
     const hit = db.query<{ id: string }, [string, string]>(WAITING_FOR_APPROVAL_SQL).get(request_id, room);
-    if (!hit) continue;
+    if (!hit || !heldForApprove(db, room, request_id)) continue;
+    const facts = requestFacts(db, room, request_id);
     out.push({
       request_id,
       stage_id: hit.id,
+      origin: facts?.origin ?? "human",
+      features: facts?.features ?? [],
+      // `source` and `reasons` stay empty until the radius rule (P6-03) stores them on the ticket.
+      tickets: db
+        .query<{ id: string; title: string; status: string; blast_radius: "low" | "high" }, [string, string]>(
+          "SELECT id, title, status, blast_radius FROM tickets WHERE request_id = ? AND room = ? AND status != 'cancelled' ORDER BY created_at_ms, id",
+        )
+        .all(request_id, room)
+        .map((t) => ({ id: t.id, title: t.title, status: t.status, radius: t.blast_radius, source: null, reasons: [] })),
+      scope_change: scopeChange(db, room, request_id),
       high_tickets: db
         .query<{ id: string; title: string; status: string }, [string, string]>(
           "SELECT id, title, status FROM tickets WHERE request_id = ? AND room = ? AND blast_radius = 'high' AND status NOT IN ('done', 'cancelled') ORDER BY created_at_ms, id",
@@ -1520,11 +1537,8 @@ export function createStageRuntime(
     // after the review began was not reviewed as it stands now.
     const scope = all.filter((t) => t.status === "draft" && t.request_id === prior.request_id);
     const room = all[0]?.room;
-    const high = room
-      ? db.query<{ n: number }, [string, string]>(
-          "SELECT COUNT(*) AS n FROM tickets WHERE request_id = ? AND room = ? AND blast_radius = 'high' AND status NOT IN ('done', 'cancelled')",
-        ).get(prior.request_id ?? "", room)!.n > 0
-      : false;
+    // The Approve rule (plan-approval): a request that needs the human's Approve and has none, or whose scope changed, keeps its drafts.
+    const high = room && prior.request_id ? heldForApprove(db, room, prior.request_id) : false;
     const queuedNow: Array<NonNullable<ReturnType<typeof queueBySystemInTx>>> = [];
     const held: HeldDraft[] = [];
     const stage = api.move(
@@ -1533,7 +1547,7 @@ export function createStageRuntime(
       "system",
       cap,
       () => {
-        // A ticket that left `draft` meanwhile is skipped. With a high ticket in the request nothing moves.
+        // A ticket that left `draft` meanwhile is skipped. When the request is held for the human's Approve nothing moves.
         if (high) return;
         for (const { ticket_id } of scope) {
           const q = queueBySystemInTx(db, cap, ticket_id, prior.request_id, held);

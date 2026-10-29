@@ -50,7 +50,7 @@ describe("GET /requests/<room>/waiting", () => {
     const r = await waiting("wa");
     expect(r.room).toBe("wa");
     expect(r.waiting).toEqual([
-      { request_id: "wr-1", stage_id: stage, high_tickets: [{ id: hi, title: "Risky", status: "draft" }], draft_tickets: [a] },
+      expect.objectContaining({ request_id: "wr-1", stage_id: stage, high_tickets: [{ id: hi, title: "Risky", status: "draft" }], draft_tickets: [a], origin: "factory", features: [] }),
     ]);
   });
 
