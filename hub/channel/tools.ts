@@ -438,7 +438,7 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
   {
     name: "create_ticket",
     description:
-      "Create a work ticket in your room. Acceptance criteria are required: state what done means. A high blast_radius ticket needs the human's approval to reach done. Use status draft to hold a ticket back: a draft cannot be claimed and wakes no one until it moves to queued. Use request_id to group the tickets of one request, and blocked_by to list ticket ids that must be done before this ticket can be claimed. Use role to name the stage role that works the ticket first. Returns ticket_id.",
+      "Create a work ticket in your room. Acceptance criteria are required: state what done means. A high blast_radius ticket needs the human's approval to reach done. Use status draft to hold a ticket back: a draft cannot be claimed and wakes no one until it moves to queued. Use request_id to group the tickets of one request, and blocked_by to list ticket ids that must be done before this ticket can be claimed. Use role to name the stage role that works the ticket first. The radius is set by the radius rule from the title, criteria and planning note: the stored blast_radius is never below the rule radius, and the room lead can raise it. Returns ticket_id.",
     inputSchema: {
       type: "object",
       properties: {
@@ -565,14 +565,14 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
   {
     name: "edit_ticket",
     description:
-      "Edit an open ticket's title or acceptance criteria. Only the human, the ticket's creator and its assignee may edit. Only the human may change blast_radius: an agent that sends it is refused. A done or cancelled ticket cannot be edited. Pass only the fields you change. The human, the ticket's creator and the room lead change request_id, role and blocked_by, not the assignee, and only while the ticket is draft or queued (the human may change them at any time). blocked_by replaces the whole list, and null or [] clears it.",
+      "Edit an open ticket's title or acceptance criteria. Only the human, the ticket's creator and its assignee may edit. The radius is set by the radius rule and is never below it: the lead can raise blast_radius, and an edit below the rule radius is refused with 403. Only the human, the room lead and the creator may change blast_radius. A done or cancelled ticket cannot be edited. Pass only the fields you change. The human, the ticket's creator and the room lead change request_id, role and blocked_by, not the assignee, and only while the ticket is draft or queued (the human may change them at any time). blocked_by replaces the whole list, and null or [] clears it.",
     inputSchema: {
       type: "object",
       properties: {
         ticket_id: TICKET_ID_SCHEMA,
         title: { type: "string", maxLength: 200, description: "The new title." },
         acceptance_criteria: { type: "string", maxLength: 4000, description: "The new acceptance criteria." },
-        blast_radius: { type: "string", enum: ["low", "high"], description: "The human only." },
+        blast_radius: { type: "string", enum: ["low", "high"], description: "The radius is set by the radius rule. The lead can raise it. Below the rule radius is refused." },
         request_id: { type: ["string", "null"], pattern: "^[A-Za-z0-9._-]{1,64}$", description: "The label that groups the tickets of one request." },
         role: { type: ["string", "null"], enum: [...TICKET_ROLES, null], description: "The stage role that works the ticket first. null clears it." },
         blocked_by: { type: ["array", "null"], items: TICKET_ID_SCHEMA, maxItems: 20, description: "Replaces the whole blocker list. null or [] clears it." },

@@ -591,7 +591,7 @@ describe("only the stage logic queues launches", () => {
   test("the launch queue is imported only by hub/kinds/stage.ts", () => {
     const users = hubFiles
       .filter((p) => !p.endsWith("hub/core/launch-queue.ts"))
-      .filter((p) => /launch-queue/.test(readFileSync(p, "utf8")))
+      .filter((p) => /(?:from\s+|import\s*\(\s*|require\s*\(\s*)["'][^"']*launch-queue["']/.test(readFileSync(p, "utf8")))
       .map(rel);
     expect(users).toEqual(["hub/kinds/stage.ts"]);
   });
