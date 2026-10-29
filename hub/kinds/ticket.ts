@@ -733,6 +733,24 @@ function validatorPassCommits(db: Database, ticketId: string): (string | null)[]
   });
 }
 
+/**
+ * The result handoff ids of the Validator PASS stages of a ticket since its latest worker stage, oldest first. A stage's result
+ * is the last handoff its own session sent with context.stage_id = the stage (null when none is recorded).
+ */
+function validatorPassHandoffs(db: Database, ticketId: string): { stage_id: string; handoff_id: string | null }[] {
+  return db
+    .query<{ stage_id: string; handoff_id: string | null }, [string, string]>(
+      `SELECT s.id AS stage_id,
+              (SELECT h.id FROM handoffs h WHERE h.from_agent = s.session AND json_extract(h.context_json, '$.stage_id') = s.id
+                ORDER BY h.rowid DESC LIMIT 1) AS handoff_id
+         FROM stage s
+        WHERE s.ticket_id = ?1 AND s.role = 'validator' AND s.review IS NULL AND s.status = 'passed' AND s.verdict = 'PASS'
+          AND s.created_seq > COALESCE((SELECT MAX(w.created_seq) FROM stage w WHERE w.ticket_id = ?2 AND w.role = 'worker'), 0)
+        ORDER BY s.created_seq`,
+    )
+    .all(ticketId, ticketId);
+}
+
 /** True when `commit` is an ancestor of the staging branch of the room's project. Fails closed on any git problem. */
 function mergedIntoStaging(cap: HubCapabilities, room: string, commit: string): boolean {
   const project = getRoomSettings(cap.db, room)?.project_folder;
@@ -1212,6 +1230,27 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
           { kind: "ui-only-ambient" },
         );
         return Response.json({ attachments_count: total });
+      },
+    },
+
+    {
+      method: "GET",
+      path: /^\/tickets\/([^/]+)\/merge-message$/,
+      auth: "read",
+      handler: (_req, cap, params) => {
+        if (!TICKET_ID_RE.test(params.id)) return Response.json({ error: "invalid ticket id" }, { status: 400 });
+        const t = entity.load(params.id);
+        if (!t) return Response.json({ error: "not found" }, { status: 404 });
+        const passes = validatorPassHandoffs(cap.db, t.id);
+        const high = t.blast_radius === "high";
+        const need = high ? 2 : 1;
+        if (passes.length === 0) return Response.json({ error: "merge message needs a Validator PASS: none yet" }, { status: 409 });
+        if (passes.length < need) return Response.json({ error: "merge message of a high-blast-radius ticket needs the second Validator PASS: it is missing" }, { status: 409 });
+        const ids = passes.slice(0, need);
+        const lost = ids.find((p) => p.handoff_id === null);
+        if (lost) return Response.json({ error: `merge message needs the result handoff of stage ${lost.stage_id}: it is missing` }, { status: 409 });
+        const evidence = high ? `validator PASS ${ids[0].handoff_id}, second review PASS ${ids[1].handoff_id}` : `validator PASS ${ids[0].handoff_id}`;
+        return new Response(`Merge ticket/${t.id}: ${t.title} (${evidence})`, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
       },
     },
 
