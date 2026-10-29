@@ -58,6 +58,8 @@ export type LaunchQueue = {
   push(req: LaunchRequest): void;
   /** Session names that have a close without an ack. */
   pendingCloses(): string[];
+  /** The request with this id when the shell has not received it yet, else null. */
+  undelivered(id: string): LaunchRequest | null;
   /** Removes a request the shell never received. True when it was dropped; false when it was delivered (or is unknown). */
   drop(id: string): boolean;
   /**
@@ -144,6 +146,10 @@ export function createLaunchQueue(opts: LaunchQueueOpts): LaunchQueue {
     },
 
     pendingCloses,
+
+    undelivered(id) {
+      return undelivered.find((r) => r.id === id) ?? null;
+    },
 
     drop(id) {
       const i = undelivered.findIndex((r) => r.id === id);

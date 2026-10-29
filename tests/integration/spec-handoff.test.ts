@@ -124,12 +124,13 @@ describe("spec-review handoff over HTTP", () => {
     expect((await spec({ request_id: "req-empty" })).status).toBe(400);
   });
 
-  test("spec review of one changed ticket (5.2): the edited queued ticket is back to draft, the handoff names it, the scope is that ticket only", async () => {
+  test("spec review of one changed ticket (5.2): the edited ticket is a draft again, the handoff names it, the scope is that ticket only", async () => {
     const other = await draft("req-6");
     const changed = await draft("req-6", { status: undefined }); // queued
     const e = await postJson(hub, `/tickets/${changed}/edit`, { by: "sp-alice", acceptance_criteria: "new criteria" });
     expect(e.status).toBe(200);
-    expect(rows("SELECT status FROM tickets WHERE id = ?", changed)[0].status).toBe("draft");
+    expect(rows("SELECT status FROM tickets WHERE id = ?", changed)[0].status).toBe("queued"); // lean flow L2: kept
+    expect((await postJson(hub, `/tickets/${changed}/transition`, { by: "human", to: "draft" })).status).toBe(200);
     expect((await spec({ request_id: "req-6" }, { request_text: "t", ticket_ids: [changed] })).status).toBe(201);
     await sleep(200);
     const st = await stageOf("req-6");
