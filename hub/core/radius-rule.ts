@@ -20,12 +20,8 @@ const strings = (v: unknown): string[] | null =>
 
 function settings(): { terms: readonly string[]; paths: readonly string[] } {
   const defaults = { terms: DEFAULT_TERMS, paths: DEFAULT_PATHS };
-  const doc = readConfig("radius-rule");
-  if (!("radius_rule" in doc)) {
-    // An unusable file already logged its own line.
-    if (Object.keys(doc).length) console.log("[radius-rule] radius_rule is not set in config.yml, default terms");
-    return defaults;
-  }
+  const doc = readConfig("radius-rule", "radius_rule");
+  if (!("radius_rule" in doc)) return defaults; // the reader logged the line
   const block = doc.radius_rule;
   if (!isMap(block)) {
     console.log("[radius-rule] radius_rule is not a map, default terms");

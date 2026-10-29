@@ -11,8 +11,11 @@ export const configPath = () =>
 
 export const isMap = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** The parsed settings of config.yml, or {} when the file cannot be used. `tag` names the caller in the log line. */
-export function readConfig(tag = "config"): Record<string, unknown> {
+/**
+ * The parsed settings of config.yml, or {} when the file cannot be used. `tag` names the caller in the log line.
+ * With `key`, a document that lacks the key also gives {} and one log line.
+ */
+export function readConfig(tag = "config", key?: string): Record<string, unknown> {
   let text: string;
   try {
     text = readFileSync(configPath(), "utf8");
@@ -27,5 +30,13 @@ export function readConfig(tag = "config"): Record<string, unknown> {
     console.log(`[${tag}] config.yml is not valid YAML, no settings: ${(e as Error).message.split("\n")[0]}`);
     return {};
   }
-  return isMap(doc) ? doc : {};
+  if (!isMap(doc)) {
+    console.log(`[${tag}] config.yml is not a map, no settings`);
+    return {};
+  }
+  if (key !== undefined && !(key in doc)) {
+    console.log(`[${tag}] ${key} is not set in config.yml, no settings`);
+    return {};
+  }
+  return doc;
 }

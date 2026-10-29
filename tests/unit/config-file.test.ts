@@ -36,15 +36,20 @@ describe("readConfig", () => {
     expect(logs).toHaveLength(1);
     expect(logs[0]).toContain("not valid YAML");
   });
-  test("missing key gives a map without it", () => {
+  test("missing key gives {} and one log line", () => {
     writeFileSync(join(dir, "config.yml"), "other: 1\n");
-    const c = readConfig("t");
-    expect(c).toEqual({ other: 1 });
-    expect("radius_rule" in c).toBe(false);
+    expect(readConfig("t", "radius_rule")).toEqual({});
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toContain("radius_rule is not set");
+  });
+  test("a present key gives the document", () => {
+    writeFileSync(join(dir, "config.yml"), "other: 1\nradius_rule: {}\n");
+    expect(readConfig("t", "radius_rule")).toEqual({ other: 1, radius_rule: {} });
     expect(logs).toHaveLength(0);
   });
-  test("a top level that is not a map gives {}", () => {
+  test("a top level that is not a map gives {} and one log line", () => {
     writeFileSync(join(dir, "config.yml"), "- a\n- b\n");
     expect(readConfig("t")).toEqual({});
+    expect(logs).toHaveLength(1);
   });
 });

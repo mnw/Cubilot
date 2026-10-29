@@ -884,7 +884,7 @@ const TicketBoard = (() => {
       t.request_id ? `<span class="ticket-chip">${icon('layers')}<span class="ticket-request-label">${escHtml(t.request_id)}</span></span>` : '',
       t.external_ref ? `<span class="ticket-chip">${escHtml(t.external_ref)}</span>` : '',
       t.blast_radius === 'high' ? '<span class="ticket-chip ticket-radius">High radius</span>' : '',
-      t.blast_radius === 'high' && t.radius_source ? `<span class="ticket-chip ticket-radius-source">Radius: ${escHtml(t.radius_source)}</span>` : '',
+      t.radius_source ? `<span class="ticket-chip ticket-radius-source">Radius: ${escHtml(t.radius_source)}</span>` : '',
       t.archived_at_ms ? '<span class="ticket-chip">archived</span>' : '',
     ].join('');
     const who = t.assignee
