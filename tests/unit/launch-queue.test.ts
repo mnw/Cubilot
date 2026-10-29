@@ -9,16 +9,17 @@ import { migrateLedger, setRoomSettings } from "../../hub/core/ledger";
 import { createTicketKind } from "../../hub/kinds/ticket";
 import { createStageRuntime, type LaunchInput, type StageRuntime } from "../../hub/kinds/stage";
 import type { LaunchRequest } from "../../hub/core/launch-queue";
+import { createLaunchRecord, type LaunchRecord } from "../../hub/core/launch-record";
 import type { Entry, HubCapabilities, Scope } from "../../hub/core/types";
 
 const ACK_MS = 60;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function makeEnv(o: { retainMs?: number; db?: Database; sweepMs?: number; bootGraceMs?: number } = {}) {
+function makeEnv(o: { retainMs?: number; db?: Database; sweepMs?: number; bootGraceMs?: number; launchRecord?: LaunchRecord } = {}) {
   const db = o.db ?? new Database(":memory:");
   migrateLedger(db);
   createTicketKind(db).migrate(db);
-  const rt: StageRuntime = createStageRuntime(db, { ackMs: ACK_MS, retainMs: o.retainMs, sweepMs: o.sweepMs, bootGraceMs: o.bootGraceMs });
+  const rt: StageRuntime = createStageRuntime(db, { ackMs: ACK_MS, retainMs: o.retainMs, sweepMs: o.sweepMs, bootGraceMs: o.bootGraceMs, launchRecord: o.launchRecord });
   rt.module.migrate(db);
   const cap = { db, sse: { emit: (_e: Entry, _s: Scope) => {} }, briefing: { refresh: () => {} } } as unknown as HubCapabilities;
   const sent: LaunchRequest[] = [];
@@ -111,6 +112,40 @@ describe("launch queue and ack", () => {
     expect(e.sent).toEqual([{ id: "l_00000000000000aa", kind: "close", session: "tester-1" }]);
     await sleep(ACK_MS * 2);
     expect(e.rt.queue.size().awaitingAck).toBe(0);
+    e.stop();
+  });
+});
+
+describe("the stage runtime releases the session from the launch record", () => {
+  test("close ack releases the session", () => {
+    const launchRecord = createLaunchRecord();
+    const e = makeEnv({ launchRecord });
+    e.connect();
+    const s = e.stageFor(e.ticket());
+    e.rt.enqueueLaunch(e.input(s.id), e.cap);
+    expect(launchRecord.sessions().has("worker-1")).toBe(true);
+    e.rt.queue.ack(e.sent[0].id, { result: "spawned" }, e.cap);
+    expect(launchRecord.sessions().has("worker-1")).toBe(true); // still bound while it runs
+    e.rt.queue.push({ id: "l_00000000000000bb", kind: "close", session: "worker-1" });
+    e.rt.queue.ack("l_00000000000000bb", { result: "spawned" }, e.cap);
+    expect(launchRecord.sessions().has("worker-1")).toBe(false);
+    e.stop();
+  });
+
+  test("final launch error releases the session", async () => {
+    const launchRecord = createLaunchRecord();
+    const e = makeEnv({ launchRecord });
+    e.connect();
+    const s = e.stageFor(e.ticket());
+    e.rt.enqueueLaunch(e.input(s.id), e.cap);
+    e.rt.queue.ack(e.sent[0].id, { result: "error", error: "tmux failed" }, e.cap);
+    // attempt 2 is a relaunch that binds the session again; its error ack is the final one
+    const second = e.sent.filter((r) => r.kind === "launch")[1];
+    expect(second).toBeDefined();
+    expect(launchRecord.sessions().has("worker-1")).toBe(true);
+    e.rt.queue.ack(second.id, { result: "error", error: "tmux failed" }, e.cap);
+    expect(e.rt.api.load(s.id)!.status).toBe("failed");
+    expect(launchRecord.sessions().has("worker-1")).toBe(false);
     e.stop();
   });
 });

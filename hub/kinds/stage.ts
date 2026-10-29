@@ -631,6 +631,53 @@ export function needsYouRequests(db: Database, room: string): NeedsYouRequest[] 
   return out;
 }
 
+/** One ticket that waits for the human (P6-15c). */
+export type WaitsForYou = {
+  ticket_id: string;
+  title: string;
+  request_id: string | null;
+  case: "approve" | "allow";
+  /** The commit of the newest tester PASS result of the ticket, else null. */
+  commit: string | null;
+  /** The pending ticket:done permission (case allow), else null. */
+  permission_id: string | null;
+  question: string;
+};
+
+/**
+ * The tickets of one room that wait for the human: a draft ticket of a request that holds a non-terminal high ticket
+ * (approve), and a non-terminal high ticket with a pending ticket:done permission (allow). Derived from the tables.
+ */
+export function waitsForYou(db: Database, room: string): WaitsForYou[] {
+  type Row = { id: string; title: string; request_id: string | null; permission_id?: string | null };
+  const commitOf = db.query<{ c: string | null }, [string]>(
+    `SELECT json_extract(h.context_json, '$.commit') AS c FROM handoffs h
+      WHERE json_extract(h.context_json, '$.verdict') = 'PASS'
+        AND json_extract(h.context_json, '$.stage_id') IN (SELECT s.id FROM stage s WHERE s.ticket_id = ?1 AND s.role = 'tester')
+      ORDER BY h.created_at_ms DESC, h.rowid DESC LIMIT 1`,
+  );
+  const commit = (id: string) => commitOf.get(id)?.c ?? null;
+  const approve = db
+    .query<Row, [string]>(
+      `SELECT t.id, t.title, t.request_id FROM tickets t
+        WHERE t.room = ?1 AND t.status = 'draft' AND t.request_id IS NOT NULL
+          AND EXISTS (SELECT 1 FROM tickets h WHERE h.request_id = t.request_id AND h.room = ?1 AND h.blast_radius = 'high' AND h.status NOT IN ('done', 'cancelled'))
+        ORDER BY t.created_at_ms, t.id`,
+    )
+    .all(room)
+    .map((t): WaitsForYou => ({ ticket_id: t.id, title: t.title, request_id: t.request_id, case: "approve", commit: commit(t.id), permission_id: null, question: `Approve request ${t.request_id}?` }));
+  const allow = db
+    .query<Row, [string]>(
+      `SELECT t.id, t.title, t.request_id, p.id AS permission_id FROM tickets t
+        JOIN permissions p ON p.id = t.approval_request_id AND p.tool_name = 'ticket:done' AND p.status = 'pending'
+        WHERE t.room = ?1 AND t.blast_radius = 'high' AND t.status NOT IN ('done', 'cancelled', 'queued')
+        ORDER BY t.created_at_ms, t.id`,
+    )
+    .all(room)
+    .map((t): WaitsForYou => ({ ticket_id: t.id, title: t.title, request_id: t.request_id, case: "allow", commit: commit(t.id), permission_id: t.permission_id ?? null, question: `Allow done of ${t.id}?` }));
+  return [...approve, ...allow];
+}
+
 /** The requests of one room that wait for the human's approval, each with the stage and the tickets behind it. */
 export function waitingRequests(db: Database, room: string): WaitingRequest[] {
   const requests = db
@@ -1082,8 +1129,8 @@ export function createStageRuntime(
     let c: { request_text?: unknown; spec_paths?: unknown; commit?: unknown } = {};
     try { c = ctx ? JSON.parse(ctx) : {}; } catch { /* no context: an empty request text */ }
     const scope = db
-      .query<{ id: string; title: string; acceptance_criteria: string; role: string | null; blast_radius: string }, [string]>(
-        "SELECT t.id, t.title, t.acceptance_criteria, t.role, t.blast_radius FROM stage_scope s JOIN tickets t ON t.id = s.ticket_id WHERE s.stage_id = ? ORDER BY t.id",
+      .query<{ id: string; title: string; acceptance_criteria: string; planning_note: string | null; role: string | null; blast_radius: string }, [string]>(
+        "SELECT t.id, t.title, t.acceptance_criteria, t.planning_note, t.role, t.blast_radius FROM stage_scope s JOIN tickets t ON t.id = s.ticket_id WHERE s.stage_id = ? ORDER BY t.id",
       )
       .all(stage.id)
       .map((t) => ({
@@ -1666,7 +1713,7 @@ export function createStageRuntime(
       handler: (_req, _cap, params) => {
         const room = decodeURIComponent(params.id);
         if (!validRoomLabel(room)) return Response.json({ error: "invalid room" }, { status: 400 });
-        return Response.json({ room, requests: needsYouRequests(db, room) });
+        return Response.json({ room, requests: needsYouRequests(db, room), waiting: waitsForYou(db, room) });
       },
     },
     {

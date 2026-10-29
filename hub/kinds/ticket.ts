@@ -554,9 +554,9 @@ const editTicketVerb: VerbDecl<TicketSnapshot, EditInput> = {
     if (grouping && !human && actor !== prior.creator && actor !== roomLead(cap, prior.room)) {
       return forbidden("only the human, the creator or the room lead may edit request_id, blocked_by or role");
     }
-    // The planning note follows the request_id rule: the human, the creator or the room lead, not the assignee.
-    if (payload.planning_note !== undefined && !human && actor !== prior.creator && actor !== roomLead(cap, prior.room)) {
-      return forbidden("only the human, the creator or the room lead may edit planning_note");
+    // The agent notes (planning_note): the human, the creator, the room lead or the assignee. The assignee gets no other field here.
+    if (payload.planning_note !== undefined && !human && actor !== prior.creator && actor !== prior.assignee && actor !== roomLead(cap, prior.room)) {
+      return forbidden("only the human, the creator, the room lead or the assignee may edit the agent notes (planning_note)");
     }
     if (TICKET_TERMINAL.has(prior.status)) return conflict(`ticket already ${prior.status}`);
     // After the claim the grouping is frozen for agents: the human alone changes it.

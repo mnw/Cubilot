@@ -458,6 +458,8 @@ body.board-open .board-col {
 #ticket-view .modal { position: relative; }
 .ticket-view-light { position: absolute; top: 14px; right: 16px; }
 .ticket-board-empty { color: var(--text-muted); }
+.ticket-move-status { flex: none; color: var(--text-muted); }
+.ticket-move-status:empty { display: none; }
 .ticket-add {
   width: 100%; background: none; border: 1px dashed var(--border, #444); border-radius: 6px;
   color: var(--text-muted); padding: 4px; cursor: pointer; font-size: 0.85em;
@@ -640,6 +642,9 @@ body.board-open .board-col {
 .ticket-tabs [role="tab"]:focus-visible { outline: 2px solid var(--orange); outline-offset: -2px; }
 .md code { font-family: var(--mono); font-size: 0.95em; padding: 0 var(--sp-4); background: var(--bg-inset); border-radius: var(--radius-md); }
 .ticket-view-criteria.md { white-space: normal; }
+.ticket-agent-notes { margin-top: 10px; font-size: 0.9em; }
+.ticket-agent-notes summary { cursor: pointer; color: var(--text); }
+.ticket-agent-notes-text { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 4px; color: var(--text); }
 
 /* Request label and blockers (ticket-grouping 6.2, 6.3, 6.5). Part 14 restyles these.
    Text uses --text, not --text-muted: measured, --text-muted is below 4.5:1 on the dawn theme (4.0 on --bg)
@@ -690,7 +695,7 @@ label[for="ticket-filter-request"] { color: var(--text); }
    guarantees a visible ring. --text, not --orange: --orange is 2.45-2.74:1 on dawn, below 3:1. */
 #ticket-modal button:focus-visible, #ticket-modal input:focus-visible, #ticket-modal textarea:focus-visible, #ticket-modal select:focus-visible,
 #ticket-view button:focus-visible, #ticket-view input:focus-visible, #ticket-view textarea:focus-visible, #ticket-view select:focus-visible,
-#ticket-view summary:focus-visible, #ticket-view a:focus-visible,
+#ticket-view summary:focus-visible, #ticket-view a:focus-visible, .ticket-agent-notes summary:focus-visible,
 #ticket-filters button:focus-visible, #ticket-filters input:focus-visible, #ticket-filters select:focus-visible,
 .ticket-add:focus-visible, .ticket-card button:focus-visible, .ticket-card select:focus-visible, .ticket-card summary:focus-visible {
   outline: 2px solid var(--text); outline-offset: 2px;

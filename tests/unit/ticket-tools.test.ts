@@ -588,5 +588,8 @@ describe("planning_note in create_ticket and edit_ticket", () => {
     await run("edit_ticket", f.host, { ticket_id: TID, title: "x" });
     expect("planning_note" in f.calls[2].body).toBe(false);
     expect(Object.keys(props("edit_ticket"))).toContain("planning_note");
+    expect(props("edit_ticket").planning_note.description).toContain("agent notes");
+    expect(props("create_ticket").planning_note.description).toContain("agent notes");
+    expect(props("edit_ticket").planning_note.description).toContain("assignee");
   });
 });
