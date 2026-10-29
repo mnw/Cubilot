@@ -553,9 +553,9 @@ const editTicketVerb: VerbDecl<TicketSnapshot, EditInput> = {
     if (grouping && !human && actor !== prior.creator && actor !== roomLead(cap, prior.room)) {
       return forbidden("only the human, the creator or the room lead may edit request_id, blocked_by or role");
     }
-    // The planning note follows the request_id rule: the human, the creator or the room lead, not the assignee.
-    if (payload.planning_note !== undefined && !human && actor !== prior.creator && actor !== roomLead(cap, prior.room)) {
-      return forbidden("only the human, the creator or the room lead may edit planning_note");
+    // The agent notes (planning_note): the human, the creator, the room lead or the assignee. The assignee gets no other field here.
+    if (payload.planning_note !== undefined && !human && actor !== prior.creator && actor !== prior.assignee && actor !== roomLead(cap, prior.room)) {
+      return forbidden("only the human, the creator, the room lead or the assignee may edit the agent notes (planning_note)");
     }
     if (TICKET_TERMINAL.has(prior.status)) return conflict(`ticket already ${prior.status}`);
     // After the claim the grouping is frozen for agents: the human alone changes it.
@@ -672,7 +672,12 @@ const transitionTicketVerb: VerbDecl<TicketSnapshot, TransitionInput> = {
                 "SELECT COUNT(*) AS n FROM tickets WHERE room = ? AND request_id = ? AND blast_radius = 'high' AND status NOT IN ('done','cancelled')",
               )
               .get(prior.room, prior.request_id)!.n > 0;
-      if (high) return forbidden("the request holds a high blast_radius ticket: only the human may queue it");
+      // The human's Approve of the request (request_approvals) releases every ticket of it, also one added later.
+      const approved =
+        high &&
+        prior.request_id !== null &&
+        cap.db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM request_approvals WHERE room = ? AND request_id = ?").get(prior.room, prior.request_id)!.n > 0;
+      if (high && !approved) return forbidden("the request holds a high blast_radius ticket: only the human may queue it");
     }
     // A state check after every authorization check: it refuses the human and the lead alike.
     if (to === "queued" && prior.role !== null && hasNoChain(prior.role)) {
@@ -969,6 +974,12 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
         const held: HeldDraft[] = [];
         // One transaction: every draft ticket of the request gets its ticket.queued event and its row update, or none does.
         db.transaction(() => {
+          // Store the Approve once: one event and one row. A repeat changes nothing.
+          if (!db.query("SELECT 1 FROM request_approvals WHERE room = ? AND request_id = ?").get(room, requestId)) {
+            const now = Date.now();
+            insertEvent(db, `request:${room}:${requestId}`, "request.approved", a.name, { room, request_id: requestId }, now);
+            db.run("INSERT INTO request_approvals (room, request_id, approved_by, approved_at_ms) VALUES (?, ?, ?, ?)", [room, requestId, a.name, now]);
+          }
           const drafts = db
             .query<{ id: string }, [string, string]>("SELECT id FROM tickets WHERE request_id = ? AND room = ? AND status = 'draft' ORDER BY created_at_ms, id")
             .all(requestId, room);
@@ -1559,6 +1570,8 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
       // linked to a ticket once.
       d.exec(`CREATE TABLE IF NOT EXISTS "ticket_attachments" ("id" INTEGER PRIMARY KEY, "ticket_id" TEXT NOT NULL, "author" TEXT NOT NULL, "name" TEXT NOT NULL, "url" TEXT NOT NULL, "created_at_ms" INTEGER NOT NULL)`);
       d.exec(`CREATE UNIQUE INDEX IF NOT EXISTS "idx_ticket_attachments_ticket_url" ON "ticket_attachments" ("ticket_id", "url")`);
+      // The human's Approve of a request: one row per (room, request), written with its request.approved event.
+      d.exec(`CREATE TABLE IF NOT EXISTS "request_approvals" ("room" TEXT NOT NULL, "request_id" TEXT NOT NULL, "approved_by" TEXT NOT NULL, "approved_at_ms" INTEGER NOT NULL, PRIMARY KEY ("room", "request_id"))`);
       d.exec(`CREATE TABLE IF NOT EXISTS "ticket_room_lead" ("room" TEXT PRIMARY KEY, "agent" TEXT NOT NULL, "updated_at_ms" INTEGER NOT NULL)`);
     },
     routes: withLedgerRequired(routes),

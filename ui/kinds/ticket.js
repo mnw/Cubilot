@@ -1635,11 +1635,19 @@ const TicketBoard = (() => {
   const STATUS_PILL = { draft: 'Draft', queued: 'Queued', claimed: 'In progress', in_progress: 'In progress', in_review: 'In review', done: 'Done', cancelled: 'Cancelled' };
 
   // The body's left column: criteria, blockers, the editor, approval, notes, files. The properties are in the panel (panelHtml).
+  // The agent notes (planning_note): a native closed details; the text is escaped, so it shows as text.
+  function agentNotesHtml(t) {
+    const text = String(t.planning_note ?? '').trim();
+    if (!text) return '';
+    return `<details class="ticket-agent-notes"><summary>For the agents</summary><div class="ticket-agent-notes-text">${escHtml(text)}</div></details>`;
+  }
+
   function viewHtml(t) {
     const draft = isEditMode(t);
     const crit = criteriaProgress(t.acceptance_criteria);
     return approvalHtml(t)
       + (draft ? '' : `<h3 class="ticket-view-h">Acceptance criteria${crit.total ? ` <span class="ticket-view-count">${crit.done} of ${crit.total} checked</span>` : ''}</h3><div class="ticket-view-criteria md">${mdHtml(t.acceptance_criteria)}</div>`)
+      + agentNotesHtml(t)
       + requestFormHtml(t)
       + blockersHtml(t)
       + filesHtml(t);

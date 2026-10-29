@@ -1086,8 +1086,8 @@ export function createStageRuntime(
     let c: { request_text?: unknown; spec_paths?: unknown; commit?: unknown } = {};
     try { c = ctx ? JSON.parse(ctx) : {}; } catch { /* no context: an empty request text */ }
     const scope = db
-      .query<{ id: string; title: string; acceptance_criteria: string; role: string | null; blast_radius: string }, [string]>(
-        "SELECT t.id, t.title, t.acceptance_criteria, t.role, t.blast_radius FROM stage_scope s JOIN tickets t ON t.id = s.ticket_id WHERE s.stage_id = ? ORDER BY t.id",
+      .query<{ id: string; title: string; acceptance_criteria: string; planning_note: string | null; role: string | null; blast_radius: string }, [string]>(
+        "SELECT t.id, t.title, t.acceptance_criteria, t.planning_note, t.role, t.blast_radius FROM stage_scope s JOIN tickets t ON t.id = s.ticket_id WHERE s.stage_id = ? ORDER BY t.id",
       )
       .all(stage.id)
       .map((t) => ({

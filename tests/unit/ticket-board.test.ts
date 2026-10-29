@@ -1794,6 +1794,42 @@ describe("ticket notes", () => {
     expect(content()).toContain("Tested: ok");
   });
 
+  const openFull = async (extra: object) => {
+    const card: any = { dataset: { ticket: "a" }, isConnected: true, handlers: {}, addEventListener(t: string, f: any) { this.handlers[t] = f; }, focus() {} };
+    cols.querySelectorAll = (q: string) => (q === ".ticket-card" ? [card] : []);
+    await show(T("a", 0, extra));
+    card.handlers.click({ target: { closest: () => null } });
+    await settle();
+    return els["ticket-view-content"].innerHTML as string;
+  };
+
+  test("agent notes in details, closed, summary text For the agents", async () => {
+    const html = await openFull({ planning_note: "Files: a.ts\nBase commit: abc" });
+    expect(html).toContain('<details class="ticket-agent-notes"><summary>For the agents</summary>');
+    expect(html).not.toMatch(/<details class="ticket-agent-notes"[^>]*\bopen\b/);
+    expect(html).toContain("Files: a.ts\nBase commit: abc");
+    expect(await openFull({ planning_note: null })).not.toContain("For the agents");
+  });
+
+  test("hostile agent notes show as text", async () => {
+    ctx.escHtml = (x: unknown) => String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");   // the real helper escapes; the harness one is String
+    const html = await openFull({ planning_note: "<img src=x onerror=alert(1)>" });
+    expect(html).not.toContain("<img src=x");
+    expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
+  });
+
+  test("summary has a focus style", () => {
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toMatch(/\.ticket-agent-notes summary:focus-visible[^{]*\{\s*outline: 2px solid/);
+  });
+
+  test("board card hides agent notes", async () => {
+    await show(T("a", 0, { planning_note: "SECRET-AGENT-FACT" }));
+    expect(cols.innerHTML).toContain('data-ticket="a"');
+    expect(cols.innerHTML).not.toContain("SECRET-AGENT-FACT");
+    expect(cols.innerHTML).not.toContain("For the agents");
+  });
+
   test("the full view says so when there are no notes", async () => {
     const card: any = { dataset: { ticket: "a" }, isConnected: true, handlers: {}, addEventListener(t: string, f: any) { this.handlers[t] = f; }, focus() {} };
     cols.querySelectorAll = (q: string) => (q === ".ticket-card" ? [card] : []);

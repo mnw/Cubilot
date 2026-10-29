@@ -432,6 +432,8 @@ The factory works on many tickets at the same time. One ticket that waits or fai
 
 #### Ticket format
 
+Changed 2026-10-29 (human): tickets are user stories with Given/When/Then criteria and the INVEST checks. See `factory/orchestrator/orchestrator.md`, step 2, and Part 18. The fields below stay; "Why" becomes the story line.
+
 A ticket describes a result for a reader who knows the product, not a message from one agent to another. History, review ids, message numbers and process rules do not go in the ticket.
 
 ```
