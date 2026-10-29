@@ -253,6 +253,8 @@ describe("the spec PASS follows the Approve rule", () => {
     expect(status(t1)).toBe("queued");
     const edit = await e.call("POST", `/tickets/${t1}/edit`, { by: "alice", acceptance_criteria: "New criteria." });
     expect(edit.status).toBe(200);
+    // A criteria edit keeps the ticket queued (lean flow L2): the lead sends it back to draft for the new review.
+    expect((await move(t1, "alice", "draft")).status).toBe(200);
     expect(status(t1)).toBe("draft");
     const r = specPass("r-1", [t1]);
     expect(r.queued).toEqual([t1]);
@@ -303,18 +305,19 @@ describe("the lead's queue follows the Approve rule", () => {
     const t1 = await ticket("r-1");
     await approve("r-1");
     await e.call("POST", `/tickets/${t1}/edit`, { by: "alice", acceptance_criteria: "Other." });
-    expect(status(t1)).toBe("draft");
+    expect((await move(t1, "alice", "draft")).status).toBe(200);
     expect((await move(t1, "alice", "queued")).status).toBe(200);
   });
 
-  test("an approved request whose scope changed holds the lead again", async () => {
+  test("New ticket after an Approve: the lead queues it with no new Approve (Part 18 L1); a new Approve still queues the drafts left", async () => {
     await request("r-1");
     await ticket("r-1");
     await approve("r-1");
     const t3 = await ticket("r-1");
-    expect((await move(t3, "alice", "queued")).status).toBe(403);
+    expect((await move(t3, "alice", "queued")).status).toBe(200);
+    const t4 = await ticket("r-1");
     await approve("r-1");
-    expect(status(t3)).toBe("queued");
+    expect(status(t4)).toBe("queued");
   });
 
   test("the old high-radius check is gone: a human request with only low tickets also needs the Approve", async () => {

@@ -661,7 +661,6 @@ const editTicketVerb: VerbDecl<TicketSnapshot, EditInput> = {
         ...(changes.acceptance_criteria !== undefined ? { acceptance_criteria: { from: prior.acceptance_criteria, to: changes.acceptance_criteria } } : {}),
         ...(changes.role !== undefined ? { role: { from: prior.role, to: changes.role } } : {}),
         ...(blockersChanged ? { blocked_by: { from: blockersFrom, to: blockersTo } } : {}),
-        ...(backToDraft ? { status: { from: prior.status, to: "draft" } } : {}),
       }),
       entry: (post) => ticketEntry(cap.db, post, "ticket.update", actor),
     };
