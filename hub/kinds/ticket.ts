@@ -650,10 +650,15 @@ function validatorPassCommits(db: Database, ticketId: string): (string | null)[]
     .query<{ context_json: string | null }, [string, string]>(
       `SELECT (SELECT h.context_json FROM handoffs h
                 WHERE h.to_agent = 'role:validator' AND json_extract(h.context_json, '$.ticket_id') = ?1
-                  AND (SELECT MIN(e.seq) FROM events e WHERE e.entity_id = h.id) < s.created_seq
-                  AND NOT EXISTS (SELECT 1 FROM events w WHERE w.entity_id = h.id AND w.kind IN ('handoff.cancelled', 'handoff.declined') AND w.seq < s.created_seq)
+                  AND (SELECT MIN(e.seq) FROM events e WHERE e.entity_id = h.id) < COALESCE(f.created_seq, s.created_seq)
+                  AND NOT EXISTS (SELECT 1 FROM events w WHERE w.entity_id = h.id AND w.kind IN ('handoff.cancelled', 'handoff.declined') AND w.seq < COALESCE(f.created_seq, s.created_seq))
                 ORDER BY (SELECT MIN(e.seq) FROM events e WHERE e.entity_id = h.id) DESC LIMIT 1) AS context_json
          FROM stage s
+         LEFT JOIN stage f ON f.id = (SELECT p.id FROM stage p
+                WHERE p.ticket_id = ?1 AND p.role = 'validator' AND p.review IS NULL AND p.status = 'passed' AND p.verdict = 'PASS'
+                  AND p.created_seq < s.created_seq
+                  AND p.created_seq > COALESCE((SELECT MAX(w.created_seq) FROM stage w WHERE w.ticket_id = ?2 AND w.role = 'worker'), 0)
+                ORDER BY p.created_seq LIMIT 1)
         WHERE s.ticket_id = ?1 AND s.role = 'validator' AND s.review IS NULL AND s.status = 'passed' AND s.verdict = 'PASS'
           AND s.created_seq > COALESCE((SELECT MAX(w.created_seq) FROM stage w WHERE w.ticket_id = ?2 AND w.role = 'worker'), 0)
         ORDER BY s.created_seq`,

@@ -852,8 +852,21 @@ export function createStageRuntime(
    * is judged by its state when the stage was created: a cancel or decline after that does not take it away from a retry.
    * A later handoff has its own stage, so a retry never switches to it. Same rule as the spec stage's `specCommit`.
    */
-  const startingHandoffRow = (stageId: string, ticketId: string, role: string) =>
-    db
+  const startingHandoffRow = (stageId: string, ticketId: string, role: string) => {
+    // L4: the second Validator stage reviews the commit of the first one, so it takes the handoff that started the first.
+    if (role === "validator") {
+      const first = db
+        .query<{ id: string }, [string, string, string]>(
+          `SELECT p.id FROM stage p
+            WHERE p.ticket_id = ?1 AND p.role = 'validator' AND p.review IS NULL AND p.status = 'passed' AND p.verdict = 'PASS'
+              AND p.created_seq < (SELECT created_seq FROM stage WHERE id = ?2)
+              AND p.created_seq > COALESCE((SELECT MAX(w.created_seq) FROM stage w WHERE w.ticket_id = ?3 AND w.role = 'worker'), 0)
+            ORDER BY p.created_seq LIMIT 1`,
+        )
+        .get(ticketId, stageId, ticketId);
+      if (first) stageId = first.id;
+    }
+    return db
       .query<{ id: string; from_agent: string; task: string; context_json: string | null }, [string, string, string]>(
         `SELECT h.id, h.from_agent, h.task, h.context_json
            FROM handoffs h
@@ -867,6 +880,7 @@ export function createStageRuntime(
           ORDER BY (SELECT MIN(e.seq) FROM events e WHERE e.entity_id = h.id) DESC LIMIT 1`,
       )
       .get(`${ROLE_RECIPIENT_PREFIX}${role}`, ticketId, stageId);
+  };
 
   /** The commit of the handoff that started this stage (context.commit), else null (the ticket branch, else HEAD). */
   const handoffCommit = (stageId: string, ticketId: string, role: string): string | null => {

@@ -155,6 +155,24 @@ describe("high ticket: two Validator PASSes", () => {
     expect(e.doneEvents(t.id)).toHaveLength(0);
   });
 
+  test("a later Validator handoff does not change the commit of the second PASS", async () => {
+    const e = makeEnv();
+    const t = e.ticket("high");
+    // A later handoff on C2 arrives while the first stage runs.
+    e.db.run(
+      "INSERT INTO handoffs (id, from_agent, to_agent, task, context_json, status, created_at_ms, expires_at_ms) VALUES ('h_late', 'tester-1', 'role:validator', 'validate', ?, 'accepted', 1, 9999999999999)",
+      [JSON.stringify({ ticket_id: t.id, commit: C2 })],
+    );
+    e.db.run("INSERT INTO events (entity_id, kind, actor, payload_json, at_ms) VALUES ('h_late', 'handoff.created', 'tester-1', '{}', 1)");
+    e.rt.hooks.onResult("validator-1", { stage_id: t.first, verdict: "PASS" }, e.cap);
+    const second = e.startSecond(t.id);
+    const bad = e.rt.hooks.checkResult("validator-2", { stage_id: second, ticket_id: t.id, verdict: "PASS", findings: [], notes: "ok", commit: C2 }, e.cap);
+    expect(bad!.join(" ")).toContain(C1);
+    expect(e.rt.hooks.checkResult("validator-2", { stage_id: second, ticket_id: t.id, verdict: "PASS", findings: [], notes: "ok", commit: C1 }, e.cap)).toEqual([]);
+    e.rt.hooks.onResult("validator-2", { stage_id: second, verdict: "PASS" }, e.cap);
+    expect((await e.leadDone(t.id)).status).toBe(200);
+  });
+
   test("second PASS on other commit refused", () => {
     const e = makeEnv();
     const t = e.ticket("high");
