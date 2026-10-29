@@ -29,6 +29,22 @@ Verdict, with `send_handoff` to the Orchestrator:
 - Everything else is a suggestion: wording, file names, implementation, `blocked_by` details, a better split. Never FAIL for implementation detail, line numbers or a rule of a role file.
 - **PASS:** context `{request_id, review: "spec", verdict: "PASS", suggestions}`. **FAIL:** context `{request_id, review: "spec", verdict: "FAIL", findings, questions_for_human}`.
 - A re-check after a FAIL checks only the earlier findings and the Orchestrator's answer to each. Judge each answer on its merit: a different fix that covers the requirement is a PASS for that finding; a rejection that the spec supports is a PASS. Your proposal is a suggestion, not the only answer. When you still disagree, say so in one line per finding, with your reason: the human decides at the Approve. No new findings, unless a changed ticket now contradicts the spec.
+- Example of a spec result (send it to the Orchestrator, the room lead. The hub checks every field):
+  ```json
+  {
+    "stage_id": "s_0123456789abcdef",
+    "review": "spec",
+    "request_id": "r-2026-10-29-example",
+    "verdict": "FAIL",
+    "findings": [
+      { "ticket_id": "t_0123456789abcdef", "severity": "blocking", "text": "Requirement X has no ticket. Add a ticket with criteria Y." }
+    ],
+    "questions_for_human": [],
+    "suggestions": [],
+    "notes": "What I checked and what is open. Target 300 words, limit 400."
+  }
+  ```
+  `ticket_id` of a finding is a ticket in the scope of the review. `severity` is `blocking` or `suggestion`. A PASS has no blocking finding.
 - Put `context.notes` in the verdict: what you checked and what is open. Target 300 words. Limit 400 words.
 
 ## Code review flow
@@ -49,7 +65,24 @@ Verdict, with `send_handoff` to the Orchestrator:
 7. Judge the code against the ticket criteria, the tests and security. Do not fail a ticket for a plan detail that the criteria do not ask for. A finding outside the ticket is a suggestion: say "follow-up" and the Orchestrator makes a ticket.
 8. Verdict:
    - **PASS:** `send_handoff` to the Orchestrator: task "PASS <ticket_id>", context `{ticket_id, commit, summary, criteria}`. `commit` is the full sha you reviewed. `criteria` lists each acceptance criterion with its evidence (test name, command output). The Orchestrator merges and closes the ticket.
-   - **FAIL:** `send_handoff` to the Worker: context `{ticket_id, findings}`. Each finding has the evidence and the criterion or rule it breaks. Mark each finding `blocking` or `suggestion` with the decision tree below. Only blocking findings stop PASS.
+   - **FAIL:** `send_handoff` with `to_role: "worker"`: context `{stage_id, ticket_id, commit, verdict: "FAIL", findings, notes}`. Each finding has the evidence and the criterion or rule it breaks. Mark each finding `blocking` or `suggestion` with the decision tree below. Only blocking findings stop PASS.
+   - Example of a ticket result (the hub checks `stage_id`, `ticket_id`, `verdict`, `findings` and `notes`):
+     ```json
+     {
+       "stage_id": "s_0123456789abcdef",
+       "ticket_id": "t_0123456789abcdef",
+       "commit": "0123456789abcdef0123456789abcdef01234567",
+       "verdict": "PASS",
+       "summary": "One short paragraph: what the change does and what I checked.",
+       "criteria": [
+         { "criterion": "1", "evidence": "rg -n 'x' file.md finds 2 lines" }
+       ],
+       "findings": [
+         { "ticket_id": "t_0123456789abcdef", "severity": "suggestion", "text": "Follow-up: name the file and line." }
+       ],
+       "notes": "What I checked and what is open. Target 300 words, limit 400."
+     }
+     ```
 9. When the problem is in the ticket itself (wrong criteria, wrong scope), `send_handoff` to the Orchestrator with the reason.
 
 ## Decision tree: blocking or suggestion
