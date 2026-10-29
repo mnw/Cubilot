@@ -276,7 +276,10 @@ const TicketBoard = (() => {
     const refocus = () => {
       if (!fromControl) return;
       const board = document.getElementById('ticket-board-columns');
-      [...(board?.querySelectorAll?.('.ticket-move') ?? [])].find((s) => s.dataset.ticket === id)?.focus?.();
+      const sel = [...(board?.querySelectorAll?.('.ticket-move') ?? [])].find((s) => s.dataset.ticket === id);
+      // The controls are visibility: hidden until the card has focus (kinds.css), so the card takes focus first.
+      sel?.closest?.('.ticket-card')?.focus?.();
+      sel?.focus?.();
     };
     if (moving.has(id)) { failMove(id, 'a move is in flight'); refocus(); return; }
     moving.add(id);
