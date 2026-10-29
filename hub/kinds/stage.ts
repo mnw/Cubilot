@@ -850,7 +850,8 @@ export function createStageRuntime(
               db.run("UPDATE stage SET session_released_at_ms = ? WHERE id = ?", [Date.now(), req.stage_id]);
               endLaunchAttempt(api, req.stage_id, cap, why);
             })();
-            opts.launchRecord?.release(req.session);
+            // A retry the move started has bound the session again: only a session with no launch in flight is released.
+            if (!inflight.has(req.stage_id)) opts.launchRecord?.release(req.session);
           } else endLaunchAttempt(api, req.stage_id, cap, why);
           reportFinalFailure(req.stage_id, `the launch did not start: ${why}`, cap);
         }
