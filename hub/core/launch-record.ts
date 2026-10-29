@@ -6,7 +6,8 @@ import type { Database } from "bun:sqlite";
 // (stream parameter, header, env value) counts as proof that it is a stage session.
 export type LaunchRecord = {
   bind(session: string, stageId: string): void;
-  release(session: string): void;
+  /** With `stageId`, releases only a binding that this stage still holds. */
+  release(session: string, stageId?: string): void;
   /** Adds bindings read from the ledger (at start). */
   load(bindings: Iterable<[string, string]>): void;
   /** Names of the sessions the hub launched and has not seen closed. */
@@ -29,7 +30,7 @@ export function createLaunchRecord(initial: Iterable<[string, string]> = []): La
   const bound = new Map<string, string>(initial);
   return {
     bind: (session, stageId) => void bound.set(session, stageId),
-    release: (session) => void bound.delete(session),
+    release: (session, stageId) => void (stageId === undefined || bound.get(session) === stageId ? bound.delete(session) : false),
     load: (bindings) => void [...bindings].forEach(([session, stageId]) => bound.set(session, stageId)),
     sessions: () => new Set(bound.keys()),
   };

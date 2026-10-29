@@ -148,6 +148,27 @@ describe("the stage runtime releases the session from the launch record", () => 
     expect(launchRecord.sessions().has("worker-1")).toBe(false);
     e.stop();
   });
+
+  test("final launch error keeps the binding that a waiting stage of the same role took", () => {
+    const launchRecord = createLaunchRecord();
+    const e = makeEnv({ launchRecord });
+    setRoomSettings(e.db, "r1", { role_limits: { worker: 1 } });
+    e.connect();
+    const a = e.stageFor(e.ticket());
+    const b = e.stageFor(e.ticket());
+    e.rt.enqueueLaunch(e.input(a.id), e.cap);
+    e.rt.queue.ack(e.sent[0].id, { result: "error", error: "tmux failed" }, e.cap);
+    const second = e.sent.filter((r) => r.kind === "launch")[1];
+    expect(second.session).toBe("worker-1");
+    e.rt.queue.ack(second.id, { result: "error", error: "tmux failed" }, e.cap);
+    expect(e.rt.api.load(a.id)!.status).toBe("failed");
+    // the drain inside the move gave the name to stage b; the release step of stage a must not delete that bind
+    const third = e.sent.filter((r) => r.kind === "launch")[2];
+    expect(third).toMatchObject({ session: "worker-1" });
+    expect(e.rt.api.load(b.id)!.status).toBe("launching");
+    expect(launchRecord.sessions().has("worker-1")).toBe(true);
+    e.stop();
+  });
 });
 
 describe("a failed stage change keeps the request pending (4.1 review)", () => {

@@ -851,7 +851,8 @@ export function createStageRuntime(
               endLaunchAttempt(api, req.stage_id, cap, why);
             })();
             // A retry the move started has bound the session again: only a session with no launch in flight is released.
-            if (!inflight.has(req.stage_id)) opts.launchRecord?.release(req.session);
+            // A waiting stage may hold the name now: only a binding of this stage is released.
+            if (!inflight.has(req.stage_id)) opts.launchRecord?.release(req.session, req.stage_id);
           } else endLaunchAttempt(api, req.stage_id, cap, why);
           reportFinalFailure(req.stage_id, `the launch did not start: ${why}`, cap);
         }
