@@ -29,7 +29,7 @@ import { LedgerConflict } from "../core/types";
 import type { LaunchRecord } from "../core/launch-record";
 import { createLaunchQueue, type LaunchEnd, type LaunchQueue, type LaunchRequest } from "../core/launch-queue";
 import { roleHarness } from "../core/role-harness";
-import { roleModelFor } from "../core/role-models";
+import { roleModelFor, secondReviewModel } from "../core/role-models";
 import { metricsByRole, recordStageMetrics, stagesMissingMetrics, type Launch } from "../core/stage-metrics";
 import { makeSSE } from "../core/sse";
 import { assignBySystemInTx, closeReviewedBySystemInTx, notifyHeldDrafts, queueBySystemInTx, type HeldDraft } from "./ticket";
@@ -1415,7 +1415,9 @@ export function createStageRuntime(
 
     // role_models in config.yml, read now so an edit applies to this launch. A shape error of this role fails the attempt
     // below, after the stage is `launching`, through the same path as a refused ack (retry, then final failure).
-    const models = roleModelFor(stage.role, STAGE_ROLES);
+    // The second Validator review of a high ticket uses second_review instead (a bad value gives the default, never an error).
+    const secondReview = stage.role === "validator" && !!stage.ticket_id && stage.review === null && isHighTicket(stage.ticket_id) && validatorPasses(stage.ticket_id) >= 1;
+    const models: ReturnType<typeof roleModelFor> = secondReview ? { entry: secondReviewModel() } : roleModelFor(stage.role, STAGE_ROLES);
 
     // 4.5: the hub makes the worktree; the shell only starts in it. A spec stage gets a detached read-only one at the
     // commit of its handoff, or HEAD (spec-review 2.4), under the request instead of a ticket.
@@ -1457,7 +1459,7 @@ export function createStageRuntime(
         )
         .get(stage.ticket_id);
       if (t) {
-        const fm = { stable: stableFor(input.room), notes: earlierNotes(db, t.id), stageId: input.stage_id, role: stage.role, ticket: t, branch, worktree: cwd, reason: input.reason, recipient: leadOfRoom(input.room), handoff: startingHandoff(stage.id, stage.ticket_id, stage.role) ?? undefined };
+        const fm = { stable: stableFor(input.room), notes: earlierNotes(db, t.id).filter((n) => !secondReview || n.role !== "validator"), stageId: input.stage_id, role: stage.role, ticket: t, branch, worktree: cwd, reason: input.reason, recipient: leadOfRoom(input.room), handoff: startingHandoff(stage.id, stage.ticket_id, stage.role) ?? undefined };
         prompt = renderFirstMessage(fm);
         // The ticket row is read again at each render: an edit between the launch request and the delivery is not lost (L2).
         renderWithPack = (pack) => {
