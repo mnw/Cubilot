@@ -107,7 +107,9 @@ function makeEnv() {
   };
 }
 
+// A queued ticket of a plain agent needs a request (criterion 2.2): the default names a request the harness seeds.
 const spec = (over: Record<string, unknown> = {}) => ({
+  request_id: "req-default",
   by: "alice",
   title: "Fix login",
   acceptance_criteria: "Login works with a valid token.",
@@ -393,7 +395,7 @@ describe("briefing: request label, open blockers, draft", () => {
     expect(lines()).not.toContain(b1);
 
     // No label and no blockers: the line is as before.
-    await create({ assignee: "bob" });
+    await create({ by: HUMAN, room: "r1", request_id: null, assignee: "bob" });
     expect(lines().split("\n").filter((l) => l.startsWith("- ") && !l.includes("req-9") ).every((l) => !l.includes("request"))).toBe(true);
   });
 });
@@ -489,7 +491,7 @@ describe("create", () => {
     expect(ok.status).toBe(201);
     expect(ok.json.snapshot.request_id).toBe("req-1.a_B");
     expect(t.row(ok.json.snapshot.id).request_id).toBe("req-1.a_B");
-    expect((await t.call("POST", "/tickets", spec())).json.snapshot.request_id).toBeNull();
+    expect((await t.call("POST", "/tickets", spec({ request_id: null, status: "draft" }))).json.snapshot.request_id).toBeNull();
     const before = t.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM tickets").get()!.n;
     const eventsBefore = t.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM events").get()!.n;
     for (const bad of ["bad label!", "", "a".repeat(65), 7, ["x"]]) {
@@ -1954,11 +1956,11 @@ describe("briefing hook (4.4) and refresh", () => {
     t.kinds.find((x) => x.kind === "ticket")!.briefingLines!({ name, room, permanent: false }, t.cap);
 
   test("lists only the agent's own non-terminal tickets in its room, highest priority first", async () => {
-    const low = await create({ title: "low pri", priority: "low", acceptance_criteria: "A\nB   C" });
-    const high = await create({ title: "high pri", priority: "highest" });
-    const done = await create({ title: "finished" });
-    const mine = await create({ title: "not claimed" });
-    const others = await create({ title: "carol's" });
+    const low = await create({ by: HUMAN, room: "r1", request_id: null, title: "low pri", priority: "low", acceptance_criteria: "A\nB   C" });
+    const high = await create({ by: HUMAN, room: "r1", request_id: null, title: "high pri", priority: "highest" });
+    const done = await create({ by: HUMAN, room: "r1", request_id: null, title: "finished" });
+    const mine = await create({ by: HUMAN, room: "r1", request_id: null, title: "not claimed" });
+    const others = await create({ by: HUMAN, room: "r1", request_id: null, title: "carol's" });
     for (const id of [low, high, done]) await claim(id, "bob");
     await claim(others, "carol");
     await as(done, "bob", "cancelled");

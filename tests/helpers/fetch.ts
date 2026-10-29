@@ -40,7 +40,12 @@ export async function postJson(
   path: string,
   body: unknown,
 ): Promise<{ status: number; json: unknown }> {
-  const b = body as Record<string, unknown> | null;
+  let b = body as Record<string, unknown> | null;
+  // A plain agent queues a ticket only with a request (criterion 2.2): a test that is not about the rule gets one.
+  if (path === "/tickets" && b && b.noSeed !== true && b.by !== hub.humanName && b.request_id === undefined && b.status !== "draft") {
+    b = { ...b, request_id: "req-default" };
+    body = b;
+  }
   if (path === "/tickets" && b && typeof b.request_id === "string" && b.noSeed !== true) await seedRequestFor(hub, b);
   if (b && "noSeed" in b) {
     const { noSeed: _drop, ...rest } = b;
