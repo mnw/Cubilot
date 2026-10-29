@@ -370,3 +370,42 @@ describe("pty plumbing — skill view", () => {
     });
   }
 });
+
+// P6-15: the checkpoint `/clear` is written to the PTY of one named session (launches.rs `input`, pty.rs `write_input`:
+// the text and Enter to the PTY master of that session's attach client; never `send-keys`). The Rust tests pin the request
+// parse, the routing and the one-line rule. This scenario pins what tmux does with it: two sessions each run `cat`; a client
+// attached to A gets a line on its PTY; the line reaches the pane of A and the pane of B stays empty.
+describe("pty plumbing — input to a named session", () => {
+  test("text reaches the named session and no other", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cubilot-input-"));
+    const fileA = join(dir, "a.txt");
+    const fileB = join(dir, "b.txt");
+    let client: ReturnType<typeof Bun.spawn> | null = null;
+    try {
+      writeFileSync(fileA, "");
+      writeFileSync(fileB, "");
+      await h.spawnSession("Orchestrator", ["-c", "/tmp", `cat >> '${fileA}'`]);
+      await h.spawnSession("Orchestrator2", ["-c", "/tmp", `cat >> '${fileB}'`]);
+      // The attach client runs on a PTY, the way pty.rs holds one: Bun's `terminal` option gives the PTY master side.
+      client = Bun.spawn([h.tmux, "-S", h.sock, "attach-session", "-t", "=Orchestrator"], {
+        terminal: { cols: 80, rows: 24, data() {} }, env: { ...process.env, TERM: "xterm-256color" },
+      } as any);
+      const deadline0 = Date.now() + 5000;
+      while (Date.now() < deadline0) {
+        const r = await h.run(["list-clients", "-F", "#{client_session}"]);
+        if (r.stdout.includes("Orchestrator")) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      await new Promise((r) => setTimeout(r, 300));
+      (client as any).terminal.write("/clear\r");
+      const deadline = Date.now() + 5000;
+      while (!readFileSync(fileA, "utf8").includes("/clear") && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+      expect(readFileSync(fileA, "utf8")).toBe("/clear\n");
+      await new Promise((r) => setTimeout(r, 300));
+      expect(readFileSync(fileB, "utf8")).toBe(""); // the session whose name starts the same got nothing
+    } finally {
+      try { client?.kill(); } catch { /* gone */ }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20000);
+});

@@ -6,6 +6,7 @@
 import type { Database } from "bun:sqlite";
 import type { KindModule } from "../core/types";
 import { createCancelTraceKind } from "./cancel-trace";
+import { createCheckpointKind } from "./checkpoint";
 import { createDecisionKind } from "./decision";
 import { createHandoffKind, createSystemHandoff } from "./handoff";
 import { createInterruptKind } from "./interrupt";
@@ -58,5 +59,7 @@ export function buildKinds(db: Database | null, launchRecord?: LaunchRecord): re
     stage.module,
     cancelTrace,
     createDecisionKind(db),
+    // The checkpoint asks the shell for a `/clear` through the stage runtime, the one owner of the launch queue.
+    createCheckpointKind(db, { sendInput: stage.sendInput, dropInput: stage.dropInput }),
   ];
 }

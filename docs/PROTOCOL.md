@@ -747,6 +747,7 @@ Request formats (`id` has the format `l_[0-9a-f]{16}`):
   "env": { "CHATBRIDGE_AGENT": "worker-1", "CHATBRIDGE_ROOM": "cubilot", "CUBILOT_STAGE_ID": "s_…" }
 }
 { "id": "l_…", "kind": "close", "session": "worker-1" }
+{ "id": "l_…", "kind": "input", "session": "Orchestrator", "text": "/clear" }
 ```
 
 - `harness` comes from the `role_models` entry of the role in `config.yml` (`hub/core/role-models.ts`), else from the role's staged `harness` file (`hub/core/role-harness.ts`). The default is `claude`.
@@ -755,6 +756,7 @@ Request formats (`id` has the format `l_[0-9a-f]{16}`):
 - `cwd` is the worktree that the hub made before it queued the launch. The shell never runs git.
 - `prompt` is the ticket part of the first message, rendered from `factory/<role>/first-message.md`. It does not contain the role prompt. `factory-roles` passes the role prompt as a file: Claude Code gets `--append-system-prompt-file <file>`, and pi gets `--append-system-prompt <file>` (`src-tauri/src/pty.rs`). A retry adds one line with the reason of the earlier stop. When a `to_role` handoff started the stage, the prompt also holds a section `## Handoff` with the sender, the task and the context JSON of that handoff. The section is capped at 64 KB. Over the cap, the hub cuts it and adds one line that names the handoff id. A stage that no handoff started gets no such section. A retry gets the same section. The section starts its context with one line that names the session's own stage id: "The stage_id in this context is the sender's stage. Your stage id is <id>. Use your own stage id in your result." The cap includes this line.
 - The shell reads `stage_id` and sets `CUBILOT_STAGE_ID` itself. It does not read `env`.
+- An `input` request (the checkpoint `/clear`, P6-15) carries one line of text for one named session. The shell writes the text and Enter to the PTY of that session and to no other (`pty::write_input`, raw PTY, never `tmux send-keys`). It refuses an unknown session, empty text, text over 1,024 bytes and any control character. The shell does the write once. The hub sends an `input` once: it is not sent again after a reconnect. The ack is `spawned` (written) or `error`. Only `hub/kinds/stage.ts` queues it, through `sendInput`.
 
 Ack body:
 
@@ -1322,3 +1324,17 @@ Per-room durable chat history. Off by default; flipped on per room via the setti
 **Hub restart hydration:** on startup, opted-in rooms have their **active chunk** tail-loaded into `chatLog` (rotated chunks are NOT loaded). Subsequent SSE replay on `/stream` covers the hydrated entries.
 
 **SQLite invariant:** `room_settings` (added in ledger schema v8) holds the opt-in flag only; rotation size is a code-level constant (`ROTATION_LINES = 10_000`). Kinds (`handoff`, `interrupt`, `permission`, `nutshell`) remain exclusively in SQLite — the JSONL never carries kind state, only chat entries.
+
+### Checkpoints
+
+A checkpoint makes the room lead write a short note, clears its context and starts it again from the note and the state summary (`hub/kinds/checkpoint.ts`). Statuses: `noting`, `clearing`, `done`, `failed`. One event for each change: `checkpoint.started`, `checkpoint.note_asked`, `checkpoint.noted`, `checkpoint.clearing`, `checkpoint.done`, `checkpoint.failed`. No cross-kind transaction.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/checkpoints` | Bearer, body `{by, room}` | The human starts a checkpoint for the lead of `room`. 400 for a Pi lead, 403 for a caller that is not the human, 404 for a room with no lead, 409 when a checkpoint of that lead is not finished. |
+| GET | `/checkpoints?room=` | read | The record of a room, newest first: time (`started_at_ms`), `trigger` (`human` or `rule`), `context_pct_before`, `context_pct_after`, `summary_bytes`, `status`, `reason`. |
+| GET | `/checkpoints/{id}` | read | One record. |
+| POST | `/agents/{name}/turn-end` | Bearer, body `{by}` | The Stop hook of the lead. The first turn end after the start asks the lead for a note. The next one writes the summary file and asks the shell for `/clear`. A turn end of any other agent changes nothing (`{"action":"none"}`). |
+| POST | `/agents/{name}/checkpoint-note` | Bearer, body `{by, text}` | `checkpoint-note.sh` of the lead. Only after the request (409 otherwise). The hub keeps the first 200 words. |
+
+The summary is written to `<app data>/checkpoints/<agent>.md` with mode `0600`. The `SessionStart` hook (matcher `clear`) of the Orchestrator role returns the file as `additionalContext` and removes it (`factory/orchestrator/hooks/`). The sweep moves a `clearing` checkpoint to `done` when the file is gone (`context_pct_after` is the context percentage at that time), and to `failed` after 2 minutes (`CUBILOT_CHECKPOINT_TIMEOUT_MS` in tests). A Pi lead has no checkpoint.
