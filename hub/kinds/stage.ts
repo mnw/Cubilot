@@ -1229,14 +1229,8 @@ export function createStageRuntime(
     if (ready.length > 0) created.push(api.create({ ticket_id: ticketId, role: ready[0].role }, "system", cap));
     if (eopts.launch) {
       const room = db.query<{ room: string }, [string]>("SELECT room FROM tickets WHERE id = ?").get(ticketId)!.room;
-      for (const stage of created) {
-        // TODO(4.3, 4.5): the real first message and the worktree path. Until then the launch has no prompt and no cwd.
-        const r = enqueueLaunch(
-          { stage_id: stage.id, session: nextSessionName(stage.role), room, harness: roleHarness(stage.role), cwd: null, prompt: "" },
-          cap,
-        );
-        if (!r.ok) console.log(`[stage] ${stage.id} stays queued: ${r.reason}`);
-      }
+      // A retrying or older queued stage of the role goes before the new one (startWaiting order), inside the limit.
+      for (const role of new Set(created.map((c) => c.role))) startWaiting(role, room, cap);
     }
     return created;
   }
@@ -1780,6 +1774,11 @@ export function createStageRuntime(
 
   const module: KindModule = {
     kind: "stage",
+    // The human saved the limits of a room: start the waiting stages of every role that has a free slot now. A lowered limit
+    // starts nothing and stops nothing: enqueueLaunch checks the limit again.
+    onRoomLimitsChanged(room, cap) {
+      for (const role of STAGE_ROLES) startWaiting(role, room, cap);
+    },
     migrate: (d: Database) => entity.migrate(d),
     routes: withLedgerRequired(routes),
     // A stage is the hub's own bookkeeping: agents never get a stage replayed on reconnect.

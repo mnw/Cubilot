@@ -300,7 +300,7 @@ const FEATURES: readonly HubFeature[] = [
   }),
   createRosterFeature({ agents, removeAgent, defaultRoom: DEFAULT_ROOM, readNutshell }),
   ...(ledgerDb
-    ? [createTranscriptFeature({ db: ledgerDb, chatLog, roomSummariser })]
+    ? [createTranscriptFeature({ db: ledgerDb, chatLog, roomSummariser, onRoleLimitsChanged: (room, cap) => { for (const k of KINDS) k.onRoomLimitsChanged?.(room, cap); } })]
     : []),
   createChatFeature({
     agents,
