@@ -260,6 +260,7 @@ describe("high ticket through POST /handoffs", () => {
     try { return fn(db); } finally { db.close(); }
   };
   const stages = (id: string) => ledger((db) => db.query("SELECT id, role, status, verdict, session FROM stage WHERE ticket_id = ? ORDER BY created_seq").all(id) as Stage[]);
+  const stageRows = (id: string) => ledger((db) => db.query("SELECT * FROM stage WHERE ticket_id = ? ORDER BY created_seq").all(id));
   const ticketStatus = (id: string) => ledger((db) => db.query<{ status: string }, [string]>("SELECT status FROM tickets WHERE id = ?").get(id)!.status);
   const handoffsTo = (id: string, to: string) =>
     ledger((db) => db.query<{ id: string }, [string, string]>("SELECT id FROM handoffs WHERE to_agent = ? AND json_extract(context_json, '$.ticket_id') = ?").all(to, id));
@@ -338,13 +339,13 @@ describe("high ticket through POST /handoffs", () => {
 
   test("second PASS on other commit refused", async () => {
     const t = await startSecond();
-    const before = stages(t.id);
+    const before = stageRows(t.id);
     const handoffsBefore = ledger((db) => db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM handoffs").get()!.n);
     const res = await result(t.secondSession, t.second, t.id, "PASS", C2, toLead);
     expect(res.status).toBe(400);
     expect(JSON.stringify(res.json)).toContain(C1);
     expect(ticketStatus(t.id)).toBe("in_review");
-    expect(stages(t.id)).toEqual(before);
+    expect(stageRows(t.id)).toEqual(before);
     expect(ledger((db) => db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM handoffs").get()!.n)).toBe(handoffsBefore);
   });
 });
