@@ -3,7 +3,7 @@
 // the same bytes (JSON.stringify of the result).
 
 import type { Database } from "bun:sqlite";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { flowReport } from "./flow";
 import { STAGE_ROOM_SQL } from "../kinds/stage";
@@ -266,6 +266,17 @@ export function writeEvidenceFile(db: Database, ledgerDb: string, room: string, 
   return { path, text };
 }
 
+/** Ids of the `done` items of the `improvements` section of the saved evidence file; [] when the file is missing or does not parse. */
+export function savedDoneImprovements(ledgerDb: string, room: string, week: string): string[] {
+  try {
+    const list = JSON.parse(readFileSync(evidencePath(ledgerDb, room, week), "utf8"))?.improvements;
+    if (!Array.isArray(list)) return [];
+    return list.filter((i) => i?.status === "done" && typeof i.ticket_id === "string").map((i) => i.ticket_id);
+  } catch {
+    return [];
+  }
+}
+
 /** The proposal titles of the newest earlier passed retrospective of the room; [] when there is none or its result has no proposals. */
 export function previousProposalTitles(db: Database, room: string, week: string): string[] {
   const prev = db
@@ -303,7 +314,7 @@ const str = (v: unknown): v is string => typeof v === "string" && v.trim() !== "
 
 /** True when one sentence of `text` holds a removal word and a gate word (design decision 2). */
 export function removesHumanGate(text: string): boolean {
-  return text.split(/(?<=[.!?;])\s+|\n+/).some((s) => REMOVAL_RE.test(s) && GATE_RE.test(s));
+  return text.split(/(?<=[.!?])\s+|\n+/).some((s) => REMOVAL_RE.test(s) && GATE_RE.test(s));
 }
 
 export type RetroResultEnv = {
@@ -350,6 +361,7 @@ export function checkRetroResult(c: Record<string, unknown>, env: RetroResultEnv
       }
     });
   }
+  if (!Array.isArray(c.lessons) || !c.lessons.every(str)) errors.push("context.lessons must be a list of non-empty strings (may be empty)");
   const verdicts = c.verdicts;
   const judged = new Set<string>();
   if (!Array.isArray(verdicts)) errors.push("context.verdicts must be a list (may be empty)");

@@ -70,9 +70,9 @@ function env(done: string[] = []) {
   rt.sweep(cap, MON);
   const stage = db.query<{ id: string; session: string }, []>("SELECT id, session FROM stage WHERE review = 'retro'").get()!;
   rt.api.move(stage.id, { to: "running" }, "system", cap);
-  const check = (c: Record<string, unknown>) => rt.hooks.checkResult(stage.session, { stage_id: stage.id, notes: "n", verdicts: [], proposals: [], ...c }, cap) ?? ["no stage"];
+  const check = (c: Record<string, unknown>) => rt.hooks.checkResult(stage.session, { stage_id: stage.id, notes: "n", verdicts: [], proposals: [], lessons: [], ...c }, cap) ?? ["no stage"];
   const status = () => db.query<{ status: string }, [string]>("SELECT status FROM stage WHERE id = ?").get(stage.id)!.status;
-  return { check, status };
+  return { check, status, ticket };
 }
 
 const proposal = (over: Record<string, unknown> = {}) => ({
@@ -113,6 +113,12 @@ describe("the schema of a retro result", () => {
     expect(e.status()).toBe("running");
   });
 
+  test("lessons must be a list of strings", () => {
+    const e = env();
+    for (const bad of [undefined, "a lesson", [1], [""]]) expect(e.check({ lessons: bad }).join("\n")).toContain("context.lessons");
+    expect(e.check({ lessons: ["When x, y, because z."] })).toEqual([]);
+  });
+
   test("a proposal with no evidence item", () => {
     expect(env().check({ proposals: [proposal({ evidence: [] })] }).join("\n")).toContain("evidence needs at least one item");
   });
@@ -142,6 +148,10 @@ describe("the human-gate check", () => {
 
   test("Add a check before the human Approve passes", () => {
     expect(env().check({ proposals: [proposal({ change: "Add a check before the human Approve" })] })).toEqual([]);
+  });
+
+  test("a semicolon does not end a sentence", () => {
+    expect(removesHumanGate("Remove manual review; human Approve is obsolete.")).toBe(true);
   });
 
   test("the removal word and the gate word must share a sentence", () => {
@@ -191,6 +201,13 @@ describe("verdicts for done improvements", () => {
     expect(e.check({ verdicts: [verdict(A)] })).toContain(`context.verdicts has no verdict for improvement ${B}`);
     expect(e.status()).toBe("running");
     expect(e.check({ verdicts: [verdict(A), verdict(B, "revert")] })).toEqual([]);
+  });
+
+  test("the done items are those of the evidence file, not the ledger after the launch", () => {
+    const e = env([A]);
+    e.ticket(B, "done", "r-2026-10-26-retro", at(4, 13));
+    expect(e.check({ verdicts: [verdict(A)] })).toEqual([]);
+    expect(e.check({ verdicts: [verdict(B)] })).toContain(`context.verdicts has no verdict for improvement ${A}`);
   });
 
   test("a verdict other than keep or revert is refused", () => {

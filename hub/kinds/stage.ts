@@ -26,7 +26,7 @@ import { validName, validRoomLabel } from "../core/ids";
 import { deliveriesNotInMain } from "../core/delivery-report";
 import { openBlockerIds } from "./ticket-blockers";
 import { flowReport } from "../core/flow";
-import { buildEvidence, checkRetroResult, previousProposalTitles, retroWeekAt, retroWeekWindow, roomsWithTicketEvents, writeEvidenceFile } from "../core/retro";
+import { checkRetroResult, previousProposalTitles, retroWeekAt, retroWeekWindow, roomsWithTicketEvents, savedDoneImprovements, writeEvidenceFile } from "../core/retro";
 import { getRoomSettings, DEFAULT_ROLE_LIMITS, DEFAULT_STAGE_TIMEOUT_MIN, STAGE_ROLES, type StageRole } from "../core/ledger";
 import { LedgerConflict } from "../core/types";
 import type { LaunchRecord } from "../core/launch-record";
@@ -2316,8 +2316,9 @@ export function createStageRuntime(
   /** Part 21 group 5: the schema, human-gate, replaces and verdict checks of a retro result (hub/core/retro.ts). */
   function retroResultErrors(stage: { id: string; review: string | null; ticket_id: string | null; request_id: string | null }, c: Record<string, unknown>): string[] {
     const row = db.query<{ room: string | null; retro_week: string | null; session: string | null }, [string]>("SELECT room, retro_week, session FROM stage WHERE id = ?").get(stage.id);
-    const w = row?.retro_week ? retroWeekWindow(row.retro_week) : null;
-    const done = row?.room && w ? buildEvidence(db, row.room, w.since, w.until).improvements.filter((i) => i.status === "done").map((i) => i.ticket_id) : [];
+    const ledgerDb = (process.env.CUBILOT_LEDGER_DB ?? "").trim();
+    // The saved evidence file is the snapshot the stage got; the ledger may have changed since the launch.
+    const done = row?.room && row.retro_week && ledgerDb ? savedDoneImprovements(ledgerDb, row.room, row.retro_week) : [];
     const wt = row?.room && row.session ? join(worktreesRoot(), pathSegment(row.room), pathSegment(worktreeKey(stage)!), pathSegment(row.session)) : null;
     return checkRetroResult(c, {
       doneImprovements: done,
