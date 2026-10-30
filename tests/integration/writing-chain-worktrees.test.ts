@@ -69,9 +69,14 @@ describe("writing chain worktrees", () => {
     return git(cwd, "rev-parse", "HEAD");
   };
   // The result passes the stage; the end of the session's turn queues its close.
-  const finish = async (req: any, ticket: string, sha: string) => {
-    expect((await postJson(hub, "/handoffs", { from: req.session, to: "Orchestrator", task: "done", context: { stage_id: req.stage_id, ticket_id: ticket, notes: "n", commit: sha } })).status).toBe(201);
+  // A writer or editor result is the hand-over to the next role (t_6e70): it carries the new commit.
+  const finish = async (req: any, ticket: string, sha: string, next: string) => {
+    const closes = () => reqs.filter((r) => r.kind === "close" && r.session === req.session).length;
+    const before = closes();
+    expect((await postJson(hub, "/handoffs", { from: req.session, to_role: next, task: "done", context: { stage_id: req.stage_id, ticket_id: ticket, notes: "n", commit: sha } })).status).toBe(201);
     expect((await postJson(hub, `/stages/${req.stage_id}/turn-end`, { agent: req.session })).status).toBe(200);
+    // A session name is reused: wait for this session's own close request, so ackClose never acks an older one.
+    for (let i = 0; i < 60 && closes() === before; i++) await sleep(50);
   };
   // The writer of a ticket runs, commits and finishes. Its close is not acked.
   const writerDone = async (ticket: string) => {
@@ -79,7 +84,7 @@ describe("writing chain worktrees", () => {
     const req = await launchOf(stageOf(ticket, "writer")!.id);
     await spawn(req);
     const sha = commit(req.cwd, `${ticket}-w.txt`);
-    await finish(req, ticket, sha);
+    await finish(req, ticket, sha, "editor");
     return { req, sha };
   };
   const ackClose = async (session: string) => {
@@ -90,7 +95,6 @@ describe("writing chain worktrees", () => {
   test("editor on the writer branch", async () => {
     const t = await mk();
     const { req: w, sha } = await writerDone(t);
-    await handoff(t, "editor", { commit: sha });
     await ackClose(w.session);
     const e = await launchOf(stageOf(t, "editor")!.id);
     expect(e).toBeTruthy();
@@ -105,8 +109,6 @@ describe("writing chain worktrees", () => {
     const b = await mk();
     const wa = await writerDone(a);
     const wb = await writerDone(b);
-    await handoff(a, "editor", { commit: wa.sha });
-    await handoff(b, "editor", { commit: wb.sha });
     await sleep(300);
     expect(stageOf(a, "editor")!.status).toBe("queued");
     expect(stageOf(b, "editor")!.status).toBe("queued");
@@ -120,13 +122,11 @@ describe("writing chain worktrees", () => {
   test("reviewer reviews the editor version read-only", async () => {
     const t = await mk();
     const { req: w, sha } = await writerDone(t);
-    await handoff(t, "editor", { commit: sha });
     await ackClose(w.session);
     const e = await launchOf(stageOf(t, "editor")!.id);
     await spawn(e);
     const editorSha = commit(e.cwd, `${t}-e.txt`);
-    await finish(e, t, editorSha);
-    await handoff(t, "reviewer", { commit: editorSha });
+    await finish(e, t, editorSha, "reviewer");
     await ackClose(e.session);
     const r = await launchOf(stageOf(t, "reviewer")!.id);
     expect(r).toBeTruthy();
