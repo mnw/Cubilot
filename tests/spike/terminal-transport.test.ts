@@ -244,7 +244,7 @@ test.skipIf(!TMUX || !process.env.TT_REAL)("real program on both transports", as
   const out: Record<string, unknown> = {};
   for (const t of [controlMode(), rawPty()]) {
     const session = t.name === "raw PTY" ? "rawr" : "ctlr";
-    const work = mkdtempSync(join(dir, "work-"));
+    const work = mkdtempSync(join(dir, "work-🦀-"));
     tmux("new-session", "-d", "-x", "80", "-y", "24", "-s", session, "-c", work, `$SHELL -ic '${cmd}'`);
     tmux("set-option", "-t", `=${session}:`, "status", "off");
     tmux("set-option", "-sa", "terminal-features", ",xterm-256color:RGB");
@@ -263,6 +263,9 @@ test.skipIf(!TMUX || !process.env.TT_REAL)("real program on both transports", as
     const before = stats();
     t.resize(session, 120, 40); v.term.resize(120, 40);
     await sleep(2500); await v.settle();
+    // 4-byte UTF-8: the folder name holds U+1F980 (claude prints the folder path); the test also types U+1F980 as UTF-8 bytes (pi shows it in its input box).
+    t.send(session, [...Buffer.from("\u{1F980}")]); await sleep(700); await v.settle();
+    const crabs = (() => { const b = v.term.buffer.active; let n = 0, wide = 0; for (let y = 0; y < v.term.rows; y++) for (let x = 0; x < v.term.cols; x++) { const c = b.getLine(y)?.getCell(x); if (c?.getChars() === "\u{1F980}") { n++; if (c.getWidth() === 2) wide++; } } return { shown: n, width2: wide }; })();
     const tmuxSize = tmux("display", "-p", "-t", `=${session}:`, "#{pane_width}x#{pane_height}").out.trim();
     const after = stats();
     // Cursor and alternate screen: the viewer must agree with tmux's own pane state.
@@ -284,7 +287,7 @@ test.skipIf(!TMUX || !process.env.TT_REAL)("real program on both transports", as
       keyLog[name] = `${alive ? "alive" : "program exited"}, screen ${v.text() === prev ? "unchanged" : "changed"}`;
     }
     const alive = tmux("has-session", "-t", `=${session}`).ok;
-    out[t.name] = { before, after, paneSizeAfterResize: tmuxSize, cursor, altScreen, keyLog, alive, head: v.text().split("\n").filter(Boolean).slice(0, 6) };
+    out[t.name] = { before, crabs, after, paneSizeAfterResize: tmuxSize, cursor, altScreen, keyLog, alive, head: v.text().split("\n").filter(Boolean).slice(0, 6) };
     t.close();
     tmux("kill-session", "-t", `=${session}`);
   }

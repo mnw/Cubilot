@@ -30,7 +30,7 @@ Notes:
 
 ## Manual run with real programs
 
-Run: `TT_REAL=claude bun test tests/spike/terminal-transport.test.ts -t "real program"` and the same with `pi`. The test starts the program in a new folder, waits 9 s, resizes to 120x40, sends paste, Shift+Tab, Up, Ctrl+C and Esc one by one, and does not send a prompt.
+Run: `TT_REAL=claude bun test tests/spike/terminal-transport.test.ts -t "real program"` and the same with `pi`. The test starts the program in a new folder, waits 9 s, resizes to 120x40, types U+1F980 as UTF-8 bytes, sends paste, Shift+Tab, Up, Ctrl+C and Esc one by one, and does not send a prompt.
 
 | Item | claude, control mode | claude, raw PTY | pi, control mode | pi, raw PTY |
 |---|---|---|---|---|
@@ -44,7 +44,7 @@ Run: `TT_REAL=claude bun test tests/spike/terminal-transport.test.ts -t "real pr
 | Up | alive, screen changed | same | alive, screen unchanged | same |
 | Ctrl+C | alive, screen changed | same | alive, screen changed | same |
 | Esc | claude exited | claude exited | alive, screen unchanged | same |
-| Glyphs | box-drawing lines shown | same | text shown | same |
+| 4-byte UTF-8 glyph U+1F980 (crab), cells shown / of width 2 | 1 / 1 (in the folder path) | 1 / 1 | 2 / 2 (typed into the input box) | 2 / 2 |
 
 Key rows record that the program lived and whether the screen changed. They do not prove which byte the program read: a real program has no hex log. Claude Code sat on its folder trust prompt, so Esc closed it and the process exited on both transports. Both transports gave the same answer for each item and each program.
 
