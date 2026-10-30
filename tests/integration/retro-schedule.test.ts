@@ -159,6 +159,20 @@ describe("the weekly schedule", () => {
     expect(e2.retroStages().map((s) => s.retro_week)).toEqual(["2026-W48"]);
   });
 
+  test("rooms `A B` and `A_B` get two evidence files; one never overwrites the other", () => {
+    const e = env();
+    for (const room of ["A B", "A_B"]) {
+      setRoomSettings(e.db, room, { project_folder: e.project });
+      e.ticketEvent(room, at(5, 12));
+    }
+    e.rt.sweep(e.cap, MON());
+    expect(e.retroStages().map((s) => s.room).sort()).toEqual(["A B", "A_B"]);
+    for (const room of ["A B", "A_B"]) {
+      const file = join(dir, "retro", room, "2026-W46.json");
+      expect(JSON.parse(readFileSync(file, "utf8")).room).toBe(room);
+    }
+  });
+
   test("each room with activity gets its own stage and file", () => {
     const e = env();
     e.ticketEvent("A", at(3, 12));
