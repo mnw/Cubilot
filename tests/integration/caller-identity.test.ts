@@ -3,7 +3,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { Database } from "bun:sqlite";
 import { spawnHub, type HubHandle } from "../helpers/hub";
-import { registerAgent } from "../helpers/fetch";
+import { registerAgent, openSSE } from "../helpers/fetch";
 
 describe("caller identity", () => {
   let hub: HubHandle;
@@ -80,9 +80,18 @@ describe("caller identity", () => {
   });
 
   test("a chat from the human token carries the human as sender", async () => {
-    const ac = new AbortController();
-    const r = await call(hub.humanToken, "/send", { from: "someone-else", to: "all", room: "ci", text: "hello" });
-    ac.abort();
+    const sse = openSSE(hub, "/agent-stream?agent=w2&room=ci");
+    await sse.events.next(); // the briefing: w2 is registered
+    const r = await call(hub.humanToken, "/send", { from: "someone-else", to: "w2", room: "ci", text: "hello-sender" });
     expect(r.status).toBe(200);
+    let got: any = null;
+    const timer = setTimeout(() => sse.close(), 5000);
+    for await (const e of sse.events) {
+      if (JSON.stringify(e).includes("hello-sender")) { got = e; break; }
+    }
+    clearTimeout(timer);
+    sse.close();
+    // The hub labels the human "you" on delivery; the forged "someone-else" is gone.
+    expect(got?.from).toBe("you");
   });
 });

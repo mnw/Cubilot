@@ -5,6 +5,7 @@
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { spawnHub, type HubHandle } from "../helpers/hub";
+import { registerAgent } from "../helpers/fetch";
 
 const ROUTES: Array<[method: string, path: string]> = [
   ["POST", "/requests/r1/req-1/approve"],
@@ -20,8 +21,9 @@ const ROUTES: Array<[method: string, path: string]> = [
 
 describe("human-only routes", () => {
   let hub: HubHandle;
-  beforeAll(async () => { hub = await spawnHub(); });
-  afterAll(async () => { await hub.kill(); });
+  let w1: { close: () => void };
+  beforeAll(async () => { hub = await spawnHub(); w1 = await registerAgent(hub, "w1"); });
+  afterAll(async () => { w1.close(); await hub.kill(); });
 
   const send = (method: string, path: string, token: string) =>
     fetch(`${hub.url}${path}`, { method, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: method === "GET" ? undefined : "{}" });
@@ -44,8 +46,10 @@ describe("human-only routes", () => {
   }
 
   test("Remove agent with the agent token: the agent stays on the roster", async () => {
-    const r = await send("POST", "/remove", hub.token);
+    const r = await fetch(`${hub.url}/remove`, { method: "POST", headers: { Authorization: `Bearer ${hub.token}`, "Content-Type": "application/json" }, body: JSON.stringify({ agent: "w1" }) });
     expect(r.status).toBe(403);
+    const roster = (await (await fetch(`${hub.url}/agents`, { headers: { Authorization: `Bearer ${hub.token}` } })).json()) as Array<{ name: string }>;
+    expect(roster.map((a) => a.name)).toContain("w1");
   });
 
   test("Pause with the agent token", async () => {
