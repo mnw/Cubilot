@@ -19,6 +19,7 @@ const PlanApproval = (() => {
   let waiting = [];
   let needs = [];
   let waits = [];   // tickets that wait for the human (needs-you `waiting`)
+  let deliveries = [];   // delivered requests with a merge commit not on main yet (needs-you `deliveries`)
   let traces = [];
   const traceBusy = new Set();       // trace ids whose Clear is in flight
   const traceButtons = new Map();    // trace id -> its Clear button of the last render, for the focus after Clear
@@ -230,6 +231,29 @@ const PlanApproval = (() => {
     return el;
   }
 
+  // "Delivered": one text line for each request whose merge commits are not all on main. The li is a tab stop so a keyboard
+  // user reaches it. Every field goes in as text, never as markup.
+  function deliveriesSection() {
+    const el = document.createElement('section');
+    el.className = 'needs-row deliveries-not-in-main';
+    const h = document.createElement('h3');
+    h.className = 'plan-title';
+    h.textContent = 'Delivered, not in main';
+    const list = document.createElement('ul');
+    list.className = 'needs-findings';
+    for (const d of deliveries) {
+      const li = document.createElement('li');
+      li.className = 'needs-finding delivery-line';
+      li.dataset.request = d.request_id;
+      li.setAttribute('tabindex', '0');
+      const n = d.unmerged_commits.length;
+      li.textContent = `Request ${d.request_id} is delivered. ${n} merge commit${n === 1 ? ' is' : 's are'} not on main. Report: GET /requests/${room}/${d.request_id}/delivery`;
+      list.appendChild(li);
+    }
+    el.append(h, list);
+    return el;
+  }
+
   // Clear hides the block for its FAIL stage. Focus moves to the next block's Collapse button, else the previous one's,
   // else the first column heading of the board.
   function clearBlock(n) {
@@ -324,8 +348,8 @@ const PlanApproval = (() => {
     collapseButtons.clear();
     traceButtons.clear();
     const shown = room ? visibleNeeds(room, needs) : needs;
-    r.replaceChildren(...waiting.map(row), ...(waits.length ? [waitsSection()] : []), ...shown.map(needsRow), ...traces.map(traceRow));
-    r.hidden = waiting.length === 0 && waits.length === 0 && shown.length === 0 && traces.length === 0;
+    r.replaceChildren(...waiting.map(row), ...(waits.length ? [waitsSection()] : []), ...(deliveries.length ? [deliveriesSection()] : []), ...shown.map(needsRow), ...traces.map(traceRow));
+    r.hidden = waiting.length === 0 && waits.length === 0 && deliveries.length === 0 && shown.length === 0 && traces.length === 0;
     if (focused !== null && traceFocus === null && pendingFocus === null && traceButtons.has(focused)) traceFocus = focused;
     applyFocus();
   }
@@ -340,6 +364,7 @@ const PlanApproval = (() => {
       waiting = [];
       needs = [];
       waits = [];
+      deliveries = [];
       traces = [];
       room = shown;
       render();
@@ -363,6 +388,7 @@ const PlanApproval = (() => {
         if (seq !== loadSeq) return;
         needs = Array.isArray(body?.requests) ? body.requests : [];
         waits = Array.isArray(body?.waiting) ? body.waiting : [];
+        deliveries = Array.isArray(body?.deliveries) ? body.deliveries : [];
       }
       if (tres.ok) {
         const body = await tres.json();
