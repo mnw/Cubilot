@@ -19,6 +19,47 @@ The tester is the bottleneck. Every tested ticket runs the full suite (`./script
 - The peak memory of a full run (`CUBILOT_TEST_PEAK=1`).
 - Result: a table of the 20 slowest files with their time, and the peak in MB, written into this part. Steps 5 and 6 use it.
 
+#### Result (measured 2026-10-30)
+
+- Run: `CUBILOT_TEST_PEAK=1 ./scripts/test.sh --reporter=junit --reporter-outfile=test-reports/part20-measure/junit.xml` at staging commit `b07f8e0a4336e42fb757b394d025347c5db0bc89` (the commit of the branch base; staging has since moved on).
+- Exit 0. 2627 pass, 0 fail, 199 files. Total run 383.6 s (bun test), plus 29 s Rust pre-build. Peak RSS 724 MB (limit 2048 MB).
+- Report and full log: `test-reports/part20-measure/junit.xml` and `run.log`.
+- File seconds are the sum of the test case times of the file. Setup and hook time is not in them. The sum over all files is 366.5 s. The rest of the 383.6 s (17.1 s, 4.5 percent) is setup, hooks and teardown.
+
+| Group | Files | Seconds |
+|-------|-------|---------|
+| unit | 111 | 107.0 |
+| integration | 84 | 259.5 |
+| contract | 3 | 0.0 |
+| helpers (`tests/helpers/smoke.test.ts`) | 1 | 0.0 |
+| Sum of test cases | 199 | 366.5 |
+| Total run (bun test) | 199 | 383.6 |
+
+The 20 slowest files:
+
+| # | File | Group | Seconds |
+|---|------|-------|---------|
+| 1 | `tests/unit/test-script.test.ts` | unit | 37.6 |
+| 2 | `tests/integration/ticket-blockers-merge.test.ts` | integration | 29.9 |
+| 3 | `tests/integration/lead-briefing-stage-peers.test.ts` | integration | 22.8 |
+| 4 | `tests/integration/one-live-stage.test.ts` | integration | 21.2 |
+| 5 | `tests/integration/agent-stream-takeover.test.ts` | integration | 17.9 |
+| 6 | `tests/integration/context-pack-launch.test.ts` | integration | 15.7 |
+| 7 | `tests/unit/stage-prep.test.ts` | unit | 13.0 |
+| 8 | `tests/integration/role-models-hub.test.ts` | integration | 12.9 |
+| 9 | `tests/integration/agent-skills-hub.test.ts` | integration | 11.4 |
+| 10 | `tests/unit/context-pack.test.ts` | unit | 10.9 |
+| 11 | `tests/integration/stage-cancelled.test.ts` | integration | 7.5 |
+| 12 | `tests/integration/checkpoint.test.ts` | integration | 7.3 |
+| 13 | `tests/integration/writing-chain-ste-gate.test.ts` | integration | 7.2 |
+| 14 | `tests/integration/high-ticket-two-validators.test.ts` | integration | 6.5 |
+| 15 | `tests/unit/worktrees.test.ts` | unit | 6.5 |
+| 16 | `tests/unit/context-pack-launch.test.ts` | unit | 6.3 |
+| 17 | `tests/integration/writing-chain-e2e.test.ts` | integration | 6.1 |
+| 18 | `tests/integration/agent-reload.test.ts` | integration | 5.8 |
+| 19 | `tests/integration/stage-draft-done-cancel.test.ts` | integration | 5.3 |
+| 20 | `tests/integration/roster-context.test.ts` | integration | 5.0 |
+
 ### 2. Affected tests for low tickets (low)
 
 - New script `scripts/test-affected.sh <base commit>`: the files that the ticket changed since its base, the test files that import them (directly or through one level of re-export), plus all of `tests/contract/`. It runs them under the same lock, time limit and memory limit as `test.sh`, and prints the list of test files it ran.
