@@ -845,11 +845,11 @@ A Reviewer stage (role `reviewer`) has stricter rules. The hub refuses the resul
 | `context.ticket_id` | required, the stage's ticket (`context.ticket_id must be <id>`) |
 | `context.findings` | list of `{severity, text}`. `severity` is `"blocking"` or `"suggestion"`: another value gives `context.findings[i].severity must be blocking or suggestion`. `text` is a non-empty string. |
 | PASS | no `blocking` finding: `a PASS must not have a blocking finding`. The recipient is the room lead: any other agent gives `to: a Reviewer PASS must be sent to <lead>, not to <to>`. |
-| FAIL | the recipient is `to_role: "writer"`: any other target gives `to: a Reviewer FAIL must be sent with to_role "writer", not to <to>`. |
+| FAIL | the recipient is `to_role: "writer"`: any other target gives `to: a Reviewer FAIL must be sent with to_role "writer", not to <to>`. A lint FAIL has `context.gate: "ste-lint"` and the recipient is `to_role: "editor"`: any other target gives `to: a Reviewer FAIL with gate "ste-lint" must be sent with to_role "editor", not to <to>`. |
 
 The Validator result keeps its schema: findings are `{ticket_id, text}`, with no severity.
 
-**Writing chain.** A ticket with role `writer` queues and starts like a `worker` ticket. The Writer hands over with `to_role: "editor"` and the Editor with `to_role: "reviewer"`. No stage session accepts or declines these role hand-overs, and none moves the ticket to `done`. A Reviewer PASS closes the ticket by the Final PASS rule below. A Reviewer FAIL is a handoff with `to_role: "writer"`: the hub starts one Writer stage, and its first message holds the findings.
+**Writing chain.** A ticket with role `writer` queues and starts like a `worker` ticket. The Writer hands over with `to_role: "editor"` and the Editor with `to_role: "reviewer"`. No stage session accepts or declines these role hand-overs, and none moves the ticket to `done`. A Reviewer PASS closes the ticket by the Final PASS rule below. A Reviewer FAIL is a handoff with `to_role: "writer"`: the hub starts one Writer stage, and its first message holds the findings. A Reviewer lint FAIL (`gate: "ste-lint"`, sent before the review) is a handoff with `to_role: "editor"`: the hub starts one Editor stage and no Writer stage. The Reviewer runs the lint, not the hub.
 
 Example of a valid Validator result:
 

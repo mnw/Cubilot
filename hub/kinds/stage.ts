@@ -2163,7 +2163,9 @@ export function createStageRuntime(
             if (to !== undefined) {
               const lead = leadOfRoom(roomOfStage(stage.id));
               if (c.verdict === "PASS" && to !== lead) errors.push(`to: a Reviewer PASS must be sent to ${lead}, not to ${to}`);
-              if (c.verdict === "FAIL" && to !== `${ROLE_RECIPIENT_PREFIX}writer`) errors.push(`to: a Reviewer FAIL must be sent with to_role "writer", not to ${to}`);
+              // A lint FAIL (gate "ste-lint") goes back to the Editor; any other FAIL goes to the Writer.
+              if (c.verdict === "FAIL" && c.gate === "ste-lint" && to !== `${ROLE_RECIPIENT_PREFIX}editor`) errors.push(`to: a Reviewer FAIL with gate "ste-lint" must be sent with to_role "editor", not to ${to}`);
+              else if (c.verdict === "FAIL" && c.gate !== "ste-lint" && to !== `${ROLE_RECIPIENT_PREFIX}writer`) errors.push(`to: a Reviewer FAIL must be sent with to_role "writer", not to ${to}`);
             }
           } else if (!Array.isArray(c.findings)) errors.push("context.findings must be a list of {ticket_id, text}");
           else {
