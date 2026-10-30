@@ -50,9 +50,7 @@ describe("ticket role", () => {
 
   test("all six roles are accepted", async () => {
     for (const role of ["worker", "tester", "validator", "writer", "editor", "reviewer"]) {
-      // writer, editor and reviewer have no hub stage chain: the default status queued is refused (409), so the three are created as draft.
-      const noChain = ["writer", "editor", "reviewer"].includes(role);
-      expect((await make({ role, ...(noChain ? { status: "draft" } : {}) })).status).toBe(201);
+      expect((await make({ role })).status).toBe(201);
     }
   });
 

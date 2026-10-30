@@ -56,7 +56,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Permissions have no TTL.** docs/rules/permissions.md
 - **State-machine kinds live in hub/kinds/<kind>.ts (KindModule).** Never add kind branches to hub.ts. docs/rules/kinds.md
 - **Broadcast with cap.sse.emit(entry, scope).** Never enumerate agent queues in a kind. docs/rules/kinds.md
-- **Tickets need acceptance criteria.** Agent moves high blast_radius ticket to done only after human's Allow. docs/rules/kinds.md
+- **Tickets need acceptance criteria.** Agent moves a ticket to done only with its Validator PASSes; no human Allow step. docs/rules/kinds.md
 - **A draft ticket starts nothing.** An open blocker stops a claim. docs/rules/kinds.md
 - **Hub decides launches; Rust shell only executes.** docs/rules/kinds.md
 - **Stage state changes only via createStageApi.** docs/rules/kinds.md
@@ -138,7 +138,7 @@ curl -sN --max-time 1 "$HUB/agent-stream?agent=foo&token=$TOK"   # auto-register
 curl -s "$HUB/agents?token=$TOK"                                 # includes "foo"
 ```
 
-Full test run: `./scripts/test.sh [bun test args]` is the default. It takes the heavy lock itself, runs `bun test "$@"`, and stops the run and its process group at a time or memory limit. Settings: `CUBILOT_TEST_TIMEOUT_S` (default 300 s), `CUBILOT_TEST_MAX_RSS_MB` (default 2048 MB), `CUBILOT_HEAVY_LOCK` (default `/tmp/cubilot-heavy.lock`). Memory check: RSS sum of the process group, once per second; not a strict ceiling.
+Full test run: `./scripts/test.sh [bun test args]` is the default. It takes the heavy lock itself, runs `bun test "$@"`, and stops the run and its process group at a time or memory limit. Settings: `CUBILOT_TEST_TIMEOUT_S` (default 520 s), `CUBILOT_TEST_MAX_RSS_MB` (default 2048 MB), `CUBILOT_HEAVY_LOCK` (default `/tmp/cubilot-heavy.lock`). Memory check: RSS sum of the process group, once per second; not a strict ceiling.
 
 Tests: `bun test` (discovery scoped to `tests/` by `bunfig.toml`), `cargo test --manifest-path src-tauri/Cargo.toml`, and `./scripts/check-mod.sh` for the Claude mod's own `claude plugin test` suite. Type check: `bun x tsc --noEmit`. No linter.
 

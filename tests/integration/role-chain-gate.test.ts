@@ -1,5 +1,5 @@
-// Role gate: a ticket whose role has no hub stage chain (writer, editor, reviewer) never enters queued.
-// Temporary: the writing chain (t_922581db0beb6fe4) removes the gate. Real hub, HTTP only.
+// Writing roles: a ticket with role writer, editor or reviewer queues like any other (the gate of t_9d878ebf272a9177 is gone).
+// Real hub, HTTP only.
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -12,7 +12,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const NO_CHAIN = ["writer", "editor", "reviewer"];
 const LEAD = "Orchestrator";
 
-describe("role chain gate", () => {
+describe("writing roles queue", () => {
   let hub: HubHandle;
   const open: Array<{ close: () => void }> = [];
   const held: any[] = [];
@@ -40,7 +40,6 @@ describe("role chain gate", () => {
     return id;
   };
   const move = (id: string, by: string, to = "queued") => postJson(hub, `/tickets/${id}/transition`, { by, to });
-  const heldMessages = () => held.filter((e) => e.kind === "ticket.held");
 
   beforeAll(async () => {
     const repo = mkdtempSync(join(tmpdir(), "rolegate-"));
@@ -77,41 +76,30 @@ describe("role chain gate", () => {
   });
 
   for (const role of NO_CHAIN) {
-    test(`${role}: create as queued (default and explicit) is 409, no row; draft is 201`, async () => {
-      const before = await tickets();
-      const mark = await marker();
-      for (const extra of [{}, { status: "queued" }]) {
-        const { r } = await mk({ role, ...extra });
-        expect(r.status).toBe(409);
-        expect((r.json as any).error).toBe(`role ${role} has no hub stage chain: create the ticket as draft`);
+    test(`${role}: create as queued (default and explicit) is 201; draft is 201`, async () => {
+      for (const extra of [{}, { status: "queued" }, { status: "draft" }]) {
+        const { r, id } = await mk({ role, ...extra });
+        expect(r.status).toBe(201);
+        expect(await status(id)).toBe((extra as any).status ?? "queued");
       }
-      expect(await tickets()).toBe(before);
-      await quiet(mark);
-      expect((await mk({ role, status: "draft" })).r.status).toBe(201);
     });
 
-    test(`${role}: a move to queued is 409 for the human and the lead; the row and the events do not change`, async () => {
-      const id = await draft(`rq-move-${role}`, role);
-      const v0 = await version(id);
-      const mark = await marker();
+    test(`${role}: a move to queued is 200 for the human and the lead; a non-lead agent keeps its 403`, async () => {
       for (const by of [hub.humanName, LEAD]) {
-        const r = await move(id, by);
-        expect(r.status).toBe(409);
-        expect((r.json as any).error).toBe(`role ${role} has no hub stage chain: ticket ${id} cannot enter queued`);
+        const id = await draft(`rq-move-${role}-${by}`, role);
+        expect((await move(id, by)).status).toBe(200);
+        expect(await status(id)).toBe("queued");
       }
-      expect(await status(id)).toBe("draft");
-      expect(await version(id)).toBe(v0);
-      await quiet(mark);
-      // A non-lead agent keeps its 403.
+      const id = await draft(`rq-move-${role}-bob`, role);
       expect((await move(id, "rc-bob")).status).toBe(403);
     });
 
-    test(`${role}: the lead still gets 403 on a high-radius request before the role check`, async () => {
+    test(`${role}: the lead still gets 403 on a high-radius request, the human queues it`, async () => {
       const id = await draft(`rq-high-${role}`, role, { blast_radius: "high" });
       const r = await move(id, LEAD);
       expect(r.status).toBe(403);
       expect((r.json as any).error).toContain("high blast_radius");
-      expect((await move(id, hub.humanName)).status).toBe(409);
+      expect((await move(id, hub.humanName)).status).toBe(200);
     });
   }
 
@@ -125,57 +113,26 @@ describe("role chain gate", () => {
     }
   });
 
-  test("approval: no-chain drafts stay draft, the others queue, not_queued lists them, one lead message", async () => {
+  test("approval queues the writing roles with the others", async () => {
     const request = `rq-appr-${++n}`;
-    const ok = await draft(request, "worker");
-    const none = await draft(request, null);
-    const stuck = new Map<string, string>();
-    for (const role of NO_CHAIN) stuck.set(await draft(request, role), role);
-    const before = heldMessages().length;
+    const ids = [await draft(request, "worker"), await draft(request, null)];
+    for (const role of NO_CHAIN) ids.push(await draft(request, role));
     const r = await postJson(hub, `/requests/rc/${request}/approve`, { by: hub.humanName });
     expect(r.status).toBe(200);
     const body = r.json as any;
-    expect(body.queued.sort()).toEqual([ok, none].sort());
-    expect(body.idempotent).toBeUndefined();
-    expect([...body.not_queued].sort((a: any, b: any) => a.id.localeCompare(b.id))).toEqual(
-      [...stuck].map(([id, role]) => ({ id, role, reason: `role ${role} has no hub stage chain` })).sort((a, b) => a.id.localeCompare(b.id)),
-    );
-    expect([await status(ok), await status(none)]).toEqual(["queued", "queued"]);
-    for (const id of stuck.keys()) expect(await status(id)).toBe("draft");
-    await sleep(300);
-    const msgs = heldMessages().slice(before);
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0].from).toBe("system");
-    for (const [id, role] of stuck) {
-      expect(msgs[0].text).toContain(id);
-      expect(msgs[0].text).toContain(`role ${role}`);
-    }
-    // A second approval still has held drafts: not idempotent, one more message.
-    const again = await postJson(hub, `/requests/rc/${request}/approve`, { by: hub.humanName });
-    expect((again.json as any).queued).toEqual([]);
-    expect((again.json as any).not_queued).toHaveLength(3);
-    expect((again.json as any).idempotent).toBeUndefined();
-  });
-
-  test("approval with only chain roles keeps today's shape: not_queued empty, repeat is idempotent", async () => {
-    const request = `rq-appr-${++n}`;
-    await draft(request, "worker");
-    const before = heldMessages().length;
-    const r = await postJson(hub, `/requests/rc/${request}/approve`, { by: hub.humanName });
-    expect((r.json as any).not_queued).toEqual([]);
+    expect(body.queued.sort()).toEqual([...ids].sort());
+    expect(body.not_queued).toBeUndefined();
+    for (const id of ids) expect(await status(id)).toBe("queued");
     const again = await postJson(hub, `/requests/rc/${request}/approve`, { by: hub.humanName });
     expect((again.json as any).idempotent).toBe(true);
-    await sleep(200);
-    expect(heldMessages()).toHaveLength(before);
   });
 
-  test("spec PASS: no-chain drafts stay draft, the others queue without rollback, the lead gets one message", async () => {
+  test("spec PASS queues the writing roles with the others", async () => {
     const request = `rq-pass-${++n}`;
     const ok = await draft(request, "worker");
     const none = await draft(request, null);
-    const stuck = new Map<string, string>();
-    for (const role of NO_CHAIN) stuck.set(await draft(request, role), role);
-    const before = heldMessages().length;
+    const roleIds: string[] = [];
+    for (const role of NO_CHAIN) roleIds.push(await draft(request, role));
     const spec = await postJson(hub, "/handoffs", { from: "rc-alice", to_role: "validator", review: "spec", request_id: request, task: "review", context: { request_text: "X" } });
     expect(spec.status).toBe(201);
     const launch = async () => {
@@ -192,14 +149,6 @@ describe("role chain gate", () => {
     });
     expect(pass.status, JSON.stringify(pass.json)).toBe(201);
     expect([await status(ok), await status(none)]).toEqual(["queued", "queued"]);
-    for (const id of stuck.keys()) expect(await status(id)).toBe("draft");
-    await sleep(300);
-    const msgs = heldMessages().slice(before);
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0].from).toBe("system");
-    for (const [id, role] of stuck) {
-      expect(msgs[0].text).toContain(id);
-      expect(msgs[0].text).toContain(`role ${role}`);
-    }
+    for (const id of roleIds) expect(await status(id)).toBe("queued");
   });
 });

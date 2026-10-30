@@ -454,7 +454,7 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
   {
     name: "create_ticket",
     description:
-      "Create a work ticket in your room. Acceptance criteria are required: state what done means. A high blast_radius ticket needs the human's approval to reach done. Use status draft to hold a ticket back: a draft cannot be claimed and wakes no one until it moves to queued. Use request_id to group the tickets of one request, and blocked_by to list ticket ids that must be done before this ticket can be claimed. Use role to name the stage role that works the ticket first. The radius is set by the radius rule from the title, criteria and planning note: the stored blast_radius is never below the rule radius, and the room lead can raise it. Returns ticket_id.",
+      "Create a work ticket in your room. Acceptance criteria are required: state what done means. Use status draft to hold a ticket back: a draft cannot be claimed and wakes no one until it moves to queued. Use request_id to group the tickets of one request, and blocked_by to list ticket ids that must be done before this ticket can be claimed. Use role to name the stage role that works the ticket first. The radius is set by the radius rule from the title, criteria and planning note: the stored blast_radius is never below the rule radius, and the room lead can raise it. Returns ticket_id.",
     inputSchema: {
       type: "object",
       properties: {
@@ -511,7 +511,7 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
   {
     name: "transition_ticket",
     description:
-      "Move your ticket to in_progress, in_review, done or cancelled. Only the assignee moves a claimed ticket. Move a ticket to draft or queued only as the human or the room lead: queued promotes a draft, and the hub refuses any other actor. A done move on a high blast_radius ticket needs the human's Allow: the tool then requests approval and returns the request id. Moving to in_review REQUIRES `note`: say how you implemented it and how you tested it. The note goes into the ticket's audit trail; it does not replace your chatbridge messages, so still post what the room needs to know.",
+      "Move your ticket to in_progress, in_review, done or cancelled. Only the assignee moves a claimed ticket. Move a ticket to draft or queued only as the human or the room lead: queued promotes a draft, and the hub refuses any other actor. Moving to in_review REQUIRES `note`: say how you implemented it and how you tested it. The note goes into the ticket's audit trail; it does not replace your chatbridge messages, so still post what the room needs to know.",
     inputSchema: {
       type: "object",
       properties: {
@@ -536,26 +536,7 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
       const move = { by: ctx.agent, to, ...(note ? { note } : {}) };
       const resp = await authedPost(ctx.host, ctx.hubEnv, `/tickets/${encodeURIComponent(id)}/transition`, move);
       if (resp.status === 200) return { content: [{ type: "text", text: `ticket ${id} is now ${to}` }] };
-      const blocked = resp.status === 409 && to === "done" && resp.json && typeof resp.json === "object" &&
-        "approval_request_id" in resp.json;
-      if (!blocked) toolError(resp, "transition_ticket");
-      const ap = await authedPost(ctx.host, ctx.hubEnv, `/tickets/${encodeURIComponent(id)}/approval`, { by: ctx.agent });
-      if (ap.status < 200 || ap.status >= 300) toolError(ap, "transition_ticket approval");
-      const apj = ap.json as { request_id?: string; created?: boolean; status?: string } | null;
-      const reqId = apj?.request_id ?? "";
-      // The human allowed the request between the blocked move and this call: nothing is left to
-      // wait for. Retry the move once and report what it did.
-      if (apj?.created === false && apj.status === "allowed") {
-        const retry = await authedPost(ctx.host, ctx.hubEnv, `/tickets/${encodeURIComponent(id)}/transition`, move);
-        if (retry.status === 200) return { content: [{ type: "text", text: `ticket ${id} is now ${to} (the human had already allowed approval_request_id=${reqId})` }] };
-        toolError(retry, "transition_ticket retry after the human's approval");
-      }
-      return {
-        content: [{
-          type: "text",
-          text: `ticket ${id} is not done. It needs the human's approval. approval_request_id=${reqId}. Wait for the human to Allow, then call transition_ticket again.`,
-        }],
-      };
+      toolError(resp, "transition_ticket");
     },
   },
   {

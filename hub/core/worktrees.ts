@@ -1,5 +1,5 @@
 // Git worktrees for stage sessions (stage-sessions 4.5, design decision 8). The hub makes them before it queues a
-// launch; the shell never runs git. Worker and Writer sessions use the branch `ticket/<id>` and reuse its worktree.
+// launch; the shell never runs git. Worker, Writer and Editor sessions use the branch `ticket/<id>` and reuse its worktree.
 // Every other role gets a temporary worktree, detached at a commit, that is removed when the stage ends for good.
 
 import { accessSync, chmodSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, rmSync } from "node:fs";
@@ -19,7 +19,7 @@ export type WorktreeRequest = {
 
 export type Worktree = { path: string; branch: string | null; temporary: boolean };
 
-const BRANCH_ROLES = new Set(["worker", "writer"]);
+const BRANCH_ROLES = new Set(["worker", "writer", "editor"]);
 /** Validator and Reviewer read the tree and never change it (stage-sessions 4.4). */
 export const READ_ONLY_ROLES = new Set(["validator", "reviewer"]);
 

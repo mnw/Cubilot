@@ -2,9 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
-// Runs the production ui/kinds/ticket.js against a fake hub list. Checks that the
-// permission preview's ticket_id is only a hint: an approval reaches a ticket only when
-// its request id equals the ticket's current approval_request_id.
+// Runs the production ui/kinds/ticket.js against a fake hub list.
 const SRC = readFileSync("ui/kinds/ticket.js", "utf8");
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
@@ -41,16 +39,11 @@ const ticket = (pointer: string, approval: any) => ({
   creator: "a", assignee: "a", approval_request_id: pointer, external_ref: null,
   status: "in_review", created_at_ms: 1, updated_at_ms: 1, version: 5, approval,
 });
-const perm = (id: string, status: string, version: number, resolved_by: string | null = "human") => ({
-  kind: "permission.resolved", permission_id: id, version,
-  snapshot: { id, tool_name: "ticket:done", input_preview: JSON.stringify({ ticket_id: "t_1" }), status, resolved_by, version },
-});
 const draft = () => ({
   title: { value: "T" }, criteria: { value: "c" }, radius: { value: "high" }, priority: { value: "medium" },
   external_ref: { value: "" }, reset: () => {},
 });
 const paths = () => posts.map((p) => [p.path, p.body.to ?? null]);
-const approvalOf = () => ctx.TicketBoard._tickets.get("t_1").approval;
 
 beforeEach(async () => {
   list = [ticket("abcde", { id: "abcde", status: "pending", resolved_by: null })];
@@ -193,31 +186,7 @@ beforeEach(async () => {
   await ctx.TicketBoard.load();
 });
 
-describe("ticket board approval binding", () => {
-  test("an unrelated request naming the ticket does not replace the current approval", async () => {
-    expect(ctx.TicketBoard.onPermission(perm("zzzzz", "allowed", 9))).toBe("reload");
-    await settle();
-    expect(approvalOf()).toMatchObject({ id: "abcde", status: "pending" });
-  });
-
-  test("a late event of a superseded request does not replace the new approval", async () => {
-    list = [ticket("fghij", { id: "fghij", status: "pending", resolved_by: null })];
-    await ctx.TicketBoard.load();                     // pointer moved to fghij
-    ctx.TicketBoard.onPermission(perm("abcde", "allowed", 9));
-    await settle();
-    expect(approvalOf()).toMatchObject({ id: "fghij", status: "pending" });
-    const before = fetches;
-    expect(ctx.TicketBoard.onPermission(perm("abcde", "allowed", 10))).toBe("ignored");  // no reload loop
-    expect(fetches).toBe(before);
-  });
-
-  test("the current request's verdict is applied, and an older version is not", () => {
-    expect(ctx.TicketBoard.onPermission(perm("abcde", "allowed", 7))).toBe("applied");
-    expect(approvalOf()).toMatchObject({ id: "abcde", status: "allowed", resolved_by: "human" });
-    expect(ctx.TicketBoard.onPermission(perm("abcde", "pending", 6))).toBe("ignored");
-    expect(approvalOf().status).toBe("allowed");
-  });
-
+describe("ticket board version merge", () => {
   test("a ticket event with an older version is ignored", () => {
     ctx.TicketBoard.onTicket({ ticket_id: "t_1", version: 4, snapshot: { ...ticket("abcde", null), status: "queued", version: 4 } });
     expect(ctx.TicketBoard._tickets.get("t_1").status).toBe("in_review");
@@ -229,25 +198,6 @@ describe("ticket board approval binding", () => {
     list = stale;                            // the delayed read now lands
     await ctx.TicketBoard.load();
     expect(ctx.TicketBoard._tickets.get("t_1")).toMatchObject({ status: "done", version: 6 });
-  });
-
-  test("a delayed list read does not roll back a newer approval verdict", async () => {
-    ctx.TicketBoard.onPermission(perm("abcde", "allowed", 8));
-    list = [ticket("abcde", { id: "abcde", status: "pending", resolved_by: null, version: 3 })];
-    await ctx.TicketBoard.load();
-    expect(approvalOf()).toMatchObject({ id: "abcde", status: "allowed", version: 8 });
-  });
-
-  test("a verdict that arrives during the first list read is applied after the read", async () => {
-    ctx.TicketBoard._tickets.clear();        // first load: no cached ticket
-    let release!: () => void;
-    gate = new Promise((r) => { release = r; });
-    const loading = ctx.TicketBoard.load();  // reads the pending approval, then waits
-    await settle();
-    expect(ctx.TicketBoard.onPermission(perm("abcde", "allowed", 8))).toBe("deferred");
-    release();
-    await loading;
-    expect(approvalOf()).toMatchObject({ id: "abcde", status: "allowed", version: 8 });
   });
 
   test("the create form keeps its input after a failure and resets after success", async () => {
@@ -1206,20 +1156,18 @@ describe("ticket view dialog", () => {
   const click = (card: any, inside = false) => card.handlers.click({ target: { closest: () => (inside ? {} : null) } });
 
   // (The harness escHtml/escAttr are String, so these checks read the raw text; the real helpers escape it.)
-  // Status light (the human's rules): red = cannot advance without the human (pending approval or human assignee),
+  // Status light (the human's rules): red = cannot advance without the human (human assignee),
   // orange = claimed / in_progress, green = queued and in_review, none when finished.
-  test("lightOf: every status, a pending approval or a human assignee wins", () => {
+  test("lightOf: every status, a human assignee wins", () => {
     const light = (status: string, extra: any = {}) => ctx.TicketBoard.lightOf({ status, assignee: "alice", ...extra })?.[0] ?? null;
     for (const s of ["queued", "in_review"]) expect(light(s)).toBe("green");
     for (const s of ["claimed", "in_progress"]) expect(light(s)).toBe("orange");
     for (const s of ["done", "cancelled"]) expect(light(s)).toBeNull();
     for (const s of ["queued", "claimed", "in_progress", "in_review"]) {
-      expect(light(s, { approval: { status: "pending" } })).toBe("red");
       expect(light(s, { assignee: "human" })).toBe("red");
     }
-    expect(light("in_progress", { approval: { status: "allowed" } })).toBe("orange");
     expect(light("queued", { assignee: null })).toBe("green");
-    expect(light("done", { approval: { status: "pending" }, assignee: "human" })).toBeNull();   // finished: no light
+    expect(light("done", { assignee: "human" })).toBeNull();   // finished: no light
   });
 
   // The human's rule 2026-10-24: when a ticket needs the human's action the light is red. Two more cases where only the human
@@ -1251,9 +1199,8 @@ describe("ticket view dialog", () => {
       }
     });
 
-    test("the order: pending approval, then the human, then a gone assignee, then only-you-can-queue", async () => {
+    test("the order: the human, then a gone assignee, then only-you-can-queue", async () => {
       const gone = { status: "in_progress", assignee: "ghost" };
-      expect(S({ ...gone, approval: { status: "pending" } })).toBe("Waiting for your approval");
       expect(S({ ...gone, assignee: "human" })).toBe("Assigned to you");
       expect(S(gone)).toBe(GONE);
       // a draft with a gone assignee in a request with a high ticket: the gone line comes before "only you"
@@ -1386,21 +1333,20 @@ describe("ticket view dialog", () => {
     expect(b("bogus")).toBe(2);
   });
 
-  test("statusLine: approval, then the human, then blockers; null otherwise; never disagrees with lightOf", () => {
+  test("statusLine: the human, then blockers; null otherwise; never disagrees with lightOf", () => {
     const sl = (t: any) => ctx.TicketBoard.statusLine({ status: "queued", assignee: "alice", ...t });
     expect(sl({})).toBeNull();
     expect(sl({ blocked_by: ["x"], open_blockers: ["x"] })).toBe("Blocked by 1 open ticket");
     expect(sl({ blocked_by: ["x", "y"], open_blockers: ["x", "y"] })).toBe("Blocked by 2 open tickets");
     expect(sl({ blocked_by: ["x"], open_blockers: [] })).toBeNull();                                  // blocker is done
     expect(sl({ assignee: "human", blocked_by: ["x"], open_blockers: ["x"] })).toBe("Assigned to you");
-    expect(sl({ approval: { status: "pending" }, assignee: "human", open_blockers: ["x"], blocked_by: ["x"] })).toBe("Waiting for your approval");
-    for (const status of ["done", "cancelled"]) expect(sl({ status, approval: { status: "pending" }, assignee: "human" })).toBeNull();
-    // Whenever the line is the approval or the human line, the light is red.
+    for (const status of ["done", "cancelled"]) expect(sl({ status, assignee: "human" })).toBeNull();
+    // Whenever the line is the human line, the light is red.
     for (const status of ["queued", "claimed", "in_progress", "in_review", "done", "cancelled"]) {
-      for (const extra of [{}, { assignee: "human" }, { approval: { status: "pending" } }, { blocked_by: ["x"], open_blockers: ["x"] }]) {
+      for (const extra of [{}, { assignee: "human" }, { blocked_by: ["x"], open_blockers: ["x"] }]) {
         const t = { status, assignee: "alice", ...extra };
         const line = ctx.TicketBoard.statusLine(t);
-        if (line === "Waiting for your approval" || line === "Assigned to you") expect(ctx.TicketBoard.lightOf(t)?.[0]).toBe("red");
+        if (line === "Assigned to you") expect(ctx.TicketBoard.lightOf(t)?.[0]).toBe("red");
       }
     }
   });
@@ -1424,8 +1370,34 @@ describe("ticket view dialog", () => {
     expect(cols.innerHTML).toContain('role="button" tabindex="0" draggable="true" data-ticket="t_9" aria-label="Open ticket t_9: Fix <it>"');
   });
 
+  test("two PASS marks, no approval state", async () => {
+    const cards = await board(T({ blast_radius: "high", validator_passes: 1 }));
+    expect(cols.innerHTML).toContain("PASS 1/2");
+    expect(cols.innerHTML).not.toMatch(/approval/i);
+    click(cards.t_9);
+    expect(content()).not.toMatch(/approval|Allow|Deny/i);
+    await board(T({ blast_radius: "high", validator_passes: 2 }));
+    expect(cols.innerHTML).toContain("PASS 2/2");
+    await board(T({ blast_radius: "low", validator_passes: 1 }));
+    expect(cols.innerHTML).not.toContain("PASS ");
+  });
+
+  test("a Validator PASS stage event refreshes the PASS marks of an open board", async () => {
+    await board(T({ blast_radius: "high", validator_passes: 0 }));
+    expect(cols.innerHTML).toContain("PASS 0/2");
+    list = [T({ blast_radius: "high", validator_passes: 1 })];                 // the hub counts the new PASS
+    expect(observers.stage).toBe(ctx.TicketBoard.onStage);
+    ctx.TicketBoard.onStage({ kind: "stage.passed", snapshot: { role: "validator", ticket_id: "t_9", verdict: "PASS", review: null } });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(cols.innerHTML).toContain("PASS 1/2");
+    list = [T({ blast_radius: "high", validator_passes: 0 })];                 // a rework clears the marks
+    ctx.TicketBoard.onStage({ kind: "stage.queued", snapshot: { role: "worker", ticket_id: "t_9", review: null } });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(cols.innerHTML).toContain("PASS 0/2");
+  });
+
   test("a click on the card opens the dialog with the whole ticket", async () => {
-    const cards = await board(T({ blast_radius: "high", approval_request_id: "abcde", approval: { id: "abcde", status: "pending", resolved_by: null, version: 1 } }));
+    const cards = await board(T({ blast_radius: "high", approval_request_id: null }));
     click(cards.t_9);
     expect(view().open).toBe(true);
     expect(els["ticket-view-title"].textContent).toBe("Fix <it>");
@@ -1434,7 +1406,7 @@ describe("ticket view dialog", () => {
     expect(content()).toContain("line one<br>line two <b>");
     expect(panel()).toContain("Copy");                                        // the ID has a copy button
     expect(content()).toContain("Acceptance criteria");
-    expect(content()).toContain("Waiting for your approval.");              // the approval banner
+    expect(content()).not.toContain("approval");                            // no approval state
     expect(active).toBe(els["ticket-view-x"]);                             // focus moves into the dialog: the header Close, the first control
   });
 
@@ -1534,18 +1506,6 @@ describe("ticket view dialog", () => {
     expect(head()).toContain("In review");
     expect(panel()).toContain("bob");
     expect(view().open).toBe(true);
-  });
-
-  test("an approval verdict updates the open dialog", async () => {
-    const cards = await board(T({ blast_radius: "high", approval_request_id: "abcde", approval: { id: "abcde", status: "pending", resolved_by: null, version: 1 } }));
-    click(cards.t_9);
-    expect(content()).toContain("Waiting for your approval.");
-    expect(content()).toContain("asks to move this high-radius ticket to Done.");
-    expect(content()).toContain('data-approval="deny" data-request="abcde"');
-    expect(content()).toContain('data-approval="allow" data-request="abcde"');
-    observers.permission({ kind: "permission.resolved", permission_id: "abcde", version: 9, snapshot: { id: "abcde", tool_name: "ticket:done", input_preview: JSON.stringify({ ticket_id: "t_9" }), status: "allowed", resolved_by: "human", version: 9 } });
-    expect(content()).toContain("Approved by human · abcde");
-    expect(content()).not.toContain("data-approval=");                       // the banner is gone once the request is answered
   });
 
   test("the keyboard stays on the same control after a live redraw", async () => {
@@ -3571,6 +3531,29 @@ describe("moving tickets: the Move to select and drag and drop", () => {
       expect(active).toBe("elsewhere");
     });
 
+    test("refocus works when the controls are hidden until focus-within", async () => {
+      await show(T("a", "queued"));
+      // Real CSS: the select takes focus only while its card has focus (visibility hidden otherwise).
+      cards.a.focus = () => { active = cards.a; };
+      selects.a.closest = (q: string) => (q === ".ticket-card" ? cards.a : null);
+      selects.a.focus = () => { if (active === cards.a) active = selects.a; };
+      postOk = false;
+      active = "elsewhere";
+      selects.a.value = "done";
+      await selects.a.handlers.change();
+      expect(active).toBe(selects.a);
+      // A move in flight takes the same path.
+      const release = hold();
+      selects.a.value = "in_progress";
+      const first = selects.a.handlers.change();
+      active = "elsewhere";
+      selects.a.value = "done";
+      await selects.a.handlers.change();
+      expect(active).toBe(selects.a);
+      release();
+      await first;
+    });
+
     test("two concurrent failing moves of different tickets each show their own reason", async () => {
       await show(T("a", "queued"), T("b", "queued"));
       const normal = ctx.authedFetch;
@@ -3788,16 +3771,14 @@ describe("request label and blockers (6.2, 6.3)", () => {
     expect(css).toMatch(/\.ticket-chip \{[^}]*white-space: nowrap; overflow: hidden; text-overflow: ellipsis;/);
   });
 
-  test("15.3 the status line: blockers, the human, the approval; none otherwise", async () => {
+  test("15.3 the status line: blockers, the human; none otherwise", async () => {
     await show(
       cardOf({ blocked_by: ["x"], open_blockers: ["x"] }),
       mk("h", "queued", { assignee: "human" }),
-      mk("p", "in_review", { assignee: "alice", blast_radius: "high", approval_request_id: "req1", approval: { id: "req1", status: "pending", version: 1 } }),
       mk("n", "queued"),
     );
     expect(card("a")).toMatch(/ticket-status-line is-blocked">.*Blocked by 1 open ticket<\/div>/s);
     expect(card("h")).toMatch(/ticket-status-line is-human">.*Assigned to you<\/div>/s);
-    expect(card("p")).toMatch(/ticket-status-line is-approval">.*Waiting for your approval<\/div>/s);
     expect(card("n")).not.toContain("ticket-status-line");
   });
 
@@ -4044,20 +4025,6 @@ describe("request label and blockers (6.2, 6.3)", () => {
     const ids = [...content().matchAll(/<li role="option" id="ticket-blocker-opt-\d+"[^>]*data-id="(\w+)"/g)].map((m) => m[1]);
     expect(ids).toEqual(["o", "d"]);
     delete els["ticket-view-content"].querySelector;
-  });
-
-  test("15.11 the approval line after an answer: Approved by human · id, Denied by human · id; another resolver keeps the old text", async () => {
-    const hi = (a: object) => mk("a", "in_review", { blast_radius: "high", approval_request_id: "req1", approval: { id: "req1", version: 1, ...a } });
-    await show(hi({ status: "denied", resolved_by: "human" }));
-    ctx.TicketBoard.openView("a");
-    expect(content()).toContain("Denied by human · req1");
-    expect(content()).not.toContain("not your approval");
-    await show(hi({ status: "allowed", resolved_by: "human" }));
-    ctx.TicketBoard.openView("a");
-    expect(content()).toContain("Approved by human · req1");
-    await show(hi({ status: "allowed", resolved_by: "Worker1" }));
-    ctx.TicketBoard.openView("a");
-    expect(content()).toContain("request allowed by Worker1 — not your approval");
   });
 
   test("15.11 layout: the dialog fills the board pane; the panel is at least 220 px; labels sit above their fields; long values wrap", () => {
@@ -4515,34 +4482,6 @@ describe("request label and blockers (6.2, 6.3)", () => {
     expect(els["ticket-view-notice"].innerHTML).toContain("Unsaved changes");
     const css = readFileSync("ui/styles/kinds.css", "utf8");
     expect(css).toContain(".ticket-view-bottom #ticket-view-save:not([hidden]), .ticket-view-bottom:has(#ticket-view-save[hidden]) #ticket-view-close {");   // Close is primary only when Save is hidden
-    unmount();
-  });
-
-  test("15.6 with a pending approval, edit mode shows the warning; without one it does not", async () => {
-    await show(inReview({ blast_radius: "high", approval_request_id: "req1", approval: { id: "req1", status: "pending", version: 1 } }), mk("n", "in_review", { assignee: "alice" }));
-    startEdit("r");
-    expect(els["ticket-view-content"].innerHTML).toContain("This ticket waits for your approval. If you save new acceptance criteria or set the blast radius to low, alice&#39;s approval request is cancelled.".replace("&#39;", "'"));
-    els["ticket-view"].close();
-    ctx.TicketBoard.openView("r");
-    expect(els["ticket-view-content"].innerHTML).not.toContain("waits for your approval. If you save");   // read mode: no warning
-    els["ticket-view"].close();
-    startEdit("n");
-    expect(els["ticket-view-content"].innerHTML).not.toContain("ticket-edit-warning");
-  });
-
-  test("15.6 saving new criteria on a ticket with a pending approval: the hub clears the pointer, and the card light is no longer red", async () => {
-    await show(inReview({ blast_radius: "high", approval_request_id: "req1", approval: { id: "req1", status: "pending", version: 1 }, version: 1 }));
-    expect(card("r")).toContain("Waiting for your approval");
-    expect(card("r")).toContain("light-red");
-    const m = mount({ ...editVals, radius: "high" });
-    posts = [];
-    startEdit();
-    m.type("criteria", "new criteria");
-    await m.submit();
-    expect(posts[0].body).toEqual({ by: "human", acceptance_criteria: "new criteria" });
-    ev(inReview({ blast_radius: "high", approval_request_id: null, acceptance_criteria: "new criteria" }), 9);   // the hub's event: pointer cleared
-    expect(card("r")).not.toContain("Waiting for your approval");
-    expect(card("r")).not.toContain("light-red");
     unmount();
   });
 

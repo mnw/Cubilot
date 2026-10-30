@@ -77,10 +77,7 @@ function addMessage(data) {
         '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        navigator.clipboard?.writeText(copyText).then(
-          () => showCopyToast('Copied'),
-          () => showCopyToast('Copy failed'),
-        );
+        copyMessage(copyText);
       });
       body.appendChild(btn);
     }
@@ -133,6 +130,30 @@ function showCopyToast(msg) {
   _copyToastTimer = setTimeout(() => copyToastEl.classList.remove('visible'), 1400);
 }
 window.showCopyToast = showCopyToast;
+
+// The app WebKit can refuse navigator.clipboard.writeText; fall back to a hidden textarea.
+async function copyToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {}
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch {}
+  document.body.removeChild(ta);
+  return ok;
+}
+
+function copyMessage(text) {
+  copyToClipboard(text).then((ok) => showCopyToast(ok ? 'Copied' : 'Copy failed'));
+}
 
 messagesEl.addEventListener('click', (e) => {
   const btn = e.target.closest?.('.msg-link-copy');

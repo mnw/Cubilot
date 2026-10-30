@@ -42,7 +42,6 @@ const ROUTES: R[] = [
   { method: "POST", path: `/tickets/${T}/assign`, body: { assignee: "sw-alice" } },
   { method: "POST", path: `/tickets/${T}/edit`, body: { title: "x" } },
   { method: "POST", path: `/tickets/${T}/transition`, body: { to: "in_progress" } },
-  { method: "POST", path: `/tickets/${T}/approval`, body: {} },
   { method: "POST", path: "/decisions", body: { facts: "x" } },
   { method: "POST", path: "/decisions/d_0123456789abcdef/answer", body: { option: "a" } },
   { method: "POST", path: `/tickets/${T}/notes`, body: { text: "x" } },

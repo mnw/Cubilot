@@ -3,11 +3,8 @@
 // Loaded AFTER kind-renderer.js; shares main.js lexical scope
 // (authedFetch, parseErrorBody, escHtml, HUMAN_NAME, SELECTED_ROOM, ROOM_ALL, addMessage).
 //
-// Two event streams feed it: ticket.* (the tickets themselves, reconciled by version)
-// and permission.* for tool_name "ticket:done" (approval state). The permission's
-// input_preview.ticket_id is only a lookup hint — an approval is applied only when its
-// request id equals the ticket's current approval_request_id; an unknown id for a ticket
-// triggers one list re-read, because setting the pointer writes no ticket event.
+// One event stream feeds it: ticket.* (the tickets themselves, reconciled by version).
+// A high ticket's card shows its Validator PASS marks as text (validator_passes, read with the list).
 
 const TicketBoard = (() => {
   // `status`: the status a ticket gets when it is created from the column's "+" (one call).
@@ -59,12 +56,8 @@ const TicketBoard = (() => {
   const LIST_LIMIT = 500;   // mirrors TICKET_LIST_LIMIT in hub/kinds/ticket.ts
   const CANCELLED = { key: 'cancelled', label: 'Cancelled', statuses: ['cancelled'] };   // no "+": nothing is created cancelled
 
-  /** @type {Map<string, any>} id → snapshot (+ approval {id,status,resolved_by,version}) */
+  /** @type {Map<string, any>} id → snapshot (+ validator_passes from the list) */
   const tickets = new Map();
-  /** request ids already re-read for, so a late superseded event cannot loop reloads */
-  const reloadedFor = new Set();
-  /** permission events for tickets not known yet, held while a list read is in flight */
-  const deferred = [];
   let loading = false;
   let room = null;
   let newColumn = COLUMNS[0];
@@ -89,24 +82,15 @@ const TicketBoard = (() => {
 
   const boardRoom = () => (typeof SELECTED_ROOM === 'string' && SELECTED_ROOM !== ROOM_ALL ? SELECTED_ROOM : null);
 
-  // The newer of two approvals for the ticket's current pointer; anything else is dropped.
-  function pickApproval(pointer, ...candidates) {
-    let best = null;
-    for (const a of candidates) {
-      if (a && a.id === pointer && (!best || Number(a.version) > Number(best.version))) best = a;
-    }
-    return best;
-  }
-
   async function load() {
     const target = boardRoom();
-    if (target !== room) { tickets.clear(); reloadedFor.clear(); deferred.length = 0; notes.clear(); openNotes.clear(); files.clear(); }
+    if (target !== room) { tickets.clear(); notes.clear(); openNotes.clear(); files.clear(); }
     const roomChanged = target !== room;
     if (roomChanged) { listLoaded = false; filter = target ? readFilter(target) : defaultFilter(); syncFilterControls(); }
     room = target;
     if (roomChanged) { closeView(); loadLead(); } else renderLead();   // the roster may have changed since
     const seq = ++loadSeq;
-    if (!room) { loading = false; deferred.length = 0; render(); return; }
+    if (!room) { loading = false; render(); return; }
     loading = true;
     freshDuringLoad.clear();
     try {
@@ -115,14 +99,13 @@ const TicketBoard = (() => {
       const list = await r.json();
       if (seq !== loadSeq || !Array.isArray(list)) return;
       // A list read can be older than events that arrived while it was in flight:
-      // keep whichever ticket and approval carries the higher version.
+      // keep whichever ticket carries the higher version.
       for (const item of list) {
         const prior = tickets.get(item.id);
-        const listApproval = item.approval ? { ...item.approval, version: Number(item.approval.version) || 0 } : null;
         const base = prior && prior.version > item.version ? prior : { ...item };
         base.notes_count = Math.max(Number(prior?.notes_count) || 0, Number(item.notes_count) || 0);   // counts only grow
         base.attachments_count = Number(base.attachments_count) || 0;   // follows the newer of list and event: a count can fall
-        base.approval = pickApproval(base.approval_request_id, prior?.approval, listApproval);
+        base.validator_passes = Number(item.validator_passes) || 0;   // only the list carries it; an event keeps the last read
         tickets.set(item.id, base);
         syncNotes(base);
         syncFiles(base);
@@ -144,18 +127,25 @@ const TicketBoard = (() => {
     } catch (e) {
       console.warn('[tickets] load failed:', e);
     } finally {
-      // Only the newest read replays: a verdict that arrived before its ticket was known
-      // is applied now, after the version merge.
-      if (seq === loadSeq) {
-        loading = false;
-        for (const e of deferred.splice(0)) onPermission(e);
-      }
+      if (seq === loadSeq) loading = false;
     }
   }
 
   function snapshotOf(event) {
     if (event.snapshot) return event.snapshot;
     try { return JSON.parse(event.text || '{}'); } catch { return null; }
+  }
+
+  // A Validator PASS adds a PASS mark and a new worker stage clears them. Neither writes a ticket event, so one list read
+  // (debounced) refreshes the count of that ticket's card.
+  let passReload = null;
+  function onStage(event) {
+    const snap = event?.snapshot;
+    if (!snap?.ticket_id || !tickets.has(snap.ticket_id) || snap.review) return;
+    const passed = snap.role === 'validator' && event.kind === 'stage.passed' && snap.verdict === 'PASS';
+    if (!passed && !(snap.role === 'worker' && event.kind === 'stage.queued')) return;
+    clearTimeout(passReload);
+    passReload = setTimeout(load, 200);
   }
 
   function onTicket(event) {
@@ -168,44 +158,13 @@ const TicketBoard = (() => {
     const prior = tickets.get(s.id);
     const version = Number(event.version ?? s.version ?? 0);
     if (prior && prior.version >= version) return;
-    const approval = prior && prior.approval_request_id === s.approval_request_id ? prior.approval : null;
     // notes_count rides on the entry (a ticket.update that carried a note), not in the snapshot.
-    tickets.set(s.id, { ...s, version, approval, notes_count: Math.max(Number(prior?.notes_count) || 0, Number(event.notes_count ?? s.notes_count) || 0),
+    tickets.set(s.id, { ...s, version, validator_passes: Number(prior?.validator_passes) || 0, notes_count: Math.max(Number(prior?.notes_count) || 0, Number(event.notes_count ?? s.notes_count) || 0),
       attachments_count: Number(event.attachments_count ?? s.attachments_count ?? prior?.attachments_count) || 0 });
     syncNotes(tickets.get(s.id));
     syncFiles(tickets.get(s.id));
-    if (s.approval_request_id && !approval) load();
-    else {
-      if (listLoaded && !loading) dropStaleRequest();   // the event may have hidden the last ticket of the selected request
-      render();
-    }
-  }
-
-  // Returns 'applied' | 'ignored' | 'reload' | 'deferred' — exposed for the unit test.
-  function onPermission(event) {
-    const p = snapshotOf(event);
-    if (!p || p.tool_name !== 'ticket:done') return 'ignored';
-    let hint = null;
-    try { hint = JSON.parse(p.input_preview || '{}').ticket_id ?? null; } catch {}
-    const t = hint ? tickets.get(hint) : null;
-    if (!t) {
-      if (!hint || !loading) return 'ignored';
-      deferred.push(event);
-      return 'deferred';
-    }
-    if (p.id !== t.approval_request_id) {
-      // Unknown to this ticket: either a new pointer we have not seen, or an unrelated /
-      // superseded request. Never applied; re-read once so the list decides.
-      if (reloadedFor.has(p.id)) return 'ignored';
-      reloadedFor.add(p.id);
-      load();
-      return 'reload';
-    }
-    const version = Number(event.version ?? p.version ?? 0);
-    if (t.approval && t.approval.id === p.id && t.approval.version >= version) return 'ignored';
-    t.approval = { id: p.id, status: p.status, resolved_by: p.resolved_by ?? null, version };
+    if (listLoaded && !loading) dropStaleRequest();   // the event may have hidden the last ticket of the selected request
     render();
-    return 'applied';
   }
 
   let lastActError = '';   // the text of the last refused call, for inline display
@@ -276,7 +235,10 @@ const TicketBoard = (() => {
     const refocus = () => {
       if (!fromControl) return;
       const board = document.getElementById('ticket-board-columns');
-      [...(board?.querySelectorAll?.('.ticket-move') ?? [])].find((s) => s.dataset.ticket === id)?.focus?.();
+      const sel = [...(board?.querySelectorAll?.('.ticket-move') ?? [])].find((s) => s.dataset.ticket === id);
+      // The controls are visibility: hidden until the card has focus (kinds.css), so the card takes focus first.
+      sel?.closest?.('.ticket-card')?.focus?.();
+      sel?.focus?.();
     };
     if (moving.has(id)) { failMove(id, 'a move is in flight'); refocus(); return; }
     moving.add(id);
@@ -720,33 +682,6 @@ const TicketBoard = (() => {
     return done;
   }
 
-  function approvalHtml(t) {
-    if (t.blast_radius !== 'high' || !t.approval_request_id) return '';
-    const a = t.approval;
-    if (a?.status === 'pending' && a.id === t.approval_request_id) {   // the human's question, with the same verdict call as the chat card
-      return `<div class="ticket-approval-banner" role="group" aria-label="Approval needed"><div class="ticket-approval-text"><strong>Waiting for your approval.</strong> ${escHtml(t.assignee || 'The assignee')} asks to move this high-radius ticket to Done.</div>`
-        + `<div class="ticket-approval-actions"><button type="button" data-approval="deny" data-request="${escAttr(t.approval_request_id)}">Deny</button><button type="button" class="primary" data-approval="allow" data-request="${escAttr(t.approval_request_id)}">Allow</button></div></div>`;
-    }
-    const state = !a ? 'waiting for approval'
-      : a.status === 'pending' ? 'waiting for your approval'
-      : a.status === 'allowed' && a.resolved_by === HUMAN_NAME ? `Approved by ${HUMAN_NAME}`
-      : a.status === 'denied' && a.resolved_by === HUMAN_NAME ? `Denied by ${HUMAN_NAME}`
-      : `request ${a.status}${a.resolved_by ? ` by ${a.resolved_by}` : ''} — not your approval`;
-    return `<div class="ticket-approval">${escHtml(state)} · ${escHtml(t.approval_request_id)}</div>`;
-  }
-
-  // Allow and Deny in the banner: both are disabled while the call runs. The redraw that follows the permission event removes the banner.
-  function wireApproval(root) {
-    const btns = [...(root.querySelectorAll?.('[data-approval]') ?? [])];
-    for (const b of btns) {
-      b.addEventListener('click', async () => {
-        btns.forEach((x) => { x.disabled = true; });
-        try { await handlePermissionAction(b.dataset.request, b.dataset.approval); }
-        finally { btns.forEach((x) => { x.disabled = false; }); }
-      });
-    }
-  }
-
   // Only a finished ticket can be archived (the hub enforces it too); an archived one can be restored.
   const archivable = (t) => t.status === 'done' || t.status === 'cancelled';
   function archiveButton(t) {
@@ -778,13 +713,13 @@ const TicketBoard = (() => {
   }
 
   // Status light, macOS window-button style (the human's rules, id=233). Red: the ticket cannot advance without the
-  // human: a pending approval, the human is the assignee, the assignee is gone, or only the human may queue it. Orange: an
+  // human: the human is the assignee, the assignee is gone, or only the human may queue it. Orange: an
   // agent works on it now (claimed, in_progress). Green: nobody works on it now: queued, and in_review, which waits for a check;
   // it is green because no "check started" state exists on the hub. Done and cancelled: no light. Only the active dot is lit.
   // statusLine() follows the same order, so the light and the line never disagree.
   function lightOf(t) {
     if (t.status === 'done' || t.status === 'cancelled') return null;
-    if (t.approval?.status === 'pending' || t.assignee === HUMAN_NAME) return ['red', 'waiting for the human'];
+    if (t.assignee === HUMAN_NAME) return ['red', 'waiting for the human'];
     if (assigneeGone(t)) return ['red', 'the assignee is gone: only the human can act'];
     if (onlyHumanCanQueue(t)) return ['red', 'only the human can queue it'];
     if (t.status === 'claimed' || t.status === 'in_progress') return ['orange', 'an agent is busy with it'];
@@ -826,11 +761,10 @@ const TicketBoard = (() => {
     return { done, total };
   }
   const priorityBars = (t) => PRIORITIES[priorityKey(t)][0] - 1;
-  // The one line under a card title. Same order as lightOf(): the approval, the human, the gone assignee and the only-you lines are
+  // The one line under a card title. Same order as lightOf(): the human, the gone assignee and the only-you lines are
   // the red light. A finished ticket has no light and no line.
   function statusLine(t) {
     if (t.status === 'done' || t.status === 'cancelled') return null;
-    if (t.approval?.status === 'pending') return 'Waiting for your approval';
     if (t.assignee === HUMAN_NAME) return 'Assigned to you';
     if (assigneeGone(t)) return `Assignee ${t.assignee} is gone: cancel or assign it`;
     if (onlyHumanCanQueue(t)) return 'Only you can queue this';
@@ -903,6 +837,9 @@ const TicketBoard = (() => {
   };
   const icon = (name) => `<svg class="ticket-icon" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
 
+  // The two Validator PASS marks of a high ticket, as text: "PASS 1/2".
+  const passMarks = (t) => `PASS ${Math.min(Number(t.validator_passes) || 0, 2)}/2`;
+
   // The card, top to bottom: tag, code and priority; title and subtitle; chips; one status line; footer (assignee, counters, light).
   // The controls (Move to, Assignee, Cancel) stay in the markup but show only on hover or keyboard focus (P4).
   function cardHtml(t) {
@@ -910,13 +847,13 @@ const TicketBoard = (() => {
     const bars = priorityBars(t);
     const prioLabel = prio(t)[1];
     const status = statusLine(t);
-    const approval = t.approval?.status === 'pending';
     const crit = criteriaProgress(t.acceptance_criteria);
     const files = attachCount(t), notes = noteCount(t);
     const chips = [
       t.request_id ? `<span class="ticket-chip">${icon('layers')}<span class="ticket-request-label">${escHtml(t.request_id)}</span></span>` : '',
       t.external_ref ? `<span class="ticket-chip">${escHtml(t.external_ref)}</span>` : '',
       t.blast_radius === 'high' ? '<span class="ticket-chip ticket-radius">High radius</span>' : '',
+      t.blast_radius === 'high' ? `<span class="ticket-chip ticket-passes">${passMarks(t)}</span>` : '',
       t.radius_source ? `<span class="ticket-chip ticket-radius-source">Radius: ${escHtml(t.radius_source)}</span>` : '',
       t.archived_at_ms ? '<span class="ticket-chip">archived</span>' : '',
     ].join('');
@@ -934,7 +871,7 @@ const TicketBoard = (() => {
         <div class="ticket-title">${escHtml(p.main)}</div>
         ${p.sub ? `<div class="ticket-sub">${escHtml(p.sub)}</div>` : ''}
         ${chips ? `<div class="ticket-chips">${chips}</div>` : ''}
-        ${status ? `<div class="ticket-status-line ${approval ? 'is-approval' : t.assignee === HUMAN_NAME ? 'is-human' : 'is-blocked'}">${icon(approval || t.assignee === HUMAN_NAME ? 'clock' : 'lock')}${escHtml(status)}</div>` : ''}
+        ${status ? `<div class="ticket-status-line ${t.assignee === HUMAN_NAME ? 'is-human' : 'is-blocked'}">${icon(t.assignee === HUMAN_NAME ? 'clock' : 'lock')}${escHtml(status)}</div>` : ''}
         <div class="ticket-card-foot">${who}<span class="ticket-counts">${counters}</span>${lightHtml(t)}</div>
         <div class="ticket-card-controls">
           ${moveHtml(t)}
@@ -1453,10 +1390,7 @@ const TicketBoard = (() => {
     if (!isEditMode(t)) return '';
     const v = formValues(t);
     const md = (a, label, html) => `<button type="button" data-edit-md="${a}" aria-label="${label}">${html}</button>`;
-    const pendingApproval = t.approval?.status === 'pending';
-    return (pendingApproval
-        ? `<div class="ticket-edit-warning" role="note">This ticket waits for your approval. If you save new acceptance criteria or set the blast radius to low, ${escHtml(t.assignee || 'the assignee')}'s approval request is cancelled.</div>` : '')
-      + `<form class="ticket-request-form" id="ticket-request-form">`
+    return `<form class="ticket-request-form" id="ticket-request-form">`
       + `<div class="ticket-crit-head"><label for="ticket-edit-criteria">Acceptance criteria <span class="ticket-view-count" id="ticket-edit-progress">${critProgressText(v.criteria)}</span></label>`
       + `<div class="ticket-tabs" role="tablist" aria-label="Acceptance criteria">`
       + ['write', 'preview'].map((k) => `<button type="button" role="tab" id="ticket-tab-${k}" aria-controls="ticket-pane-${k}" aria-selected="${critTab === k}" tabindex="${critTab === k ? 0 : -1}">${k === 'write' ? 'Write' : 'Preview'}</button>`).join('')
@@ -1677,7 +1611,7 @@ const TicketBoard = (() => {
 
   const STATUS_PILL = { draft: 'Draft', queued: 'Queued', claimed: 'In progress', in_progress: 'In progress', in_review: 'In review', done: 'Done', cancelled: 'Cancelled' };
 
-  // The body's left column: criteria, blockers, the editor, approval, notes, files. The properties are in the panel (panelHtml).
+  // The body's left column: criteria, blockers, the editor, notes, files. The properties are in the panel (panelHtml).
   // The agent notes (planning_note): a native closed details; the text is escaped, so it shows as text.
   function agentNotesHtml(t) {
     const text = String(t.planning_note ?? '').trim();
@@ -1688,8 +1622,7 @@ const TicketBoard = (() => {
   function viewHtml(t) {
     const draft = isEditMode(t);
     const crit = criteriaProgress(t.acceptance_criteria);
-    return approvalHtml(t)
-      + (draft ? '' : `<h3 class="ticket-view-h">Acceptance criteria${crit.total ? ` <span class="ticket-view-count">${crit.done} of ${crit.total} checked</span>` : ''}</h3><div class="ticket-view-criteria md">${mdHtml(t.acceptance_criteria)}</div>`)
+    return (draft ? '' : `<h3 class="ticket-view-h">Acceptance criteria${crit.total ? ` <span class="ticket-view-count">${crit.done} of ${crit.total} checked</span>` : ''}</h3><div class="ticket-view-criteria md">${mdHtml(t.acceptance_criteria)}</div>`)
       + agentNotesHtml(t)
       + requestFormHtml(t)
       + blockersHtml(t)
@@ -1776,7 +1709,6 @@ const TicketBoard = (() => {
     if (notesEl) { notesEl.innerHTML = notesHtml(t, true); wireNotes(notesEl); }
     actions.innerHTML = panelHtml(t);                                  // before the form is wired: the editor's fields are in the panel
     wireRequestForm(content);
-    wireApproval(content);
     wireBlockerPicker(content);
     wireFileButtons(content);
     if (fileFocus) content.querySelector?.(`.ticket-file-remove[data-attachment="${fileFocus}"]`)?.focus?.();
@@ -2058,9 +1990,9 @@ const TicketBoard = (() => {
   globalThis.refreshRoomLead = () => { renderLead(); if (room) render(); };
 
   KindCardRenderer.observe('ticket', onTicket);
-  KindCardRenderer.observe('permission', onPermission);
+  KindCardRenderer.observe('stage', onStage);
   KindCardRenderer.observe('room', onRoomLead);
   if (typeof document !== 'undefined' && document.getElementById) wire();
 
-  return { load, onTicket, onPermission, openNew, setFilter, matchesFilter, sanitizeFilter, readFilter, setLead, onRoomLead, archiveAllDone, setFilterPanel, attachFiles, addPendingFiles, applyMarkdownAction, mdHtml, applyToCriteria, onCriteriaKeydown, openView, closeView, _commitBlockers: (ids) => commitBlockers(ids), onNoted, lightOf, parseTitle, criteriaProgress, priorityBars, statusLine, _tickets: tickets, _filter: () => filter, _lead: () => lead };
+  return { load, onTicket, onStage, openNew, setFilter, matchesFilter, sanitizeFilter, readFilter, setLead, onRoomLead, archiveAllDone, setFilterPanel, attachFiles, addPendingFiles, applyMarkdownAction, mdHtml, applyToCriteria, onCriteriaKeydown, openView, closeView, _commitBlockers: (ids) => commitBlockers(ids), onNoted, lightOf, parseTitle, criteriaProgress, priorityBars, statusLine, _tickets: tickets, _filter: () => filter, _lead: () => lead };
 })();
