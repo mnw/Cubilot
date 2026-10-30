@@ -9,9 +9,8 @@
   align-items: center;
   justify-content: flex-end;
   gap: var(--sp-2);
-  /* 80px left clears the macOS traffic-light cluster — platform constant, not
-     a design-token value. Kept as a literal because it tracks Apple's metrics. */
-  padding: 0 var(--sp-10) 0 80px;
+  /* --size-80 clears the macOS traffic-light cluster. */
+  padding: 0 var(--sp-10) 0 var(--size-80);
   background: var(--bg-raised);
   border-bottom: var(--border-1) solid var(--line);
 }
@@ -55,7 +54,7 @@
   padding: var(--sp-4) var(--sp-12);
   background: var(--bg-elev);
   border-top: var(--border-1) solid var(--line);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   line-height: 1;
 }
 /* Pill chrome inside the footer is already provided by usage.css /

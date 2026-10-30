@@ -975,7 +975,7 @@
       info.className = 'terminal-external-info';
       info.innerHTML =
         '<div>' + t.tabEl.dataset.agent + ' is running outside Cubilot.</div>' +
-        '<div style="font-size:11px; color:var(--text-dim);">Quit the external ' +
+        '<div style="font-size:var(--fs-sm); color:var(--text-dim);">Quit the external ' +
         'claude session to launch it inside the pane.</div>';
       t.paneEl.appendChild(info);
     }
@@ -1165,7 +1165,7 @@
       const bar = document.createElement('div');
       bar.style.cssText =
         'position:absolute; top:0; left:0; right:0; z-index:5; display:flex; gap:var(--sp-4);' +
-        'align-items:flex-start; padding:8px 12px; font-size:12px; color:var(--text);' +
+        'align-items:flex-start; padding:var(--sp-8) var(--sp-12); font-size:var(--fs-sm); color:var(--text);' +
         'background:var(--bg-elev); border-left:3px solid var(--red);';
       const msg = document.createElement('div');
       msg.style.flex = '1';
@@ -1177,7 +1177,7 @@
       close.type = 'button';
       close.textContent = '\u00d7';
       close.setAttribute('aria-label', 'Dismiss');
-      close.style.cssText = 'background:none; border:0; color:var(--text-muted); cursor:pointer; font-size:16px; line-height:1;';
+      close.style.cssText = 'background:none; border:0; color:var(--text-muted); cursor:pointer; font-size:var(--fs-md); line-height:1;';
       close.addEventListener('click', () => { bar.remove(); if (t.joinWarnBar === bar) t.joinWarnBar = null; });
       bar.append(msg, close);
       t.paneEl.appendChild(bar);
