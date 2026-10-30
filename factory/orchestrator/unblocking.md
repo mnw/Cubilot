@@ -29,6 +29,10 @@ One message:
 4. **Human actions:** each with the full ticket id and the exact action or command.
 5. **What you do next** after the answer.
 
+### 5. Remove the cause
+
+When the work moves again, ask: will this block come back? If yes, open one low draft ticket that removes the cause in code (a check, a fix) or replaces a line in a role file. Name the block and its evidence. The weekly retrospective (Part 21) reviews these tickets.
+
 ## Checks before you queue
 
 - The role of each ticket runs on the hub.
