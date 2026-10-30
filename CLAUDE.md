@@ -138,7 +138,7 @@ curl -sN --max-time 1 "$HUB/agent-stream?agent=foo&token=$TOK"   # auto-register
 curl -s "$HUB/agents?token=$TOK"                                 # includes "foo"
 ```
 
-Full test run: `./scripts/test.sh [bun test args]` is the default. It takes the heavy lock itself, runs `bun test "$@"`, and stops the run and its process group at a time or memory limit. Settings: `CUBILOT_TEST_TIMEOUT_S` (default 300 s), `CUBILOT_TEST_MAX_RSS_MB` (default 2048 MB), `CUBILOT_HEAVY_LOCK` (default `/tmp/cubilot-heavy.lock`). Memory check: RSS sum of the process group, once per second; not a strict ceiling.
+Full test run: `./scripts/test.sh [bun test args]` is the default. It takes the heavy lock itself, runs `bun test "$@"`, and stops the run and its process group at a time or memory limit. Settings: `CUBILOT_TEST_TIMEOUT_S` (default 520 s), `CUBILOT_TEST_MAX_RSS_MB` (default 2048 MB), `CUBILOT_HEAVY_LOCK` (default `/tmp/cubilot-heavy.lock`). Memory check: RSS sum of the process group, once per second; not a strict ceiling.
 
 Tests: `bun test` (discovery scoped to `tests/` by `bunfig.toml`), `cargo test --manifest-path src-tauri/Cargo.toml`, and `./scripts/check-mod.sh` for the Claude mod's own `claude plugin test` suite. Type check: `bun x tsc --noEmit`. No linter.
 

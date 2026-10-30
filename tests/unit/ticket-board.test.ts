@@ -3571,6 +3571,29 @@ describe("moving tickets: the Move to select and drag and drop", () => {
       expect(active).toBe("elsewhere");
     });
 
+    test("refocus works when the controls are hidden until focus-within", async () => {
+      await show(T("a", "queued"));
+      // Real CSS: the select takes focus only while its card has focus (visibility hidden otherwise).
+      cards.a.focus = () => { active = cards.a; };
+      selects.a.closest = (q: string) => (q === ".ticket-card" ? cards.a : null);
+      selects.a.focus = () => { if (active === cards.a) active = selects.a; };
+      postOk = false;
+      active = "elsewhere";
+      selects.a.value = "done";
+      await selects.a.handlers.change();
+      expect(active).toBe(selects.a);
+      // A move in flight takes the same path.
+      const release = hold();
+      selects.a.value = "in_progress";
+      const first = selects.a.handlers.change();
+      active = "elsewhere";
+      selects.a.value = "done";
+      await selects.a.handlers.change();
+      expect(active).toBe(selects.a);
+      release();
+      await first;
+    });
+
     test("two concurrent failing moves of different tickets each show their own reason", async () => {
       await show(T("a", "queued"), T("b", "queued"));
       const normal = ctx.authedFetch;

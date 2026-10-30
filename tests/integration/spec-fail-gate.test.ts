@@ -71,6 +71,18 @@ describe("spec FAIL gate", () => {
     }
   };
 
+  /** The human's Approve of a request, as the approve route stores it (one event, one row), without queueing tickets that would launch workers. */
+  const approve = (room: string, request: string) => {
+    const db = new Database(hub.ledgerPath);
+    try {
+      db.run("INSERT INTO events (entity_id, kind, actor, payload_json, at_ms) VALUES (?, 'request.approved', ?, ?, ?)", [`request:${room}:${request}`, hub.humanName, JSON.stringify({ room, request_id: request }), Date.now()]);
+      db.run("INSERT OR IGNORE INTO request_approvals (room, request_id, approved_by, approved_at_ms) VALUES (?, ?, ?, ?)", [room, request, hub.humanName, Date.now()]);
+    } finally {
+      db.close();
+    }
+  };
+  const needsYou = async (room: string) => ((await getJson(hub, `/requests/${room}/needs-you`)).json as { requests: Array<{ request_id: string; fail_count: number }> }).requests;
+
   /** The launch the hub made last: acked, and its session connected (so it is running). */
   const startLaunch = async (room: string) => {
     const l = reqs.filter((r) => r.kind === "launch").at(-1)!;
@@ -231,6 +243,10 @@ describe("spec FAIL gate", () => {
     expect((await stages()).find((s) => s.id === queued.id)!.status).toBe("queued");
     await endSession(running);
     await until(() => launchCount() === n + 2);
+    // Close the human's stage too, so it holds no validator slot for the tests after this one.
+    const human = await startLaunch("gf");
+    expect((await result(human, "req-c", "PASS", "")).status).toBe(201);
+    await endSession(human);
   });
 
   test("(f) the lead is the human: exactly one notice, to the human", async () => {
@@ -246,7 +262,13 @@ describe("spec FAIL gate", () => {
 
   test("the count is per room: the same request id in another room is not gated", async () => {
     await draft("gf", "req-h");
+    const n = launchCount();
     expect((await spec("Orchestrator", "req-h")).status).toBe(201);
+    // End its stage, so it holds no validator slot for the tests after this one.
+    await until(() => launchCount() === n + 1);
+    const l = await startLaunch("gf");
+    expect((await result(l, "req-h", "PASS", "")).status).toBe(201);
+    await endSession(l);
   });
 
   test("human-review-room (a) the human's review after two FAILs takes the room of its ticket (not the human's default room); N = 3", async () => {
@@ -300,5 +322,62 @@ describe("spec FAIL gate", () => {
     const r = await spec("obs-gh", "req-e");
     expect(r.status).toBe(201);
     expect(handoffRoom((r.json as { id: string }).id)).toBe("gh");
+  });
+
+  test("Approve resets the FAIL stop", async () => {
+    await review("gf", "Orchestrator", "req-ap", "FAIL");
+    await review("gf", "Orchestrator", "req-ap", "FAIL");
+    await draft("gf", "req-ap");
+    expect((await spec("Orchestrator", "req-ap")).status).toBe(409);
+    approve("gf", "req-ap");
+    const n = launchCount();
+    expect((await spec("Orchestrator", "req-ap")).status).toBe(201);
+    await until(() => launchCount() === n + 1);
+    const l = await startLaunch("gf");
+    expect(l.prompt).toContain("This is spec review 1 of this request since its last PASS.");
+    expect((await result(l, "req-ap", "PASS", "")).status).toBe(201);
+    await endSession(l);
+  });
+
+  test("two FAILs after the newest PASS or Approve still stop", async () => {
+    await review("gf", "Orchestrator", "req-ap2", "FAIL");
+    await review("gf", "Orchestrator", "req-ap2", "FAIL");
+    approve("gf", "req-ap2");
+    await review("gf", "Orchestrator", "req-ap2", "FAIL");
+    await review("gf", "Orchestrator", "req-ap2", "FAIL"); // one FAIL after the Approve: allowed
+    await draft("gf", "req-ap2");
+    expect((await spec("Orchestrator", "req-ap2")).status).toBe(409);
+  });
+
+  test("two FAILs after an Approve stop again", async () => {
+    await review("gf", "Orchestrator", "req-ap3", "FAIL");
+    await review("gf", "Orchestrator", "req-ap3", "FAIL");
+    approve("gf", "req-ap3");
+    await review("gf", "Orchestrator", "req-ap3", "FAIL");
+    await review("gf", "Orchestrator", "req-ap3", "FAIL");
+    await draft("gf", "req-ap3");
+    const r = await spec("Orchestrator", "req-ap3");
+    expect(r.status).toBe(409);
+    expect((r.json as { error: string }).error).toContain("2 spec FAILs");
+  });
+
+  test("needs-you drops the request after Approve, next fail_count is 1", async () => {
+    await review("gf", "Orchestrator", "req-ap4", "FAIL");
+    await review("gf", "Orchestrator", "req-ap4", "FAIL");
+    expect((await needsYou("gf")).map((r) => r.request_id)).toContain("req-ap4");
+    approve("gf", "req-ap4");
+    expect((await needsYou("gf")).map((r) => r.request_id)).not.toContain("req-ap4");
+    await review("gf", "Orchestrator", "req-ap4", "FAIL", { fail_count: 9 });
+    expect(storedCounts("req-ap4")).toEqual([1, 2, 1]);
+    expect((await needsYou("gf")).map((r) => r.request_id)).not.toContain("req-ap4");
+  });
+
+  test("Approve in another room does not reset", async () => {
+    await review("gf", "Orchestrator", "req-ap5", "FAIL");
+    await review("gf", "Orchestrator", "req-ap5", "FAIL");
+    approve("gh", "req-ap5");
+    await draft("gf", "req-ap5");
+    expect((await spec("Orchestrator", "req-ap5")).status).toBe(409);
+    expect((await needsYou("gf")).map((r) => r.request_id)).toContain("req-ap5");
   });
 });

@@ -29,10 +29,10 @@ import { LedgerConflict } from "../core/types";
 import type { LaunchRecord } from "../core/launch-record";
 import { createLaunchQueue, type LaunchEnd, type LaunchQueue, type LaunchRequest } from "../core/launch-queue";
 import { roleHarness } from "../core/role-harness";
-import { roleModelFor } from "../core/role-models";
+import { roleModelFor, secondReviewModel } from "../core/role-models";
 import { metricsByRole, recordStageMetrics, stagesMissingMetrics, type Launch } from "../core/stage-metrics";
 import { makeSSE } from "../core/sse";
-import { assignBySystemInTx, closeReviewedBySystemInTx, notifyHeldDrafts, queueBySystemInTx, type HeldDraft } from "./ticket";
+import { assignBySystemInTx, closeReviewedBySystemInTx, queueBySystemInTx } from "./ticket";
 import type { CancelTraceCaller, CancelTraceInput } from "./cancel-trace";
 
 export type StageStatus = "queued" | "launching" | "running" | "retrying" | "passed" | "failed" | "cancelled";
@@ -475,7 +475,7 @@ export type StageRuntime = {
 };
 
 export const NO_PROJECT_FOLDER = "room has no project folder: set it in New factory room";
-const BRANCH_ROLES = new Set(["worker", "writer"]);
+const BRANCH_ROLES = new Set(["worker", "writer", "editor"]);
 const pathSegment = (x: string) => x.replace(/[^A-Za-z0-9_.-]/g, "_");
 
 /**
@@ -559,7 +559,7 @@ export type NeedsYouRequest = {
  * A newer open spec review of the request does not hide it: the human sent it, and the request stays listed until a PASS.
  */
 /**
- * The spec FAIL state of one request IN ONE ROOM: the FAIL stages created after the newest PASS stage, all read by room.
+ * The spec FAIL state of one request IN ONE ROOM: the FAIL stages created after the newest PASS stage or the human's Approve, all read by room.
  * A request id is a label the Orchestrator chooses, so two rooms may use the same one: a count or a PASS of another room
  * must never count here. `latest` is the newest of those FAIL stages (by created_seq), or null.
  */
@@ -570,12 +570,18 @@ export function specFailState(db: Database, room: string, requestId: string): { 
         `SELECT MAX(s.created_seq) AS n FROM stage s WHERE s.review = 'spec' AND s.request_id = ?1 AND s.verdict = 'PASS' AND ${STAGE_ROOM_SQL} = ?2`,
       )
       .get(requestId, room)?.n ?? 0;
+  // The human's Approve of the request in this room starts the count again, like a PASS: the later of the two ends the old run.
+  const lastApprove =
+    db
+      .query<{ n: number | null }, [string]>("SELECT MAX(e.seq) AS n FROM events e WHERE e.entity_id = ?1 AND e.kind = 'request.approved'")
+      .get(`request:${room}:${requestId}`)?.n ?? 0;
+  const since = Math.max(lastPass, lastApprove);
   const fails = db
     .query<{ id: string }, [string, string, number]>(
       `SELECT s.id FROM stage s WHERE s.review = 'spec' AND s.request_id = ?1 AND s.verdict = 'FAIL' AND s.created_seq > ?3 AND ${STAGE_ROOM_SQL} = ?2
         ORDER BY s.created_seq DESC, s.rowid DESC`,
     )
-    .all(requestId, room, lastPass);
+    .all(requestId, room, since);
   return { fails: fails.length, latest: fails[0]?.id ?? null };
 }
 
@@ -825,7 +831,11 @@ export function createStageRuntime(
       } catch (e) {
         console.error(`[stage] removing the worktree of ${session} failed:`, e);
       }
-      if (held?.room) startWaiting(held.role, held.room, cap);
+      if (held?.room) {
+        startWaiting(held.role, held.room, cap);
+        // The next branch-role stage of the same ticket (Writer -> Editor) waited for this close.
+        if (BRANCH_ROLES.has(held.role)) for (const r of BRANCH_ROLES) if (r !== held.role) startWaiting(r, held.room, cap);
+      }
     },
     onLateAck(req) {
       // Only a cancelled stage that waits for its late launch takes a late ack; any other late ack is refused.
@@ -1420,13 +1430,24 @@ export function createStageRuntime(
     for (const [session, c] of closing) {
       if (c.stageId === stage.id) return { ok: false, reason: `the close of ${session} is not acked yet` };
     }
+    // A branch role shares the ticket worktree with the earlier branch-role session of the same ticket (the Editor continues
+    // on the Writer's work): it waits for that session's close ack, whatever slot is free.
+    if (stage.ticket_id && BRANCH_ROLES.has(stage.role)) {
+      for (const [session, c] of closing) {
+        if (c.stageId === stage.id || !BRANCH_ROLES.has(c.role)) continue;
+        const same = db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM stage WHERE id = ? AND ticket_id = ?").get(c.stageId, stage.ticket_id)!.n;
+        if (same) return { ok: false, reason: `the close of ${session} (same ticket) is not acked yet` };
+      }
+    }
     // A session that ended but is not closed yet still holds its slot and its worktree (5.3b).
     const closingNow = [...closing.values()].filter((c) => c.role === stage.role && c.room === input.room).length;
     if (live + closingNow >= limit) return { ok: false, reason: `role ${stage.role} is at its limit (${limit}) in room ${input.room}` };
 
     // role_models in config.yml, read now so an edit applies to this launch. A shape error of this role fails the attempt
     // below, after the stage is `launching`, through the same path as a refused ack (retry, then final failure).
-    const models = roleModelFor(stage.role, STAGE_ROLES);
+    // The second Validator review of a high ticket uses second_review instead (a bad value gives the default, never an error).
+    const secondReview = stage.role === "validator" && !!stage.ticket_id && stage.review === null && isHighTicket(stage.ticket_id) && validatorPasses(stage.ticket_id) >= 1;
+    const models: ReturnType<typeof roleModelFor> = secondReview ? { entry: secondReviewModel() } : roleModelFor(stage.role, STAGE_ROLES);
 
     // 4.5: the hub makes the worktree; the shell only starts in it. A spec stage gets a detached read-only one at the
     // commit of its handoff, or HEAD (spec-review 2.4), under the request instead of a ticket.
@@ -1468,7 +1489,7 @@ export function createStageRuntime(
         )
         .get(stage.ticket_id);
       if (t) {
-        const fm = { stable: stableFor(input.room), notes: earlierNotes(db, t.id), stageId: input.stage_id, role: stage.role, ticket: t, branch, worktree: cwd, reason: input.reason, recipient: leadOfRoom(input.room), handoff: startingHandoff(stage.id, stage.ticket_id, stage.role) ?? undefined };
+        const fm = { stable: stableFor(input.room), notes: earlierNotes(db, t.id).filter((n) => !secondReview || n.role !== "validator"), stageId: input.stage_id, role: stage.role, ticket: t, branch, worktree: cwd, reason: input.reason, recipient: leadOfRoom(input.room), handoff: startingHandoff(stage.id, stage.ticket_id, stage.role) ?? undefined };
         prompt = renderFirstMessage(fm);
         // The ticket row is read again at each render: an edit between the launch request and the delivery is not lost (L2).
         renderWithPack = (pack) => {
@@ -1681,7 +1702,6 @@ export function createStageRuntime(
         ).get(prior.request_id ?? "", room)!.n > 0
       : false;
     const queuedNow: Array<NonNullable<ReturnType<typeof queueBySystemInTx>>> = [];
-    const held: HeldDraft[] = [];
     const stage = api.move(
       stageId,
       { to: "passed", verdict: "PASS" },
@@ -1691,14 +1711,13 @@ export function createStageRuntime(
         // A ticket that left `draft` meanwhile is skipped. With a high ticket in the request nothing moves.
         if (high) return;
         for (const { ticket_id } of scope) {
-          const q = queueBySystemInTx(db, cap, ticket_id, prior.request_id, held);
+          const q = queueBySystemInTx(db, cap, ticket_id, prior.request_id);
           if (q) queuedNow.push(q);
         }
       },
       () => {
         for (const q of queuedNow) cap.sse.emit(q.entry, { kind: "room", room: q.snapshot.room });
         if (queuedNow.length) cap.briefing.refresh();
-        if (room) notifyHeldDrafts(cap, room, held);
       },
     );
     for (const q of queuedNow) {
@@ -2154,7 +2173,25 @@ export function createStageRuntime(
         }
         if (REVIEW_ROLES.has(stage.role)) {
           if (typeof c.verdict !== "string" || !VERDICTS.has(c.verdict)) errors.push("context.verdict must be PASS or FAIL (upper case)");
-          if (!Array.isArray(c.findings)) errors.push("context.findings must be a list of {ticket_id, text}");
+          if (stage.role === "reviewer") {
+            // The Reviewer (writing chain): findings are {severity, text}; a PASS goes to the lead, a FAIL to the Writer.
+            let blocking = false;
+            if (!Array.isArray(c.findings)) errors.push("context.findings must be a list of {severity, text}");
+            else {
+              c.findings.forEach((f, i) => {
+                const o = f && typeof f === "object" ? (f as Record<string, unknown>) : null;
+                if (!o || (o.severity !== "blocking" && o.severity !== "suggestion")) errors.push(`context.findings[${i}].severity must be blocking or suggestion`);
+                if (!o || typeof o.text !== "string" || !o.text.trim()) errors.push(`context.findings[${i}].text must be a non-empty string`);
+                if (o?.severity === "blocking") blocking = true;
+              });
+            }
+            if (c.verdict === "PASS" && blocking) errors.push("a PASS must not have a blocking finding");
+            if (to !== undefined) {
+              const lead = leadOfRoom(roomOfStage(stage.id));
+              if (c.verdict === "PASS" && to !== lead) errors.push(`to: a Reviewer PASS must be sent to ${lead}, not to ${to}`);
+              if (c.verdict === "FAIL" && to !== `${ROLE_RECIPIENT_PREFIX}writer`) errors.push(`to: a Reviewer FAIL must be sent with to_role "writer", not to ${to}`);
+            }
+          } else if (!Array.isArray(c.findings)) errors.push("context.findings must be a list of {ticket_id, text}");
           else {
             c.findings.forEach((f, i) => {
               const o = f && typeof f === "object" ? (f as Record<string, unknown>) : null;
