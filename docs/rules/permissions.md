@@ -21,7 +21,7 @@ Permission relay, no-TTL rule and trust-model accepted risks.
 ## Who decides what
 
 - **The human approves.** One Approve per request releases its draft tickets, and later tickets of it (L1). Only the human approves a request, answers a decision (`escalate`) and changes the origin of a request. A high ticket has no Allow step: it closes on the full suite and two Validator PASSes (P6-04). No route and no `ticket:done` permission exist for it.
-- **The radius has a floor.** The radius rule (terms and paths in `config.yml`, `hub/core/radius-rule.ts`) gives the lowest `blast_radius` of a ticket text. The stored radius is never below it. The room lead, the creator or the human raises a radius with `edit_ticket`. Only the human lowers it below the rule. A permission request (`/permissions`) is for a Claude Code tool call and has no link to the radius.
+- **The radius has a floor.** The radius rule (terms and paths in `config.yml`, `hub/core/radius-rule.ts`) gives the lowest `blast_radius` of a ticket text. Exception: a title that starts with `[doc]` ignores the terms; a rule path still counts. The stored radius is never below it. The room lead, the creator or the human raises a radius with `edit_ticket`. Only the human lowers it below the rule. A permission request (`/permissions`) is for a Claude Code tool call and has no link to the radius.
 - **The room lead opens, the human answers.** Only the room lead opens a decision. Another agent and the human get 403. Only the human answers it.
 
 ## The launch stream has no per-role token
