@@ -32,7 +32,7 @@ import { roleHarness } from "../core/role-harness";
 import { roleModelFor, secondReviewModel } from "../core/role-models";
 import { metricsByRole, recordStageMetrics, stagesMissingMetrics, type Launch } from "../core/stage-metrics";
 import { makeSSE } from "../core/sse";
-import { assignBySystemInTx, closeReviewedBySystemInTx, notifyHeldDrafts, queueBySystemInTx, type HeldDraft } from "./ticket";
+import { assignBySystemInTx, closeReviewedBySystemInTx, queueBySystemInTx } from "./ticket";
 import type { CancelTraceCaller, CancelTraceInput } from "./cancel-trace";
 
 export type StageStatus = "queued" | "launching" | "running" | "retrying" | "passed" | "failed" | "cancelled";
@@ -659,17 +659,17 @@ export type WaitsForYou = {
   ticket_id: string;
   title: string;
   request_id: string | null;
-  case: "approve" | "allow";
+  case: "approve";
   /** The commit of the newest tester PASS result of the ticket, else null. */
   commit: string | null;
-  /** The pending ticket:done permission (case allow), else null. */
+  /** Always null: the Allow step for done is gone (P6-04). */
   permission_id: string | null;
   question: string;
 };
 
 /**
  * The tickets of one room that wait for the human: a draft ticket of a request that holds a non-terminal high ticket
- * (approve), and a non-terminal high ticket with a pending ticket:done permission (allow). Derived from the tables.
+ * (approve). Derived from the tables.
  */
 export function waitsForYou(db: Database, room: string): WaitsForYou[] {
   type Row = { id: string; title: string; request_id: string | null; permission_id?: string | null };
@@ -689,16 +689,7 @@ export function waitsForYou(db: Database, room: string): WaitsForYou[] {
     )
     .all(room)
     .map((t): WaitsForYou => ({ ticket_id: t.id, title: t.title, request_id: t.request_id, case: "approve", commit: commit(t.id), permission_id: null, question: `Approve request ${t.request_id}?` }));
-  const allow = db
-    .query<Row, [string]>(
-      `SELECT t.id, t.title, t.request_id, p.id AS permission_id FROM tickets t
-        JOIN permissions p ON p.id = t.approval_request_id AND p.tool_name = 'ticket:done' AND p.status = 'pending'
-        WHERE t.room = ?1 AND t.blast_radius = 'high' AND t.status NOT IN ('done', 'cancelled', 'queued')
-        ORDER BY t.created_at_ms, t.id`,
-    )
-    .all(room)
-    .map((t): WaitsForYou => ({ ticket_id: t.id, title: t.title, request_id: t.request_id, case: "allow", commit: commit(t.id), permission_id: t.permission_id ?? null, question: `Allow done of ${t.id}?` }));
-  return [...approve, ...allow];
+  return approve;
 }
 
 /** The requests of one room that wait for the human's approval, each with the stage and the tickets behind it. */
@@ -1702,7 +1693,6 @@ export function createStageRuntime(
         ).get(prior.request_id ?? "", room)!.n > 0
       : false;
     const queuedNow: Array<NonNullable<ReturnType<typeof queueBySystemInTx>>> = [];
-    const held: HeldDraft[] = [];
     const stage = api.move(
       stageId,
       { to: "passed", verdict: "PASS" },
@@ -1712,14 +1702,13 @@ export function createStageRuntime(
         // A ticket that left `draft` meanwhile is skipped. With a high ticket in the request nothing moves.
         if (high) return;
         for (const { ticket_id } of scope) {
-          const q = queueBySystemInTx(db, cap, ticket_id, prior.request_id, held);
+          const q = queueBySystemInTx(db, cap, ticket_id, prior.request_id);
           if (q) queuedNow.push(q);
         }
       },
       () => {
         for (const q of queuedNow) cap.sse.emit(q.entry, { kind: "room", room: q.snapshot.room });
         if (queuedNow.length) cap.briefing.refresh();
-        if (room) notifyHeldDrafts(cap, room, held);
       },
     );
     for (const q of queuedNow) {
@@ -2192,7 +2181,25 @@ export function createStageRuntime(
         }
         if (REVIEW_ROLES.has(stage.role)) {
           if (typeof c.verdict !== "string" || !VERDICTS.has(c.verdict)) errors.push("context.verdict must be PASS or FAIL (upper case)");
-          if (!Array.isArray(c.findings)) errors.push("context.findings must be a list of {ticket_id, text}");
+          if (stage.role === "reviewer") {
+            // The Reviewer (writing chain): findings are {severity, text}; a PASS goes to the lead, a FAIL to the Writer.
+            let blocking = false;
+            if (!Array.isArray(c.findings)) errors.push("context.findings must be a list of {severity, text}");
+            else {
+              c.findings.forEach((f, i) => {
+                const o = f && typeof f === "object" ? (f as Record<string, unknown>) : null;
+                if (!o || (o.severity !== "blocking" && o.severity !== "suggestion")) errors.push(`context.findings[${i}].severity must be blocking or suggestion`);
+                if (!o || typeof o.text !== "string" || !o.text.trim()) errors.push(`context.findings[${i}].text must be a non-empty string`);
+                if (o?.severity === "blocking") blocking = true;
+              });
+            }
+            if (c.verdict === "PASS" && blocking) errors.push("a PASS must not have a blocking finding");
+            if (to !== undefined) {
+              const lead = leadOfRoom(roomOfStage(stage.id));
+              if (c.verdict === "PASS" && to !== lead) errors.push(`to: a Reviewer PASS must be sent to ${lead}, not to ${to}`);
+              if (c.verdict === "FAIL" && to !== `${ROLE_RECIPIENT_PREFIX}writer`) errors.push(`to: a Reviewer FAIL must be sent with to_role "writer", not to ${to}`);
+            }
+          } else if (!Array.isArray(c.findings)) errors.push("context.findings must be a list of {ticket_id, text}");
           else {
             c.findings.forEach((f, i) => {
               const o = f && typeof f === "object" ? (f as Record<string, unknown>) : null;
