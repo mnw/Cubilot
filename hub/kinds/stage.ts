@@ -26,7 +26,7 @@ import { validName, validRoomLabel } from "../core/ids";
 import { deliveriesNotInMain } from "../core/delivery-report";
 import { openBlockerIds } from "./ticket-blockers";
 import { flowReport } from "../core/flow";
-import { previousProposalTitles, retroWeekAt, retroWeekWindow, roomsWithTicketEvents, writeEvidenceFile } from "../core/retro";
+import { checkRetroResult, previousProposalTitles, retroWeekAt, retroWeekWindow, roomsWithTicketEvents, savedDoneImprovements, writeEvidenceFile } from "../core/retro";
 import { getRoomSettings, DEFAULT_ROLE_LIMITS, DEFAULT_STAGE_TIMEOUT_MIN, STAGE_ROLES, type StageRole } from "../core/ledger";
 import { LedgerConflict } from "../core/types";
 import type { LaunchRecord } from "../core/launch-record";
@@ -2313,6 +2313,23 @@ export function createStageRuntime(
     return refuse("The commit is not new work: it does not descend from the base.");
   }
 
+  /** Part 21 group 5: the schema, human-gate, replaces and verdict checks of a retro result (hub/core/retro.ts). */
+  function retroResultErrors(stage: { id: string; review: string | null; ticket_id: string | null; request_id: string | null }, c: Record<string, unknown>): string[] {
+    const row = db.query<{ room: string | null; retro_week: string | null; session: string | null }, [string]>("SELECT room, retro_week, session FROM stage WHERE id = ?").get(stage.id);
+    const ledgerDb = (process.env.CUBILOT_LEDGER_DB ?? "").trim();
+    // The saved evidence file is the snapshot the stage got; the ledger may have changed since the launch.
+    const done = row?.room && row.retro_week && ledgerDb ? savedDoneImprovements(ledgerDb, row.room, row.retro_week) : [];
+    const wt = row?.room && row.session ? join(worktreesRoot(), pathSegment(row.room), pathSegment(worktreeKey(stage)!), pathSegment(row.session)) : null;
+    return checkRetroResult(c, {
+      doneImprovements: done,
+      readLine: (path, line) => {
+        if (!wt) return null;
+        const r = Bun.spawnSync(["git", "-C", wt, "show", `HEAD:${path}`], { stdout: "pipe", stderr: "pipe" });
+        return r.exitCode === 0 ? (r.stdout.toString().split("\n")[line - 1] ?? null) : null;
+      },
+    });
+  }
+
   const hooks: StageHooks = {
     onTicketEdited(ticketId) {
       try {
@@ -2392,6 +2409,8 @@ export function createStageRuntime(
         } else if (stage.role === "writer" || stage.role === "editor") {
           const refusal = checkWorkerResult(stage, c, to);
           if (refusal) errors.push(refusal);
+        } else if (stage.review === "retro") {
+          errors.push(...retroResultErrors(stage, c));
         } else if (c.ticket_id !== stage.ticket_id) errors.push(`context.ticket_id must be ${stage.ticket_id}`);
         if (stage.role === "tester" && (typeof c.commit !== "string" || !FULL_SHA_RE.test(c.commit))) errors.push("context.commit must be the full 40-character commit sha");
         if (stage.role === "tester" && stage.ticket_id && isHighTicket(stage.ticket_id)) {
