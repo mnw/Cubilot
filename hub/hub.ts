@@ -30,6 +30,7 @@ import { createCapBuilder } from "./core/capabilities";
 import { readHumanToken } from "./core/human-token";
 import { createFactoryFeature } from "./features/factory";
 import { createUsageFeature } from "./features/usage";
+import { createConfigFeature } from "./features/config";
 import { createSessionsFeature } from "./features/sessions";
 import { createAttachmentsFeature } from "./features/attachments";
 import { createRosterFeature } from "./features/roster";
@@ -298,6 +299,7 @@ if (ledgerDb) {
 const FEATURES: readonly HubFeature[] = [
   ...KINDS,
   createUsageFeature(),
+  createConfigFeature(),
   createFactoryFeature({
     dir: (process.env.CUBILOT_FACTORY_DIR ?? "").trim(),
     version: (process.env.CUBILOT_FACTORY_VERSION ?? "").trim(),
@@ -317,6 +319,7 @@ const FEATURES: readonly HubFeature[] = [
     agents,
     broadcastUI: (entry, scope) => fanout.send(entry, scope ?? { kind: "ui-only" }),
     attachmentsDir: ATTACHMENTS_DIR,
+    chatLog,
   }),
 ];
 
