@@ -22,6 +22,13 @@ The factory improves today only when the human and Claude look at the ledger by 
 4. **Human.** The request goes to the normal spec review and the human's one Approve. The human can drop any proposal.
 5. **Effect.** The next week's retrospective checks the target measure first.
 
+## Who does what
+
+- **The hub (code)** does the schedule, the evidence file, the schema check, the draft tickets and the request. No model.
+- **A dedicated role, `retrospective`,** does the review. It is not the Orchestrator: he plans and runs the work, so he would grade himself. It is a stage role like the others: `factory/retrospective/retrospective.md` (the job, the limits, the result format), `first-message.md` (the evidence file and last week's proposals), its own skills, read-only worktree, a new session each week. Model: Claude opus, effort high, set in `role_models`. It reads the code and the role files only to back a proposal with a file and line.
+- Skills and drafts: see `21-retrospective/README.md`. The role file and the `retrospective-review` skill are drafted in `21-retrospective/retrospective/`. Skills from ECC (loop-design-check, agent-architecture-audit, agent-introspection-debugging, growth-log), Agency (workflow-optimizer, test-results-analyzer) and Osmani (context-engineering). ECC continuous-learning is not used: it writes skills by itself.
+- The hub needs `retrospective` in `STAGE_ROLES` and `DEFAULT_ROLE_LIMITS` (1), refused as a ticket role and as a handoff `to_role`, and in the read-only role list of `factory.rs`.
+
 ## Limits
 
 - The retrospective never changes files, role files or settings itself. It only proposes.
