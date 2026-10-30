@@ -32,7 +32,7 @@ import type { LaunchRecord } from "../core/launch-record";
 import { heldForApprove, requestFacts, scopeChange, type ScopeChange } from "./request";
 import { createLaunchQueue, type LaunchEnd, type LaunchQueue, type LaunchRequest } from "../core/launch-queue";
 import { roleHarness } from "../core/role-harness";
-import { roleModelFor, secondReviewModel } from "../core/role-models";
+import { roleModelFor, secondReviewModel, type RoleModel } from "../core/role-models";
 import { metricsByRole, recordStageMetrics, stagesMissingMetrics, type Launch } from "../core/stage-metrics";
 import { makeSSE } from "../core/sse";
 import { assignBySystemInTx, closeReviewedBySystemInTx, queueBySystemInTx } from "./ticket";
@@ -44,7 +44,7 @@ export type StageSnapshot = {
   id: string;
   ticket_id: string | null;
   request_id: string | null;
-  review: "spec" | null;
+  review: "spec" | "retro" | null;
   verdict: string | null;
   role: string;
   attempt: number;
@@ -82,7 +82,7 @@ const stageDecl: StateMachineDecl<StageSnapshot> = {
     id: row.id as string,
     ticket_id: (row.ticket_id as string | null) ?? null,
     request_id: (row.request_id as string | null) ?? null,
-    review: (row.review as "spec" | null) ?? null,
+    review: (row.review as "spec" | "retro" | null) ?? null,
     verdict: (row.verdict as string | null) ?? null,
     role: row.role as string,
     attempt: Number(row.attempt),
@@ -150,7 +150,9 @@ const TERMINAL = new Set<StageStatus>(["passed", "failed", "cancelled"]);
 export type StageCreateInput = {
   ticket_id?: string | null;
   request_id?: string | null;
-  review?: "spec" | null;
+  review?: "spec" | "retro" | null;
+  /** The room of a retro stage: it has no ticket and no scope tickets to tell it. Ignored for any other stage. */
+  room?: string;
   role: string;
 };
 
@@ -181,6 +183,11 @@ const createVerb: VerbDecl<StageSnapshot, StageCreateInput & { id: string }> = {
   decide(prior, p): Decision<StageSnapshot> {
     if (prior) return { kind: "conflict", httpStatus: 409, message: `stage ${p.id} already exists` };
     const review = p.review ?? null;
+    if (review === "retro") {
+      if (p.role !== "retrospective" || p.ticket_id || !p.room) return { kind: "conflict", httpStatus: 400, message: "a retro stage is role retrospective, has a room and no ticket" };
+    } else if (p.role === "retrospective") {
+      return { kind: "conflict", httpStatus: 400, message: "role retrospective needs review retro" };
+    }
     if (review === null && !p.ticket_id) {
       return { kind: "conflict", httpStatus: 400, message: "a ticket stage needs ticket_id" };
     }
@@ -286,6 +293,7 @@ export function createStageApi(db: Database, onSlotFree?: (freed: StageSnapshot,
       const id = mintStageId();
       return entity.applyWithSideEffect(id, createVerb, { ...input, id }, actor, cap, (ctx) => {
         stamp(ctx, true);
+        if (input.review === "retro") ctx.tx.run("UPDATE stage SET room = ? WHERE id = ?", [input.room ?? null, ctx.next.id]);
         extra?.(ctx);
       }).snapshot;
     },
@@ -493,16 +501,17 @@ const BRANCH_ROLES = new Set(["worker", "writer", "editor"]);
 const pathSegment = (x: string) => x.replace(/[^A-Za-z0-9_.-]/g, "_");
 
 /**
- * The room of a stage: the room of its ticket, or for a spec stage (no ticket) the room of its scope tickets. A spec handoff
+ * The room of a stage: the room of its ticket, or for a retro stage its own `room` column, or for a spec stage (no ticket) the room of its scope tickets. A spec handoff
  * checks that all of them are in one room (the agent's room, or for a human sender the room of the named tickets), so the first one tells. Used by the role limit and the free-slot start.
  */
 export const STAGE_ROOM_SQL = `COALESCE(
   (SELECT room FROM tickets WHERE id = s.ticket_id),
-  (SELECT t.room FROM stage_scope sc JOIN tickets t ON t.id = sc.ticket_id WHERE sc.stage_id = s.id ORDER BY sc.ticket_id LIMIT 1))`;
+  (SELECT t.room FROM stage_scope sc JOIN tickets t ON t.id = sc.ticket_id WHERE sc.stage_id = s.id ORDER BY sc.ticket_id LIMIT 1),
+  s.room)`;
 
 /** The path segment under the room that holds the worktree of a stage: the ticket, or the request of a spec stage. */
-const worktreeKey = (s: { ticket_id: string | null; request_id: string | null; review: string | null }): string | null =>
-  s.ticket_id ?? (s.review === "spec" && s.request_id ? `request-${s.request_id}` : null);
+const worktreeKey = (s: { id: string; ticket_id: string | null; request_id: string | null; review: string | null }): string | null =>
+  s.ticket_id ?? (s.review === "spec" && s.request_id ? `request-${s.request_id}` : s.review === "retro" ? `retro-${s.id}` : null);
 
 const isRole = (r: string): r is StageRole => (STAGE_ROLES as readonly string[]).includes(r);
 
@@ -510,6 +519,12 @@ const isRole = (r: string): r is StageRole => (STAGE_ROLES as readonly string[])
 function migrateStartCommit(db: Database): void {
   const has = db.query<{ name: string }, []>("PRAGMA table_info(stage)").all().some((c) => c.name === "start_commit");
   if (!has) db.exec("ALTER TABLE stage ADD COLUMN start_commit TEXT");
+}
+
+/** `room`: the room of a retro stage, which has no ticket. Null for every other stage. Added here, not in `stageDecl`. */
+function migrateRoom(db: Database): void {
+  const has = db.query<{ name: string }, []>("PRAGMA table_info(stage)").all().some((c) => c.name === "room");
+  if (!has) db.exec("ALTER TABLE stage ADD COLUMN room TEXT");
 }
 
 /**
@@ -524,6 +539,23 @@ function migrateSessionReleased(db: Database): void {
     db.exec("ALTER TABLE stage ADD COLUMN session_released_at_ms INTEGER");
     db.run("UPDATE stage SET session_released_at_ms = ?", [Date.now()]);
   })();
+}
+
+/** The retrospective runs on Claude: default opus, effort high. A Pi value is refused with one log line and the default is used. */
+const RETRO_DEFAULT_MODEL: RoleModel = { harness: "claude", model: "opus", effort: "high" };
+function retroModel(found: ReturnType<typeof roleModelFor>): ReturnType<typeof roleModelFor> {
+  if ("error" in found) return found;
+  if (found.entry?.harness === "pi") {
+    console.log("[role-models] role_models.retrospective: the retrospective runs on claude, pi refused, default used");
+    return { entry: RETRO_DEFAULT_MODEL };
+  }
+  return { entry: { ...RETRO_DEFAULT_MODEL, ...found.entry } };
+}
+
+/** The staging head of the project, else HEAD (a project without a staging branch). */
+function stagingHead(project: string): string {
+  const r = Bun.spawnSync(["git", "-C", project, "rev-parse", "--verify", "--quiet", "refs/heads/staging^{commit}"], { stdout: "pipe", stderr: "pipe" });
+  return r.exitCode === 0 ? r.stdout.toString().trim() : "HEAD";
 }
 
 /** A launch that did not start a session: attempt 1 goes to `retrying` (5.3 relaunches), attempt 2 is final. */
@@ -1341,6 +1373,10 @@ export function createStageRuntime(
         )
         .all(role, stageId, stageId)) used.add(r.session);
     }
+    // Each retrospective launch is a new session: the name of an earlier retrospective stage is never reused.
+    if (role === "retrospective") {
+      for (const r of db.query<{ session: string }, [string]>("SELECT session FROM stage WHERE role = 'retrospective' AND session IS NOT NULL AND id != ?").all(stageId ?? "")) used.add(r.session);
+    }
     for (const name of cancelHolds.keys()) used.add(name);
     // A passed stage keeps its session until its turn ends: the name is not free yet.
     for (const name of awaitingClose) if (name.startsWith(`${role}-`)) used.add(name);
@@ -1502,7 +1538,9 @@ export function createStageRuntime(
     // below, after the stage is `launching`, through the same path as a refused ack (retry, then final failure).
     // The second Validator review of a high ticket uses second_review instead (a bad value gives the default, never an error).
     const secondReview = stage.role === "validator" && !!stage.ticket_id && stage.review === null && isHighTicket(stage.ticket_id) && validatorPasses(stage.ticket_id) >= 1;
-    const models: ReturnType<typeof roleModelFor> = secondReview ? { entry: secondReviewModel() } : roleModelFor(stage.role, STAGE_ROLES);
+    const models: ReturnType<typeof roleModelFor> = secondReview
+      ? { entry: secondReviewModel() }
+      : stage.role === "retrospective" ? retroModel(roleModelFor(stage.role, STAGE_ROLES)) : roleModelFor(stage.role, STAGE_ROLES);
 
     // 4.5: the hub makes the worktree; the shell only starts in it. A spec stage gets a detached read-only one at the
     // commit of its handoff, or HEAD (spec-review 2.4), under the request instead of a ticket.
@@ -1522,6 +1560,7 @@ export function createStageRuntime(
           project, room: input.room, ticketId: wtKey, session: input.session, role: stage.role,
           commit: stage.ticket_id
             ? handoffCommit(stage.id, stage.ticket_id, stage.role)
+            : stage.review === "retro" ? stagingHead(project)
             : specCommit(stage.request_id ?? "", input.room, db.query<{ n: number }, [string]>("SELECT created_seq AS n FROM stage WHERE id = ?").get(stage.id)?.n ?? 0),
         });
         cwd = wt.path;
@@ -1986,6 +2025,7 @@ export function createStageRuntime(
       entity.migrate(d);
       migrateSessionReleased(d);
       migrateStartCommit(d);
+      migrateRoom(d);
     },
     routes: withLedgerRequired(routes),
     // A stage is the hub's own bookkeeping: agents never get a stage replayed on reconnect.

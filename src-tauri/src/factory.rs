@@ -1574,6 +1574,15 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    // The roles whose role file blocks the file tools. The hub keeps READ_ONLY_ROLES (hub/core/worktrees.ts) for worktrees;
+    // `retrospective` is read-only in both lists.
+    const READ_ONLY_ROLES: [&str; 4] = ["orchestrator", "validator", "reviewer", "retrospective"];
+
+    #[test]
+    fn read_only_roles_include_retrospective() {
+        assert!(READ_ONLY_ROLES.contains(&"retrospective"));
+    }
+
     // Tool limits for both harnesses (task 9.3): the launch harness is the user's choice, so every single-agent
     // role file carries both keys. The read-only roles block the file tools on both harnesses.
     #[test]
@@ -1588,7 +1597,7 @@ mod tests {
             assert!(dis.is_some() && exc.is_some(), "{role}: needs both disallowedTools and excludeTools");
             let (dis, exc) = (csv_list(dis), csv_list(exc));
             for t in ["Task", "Agent"] { assert!(dis.iter().any(|x| x == t), "{role}: disallowedTools lacks {t}"); }
-            let read_only = ["orchestrator", "validator", "reviewer"].contains(&role.as_str());
+            let read_only = READ_ONLY_ROLES.contains(&role.as_str());
             for t in ["Edit", "Write", "NotebookEdit"] { assert_eq!(dis.iter().any(|x| x == t), read_only, "{role}: {t}"); }
             for t in ["edit", "write"] { assert_eq!(exc.iter().any(|x| x == t), read_only, "{role}: {t}"); }
             seen.push(role);
