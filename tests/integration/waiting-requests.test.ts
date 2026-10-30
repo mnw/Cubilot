@@ -92,4 +92,21 @@ describe("GET /requests/<room>/waiting", () => {
     const r = await postJson(hub, "/requests/wa/waiting", {});
     expect([404, 405]).toContain(r.status);
   });
+
+  test("each ticket carries the stored radius source and reasons", async () => {
+    const a = await draft("wr-6");
+    await draft("wr-6", { blast_radius: "high", title: "Risky", acceptance_criteria: "Change hub/core/worktrees.ts" });
+    passedSpecStage("wr-6", [a]);
+    const db = new Database(hub.ledgerPath);
+    const rows = db.query<{ id: string; radius_source: string; radius_reasons: string }, []>("SELECT id, radius_source, radius_reasons FROM tickets WHERE request_id = 'wr-6' ORDER BY created_at_ms, id").all();
+    db.close();
+    const w = (await waiting("wa")).waiting.find((x) => x.request_id === "wr-6");
+    expect(w.tickets.map((t: any) => t.id)).toEqual(rows.map((r) => r.id));
+    for (const [i, r] of rows.entries()) {
+      expect(w.tickets[i].source).toBe(r.radius_source);
+      expect(w.tickets[i].reasons).toEqual(JSON.parse(r.radius_reasons));
+    }
+    expect(w.tickets[1].source).not.toBeNull();
+    expect(w.tickets[1].reasons.length).toBeGreaterThan(0);
+  });
 });

@@ -698,6 +698,15 @@ export function waitsForYou(db: Database, room: string): WaitsForYou[] {
   return approve;
 }
 
+function parseReasons(v: string | null): string[] {
+  try {
+    const a = JSON.parse(v ?? "[]");
+    return Array.isArray(a) ? a.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 /** The requests of one room that wait for the human's approval, each with the stage and the tickets behind it. */
 export function waitingRequests(db: Database, room: string): WaitingRequest[] {
   const requests = db
@@ -713,13 +722,12 @@ export function waitingRequests(db: Database, room: string): WaitingRequest[] {
       stage_id: hit.id,
       origin: facts?.origin ?? "human",
       features: facts?.features ?? [],
-      // `source` and `reasons` stay empty until the radius rule (P6-03) stores them on the ticket.
       tickets: db
-        .query<{ id: string; title: string; status: string; blast_radius: "low" | "high" }, [string, string]>(
-          "SELECT id, title, status, blast_radius FROM tickets WHERE request_id = ? AND room = ? AND status != 'cancelled' ORDER BY created_at_ms, id",
+        .query<{ id: string; title: string; status: string; blast_radius: "low" | "high"; radius_source: string | null; radius_reasons: string | null }, [string, string]>(
+          "SELECT id, title, status, blast_radius, radius_source, radius_reasons FROM tickets WHERE request_id = ? AND room = ? AND status != 'cancelled' ORDER BY created_at_ms, id",
         )
         .all(request_id, room)
-        .map((t) => ({ id: t.id, title: t.title, status: t.status, radius: t.blast_radius, source: null, reasons: [] })),
+        .map((t) => ({ id: t.id, title: t.title, status: t.status, radius: t.blast_radius, source: t.radius_source, reasons: parseReasons(t.radius_reasons) })),
       scope_change: scopeChange(db, room, request_id),
       high_tickets: db
         .query<{ id: string; title: string; status: string }, [string, string]>(
