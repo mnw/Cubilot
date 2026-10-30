@@ -3,6 +3,8 @@
 // the same bytes (JSON.stringify of the result).
 
 import type { Database } from "bun:sqlite";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { flowReport } from "./flow";
 import { STAGE_ROOM_SQL } from "../kinds/stage";
 
@@ -200,3 +202,89 @@ export function buildEvidence(db: Database, room: string, since: number, until: 
 }
 
 export type Evidence = ReturnType<typeof buildEvidence>;
+
+// The weekly schedule (Part 21 group 4). Pure: the week and its window come from the clock value and the hub's local time zone. No model.
+
+export type RetroWeek = { week: string; since: number; until: number };
+
+const WEEK_LABEL_RE = /^(\d{4})-W(\d{2})$/;
+
+/** `YYYY-Www` of the ISO week that has this Monday. */
+function isoWeekLabel(monday: Date): string {
+  const thursday = new Date(Date.UTC(monday.getFullYear(), monday.getMonth(), monday.getDate() + 3));
+  const year = thursday.getUTCFullYear();
+  const week = Math.floor((thursday.getTime() - Date.UTC(year, 0, 1)) / (7 * 86_400_000)) + 1;
+  return `${year}-W${String(week).padStart(2, "0")}`;
+}
+
+/** The week of a Monday 06:00 local: `until` is that Monday 06:00, `since` is the Monday 06:00 before it. */
+function weekOfMonday(monday: Date): RetroWeek {
+  const at = (back: number) => new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() - back, 6, 0, 0, 0).getTime();
+  return { week: isoWeekLabel(monday), since: at(7), until: at(0) };
+}
+
+/** The retrospective week that `now` belongs to, or null before that ISO week's Monday 06:00 local (nothing is built yet). */
+export function retroWeekAt(now: number): RetroWeek | null {
+  const d = new Date(now);
+  const monday = new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7), 6, 0, 0, 0);
+  return now < monday.getTime() ? null : weekOfMonday(monday);
+}
+
+/** The window of a `YYYY-Www` label, or null when it does not parse. */
+export function retroWeekWindow(label: string): RetroWeek | null {
+  const m = WEEK_LABEL_RE.exec(label);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const jan4 = new Date(year, 0, 4);
+  const monday = new Date(year, 0, 4 - ((jan4.getDay() + 6) % 7) + 7 * (Number(m[2]) - 1), 6, 0, 0, 0);
+  const w = weekOfMonday(monday);
+  return w.week === label ? w : null;
+}
+
+/** The rooms with at least one ticket event in [since, until), in name order. */
+export function roomsWithTicketEvents(db: Database, since: number, until: number): string[] {
+  return db
+    .query<{ room: string }, [number, number]>(
+      `SELECT DISTINCT t.room AS room FROM events e JOIN tickets t ON t.id = e.entity_id
+        WHERE e.kind LIKE 'ticket.%' AND e.at_ms >= ?1 AND e.at_ms < ?2 ORDER BY t.room`,
+    )
+    .all(since, until)
+    .map((r) => r.room);
+}
+
+/** `<dir of the ledger>/retro/<room>/<iso-week>.json`. A valid room label has no path separator. Each uppercase letter becomes `%` plus the lowercase letter, and `.` and `..` become `%2E` forms. `%` is not a valid label character, so no two rooms collide, also on a case-insensitive filesystem. */
+export function evidencePath(ledgerDb: string, room: string, week: string): string {
+  return join(dirname(ledgerDb), "retro", room.replace(/^\.{1,2}$/, (d) => d.replace(/\./g, "%2E")).replace(/[A-Z]/g, (c) => `%${c.toLowerCase()}`), `${week}.json`);
+}
+
+/** Writes the evidence file of a room and week (replacing an older one) and returns its text. */
+export function writeEvidenceFile(db: Database, ledgerDb: string, room: string, w: RetroWeek): { path: string; text: string } {
+  const path = evidencePath(ledgerDb, room, w.week);
+  const text = JSON.stringify(buildEvidence(db, room, w.since, w.until), null, 2) + "\n";
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, text);
+  return { path, text };
+}
+
+/** The proposal titles of the newest earlier passed retrospective of the room; [] when there is none or its result has no proposals. */
+export function previousProposalTitles(db: Database, room: string, week: string): string[] {
+  const prev = db
+    .query<{ id: string }, [string, string]>(
+      `SELECT s.id FROM stage s WHERE s.review = 'retro' AND s.room = ?1 AND s.retro_week < ?2 AND s.status = 'passed'
+        ORDER BY s.retro_week DESC, s.created_seq DESC`,
+    )
+    .all(room, week);
+  for (const { id } of prev.slice(0, 1)) {
+    const rows = db
+      .query<{ context_json: string | null }, [string]>(
+        "SELECT context_json FROM handoffs WHERE json_extract(context_json, '$.stage_id') = ? ORDER BY created_at_ms DESC, id DESC",
+      )
+      .all(id);
+    for (const r of rows) {
+      const list = json(r.context_json).proposals;
+      if (!Array.isArray(list)) continue;
+      return list.map((p) => (p as { title?: unknown })?.title).filter((t): t is string => typeof t === "string");
+    }
+  }
+  return [];
+}

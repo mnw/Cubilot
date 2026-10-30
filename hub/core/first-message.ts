@@ -229,3 +229,54 @@ export function renderSpecFirstMessage(i: SpecFirstMessageInput): string {
   if (i.reason) text += `\nNote: the earlier session of this stage stopped: ${oneLine(i.reason)}\n`;
   return (i.stable ?? "") + text;
 }
+
+export type RetroFirstMessageInput = {
+  role: string;
+  stageId: string;
+  worktree: string;
+  /** Where the evidence file is on disk, and its text. */
+  evidencePath: string;
+  evidence: string;
+  /** The proposal titles of the previous retrospective of the room. */
+  previousWeekTitles: string[];
+  reason?: string;
+  stable?: string;
+};
+
+// Same text as factory/retrospective/first-message.md, for a hub with no staged factory folder.
+const RETRO_DEFAULT_TEMPLATE = `You are the {{role}} for one week. Your role instructions are already loaded.
+Work in the read-only worktree below. Use the \`retrospective-review\` skill. Post one result that names the stage id.
+
+## Week
+- Stage: {{stage_id}}
+- Request: {{request}}
+- Worktree: {{worktree}}
+
+## Evidence file
+{{evidence_file}}
+
+## Proposals of the previous retrospective
+{{previous_proposals}}
+`;
+
+/** The first message of a retrospective stage: `factory/retrospective/first-message.md` with the evidence file and the previous proposals. */
+const loadRetroTemplate = (role: string): string => {
+  const t = loadTemplate(role);
+  return t === DEFAULT_TEMPLATE ? RETRO_DEFAULT_TEMPLATE : t;
+};
+
+export function renderRetroFirstMessage(i: RetroFirstMessageInput, template: string = loadRetroTemplate(i.role)): string {
+  const v: Record<string, string> = {
+    role: i.role,
+    stage_id: i.stageId,
+    request: "none",
+    worktree: i.worktree,
+    evidence_file: `File: ${i.evidencePath}\n\n${i.evidence.trim()}`,
+    previous_proposals: i.previousWeekTitles.length ? i.previousWeekTitles.map((t) => `- ${oneLine(t)}`).join("\n") : "none",
+  };
+  // One pass, as in renderFirstMessage. A part line that no retro section fills vanishes.
+  let text = template.replace(/^\{\{(?:notes|pack|diff)\}\}[ \t]*(?:\n|$)|\{\{([a-z_]+)\}\}/gm, (m, k: string | undefined) => (k === undefined ? "" : k in v ? v[k] : m));
+  if (!text.endsWith("\n")) text += "\n";
+  if (i.reason) text += `\nNote: the earlier session of this stage stopped: ${oneLine(i.reason)}\n`;
+  return (i.stable ?? "") + text;
+}

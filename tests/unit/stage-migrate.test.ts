@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LEDGER_SCHEMA_VERSION, migrateLedger, openLedger } from "../../hub/core/ledger";
 import { createTicketKind } from "../../hub/kinds/ticket";
+import { createStageRuntime } from "../../hub/kinds/stage";
 
 const schema = (d: Database) =>
   d.query<{ sql: string }, []>("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name").all().map((r) => r.sql);
@@ -104,3 +105,49 @@ describe("stage-sessions migration (1.2)", () => {
     expect(columns(r.db!, "stage")).toContain("review");
   });
 });
+
+describe("retro_week and its unique index (Part 21 group 4)", () => {
+  const full = (d: Database) => {
+    migrate(d);
+    createStageRuntime(d).module.migrate(d);
+  };
+  const insertRetro = (d: Database, f: { room: string; week: string | null; status?: string }) =>
+    d.run("INSERT INTO stage (id, review, role, status, room, retro_week) VALUES (?, 'retro', 'retrospective', ?, ?, ?)", [`s_${Math.random()}`, f.status ?? "queued", f.room, f.week]);
+
+  test("the column and the partial index exist; a second run gives the same schema", () => {
+    const d = new Database(":memory:");
+    full(d);
+    expect(columns(d, "stage")).toContain("retro_week");
+    const idx = d.query<{ sql: string }, []>("SELECT sql FROM sqlite_master WHERE name = 'idx_stage_retro_week'").get()!.sql;
+    expect(idx).toContain("(room, retro_week)");
+    expect(idx).toContain("review = 'retro'");
+    expect(idx).toContain("status != 'cancelled'");
+    const first = schema(d);
+    full(d);
+    expect(schema(d)).toEqual(first);
+  });
+
+  test("a ledger without the column gets it and the index, and keeps its rows", () => {
+    const d = new Database(":memory:");
+    full(d);
+    insertRetro(d, { room: "keep", week: null });
+    d.exec("DROP INDEX idx_stage_retro_week; ALTER TABLE stage DROP COLUMN retro_week");
+    full(d);
+    expect(columns(d, "stage")).toContain("retro_week");
+    expect(d.query("SELECT COUNT(*) AS n FROM stage WHERE room = 'keep'").get()).toEqual({ n: 1 });
+    expect(d.query("SELECT 1 FROM sqlite_master WHERE name = 'idx_stage_retro_week'").get()).not.toBeNull();
+  });
+
+  test("a second live row for one room and week is refused; a cancelled one, another room and another week are allowed", () => {
+    const d = new Database(":memory:");
+    full(d);
+    insertRetro(d, { room: "r1", week: "2026-W45" });
+    expect(() => insertRetro(d, { room: "r1", week: "2026-W45", status: "running" })).toThrow();
+    insertRetro(d, { room: "r2", week: "2026-W45" });
+    insertRetro(d, { room: "r1", week: "2026-W46" });
+    insertRetro(d, { room: "r1", week: "2026-W45", status: "cancelled" });
+    d.run("UPDATE stage SET status = 'cancelled' WHERE room = 'r1' AND retro_week = '2026-W45' AND status = 'queued'");
+    insertRetro(d, { room: "r1", week: "2026-W45" });
+  });
+});
+

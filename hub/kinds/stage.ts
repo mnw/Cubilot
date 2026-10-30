@@ -4,7 +4,7 @@
 // and the launch queue (4.1) are added by their own tickets; no route here writes a stage.
 
 import { join } from "node:path";
-import { renderFirstMessage, renderSpecFirstMessage, type PackText } from "../core/first-message";
+import { renderFirstMessage, renderRetroFirstMessage, renderSpecFirstMessage, type PackText } from "../core/first-message";
 import { namedPaths, packCommandCount, type Pack, type PackInput } from "../core/context-pack";
 import { renderStable } from "../core/primer";
 import { readNutshell } from "../nutshell";
@@ -26,6 +26,7 @@ import { validName, validRoomLabel } from "../core/ids";
 import { deliveriesNotInMain } from "../core/delivery-report";
 import { openBlockerIds } from "./ticket-blockers";
 import { flowReport } from "../core/flow";
+import { previousProposalTitles, retroWeekAt, retroWeekWindow, roomsWithTicketEvents, writeEvidenceFile } from "../core/retro";
 import { getRoomSettings, DEFAULT_ROLE_LIMITS, DEFAULT_STAGE_TIMEOUT_MIN, STAGE_ROLES, type StageRole } from "../core/ledger";
 import { LedgerConflict } from "../core/types";
 import type { LaunchRecord } from "../core/launch-record";
@@ -153,6 +154,8 @@ export type StageCreateInput = {
   review?: "spec" | "retro" | null;
   /** The room of a retro stage: it has no ticket and no scope tickets to tell it. Ignored for any other stage. */
   room?: string;
+  /** The ISO week (`YYYY-Www`) of a retro stage. The unique index allows one stage that is not cancelled for each room and week. */
+  retro_week?: string;
   role: string;
 };
 
@@ -293,7 +296,7 @@ export function createStageApi(db: Database, onSlotFree?: (freed: StageSnapshot,
       const id = mintStageId();
       return entity.applyWithSideEffect(id, createVerb, { ...input, id }, actor, cap, (ctx) => {
         stamp(ctx, true);
-        if (input.review === "retro") ctx.tx.run("UPDATE stage SET room = ? WHERE id = ?", [input.room ?? null, ctx.next.id]);
+        if (input.review === "retro") ctx.tx.run("UPDATE stage SET room = ?, retro_week = ? WHERE id = ?", [input.room ?? null, input.retro_week ?? null, ctx.next.id]);
         extra?.(ctx);
       }).snapshot;
     },
@@ -525,6 +528,18 @@ function migrateStartCommit(db: Database): void {
 function migrateRoom(db: Database): void {
   const has = db.query<{ name: string }, []>("PRAGMA table_info(stage)").all().some((c) => c.name === "room");
   if (!has) db.exec("ALTER TABLE stage ADD COLUMN room TEXT");
+}
+
+/**
+ * `retro_week`: the ISO week of a retro stage (Part 21 group 4). The unique partial index allows one retro stage that is not
+ * `cancelled` for each room and week. Both steps are guarded, so a second run changes nothing. Runs after `migrateRoom`.
+ */
+function migrateRetroWeek(db: Database): void {
+  const has = db.query<{ name: string }, []>("PRAGMA table_info(stage)").all().some((c) => c.name === "retro_week");
+  if (!has) db.exec("ALTER TABLE stage ADD COLUMN retro_week TEXT");
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_stage_retro_week ON stage(room, retro_week) WHERE review = 'retro' AND status != 'cancelled'",
+  );
 }
 
 /**
@@ -1201,6 +1216,57 @@ export function createStageRuntime(
     for (const { id } of queued) cancelStage(id, `ticket moved to ${to}`, cap, atStart ? "start_sweep" : to === "draft" ? "ticket_draft" : "ticket_done", atStart);
   }
 
+  // The retrospective week that the sweep has fully handled (memory only: a restart looks again, and the unique index stops a second stage).
+  let retroDoneWeek: string | null = null;
+
+  /**
+   * Part 21 group 4: from Monday 06:00 local the sweep creates one retro stage for each room with a ticket event in the 7 days
+   * before that Monday 06:00. The evidence file is written first. No model. A week that was missed is not built later: only the week of `now` counts.
+   */
+  function startRetrospectives(cap: HubCapabilities, now: number): void {
+    try {
+      const w = retroWeekAt(now);
+      const ledgerDb = (process.env.CUBILOT_LEDGER_DB ?? "").trim();
+      if (!w || w.week === retroDoneWeek || !ledgerDb) return;
+      let failed = false;
+      for (const room of roomsWithTicketEvents(db, w.since, w.until)) {
+        try {
+          const live = db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM stage WHERE review = 'retro' AND room = ? AND retro_week = ? AND status != 'cancelled'").get(room, w.week)!.n;
+          if (live) continue;
+          writeEvidenceFile(db, ledgerDb, room, w);
+          api.create({ review: "retro", role: "retrospective", room, retro_week: w.week }, "system", cap);
+          startWaiting("retrospective", room, cap);
+        } catch (e) {
+          failed = true;
+          console.error(`[stage] retrospective of room ${room} for ${w.week} failed:`, e);
+        }
+      }
+      if (!failed) retroDoneWeek = w.week;
+    } catch (e) {
+      console.error("[stage] retrospective schedule failed:", e);
+    }
+  }
+
+  /** The first message of a retro stage: the evidence file of its week and the proposal titles of the previous retrospective of the room. */
+  function retroFirstMessage(stage: { id: string }, room: string, worktree: string, reason?: string): string | null {
+    const row = db.query<{ retro_week: string | null }, [string]>("SELECT retro_week FROM stage WHERE id = ?").get(stage.id);
+    const w = row?.retro_week ? retroWeekWindow(row.retro_week) : null;
+    const ledgerDb = (process.env.CUBILOT_LEDGER_DB ?? "").trim();
+    if (!w || !ledgerDb) return null;
+    // Written again from the ledger window: the same bytes as the file of the sweep, so a relaunch gets the same message.
+    const file = writeEvidenceFile(db, ledgerDb, room, w);
+    return renderRetroFirstMessage({
+      stable: stableFor(room),
+      role: "retrospective",
+      stageId: stage.id,
+      worktree,
+      evidencePath: file.path,
+      evidence: file.text,
+      previousWeekTitles: previousProposalTitles(db, room, w.week),
+      reason,
+    });
+  }
+
   function sweep(cap: HubCapabilities, now: number = Date.now()): void {
     // A passed stage whose turn-end report never came (5.3b): after the grace, queue its close anyway.
     for (const session of [...awaitingClose]) {
@@ -1229,6 +1295,7 @@ export function createStageRuntime(
     } catch (e) {
       console.error("[stage] blocker re-check failed:", e);
     }
+    startRetrospectives(cap, now);
     const running = db.query<{ id: string }, []>("SELECT id FROM stage WHERE status = 'running' AND session IS NOT NULL").all();
     const ids = new Set(running.map((r) => r.id));
     for (const id of runningSeen.keys()) if (!ids.has(id)) runningSeen.delete(id);
@@ -1609,6 +1676,9 @@ export function createStageRuntime(
       prompt = specFirstMessage(stage, input.room, wt, input.reason) ?? "";
       renderWithPack = (pack) => specFirstMessage(stage, input.room, wt, input.reason, pack) ?? "";
       packQuestion = db.query<{ title: string }, [string]>("SELECT t.title FROM stage_scope s JOIN tickets t ON t.id = s.ticket_id WHERE s.stage_id = ? ORDER BY t.id").all(stage.id).map((r) => r.title).join(" ");
+    }
+    else if (prompt === "" && stage.review === "retro" && cwd) {
+      prompt = retroFirstMessage(stage, input.room, cwd, input.reason) ?? "";
     }
     // The pack runs only in a worktree that the hub made for this launch.
     const packWorktree = renderWithPack && wtKey && input.cwd === null && cwd && packCommandCount(stage.role, stage.review) > 0 ? cwd : null;
@@ -2026,6 +2096,7 @@ export function createStageRuntime(
       migrateSessionReleased(d);
       migrateStartCommit(d);
       migrateRoom(d);
+      migrateRetroWeek(d);
     },
     routes: withLedgerRequired(routes),
     // A stage is the hub's own bookkeeping: agents never get a stage replayed on reconnect.
