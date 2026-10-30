@@ -35,7 +35,7 @@
     return out;
   }
 
-  // --fs-terminal already includes --ui-font-scale (single source: tokens.css).
+  // --fs-terminal is 13px, or 12px on a phone, with no --ui-font-scale (single source: tokens.css).
   function fontSize() {
     const raw = getComputedStyle(document.documentElement)
       .getPropertyValue('--fs-terminal').trim();
