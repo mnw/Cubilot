@@ -690,7 +690,7 @@ function validatorPassCommits(db: Database, ticketId: string): (string | null)[]
  * The result handoff ids of the Validator PASS stages of a ticket since its latest worker stage, oldest first. A stage's result
  * is the last handoff its own session sent with context.stage_id = the stage (null when none is recorded).
  */
-function validatorPassHandoffs(db: Database, ticketId: string): { stage_id: string; handoff_id: string | null }[] {
+export function validatorPassHandoffs(db: Database, ticketId: string): { stage_id: string; handoff_id: string | null }[] {
   return db
     .query<{ stage_id: string; handoff_id: string | null }, [string, string]>(
       `SELECT s.id AS stage_id,

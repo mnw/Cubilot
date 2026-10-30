@@ -23,6 +23,7 @@ import type {
 } from "../core/types";
 import { createLedgerEntity, ledgerConflictResponse, withLedgerRequired } from "../core/ledger-entity";
 import { validName, validRoomLabel } from "../core/ids";
+import { deliveriesNotInMain } from "../core/delivery-report";
 import { openBlockerIds } from "./ticket-blockers";
 import { flowReport } from "../core/flow";
 import { getRoomSettings, DEFAULT_ROLE_LIMITS, DEFAULT_STAGE_TIMEOUT_MIN, STAGE_ROLES, type StageRole } from "../core/ledger";
@@ -1851,7 +1852,7 @@ export function createStageRuntime(
       handler: (_req, _cap, params) => {
         const room = decodeURIComponent(params.id);
         if (!validRoomLabel(room)) return Response.json({ error: "invalid room" }, { status: 400 });
-        return Response.json({ room, requests: needsYouRequests(db, room), waiting: waitsForYou(db, room) });
+        return Response.json({ room, requests: needsYouRequests(db, room), waiting: waitsForYou(db, room), deliveries: deliveriesNotInMain(db, room) });
       },
     },
     {

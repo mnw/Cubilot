@@ -9,6 +9,7 @@ import { insertEvent } from "../core/events";
 import { mintRequestRowId, ts, validName, validRoomLabel } from "../core/ids";
 import { pausedRefusal } from "../core/auth";
 import { roomLead } from "./ticket";
+import { buildDeliveryReport } from "../core/delivery-report";
 
 // ---------- Types ----------
 
@@ -427,6 +428,24 @@ export function createRequestKind(db: Database): RequestKind {
           if (e instanceof LedgerConflict) return ledgerConflictResponse(e);
           throw e;
         }
+      },
+    },
+
+    {
+      // The delivery report of a request: ledger and git, no model. 409 while a ticket is open (P6-08).
+      method: "GET",
+      path: /^\/requests\/([^/]+)\/([^/]+)\/delivery$/,
+      auth: "read",
+      handler: (req) => {
+        const parts = new URL(req.url).pathname.split("/");
+        const room = decodeURIComponent(parts[2] ?? "");
+        const requestId = decodeURIComponent(parts[3] ?? "");
+        if (!validRoomLabel(room)) return Response.json({ error: "invalid room" }, { status: 400 });
+        if (!REQUEST_ID_RE.test(requestId)) return Response.json({ error: "invalid request id" }, { status: 400 });
+        const r = buildDeliveryReport(db, room, requestId);
+        if (r.kind === "not_found") return Response.json({ error: `no request ${requestId} in room ${room}` }, { status: 404 });
+        if (r.kind === "open") return Response.json({ error: "the request has an open ticket: no delivery report yet" }, { status: 409 });
+        return Response.json(r.report);
       },
     },
 
