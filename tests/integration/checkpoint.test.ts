@@ -198,19 +198,18 @@ describe("checkpoint failures", () => {
       await t.turnEnd();
       await waitFor(() => t.leadGot.length > before);
       const text = String(t.leadGot.slice(before).map((e: any) => e.text ?? JSON.stringify(e)).join("\n"));
-      const m = text.match(/^(bash '[^'\n]+') <<'(CKPT_NOTE_[0-9a-f]{32})'$/m);
+      const m = text.match(/^Step 2: run this command: (bash '[^'\n]+' --file '[^'\n]+')$/m);
       expect(m).not.toBeNull();
-      // The shell reads the quoted path as one word.
+      // The shell reads the quoted script path and the note file path as one word each.
       const argv = Bun.spawnSync(["bash", "-c", `set -- ${m![1].slice(5)}; echo $#`]).stdout.toString().trim();
-      expect(argv).toBe("1");
+      expect(argv).toBe("3");
       expect(m![1]).toContain(join(dir, "v1", "orchestrator", "hooks", "checkpoint-note.sh"));
     } finally {
       await t.close();
     }
   });
 
-  test("the note command does not expand shell metacharacters in the note", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "cubilot-note-"));
+  test("the note never passes through a shell: hostile note text reaches the hub whole", async () => {
     const t = await boot();
     try {
       writeContext(t.hub, 10);
@@ -219,19 +218,29 @@ describe("checkpoint failures", () => {
       await t.turnEnd();
       await waitFor(() => t.leadGot.length > before);
       const text = String(t.leadGot.slice(before).map((e: any) => e.text ?? JSON.stringify(e)).join("\n"));
-      const m = text.match(/^bash '[^'\n]+' <<'(CKPT_NOTE_[0-9a-f]{32})'$/m);
-      expect(m).not.toBeNull();
-      const tag = m![1];
+      const cmdLine = text.match(/^Step 2: run this command: (.+)$/m)![1];
+      const file = text.match(/^Step 1: write the note to this file with the Write tool: (.+)$/m)![1];
+      // The command has no model text and no here-document.
+      expect(cmdLine).not.toContain("<<");
+      const dir = mkdtempSync(join(tmpdir(), "cubilot-note-"));
       const marker = join(dir, "marker");
-      const out = join(dir, "out");
-      const stub = join(dir, "stub.sh");
-      writeFileSync(stub, `#!/bin/bash\ncat > '${out}'\n`);
-      const note = `a $(touch ${marker}) \`touch ${marker}\` "$HOME" 'q' \\ !x`;
-      // The command the hub gives, with the stub as script and the note between the tag lines.
-      const cmd = `bash '${stub}' <<'${tag}'\n${note}\n${tag}\n`;
-      expect(Bun.spawnSync(["bash", "-c", cmd]).exitCode).toBe(0);
+      // Lines that would end or escape a here-document or run a command if a shell read them.
+      const note = `a $(touch ${marker})\n\`touch ${marker}\` "$HOME" 'q' \\ !x\nEOF\nCKPT\ntouch ${marker}\n`;
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, note);
+      writeFileSync(join(dataDir(t.hub), "hub.url"), t.hub.url);
+      writeFileSync(join(dataDir(t.hub), "hub.token"), t.hub.token);
+      const run = Bun.spawnSync(["bash", "-c", cmdLine], {
+        env: { ...process.env, CHATBRIDGE_AGENT: LEAD, CUBILOT_DATA_DIR: dataDir(t.hub) },
+      });
+      expect(run.exitCode).toBe(0);
       expect(existsSync(marker)).toBe(false);
-      expect(readFileSync(out, "utf8")).toBe(note + "\n");
+      expect(existsSync(file)).toBe(false);
+      const cp = (await t.list())[0];
+      // The hub stored the first 200 words of the whole text, in order, with the shell text intact.
+      expect(cp.note).toContain("$(touch");
+      expect(cp.note).toContain("EOF");
+      expect(cp.note).toContain("CKPT");
     } finally {
       await t.close();
     }

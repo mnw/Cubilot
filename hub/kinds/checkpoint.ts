@@ -86,6 +86,8 @@ const dataDir = () => process.env.CUBILOT_DATA_DIR || join(homedir(), "Library",
 /** `<app data>/checkpoints`: one summary file for each lead, `<agent>.md`, mode 0600. */
 export const checkpointsDir = () => join(dataDir(), "checkpoints");
 const summaryPath = (agent: string) => join(checkpointsDir(), `${agent}.md`);
+/** The file the lead writes its note to. The note script reads it and removes it. */
+const notePath = (agent: string) => join(checkpointsDir(), `${agent}.note.txt`);
 
 /** Single-quote a path for the shell: the factory path holds spaces on an installed app. */
 const shellQuote = (p: string) => `'${p.replace(/'/g, `'\\''`)}'`;
@@ -330,8 +332,8 @@ export function createCheckpointKind(db: Database, deps: CheckpointDeps): Checkp
   };
 
   const askForNote = (cap: HubCapabilities, cp: CheckpointSnapshot) => {
-    // A quoted here-document delimiter stops all shell expansion. The random tag cannot appear in a note by chance.
-    const tag = `CKPT_NOTE_${crypto.randomUUID().replace(/-/g, "")}`;
+    // The note never goes through a shell: the lead writes it to a file with its Write tool. The command has no model text.
+    const file = notePath(cp.agent);
     return cap.sse.emit(
       {
         from: "system",
@@ -340,9 +342,9 @@ export function createCheckpointKind(db: Database, deps: CheckpointDeps): Checkp
         ts: ts(),
         image: null,
         text:
-          `Checkpoint ${cp.id}: write a note of at most ${NOTE_MAX_WORDS} words with the open points that are not on the board. ` +
-          `Run this command with your note on the lines between the two ${tag} lines. The shell does not expand the note. Do not change the ${tag} lines.\n` +
-          `bash ${shellQuote(noteScript())} <<'${tag}'\n<note>\n${tag}\n` +
+          `Checkpoint ${cp.id}: write a note of at most ${NOTE_MAX_WORDS} words with the open points that are not on the board.\n` +
+          `Step 1: write the note to this file with the Write tool: ${file}\n` +
+          `Step 2: run this command: bash ${shellQuote(noteScript())} --file ${shellQuote(file)}\n` +
           `Then end your turn. The hub clears your context after that turn and gives you the note and the state summary.`,
       },
       { kind: "to-agents", agents: [cp.agent] },
