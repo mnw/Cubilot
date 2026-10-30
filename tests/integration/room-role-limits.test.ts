@@ -6,7 +6,7 @@ import { Database } from "bun:sqlite";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { authedFetch } from "../helpers/fetch";
 
-const DEFAULTS = { worker: 2, tester: 2, validator: 1, writer: 1, editor: 1, reviewer: 1 };
+const DEFAULTS = { worker: 2, tester: 2, validator: 1, writer: 1, editor: 1, reviewer: 1, retrospective: 1 };
 
 async function put(hub: HubHandle, room: string, body: unknown) {
   const r = await authedFetch(hub, `/rooms/${room}/settings`, { method: "PUT", body: JSON.stringify(body) });

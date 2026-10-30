@@ -89,6 +89,8 @@ const TICKET_REF_MAX_CHARS = 200;
 const TICKET_PLANNING_NOTE_MAX_CHARS = 4_000;
 const REQUEST_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
 const isStageRole = (v: unknown): v is StageRole => typeof v === "string" && (STAGE_ROLES as readonly string[]).includes(v);
+/** An agent may name any stage role but `retrospective`: only the hub starts that one. */
+const isTicketRole = (v: unknown): v is StageRole => isStageRole(v) && v !== "retrospective";
 const TICKET_BODY_MAX = 16_384;
 // Body cap for POST /tickets and POST /tickets/<id>/edit: every capped field must reach validation in worst-case JSON encoding.
 // planning_note: 4000 code points, a non-BMP one escaped as two \uXXXX = 12 bytes -> 48000.
@@ -868,7 +870,7 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
         }
         let role: StageRole | null = null;
         if (body.role !== undefined && body.role !== null) {
-          if (!isStageRole(body.role)) return Response.json({ error: "invalid role" }, { status: 400 });
+          if (!isTicketRole(body.role)) return Response.json({ error: "invalid role" }, { status: 400 });
           role = body.role;
         }
 
@@ -1393,7 +1395,7 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
         }
         if (body.role !== undefined) {
           // One of the six roles sets it, an explicit null clears it.
-          if (body.role !== null && !isStageRole(body.role)) return Response.json({ error: "invalid role" }, { status: 400 });
+          if (body.role !== null && !isTicketRole(body.role)) return Response.json({ error: "invalid role" }, { status: 400 });
           input.role = body.role;
         }
         if (body.blocked_by !== undefined) input.blocked_by = body.blocked_by;

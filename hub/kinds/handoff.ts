@@ -408,8 +408,10 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
         if (!validName(from)) return Response.json({ error: "invalid from" }, { status: 400 });
         if (cap.agents.isPaused(from)) return pausedRefusal();
         if (toRole !== "") {
-          if (!(STAGE_ROLES as readonly string[]).includes(toRole)) {
-            return Response.json({ error: `invalid to_role (one of ${STAGE_ROLES.join(", ")})` }, { status: 400 });
+          // `retrospective` is a stage role that only the hub starts: no handoff names it.
+          const handoffRoles = STAGE_ROLES.filter((r) => r !== "retrospective");
+          if (!(handoffRoles as readonly string[]).includes(toRole)) {
+            return Response.json({ error: `invalid to_role (one of ${handoffRoles.join(", ")})` }, { status: 400 });
           }
         } else if (!validName(to)) return Response.json({ error: "invalid to" }, { status: 400 });
         if (!task) return Response.json({ error: "task required" }, { status: 400 });

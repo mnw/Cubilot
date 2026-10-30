@@ -32,7 +32,7 @@ describe("stage session bindings in the ledger", () => {
     const before = cols(db);
     migrate(db);
     const once = cols(db);
-    expect(once.filter((c) => !before.includes(c))).toEqual(["session_released_at_ms", "start_commit"]);
+    expect(once.filter((c) => !before.includes(c))).toEqual(["session_released_at_ms", "start_commit", "room"]);
     const stamp = db.query<{ v: number | null }, []>("SELECT session_released_at_ms AS v FROM stage WHERE id = 's_old'").get()!.v;
     expect(stamp).not.toBeNull();
     db.run("INSERT INTO stage (id, role, attempt, status, session) VALUES ('s_new', 'worker', 1, 'running', 'worker-2')");

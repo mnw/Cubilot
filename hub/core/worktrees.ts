@@ -20,8 +20,8 @@ export type WorktreeRequest = {
 export type Worktree = { path: string; branch: string | null; temporary: boolean };
 
 const BRANCH_ROLES = new Set(["worker", "writer", "editor"]);
-/** Validator and Reviewer read the tree and never change it (stage-sessions 4.4). */
-export const READ_ONLY_ROLES = new Set(["validator", "reviewer"]);
+/** Validator, Reviewer and Retrospective read the tree and never change it (stage-sessions 4.4). */
+export const READ_ONLY_ROLES = new Set(["validator", "reviewer", "retrospective"]);
 
 // chmod over a tree. Symlinks are skipped (chmod would follow them out of the tree). The `.git` entry at the root is
 // left alone: git reads it, and the real git data lives in the project's own .git.

@@ -471,11 +471,11 @@ export function migrateLedger(db: Database): void {
   }
 }
 
-export const STAGE_ROLES = ["worker", "tester", "validator", "writer", "editor", "reviewer"] as const;
+export const STAGE_ROLES = ["worker", "tester", "validator", "writer", "editor", "reviewer", "retrospective"] as const;
 export type StageRole = (typeof STAGE_ROLES)[number];
 export type RoleLimits = Record<StageRole, number>;
 /** Applied while room_settings.role_limits / stage_timeout_min are NULL: the columns store only what the human set. */
-export const DEFAULT_ROLE_LIMITS: Readonly<RoleLimits> = { worker: 2, tester: 2, validator: 1, writer: 1, editor: 1, reviewer: 1 };
+export const DEFAULT_ROLE_LIMITS: Readonly<RoleLimits> = { worker: 2, tester: 2, validator: 1, writer: 1, editor: 1, reviewer: 1, retrospective: 1 };
 export const DEFAULT_STAGE_TIMEOUT_MIN = 30;
 
 export type RoomSettings = {
