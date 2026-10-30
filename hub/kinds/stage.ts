@@ -29,7 +29,7 @@ import { LedgerConflict } from "../core/types";
 import type { LaunchRecord } from "../core/launch-record";
 import { createLaunchQueue, type LaunchEnd, type LaunchQueue, type LaunchRequest } from "../core/launch-queue";
 import { roleHarness } from "../core/role-harness";
-import { roleModelFor } from "../core/role-models";
+import { roleModelFor, secondReviewModel } from "../core/role-models";
 import { metricsByRole, recordStageMetrics, stagesMissingMetrics, type Launch } from "../core/stage-metrics";
 import { makeSSE } from "../core/sse";
 import { assignBySystemInTx, closeReviewedBySystemInTx, notifyHeldDrafts, queueBySystemInTx, type HeldDraft } from "./ticket";
@@ -475,7 +475,7 @@ export type StageRuntime = {
 };
 
 export const NO_PROJECT_FOLDER = "room has no project folder: set it in New factory room";
-const BRANCH_ROLES = new Set(["worker", "writer"]);
+const BRANCH_ROLES = new Set(["worker", "writer", "editor"]);
 const pathSegment = (x: string) => x.replace(/[^A-Za-z0-9_.-]/g, "_");
 
 /**
@@ -824,7 +824,11 @@ export function createStageRuntime(
       } catch (e) {
         console.error(`[stage] removing the worktree of ${session} failed:`, e);
       }
-      if (held?.room) startWaiting(held.role, held.room, cap);
+      if (held?.room) {
+        startWaiting(held.role, held.room, cap);
+        // The next branch-role stage of the same ticket (Writer -> Editor) waited for this close.
+        if (BRANCH_ROLES.has(held.role)) for (const r of BRANCH_ROLES) if (r !== held.role) startWaiting(r, held.room, cap);
+      }
     },
     onLaunchEnd(req, end: LaunchEnd, cap) {
       if (req.kind !== "launch") return;
@@ -1409,13 +1413,24 @@ export function createStageRuntime(
     for (const [session, c] of closing) {
       if (c.stageId === stage.id) return { ok: false, reason: `the close of ${session} is not acked yet` };
     }
+    // A branch role shares the ticket worktree with the earlier branch-role session of the same ticket (the Editor continues
+    // on the Writer's work): it waits for that session's close ack, whatever slot is free.
+    if (stage.ticket_id && BRANCH_ROLES.has(stage.role)) {
+      for (const [session, c] of closing) {
+        if (c.stageId === stage.id || !BRANCH_ROLES.has(c.role)) continue;
+        const same = db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM stage WHERE id = ? AND ticket_id = ?").get(c.stageId, stage.ticket_id)!.n;
+        if (same) return { ok: false, reason: `the close of ${session} (same ticket) is not acked yet` };
+      }
+    }
     // A session that ended but is not closed yet still holds its slot and its worktree (5.3b).
     const closingNow = [...closing.values()].filter((c) => c.role === stage.role && c.room === input.room).length;
     if (live + closingNow >= limit) return { ok: false, reason: `role ${stage.role} is at its limit (${limit}) in room ${input.room}` };
 
     // role_models in config.yml, read now so an edit applies to this launch. A shape error of this role fails the attempt
     // below, after the stage is `launching`, through the same path as a refused ack (retry, then final failure).
-    const models = roleModelFor(stage.role, STAGE_ROLES);
+    // The second Validator review of a high ticket uses second_review instead (a bad value gives the default, never an error).
+    const secondReview = stage.role === "validator" && !!stage.ticket_id && stage.review === null && isHighTicket(stage.ticket_id) && validatorPasses(stage.ticket_id) >= 1;
+    const models: ReturnType<typeof roleModelFor> = secondReview ? { entry: secondReviewModel() } : roleModelFor(stage.role, STAGE_ROLES);
 
     // 4.5: the hub makes the worktree; the shell only starts in it. A spec stage gets a detached read-only one at the
     // commit of its handoff, or HEAD (spec-review 2.4), under the request instead of a ticket.
@@ -1457,7 +1472,7 @@ export function createStageRuntime(
         )
         .get(stage.ticket_id);
       if (t) {
-        const fm = { stable: stableFor(input.room), notes: earlierNotes(db, t.id), stageId: input.stage_id, role: stage.role, ticket: t, branch, worktree: cwd, reason: input.reason, recipient: leadOfRoom(input.room), handoff: startingHandoff(stage.id, stage.ticket_id, stage.role) ?? undefined };
+        const fm = { stable: stableFor(input.room), notes: earlierNotes(db, t.id).filter((n) => !secondReview || n.role !== "validator"), stageId: input.stage_id, role: stage.role, ticket: t, branch, worktree: cwd, reason: input.reason, recipient: leadOfRoom(input.room), handoff: startingHandoff(stage.id, stage.ticket_id, stage.role) ?? undefined };
         prompt = renderFirstMessage(fm);
         // The ticket row is read again at each render: an edit between the launch request and the delivery is not lost (L2).
         renderWithPack = (pack) => {

@@ -179,6 +179,13 @@ describe("scripts/test.sh", () => {
     expect(r.out).toMatch(/peak RSS \d+ MB/);
   }, 30000);
 
+  test("default time limit is 520 s", () => {
+    const script = readFileSync(SCRIPT, "utf8");
+    expect(script).toMatch(/^TIMEOUT_S=\$\{CUBILOT_TEST_TIMEOUT_S:-520\}$/m);
+    expect(script).toContain("(default 520)");
+    expect(readFileSync(join(ROOT, "CLAUDE.md"), "utf8")).toContain("`CUBILOT_TEST_TIMEOUT_S` (default 520 s)");
+  });
+
   test("a bad setting exits 2 with a message and takes no lock", async () => {
     for (const env of [{ CUBILOT_TEST_TIMEOUT_S: "abc" }, { CUBILOT_TEST_MAX_RSS_MB: "0" }, { CUBILOT_TEST_TIMEOUT_S: "-5" }]) {
       const r = await run([join(dir, "ok.test.ts")], env);
