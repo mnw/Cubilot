@@ -105,9 +105,22 @@ describe("settings routes", () => {
     const f = join(modDir, "hooks/register.js");
     const keep = readFileSync(f);
     rmSync(f);
-    expect((await get("/settings/mcp-template")).status).toBe(503);
+    const res = await get("/settings/mcp-template");
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toContain("next Claude spawn stages the mod again");
     writeFileSync(f, keep);
     expect((await get("/settings/mcp-template")).status).toBe(200);
+  });
+
+  test("mcp template: a stale mod folder is not exported by the shell, so the hub gives 503", async () => {
+    const bare = await spawnHub({ humanName: "boss" });
+    try {
+      const res = await fetch(`${bare.url}/settings/mcp-template`, { headers: { Authorization: `Bearer ${bare.token}` } });
+      expect(res.status).toBe(503);
+      expect((await res.json()).error).toContain("next Claude spawn stages the mod again");
+    } finally {
+      await bare.kill();
+    }
   });
 
   test("Same values as the shell: roles are the staged single-agent roles, sorted", async () => {

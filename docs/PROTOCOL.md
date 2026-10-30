@@ -1211,7 +1211,7 @@ Read-auth. Each route reads `config.yml` at each call, so an edit shows at the n
 | GET | `/settings/ui` | `{ theme, font_scale, fonts: { ui, mono } }`. An invalid theme gives `default`; `font_scale` is clamped to 0.85..1.25; an unsafe font name gives `""`. |
 | GET | `/settings/human` | `{ name }`, the hub's own human name (`CUBILOT_HUMAN_NAME`). |
 | GET | `/settings/version` | `{ version }` from `CUBILOT_APP_VERSION` (`""` when unset). |
-| GET | `/settings/mcp-template` | `{ template }`, the Claude launch line for a session outside Cubilot. 503 when the mod folder is not staged. |
+| GET | `/settings/mcp-template` | `{ template }`, the Claude launch line for a session outside Cubilot. 503 when the mod folder is stale, missing or incomplete: the hub does not restage it (the shell does, at the next Claude spawn). |
 | GET | `/settings/paths` | `{ config, skills, mcp }`; with `?agent=<name>` also `agent_cwd` (live pane path or `null`). A browser shows these with a Copy button. 400 on an invalid agent name. |
 | GET | `/roles` | `{ roles, pills }`. `roles`: the single-agent roles of the staged version (`name`, `harness`, `provider`, `model`, `thinking`, `effort`), sorted. `pills`: `{ <agent>: { role, model, provider, effort, harness } }` of the running tmux sessions. |
 | GET | `/agents/<name>/harness` | `{ harness: "claude" \| "pi" }` of a roster agent or a tmux session. 404 for an unknown agent. |

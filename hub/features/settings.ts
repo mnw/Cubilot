@@ -251,7 +251,7 @@ export function createSettingsFeature(deps: SettingsDeps): HubFeature {
         handler: () => {
           const dir = process.env.CUBILOT_MOD_DIR;
           // Same guard as a spawn: never hand out a launch line for a stale or missing mod.
-          if (!dir || !modDirComplete(dir)) return err("chatbridge mod is not staged", 503);
+          if (!dir || !modDirComplete(dir)) return err("chatbridge mod is not staged; the next Claude spawn stages the mod again", 503);
           const q = dir.replace(/'/g, `'\\''`);
           return Response.json({ template: `CHATBRIDGE_AGENT='agent' CHATBRIDGE_ROOM='default' claude --plugin-dir '${q}'` });
         },
