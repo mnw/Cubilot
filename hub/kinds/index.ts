@@ -11,6 +11,7 @@ import { createDecisionKind } from "./decision";
 import { createHandoffKind, createSystemHandoff } from "./handoff";
 import { createInterruptKind } from "./interrupt";
 import { createPermissionKind } from "./permission";
+import { createRequestKind } from "./request";
 import { buildPack } from "../core/context-pack";
 import type { LaunchRecord } from "../core/launch-record";
 import { createStageRuntime } from "./stage";
@@ -56,6 +57,8 @@ export function buildKinds(db: Database | null, launchRecord?: LaunchRecord): re
     createInterruptKind(db),
     createPermissionKind(db),
     createTicketKind(db, stage.hooks),
+    // After the ticket kind: its migration reads the tickets table.
+    createRequestKind(db),
     stage.module,
     cancelTrace,
     createDecisionKind(db),

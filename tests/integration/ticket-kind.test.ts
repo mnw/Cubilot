@@ -46,8 +46,30 @@ function makeEnv() {
     briefing: { refresh: () => void refreshes++ },
   } as unknown as HubCapabilities;
 
+  // Every ticket names a request that exists (plan-approval). Older cases seed a factory request with no feature, so the
+  // lead's queue follows the low-radius rule; a case about the new rule sets `noSeed`.
+  let seedRequests = true;
+  const seed = (room: string | null, label: unknown) => {
+    if (!seedRequests || typeof room !== "string" || typeof label !== "string" || !/^[A-Za-z0-9._-]{1,64}$/.test(label)) return;
+    db.run(
+      `INSERT OR IGNORE INTO requests (id, room, request_id, origin, features, parent_request_id, source, approved, status, created_by, created_at_ms, version)
+       VALUES (?, ?, ?, 'factory', '[]', NULL, NULL, NULL, 'open', 'test', 1, 1)`,
+      [`rq_${room}_${label}`, room, label],
+    );
+  };
+
   async function call(method: string, path: string, body?: unknown): Promise<{ status: number; json: any }> {
     const url = new URL(`http://hub.test${path}`);
+    const b = body as Record<string, unknown> | undefined;
+    if (b && typeof b.request_id === "string") {
+      const edited = path.match(/^\/tickets\/([^/]+)\/edit$/);
+      const room = edited
+        ? (db.query<{ room: string }, [string]>("SELECT room FROM tickets WHERE id = ?").get(edited[1]!)?.room ?? null)
+        : path === "/tickets"
+          ? (b.by === HUMAN ? (b.room as string | undefined) ?? null : roster[b.by as string] ?? null)
+          : null;
+      seed(room, b.request_id);
+    }
     for (const k of kinds) {
       for (const r of k.routes) {
         if (r.method !== method) continue;
@@ -79,6 +101,7 @@ function makeEnv() {
     emitted,
     cap,
     call,
+    noSeed: () => void (seedRequests = false),
     refreshes: () => refreshes,
     events: (id: string) =>
       db.query<{ kind: string; actor: string }, [string]>("SELECT kind, actor FROM events WHERE entity_id = ? ORDER BY seq").all(id),
@@ -86,7 +109,9 @@ function makeEnv() {
   };
 }
 
+// A queued ticket of a plain agent needs a request (criterion 2.2): the default names a request the harness seeds.
 const spec = (over: Record<string, unknown> = {}) => ({
+  request_id: "req-default",
   by: "alice",
   title: "Fix login",
   acceptance_criteria: "Login works with a valid password.",
@@ -214,7 +239,7 @@ describe("draft intake moves", () => {
 
   test("the human and the lead move draft <-> queued; the creator, the assignee and others are refused", async () => {
     await lead();
-    const id = await create({ status: "draft" });   // alice creates
+    const id = await create({ status: "draft", request_id: "req-1" });   // alice creates
     expect((await mv(id, "alice", "queued")).status).toBe(403);
     expect((await mv(id, "carol", "queued")).status).toBe(403);
     expect((await mv(id, "bob", "queued")).status).toBe(200);
@@ -259,13 +284,29 @@ describe("draft intake moves", () => {
     expect((await mv(id, "bob", "queued")).status).toBe(200);
   });
 
-  test("a ticket without a label is checked alone", async () => {
+  test("a ticket without a label is queued only by the human (the lead gets 403, also for a low ticket)", async () => {
     await lead();
     const high = await create({ status: "draft", blast_radius: "high" });
     const low = await create({ status: "draft" });
     expect((await mv(high, "bob", "queued")).status).toBe(403);
-    expect((await mv(low, "bob", "queued")).status).toBe(200);
+    expect((await mv(low, "bob", "queued")).status).toBe(403);
+    expect((await mv(low, HUMAN, "queued")).status).toBe(200);
     expect((await mv(high, HUMAN, "queued")).status).toBe(200);
+  });
+});
+
+describe("ticket.edited payload", () => {
+  test("Event payload: a criteria change holds acceptance_criteria {from, to}; a title-only edit does not", async () => {
+    const id = await create({ acceptance_criteria: "Old text." });
+    expect((await t.call("POST", `/tickets/${id}/edit`, { by: "alice", acceptance_criteria: "New text." })).status).toBe(200);
+    const payloadOf = () => JSON.parse(t.db.query<{ payload_json: string }, [string]>("SELECT payload_json FROM events WHERE entity_id = ? AND kind = 'ticket.edited' ORDER BY seq DESC LIMIT 1").get(id)!.payload_json);
+    expect(payloadOf()).toMatchObject({ fields: ["acceptance_criteria"], acceptance_criteria: { from: "Old text.", to: "New text." } });
+    expect((await t.call("POST", `/tickets/${id}/edit`, { by: "alice", title: "Other title" })).status).toBe(200);
+    expect(payloadOf().acceptance_criteria).toBeUndefined();
+    // The same text again changes nothing and writes no event.
+    const n = t.events(id).length;
+    expect((await t.call("POST", `/tickets/${id}/edit`, { by: "alice", acceptance_criteria: "New text." })).json.idempotent).toBe(true);
+    expect(t.events(id).length).toBe(n);
   });
 });
 
@@ -274,7 +315,7 @@ describe("draft promotion entry", () => {
 
   test("draft -> queued writes ticket.queued and broadcasts ticket.promoted with by and the lead; other moves stay ticket.update", async () => {
     await lead();
-    const id = await create({ status: "draft" });
+    const id = await create({ status: "draft", request_id: "req-1" });
     expect((await as(id, "bob", "queued")).status).toBe(200);
     expect(t.events(id).map((e) => e.kind)).toEqual(["ticket.created", "ticket.queued"]);
     const e = t.emitted.at(-1)!.entry as any;
@@ -296,7 +337,7 @@ describe("draft promotion entry", () => {
 
   test("the lead's retry of queued or draft is idempotent: 200, no event, no broadcast; a non-lead retry is still 403", async () => {
     await lead();
-    const id = await create({ status: "draft" });   // unassigned
+    const id = await create({ status: "draft", request_id: "req-1" });   // unassigned
     expect((await as(id, "bob", "queued")).status).toBe(200);
     let sent = t.emitted.length;
     let events = t.events(id).length;
@@ -358,7 +399,7 @@ describe("briefing: request label, open blockers, draft", () => {
     expect(lines()).not.toContain(b1);
 
     // No label and no blockers: the line is as before.
-    await create({ assignee: "bob" });
+    await create({ by: HUMAN, room: "r1", request_id: null, assignee: "bob" });
     expect(lines().split("\n").filter((l) => l.startsWith("- ") && !l.includes("req-9") ).every((l) => !l.includes("request"))).toBe(true);
   });
 });
@@ -454,7 +495,7 @@ describe("create", () => {
     expect(ok.status).toBe(201);
     expect(ok.json.snapshot.request_id).toBe("req-1.a_B");
     expect(t.row(ok.json.snapshot.id).request_id).toBe("req-1.a_B");
-    expect((await t.call("POST", "/tickets", spec())).json.snapshot.request_id).toBeNull();
+    expect((await t.call("POST", "/tickets", spec({ request_id: null, status: "draft" }))).json.snapshot.request_id).toBeNull();
     const before = t.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM tickets").get()!.n;
     const eventsBefore = t.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM events").get()!.n;
     for (const bad of ["bad label!", "", "a".repeat(65), 7, ["x"]]) {
@@ -1618,11 +1659,11 @@ describe("briefing hook (4.4) and refresh", () => {
     t.kinds.find((x) => x.kind === "ticket")!.briefingLines!({ name, room, permanent: false }, t.cap);
 
   test("lists only the agent's own non-terminal tickets in its room, highest priority first", async () => {
-    const low = await create({ title: "low pri", priority: "low", acceptance_criteria: "A\nB   C" });
-    const high = await create({ title: "high pri", priority: "highest" });
-    const done = await create({ title: "finished" });
-    const mine = await create({ title: "not claimed" });
-    const others = await create({ title: "carol's" });
+    const low = await create({ by: HUMAN, room: "r1", request_id: null, title: "low pri", priority: "low", acceptance_criteria: "A\nB   C" });
+    const high = await create({ by: HUMAN, room: "r1", request_id: null, title: "high pri", priority: "highest" });
+    const done = await create({ by: HUMAN, room: "r1", request_id: null, title: "finished" });
+    const mine = await create({ by: HUMAN, room: "r1", request_id: null, title: "not claimed" });
+    const others = await create({ by: HUMAN, room: "r1", request_id: null, title: "carol's" });
     for (const id of [low, high, done]) await claim(id, "bob");
     await claim(others, "carol");
     await as(done, "bob", "cancelled");

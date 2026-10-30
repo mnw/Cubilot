@@ -17,11 +17,40 @@ export async function authedFetch(
   return fetch(url, { ...init, headers });
 }
 
+/**
+ * A ticket names a request that exists (plan-approval). Tests that are not about the request rule get a factory request
+ * with no feature in the room of the caller, so the lead's queue and the spec PASS follow the low-radius rule.
+ * A test about the rule passes `noSeed: true` in the body, or posts with authedFetch.
+ */
+async function seedRequestFor(hub: HubHandle, body: Record<string, unknown>): Promise<void> {
+  let room: string | null = typeof body.room === "string" ? body.room : null;
+  if (body.by !== hub.humanName) {
+    const roster = (await (await authedFetch(hub, "/agents")).json().catch(() => [])) as Array<{ name: string; room: string | null }>;
+    room = roster.find((a) => a.name === body.by)?.room ?? null;
+  }
+  if (!room) return;
+  await authedFetch(hub, "/requests", {
+    method: "POST",
+    body: JSON.stringify({ by: hub.humanName, room, request_id: body.request_id, origin: "factory" }),
+  });
+}
+
 export async function postJson(
   hub: HubHandle,
   path: string,
   body: unknown,
 ): Promise<{ status: number; json: unknown }> {
+  let b = body as Record<string, unknown> | null;
+  // A plain agent queues a ticket only with a request (criterion 2.2): a test that is not about the rule gets one.
+  if (path === "/tickets" && b && b.noSeed !== true && b.by !== hub.humanName && b.request_id === undefined && b.status !== "draft") {
+    b = { ...b, request_id: "req-default" };
+    body = b;
+  }
+  if (path === "/tickets" && b && typeof b.request_id === "string" && b.noSeed !== true) await seedRequestFor(hub, b);
+  if (b && "noSeed" in b) {
+    const { noSeed: _drop, ...rest } = b;
+    body = rest;
+  }
   const r = await authedFetch(hub, path, {
     method: "POST",
     body: JSON.stringify(body),
