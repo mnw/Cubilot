@@ -1603,7 +1603,7 @@ mod tests {
             seen.push(role);
         }
         seen.sort();
-        assert_eq!(seen, ["editor", "orchestrator", "reviewer", "tester", "validator", "worker", "writer"]);
+        assert_eq!(seen, ["editor", "orchestrator", "retrospective", "reviewer", "tester", "validator", "worker", "writer"]);
     }
 
     #[test]
@@ -1651,7 +1651,7 @@ mod tests {
         let v = stage_factory(&src, &dest, &root.join("user")).unwrap();
         let roles = list_roles_in(&src, &dest.join(&v));
         let names: Vec<&str> = roles.iter().map(|r| r.name.as_str()).collect();
-        assert_eq!(names, ["editor", "orchestrator", "reviewer", "tester", "validator", "worker", "writer"]);
+        assert_eq!(names, ["editor", "orchestrator", "retrospective", "reviewer", "tester", "validator", "worker", "writer"]);
         let val = roles.iter().find(|r| r.name == "validator").unwrap();
         assert_eq!((val.harness.as_str(), val.model.as_deref()), ("pi", Some("gpt-5.6-sol")));
         assert_eq!(list_roles_in(&src, &root.join("missing")), vec![]);
@@ -1715,6 +1715,24 @@ mod tests {
             let t = fs::read_to_string(dest.join(&v).join(r).join("first-message.md")).unwrap_or_else(|e| panic!("{r}: {e}"));
             assert!(t.contains("{{ticket_id}}") && t.contains("{{acceptance_criteria}}"), "{r}");
         }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // Part 21 group 2: the staged retrospective folder holds its role file, first message and 8 skill folders.
+    #[test]
+    fn staged_retrospective_holds_role_first_message_and_eight_skills() {
+        let root = tmp_root("retro");
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
+        let dest = root.join("out");
+        let v = stage_factory(&src, &dest, &root.join("user")).unwrap();
+        let d = dest.join(&v).join("retrospective");
+        assert!(d.join("role.md").is_file() && d.join("first-message.md").is_file());
+        let mut skills: Vec<String> = fs::read_dir(d.join("skills")).unwrap().flatten()
+            .map(|e| { assert!(e.path().join("SKILL.md").is_file(), "{:?}", e.file_name()); e.file_name().to_string_lossy().to_string() })
+            .collect();
+        skills.sort();
+        assert_eq!(skills, ["agency-testing-test-results-analyzer", "agency-testing-workflow-optimizer", "agent-architecture-audit",
+            "agent-introspection-debugging", "context-engineering", "growth-log", "loop-design-check", "retrospective-review"]);
         let _ = fs::remove_dir_all(&root);
     }
 }

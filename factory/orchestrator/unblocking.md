@@ -31,7 +31,7 @@ One message:
 
 ### 5. Remove the cause
 
-When the work moves again, ask: will this block come back? If yes, open one low draft ticket that removes the cause in code (a check, a fix) or replaces a line in a role file. Name the block and its evidence. The weekly retrospective (Part 21) reviews these tickets.
+When the work moves again, ask: will this block come back? If yes, open one low draft ticket in the request `r-<date>-cause-<topic>` (origin `factory`, the blocked ticket as `source`) that removes the cause in code (a check, a fix) or replaces a line in a role file. The ticket title stays a user-story outcome. Name the block and its evidence. The weekly retrospective (Part 21) reviews these tickets.
 
 ## Checks before you queue
 
