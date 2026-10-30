@@ -23,8 +23,8 @@ export function contextPctLimit(): number {
 
 /**
  * The done time of a request, or null when it is not done. Done: the request has a ticket, each ticket is `done` or
- * `cancelled`, and at least one is `done`. The done time is the `at_ms` of the newest `ticket.done` / `ticket.cancelled`
- * event of its tickets, which is the event that made the predicate true. A ticket added later is not terminal, so the
+ * `cancelled`, and at least one is `done`. The done time is the `at_ms` of the newest newest `ticket.done` / `ticket.cancelled`
+ * event of its tickets by `events.seq` (not by wall-clock time), which is the event that made the predicate true. A ticket added later is not terminal, so the
  * request is not done until that ticket ends; its event then gives a new, later done time.
  */
 export function requestDoneAt(db: Database, room: string, requestId: string): number | null {
@@ -32,7 +32,10 @@ export function requestDoneAt(db: Database, room: string, requestId: string): nu
     .query<{ open: number; done: number; at: number | null }, [string, string]>(
       `SELECT SUM(t.status NOT IN ('done', 'cancelled')) AS open,
               SUM(t.status = 'done') AS done,
-              MAX((SELECT MAX(e.at_ms) FROM events e WHERE e.entity_id = t.id AND e.kind IN ('ticket.done', 'ticket.cancelled'))) AS at
+              (SELECT e.at_ms FROM events e
+                WHERE e.kind IN ('ticket.done', 'ticket.cancelled')
+                  AND e.entity_id IN (SELECT id FROM tickets WHERE room = ?1 AND request_id = ?2)
+                ORDER BY e.seq DESC LIMIT 1) AS at
          FROM tickets t WHERE t.room = ?1 AND t.request_id = ?2`,
     )
     .get(room, requestId);

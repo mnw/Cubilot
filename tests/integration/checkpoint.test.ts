@@ -333,6 +333,16 @@ describe("checkpoint at a safe point", () => {
     expect(doneAt("q1")!).toBeGreaterThan(first);
   });
 
+  test("Done time follows ledger order", async () => {
+    const a = await ticket("q1");
+    const b = await ticket("q1");
+    await move(a, "done");
+    await move(b, "done");
+    seed("UPDATE events SET at_ms = 200 WHERE entity_id = ? AND kind = 'ticket.done'", [a]);
+    seed("UPDATE events SET at_ms = 100 WHERE entity_id = ? AND kind = 'ticket.done'", [b]);
+    expect(doneAt("q1")).toBe(100); // b has the newest events.seq
+  });
+
   test("Request done", async () => {
     await move(await ticket("q1"), "done");
     const r = await t.turnEnd();
