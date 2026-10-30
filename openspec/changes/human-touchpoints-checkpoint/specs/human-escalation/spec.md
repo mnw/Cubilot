@@ -1,6 +1,6 @@
 ## Purpose
 
-Holds the decisions of the factory between start and delivery, and asks the human only in four cases, with one Needs-you line in the escalation format of `factory/orchestrator/unblocking.md`.
+Holds the decisions of the factory between start and delivery, and asks the human only in three cases, with one Needs-you line in the escalation format of `factory/orchestrator/unblocking.md`.
 
 ## ADDED Requirements
 
@@ -18,12 +18,12 @@ A decision SHALL start `recorded` (arbiter ruling) or `open` (escalation). The l
 - **WHEN** the human overrules a decision with status `answered`
 - **THEN** the hub returns 409
 
-### Requirement: The human is asked only in four cases
-The hub SHALL open a human decision only when: a decision changes a feature or the approved scope; an action cannot be undone (data loss, a delete outside the factory, an external effect, secrets); the arbiter returns `human` or fails; a security finding has no fix in scope. No other hub path SHALL add a Needs-you line for a FAIL.
+### Requirement: The human is asked only in three cases
+The hub SHALL open a human decision only when: a decision changes a feature or the approved scope; an action cannot be undone (data loss, a delete outside the factory, an external effect, secrets); a security finding has no fix in scope. No other hub path SHALL add a Needs-you line for a FAIL.
 
-#### Scenario: Second FAIL
-- **WHEN** a ticket gets its second FAIL
-- **THEN** no Needs-you line is added and an arbiter stage starts
+#### Scenario: Feature change
+- **WHEN** a decision changes a feature of the request
+- **THEN** the hub opens a human decision
 
 ### Requirement: An open decision uses the escalation format
 An open human decision SHALL hold: `block` (one sentence), `facts` (a numbered list, each with a commit hash or a hub record), `options` (2 or 3, each with its effect, one marked as the recommendation), `human_actions` (each with the full ticket id and the exact action), and `next`. The hub SHALL refuse a decision without these parts with 400.
@@ -42,8 +42,8 @@ The `escalate` tool and `POST /decisions` SHALL let the room lead open a human d
 ### Requirement: Each open decision is one Needs-you line
 The Needs-you area SHALL show one line for each `open` or `escalated` decision of the room, with the block sentence and the ticket ids. The line SHALL open the full decision. Its answer buttons SHALL be the options.
 
-#### Scenario: Arbiter answer human
-- **WHEN** the arbiter of `t1` returns `human`
+#### Scenario: One open decision
+- **WHEN** the room lead opens one decision for `t1`
 - **THEN** the Needs-you area has exactly one line for `t1`
 
 ### Requirement: Only the human answers

@@ -12,15 +12,11 @@ Gives the human, at the delivery of each request, one report built by code from 
 - **THEN** the hub returns 409
 
 ### Requirement: The report holds the facts of the request
-The report SHALL hold, in this order: the origin and the features; each ticket with its status and its merge commit on staging (or `no merge commit`); each criteria edit after the Approve, with the text before and after; the factory requests whose parent is this request, with their tickets and statuses; the rulings and waivers; the known limits (follow-up tickets and open suggestions). The checks part follows (next requirement).
+The report SHALL hold, in this order: the origin and the features; each ticket with its status and its merge commit on staging (or `no merge commit`); each criteria edit after the Approve, with the text before and after; the factory requests whose parent is this request, with their tickets and statuses; the known limits (follow-up tickets and open suggestions). The checks part follows (next requirement).
 
 #### Scenario: Criteria edit
 - **GIVEN** a criteria line of `t1` was rewritten after the Approve
 - **THEN** the report shows the old and the new criteria of `t1`
-
-#### Scenario: Factory follow-up
-- **GIVEN** the arbiter made follow-up request `r-1-fu-1` with one low ticket, queued without the human
-- **THEN** the report of `r-1` lists `r-1-fu-1`, its ticket and its status
 
 ### Requirement: The report holds the checks of the request
 After the facts, the report SHALL hold: each high-radius ticket with both PASS handoff ids and a mark when its merge message does not name both; the test counts of the staging suite log at the newest merge commit (or `no staging log`); the steps of the request's `[human]` live-check ticket.
