@@ -1,5 +1,6 @@
 // Context percentage of an agent: `context_window.used_percentage` of the status line JSON that
-// factory/shared/scripts/statusline.sh keeps at <app data>/context/<agent>.json. null when the file or the value is missing.
+// factory/shared/scripts/statusline.sh keeps at <app data>/context/<agent>.json. rounded to the nearest whole number
+// here, for every harness. null when the file or the value is missing.
 
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -13,7 +14,7 @@ export function readContextPct(agent: string, dir: string = contextDir()): numbe
   if (!agent || agent.startsWith(".") || agent.includes("/") || agent.includes("\\")) return null;
   try {
     const v = JSON.parse(readFileSync(join(dir, `${agent}.json`), "utf8"))?.context_window?.used_percentage;
-    return typeof v === "number" && Number.isFinite(v) ? v : null;
+    return typeof v === "number" && Number.isFinite(v) ? Math.round(v) : null;
   } catch {
     return null;
   }
