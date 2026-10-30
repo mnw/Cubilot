@@ -838,35 +838,6 @@ pub(crate) fn with_choice(mut launch: RoleLaunch, choice: &LaunchChoice) -> Role
     launch
 }
 
-// ---- Role list for the spawn modal (task 5.1) ----
-#[derive(Debug, PartialEq, serde::Serialize)]
-pub(crate) struct RoleInfo {
-    pub name: String,
-    pub harness: String,
-    pub provider: Option<String>,
-    pub model: Option<String>,
-    pub thinking: Option<String>,
-    pub effort: Option<String>,
-}
-
-// Single-agent roles that the given staged version contains, sorted by name. A council (a11y, seo), a folder without
-// a role file and `shared` are not roles and are left out.
-pub(crate) fn list_roles_in(src: &Path, version_dir: &Path) -> Vec<RoleInfo> {
-    let mut out: Vec<RoleInfo> = fs::read_dir(version_dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|e| load_role_spec(&e.file_name().to_string_lossy(), src, version_dir).ok())
-        .map(|s| RoleInfo { name: s.name, harness: s.harness, provider: s.provider, model: s.model, thinking: s.thinking, effort: s.effort })
-        .collect();
-    out.sort_by(|a, b| a.name.cmp(&b.name));
-    out
-}
-
-pub(crate) fn list_roles() -> Result<Vec<RoleInfo>, String> {
-    Ok(list_roles_in(&resolve_factory_src()?, &current_version_dir()?))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1644,21 +1615,6 @@ mod tests {
     }
 
     #[test]
-    fn list_roles_has_the_seven_single_agent_roles_and_no_council_or_shared() {
-        let root = tmp_root("listroles");
-        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
-        let dest = root.join("out");
-        let v = stage_factory(&src, &dest, &root.join("user")).unwrap();
-        let roles = list_roles_in(&src, &dest.join(&v));
-        let names: Vec<&str> = roles.iter().map(|r| r.name.as_str()).collect();
-        assert_eq!(names, ["editor", "orchestrator", "retrospective", "reviewer", "tester", "validator", "worker", "writer"]);
-        let val = roles.iter().find(|r| r.name == "validator").unwrap();
-        assert_eq!((val.harness.as_str(), val.model.as_deref()), ("pi", Some("gpt-5.6-sol")));
-        assert_eq!(list_roles_in(&src, &root.join("missing")), vec![]);
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
     fn role_effort_frontmatter_is_read_checked_and_listed() {
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
         let spec = |r: &str| parse_role_spec(r, &fs::read_to_string(src.join(r).join(format!("{r}.md"))).unwrap()).unwrap();
@@ -1670,17 +1626,6 @@ mod tests {
         assert!(bad.contains("invalid effort 'huge'"), "{bad}");
         let pi = parse_role_spec("x", "---\nname: x\nharness: pi\neffort: high\n---\nbody").unwrap_err();
         assert!(pi.contains("Pi role uses 'thinking'"), "{pi}");
-        // list_roles: effort "medium" for orchestrator, null for worker and for a Pi role
-        let root = tmp_root("roleeffort");
-        let dest = root.join("out");
-        let v = stage_factory(&src, &dest, &root.join("user")).unwrap();
-        let roles = list_roles_in(&src, &dest.join(&v));
-        let json = |n: &str| serde_json::to_value(roles.iter().find(|r| r.name == n).unwrap()).unwrap();
-        assert_eq!(json("orchestrator")["effort"], serde_json::json!("medium"));
-        assert!(json("worker")["effort"].is_null());
-        assert_eq!(json("validator")["harness"], serde_json::json!("pi"));
-        assert!(json("validator")["effort"].is_null());
-        let _ = fs::remove_dir_all(&root);
     }
 
     // Not a check by itself: tests/unit/role-harness.test.ts runs it with CUBILOT_TEST_STAGE_OUT set to get a tree staged by

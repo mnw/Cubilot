@@ -67,7 +67,7 @@ thread_local! {
     static TEST_TMUX: std::cell::RefCell<Option<(PathBuf, PathBuf)>> = const { std::cell::RefCell::new(None) };
 }
 
-fn resolve_tmux_bin() -> Result<PathBuf, String> {
+pub(crate) fn resolve_tmux_bin() -> Result<PathBuf, String> {
     #[cfg(test)]
     if let Some((bin, _)) = TEST_TMUX.with(|t| t.borrow().clone()) {
         return Ok(bin);
@@ -510,18 +510,9 @@ pub(crate) fn agent_role_and_command(agent: &str) -> (Option<String>, Option<Str
     (role, command)
 }
 
-#[tauri::command]
 pub fn pty_roles() -> std::collections::HashMap<String, PillInfo> {
     // "no server running" is an error here too: no sessions, no pills.
     tmux_run(&["list-sessions", "-F", PILL_FORMAT]).map(|o| parse_role_pills(&o)).unwrap_or_default()
-}
-
-#[tauri::command]
-pub fn pty_harness(agent: String) -> String {
-    match pane_harness(&agent) {
-        Harness::Pi => "pi".to_string(),
-        Harness::Claude => "claude".to_string(),
-    }
 }
 
 /// Skill roots a pi agent actually sees: the same `--skill` paths
@@ -1763,11 +1754,6 @@ pub fn pty_list() -> Result<Vec<String>, String> {
         .filter(|l| valid_agent_name(l))
         .collect();
     Ok(names)
-}
-
-#[tauri::command]
-pub fn resolve_default_room(cwd: String) -> String {
-    default_room_for_cwd(std::path::Path::new(&cwd))
 }
 
 // Live cwd of the agent's pane (tracks `cd`), not the original spawn path.

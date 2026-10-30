@@ -14,6 +14,8 @@ export type HubHandle = {
   /** Where this hub writes room transcripts: a temp folder, never the real app data. */
   transcriptsDir: string;
   humanName: string;
+  /** The hub's data folder (CUBILOT_DATA_DIR): config.yml goes here. */
+  dataDir: string;
   kill: () => Promise<void>;
 };
 
@@ -24,6 +26,8 @@ export async function spawnHub(opts?: {
   allowedExtensions?: string;
   /** Boots a new hub on the folders and token of a killed one (a restart on the same ledger). */
   restartOf?: HubHandle;
+  /** Extra env for the hub process (settings tests set CUBILOT_APP_VERSION and the like). */
+  env?: Record<string, string>;
 }): Promise<HubHandle> {
   const base = opts?.restartOf ? dirname(opts.restartOf.ledgerPath) : mkdtempSync(join(tmpdir(), "cubilot-hub-test-"));
   const ledgerPath = join(base, "ledger.db");
@@ -50,6 +54,7 @@ export async function spawnHub(opts?: {
       CUBILOT_HUMAN_NAME: humanName,
       CUBILOT_DEFAULT_ROOM: defaultRoom,
       CUBILOT_ALLOWED_EXTENSIONS: opts?.allowedExtensions ?? "jpg,jpeg,png,pdf,md,txt,json",
+      ...opts?.env,
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -67,6 +72,7 @@ export async function spawnHub(opts?: {
     attachmentsDir,
     transcriptsDir,
     humanName,
+    dataDir: join(base, "data"),
     kill: async () => {
       try { proc.kill(); } catch {}
       await proc.exited;
