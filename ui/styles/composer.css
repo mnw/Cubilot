@@ -37,7 +37,7 @@ footer {
   height: var(--size-36);
   border-radius: var(--radius-lg);
   font-family: var(--mono);
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   font-weight: 600;
   cursor: pointer;
 }
@@ -51,7 +51,7 @@ footer {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: var(--fs-4xl);
+  font-size: var(--fs-md);
   background: var(--bg-elev);
   color: var(--text-muted);
   border: var(--border-1) solid var(--line);
@@ -68,7 +68,7 @@ footer {
   overflow: hidden;
   opacity: 0;
   font-family: var(--mono);
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-sm);
   color: var(--text-dim);
   display: flex;
   gap: var(--sp-14);
@@ -87,7 +87,7 @@ footer {
   border: var(--border-1) solid var(--line);
   color: var(--text-muted);
   font-family: var(--mono);
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-sm);
 }
 
 /* Emoji / mention popovers */
@@ -111,7 +111,7 @@ footer {
   background: transparent;
   border: none;
   color: inherit;
-  font-size: var(--fs-6xl);
+  font-size: var(--fs-lg);
   padding: var(--sp-4);
   cursor: pointer;
   border-radius: var(--radius-md);
@@ -142,12 +142,12 @@ footer {
   cursor: pointer;
   border-radius: var(--radius-md);
   font-family: var(--mono);
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   color: var(--text);
 }
 .mention-item:hover, .mention-item.active { background: color-mix(in oklab, var(--orange) 12%, transparent); }
 .mention-item .dot { width: var(--size-8); height: var(--size-8); border-radius: var(--radius-circle); }
-.mention-item .meta { font-size: var(--fs-2xs); color: var(--text-dim); margin-left: auto; }
+.mention-item .meta { font-size: var(--fs-sm); color: var(--text-dim); margin-left: auto; }
 .mention-item.offline { opacity: 0.6; }
 
 /* Slash-command picker popover — anchored above the composer textarea.
@@ -180,7 +180,7 @@ footer {
   cursor: pointer;
   border-radius: var(--radius-md);
   font-family: var(--mono);
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   color: var(--text);
 }
 /* Hover = faint preview; active = strong keyboard cursor. Same orange hue, two
@@ -192,19 +192,19 @@ footer {
 .slash-item .slash-desc {
   flex: 1 1 auto;
   font-family: var(--sans);
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-sm);
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.slash-item .slash-badge { font-size: var(--fs-2xs); color: var(--text-dim); margin-left: auto; flex: 0 0 auto; }
+.slash-item .slash-badge { font-size: var(--fs-sm); color: var(--text-dim); margin-left: auto; flex: 0 0 auto; }
 .slash-item.unavailable { opacity: 0.5; cursor: not-allowed; }
 .slash-item.unavailable .slash-badge { color: var(--text-dim); }
 .slash-empty, .slash-loading {
   padding: var(--sp-6) var(--sp-10);
   font-family: var(--mono);
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-sm);
   color: var(--text-muted);
   font-style: italic;
 }
@@ -213,7 +213,7 @@ footer {
   margin: var(--sp-4) 0 0;
   padding: var(--sp-4) var(--sp-8);
   font-family: var(--mono);
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-sm);
   color: var(--red);
   background: color-mix(in oklab, var(--red) 8%, transparent);
   border-radius: var(--radius-md);

@@ -28,6 +28,16 @@ describe("renderFirstMessage", () => {
     expect(renderFirstMessage({ stageId: "s_1", role: "editor", ticket, branch: null, worktree: "/w", notes })).not.toContain("STAGE-FACT");
   });
 
+  test("tester start message names the evidence rule: high has the full-suite line, low has the two-form line", () => {
+    const low = renderFirstMessage({ stageId: "s_1", role: "tester", ticket: { ...ticket, blast_radius: "low" }, branch: null, worktree: "/w" });
+    expect(low).toContain("context.full_suite {command, exit_code, pass, fail, log_path}, or context.full_suite false with context.tests_run");
+    expect(low).not.toContain("high blast radius");
+    const high = renderFirstMessage({ stageId: "s_1", role: "tester", ticket, branch: null, worktree: "/w" });
+    expect(high).toContain("high blast radius");
+    expect(high).not.toContain("tests_run");
+    expect(renderFirstMessage({ stageId: "s_1", role: "worker", ticket: { ...ticket, blast_radius: "low" }, branch: null, worktree: "/w" })).not.toContain("tests_run");
+  });
+
   test("no agent notes, no heading", () => {
     const m = renderFirstMessage({ stageId: "s_1", role: "worker", ticket, branch: null, worktree: "/w", notes: [{ source: "stage", role: "worker", notes: "STAGE-FACT" }] });
     expect(m).not.toContain("## Agent notes");
