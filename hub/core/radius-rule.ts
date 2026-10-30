@@ -38,16 +38,21 @@ function settings(): { terms: readonly string[]; paths: readonly string[] } {
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** `high` with the matched terms and paths, or `low` with none. */
-export function ruleRadius(text: string): RuleRadius {
+/** `high` with the matched terms and paths, or `low` with none. A `termsCount: false` call matches paths only. */
+export function ruleRadius(text: string, termsCount = true): RuleRadius {
   const { terms, paths } = settings();
   const lower = text.toLowerCase();
   const reasons: string[] = [];
-  for (const t of terms) {
+  for (const t of termsCount ? terms : []) {
     if (new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRe(t.toLowerCase())}(?![\\p{L}\\p{N}_])`, "u").test(lower) && !reasons.includes(t)) reasons.push(t);
   }
   for (const p of paths) {
     if (lower.includes(p.toLowerCase()) && !reasons.includes(p)) reasons.push(p);
   }
   return { radius: reasons.length ? "high" : "low", reasons };
+}
+
+/** The rule over a ticket text. A title that starts with `[doc]` only describes rules: its terms do not count, its paths do. */
+export function ticketRadius(title: string, criteria: string, note: string | null): RuleRadius {
+  return ruleRadius([title, criteria, note ?? ""].join("\n"), !/^\s*\[doc\]/i.test(title));
 }
