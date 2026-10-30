@@ -1097,7 +1097,7 @@ A human question from the room lead (`hub/kinds/decision.ts`). The lead opens it
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | POST | `/decisions` | Bearer, body `{by, reason, block, facts, options, human_actions, next, ticket_id?, request_id?}` | Only the room lead (403 otherwise). `reason` is `scope`, `feature`, `irreversible` or `security`. `ticket_id` or `request_id` is required. → 201 `{id, snapshot}`. |
-| POST | `/decisions/{id}/answer` | Bearer, body `{by, option, text?}` | Only the human (403 otherwise). `option` is one of the option ids. → 200. The hub sends the lead one entry with the answer and writes one note on the ticket. A repeat returns `idempotent: true`. |
+| POST | `/decisions/{id}/answer` | Bearer, body `{by, option, text?}` | Only the human (403 otherwise). `option` is one of the option ids. → 200. The hub sends the lead one entry with the answer and, when the decision has a `ticket_id`, writes one note on that ticket (a request-only decision writes no note). A repeat returns `idempotent: true`. |
 | GET | `/decisions?room=` | read | The open decisions of the room, newest first (the Needs-you list). |
 
 Decision entries go to the UI stream only. The lead gets its one entry from the answer route, and gets an answer it has not received at reconnect.
