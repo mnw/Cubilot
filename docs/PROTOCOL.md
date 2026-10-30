@@ -910,7 +910,7 @@ After a stage ends as `passed` or `failed`, the hub writes one `stage_metrics` r
 | `prompt_tokens_first` | Input, cache creation and cache read tokens of the first model request. NULL when no usage is readable. |
 | `cache_read_tokens` | `usage.cache_read_input_tokens` of the first request. NULL when no usage is readable. |
 | `tokens_before_action` | Tokens used before the first `Edit` or the result. NULL when no usage is readable. |
-| `source` | `claude` when the Claude transcript gave the numbers, else `none`. A pi stage has `none` and three NULL numbers. |
+| `source` | `claude` when the Claude transcript gave the numbers, `pi` when the pi session file did (`~/.pi/agent/sessions/--<cwd>--/`, pi 1.4.0), else `none` with three NULL numbers. |
 | `created_seq` | Event sequence of the end of the attempt. |
 
 Source: `hub/core/stage-metrics.ts`.
