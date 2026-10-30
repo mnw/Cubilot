@@ -1,9 +1,11 @@
 // Checkpoint kind (P6-15): the human starts one, the lead writes a note, the hub clears the lead through the shell and the
 // lead restarts from the note and the state summary. Real hub; the test plays the lead (its hooks) and the shell.
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { Database } from "bun:sqlite";
+import { requestDoneAt } from "../../hub/core/checkpoint-due";
 import { findTool } from "../../hub/channel/tools";
 import type { Host } from "../../hub/channel/host";
 import { spawnHub, type HubHandle } from "../helpers/hub";
@@ -276,5 +278,169 @@ describe("checkpoint migration", () => {
     } finally {
       await hub2.kill();
     }
+  });
+});
+
+// The safe-point start (t_e948): the lead's turn end starts a checkpoint when a request is done or the context is full.
+describe("checkpoint at a safe point", () => {
+  let t: Awaited<ReturnType<typeof boot>>;
+  let n = 0;
+  beforeEach(async () => { t = await boot(); n = 0; });
+  afterEach(async () => { await t.close(); });
+
+  const ticket = async (request_id: string, over: Record<string, unknown> = {}) => {
+    const r = await postJson(t.hub, "/tickets", { by: t.hub.humanName, room: "r1", title: `T${++n}`, acceptance_criteria: "c", blast_radius: "low", request_id, status: "draft", ...over });
+    expect(r.status).toBe(201);
+    return (r.json as { snapshot: { id: string } }).snapshot.id;
+  };
+  const move = async (id: string, to: string) => expect((await postJson(t.hub, `/tickets/${id}/transition`, { by: t.hub.humanName, to })).status).toBe(200);
+  const doneAt = (request: string) => {
+    const db = new Database(t.hub.ledgerPath, { readonly: true });
+    try { return requestDoneAt(db, "r1", request); } finally { db.close(); }
+  };
+  const seed = (sql: string, args: unknown[] = []) => {
+    const db = new Database(t.hub.ledgerPath);
+    try { db.run(sql, args as any); } finally { db.close(); }
+  };
+  const action = async (agent = LEAD) => ((await t.turnEnd(agent)).json as any).action as string;
+
+  test("Request done predicate", async () => {
+    const a = await ticket("q1");
+    expect(doneAt("q1")).toBeNull(); // open ticket
+    await move(a, "done");
+    expect(doneAt("q1")).toBeGreaterThan(0); // all done
+    const b = await ticket("q2");
+    const c = await ticket("q2");
+    await move(b, "done");
+    expect(doneAt("q2")).toBeNull(); // c is open
+    await move(c, "cancelled");
+    expect(doneAt("q2")).toBeGreaterThan(0); // done plus cancelled
+    const d = await ticket("q3");
+    await move(d, "cancelled");
+    expect(doneAt("q3")).toBeNull(); // all cancelled
+    expect(doneAt("nope")).toBeNull();
+  });
+
+  test("Ticket added later", async () => {
+    const a = await ticket("q1");
+    await move(a, "done");
+    const first = doneAt("q1")!;
+    const b = await ticket("q1");
+    expect(doneAt("q1")).toBeNull();
+    expect(await action()).toBe("none");
+    await sleep(5);
+    await move(b, "done");
+    expect(doneAt("q1")!).toBeGreaterThan(first);
+  });
+
+  test("Done time follows ledger order", async () => {
+    const a = await ticket("q1");
+    const b = await ticket("q1");
+    await move(a, "done");
+    await move(b, "done");
+    seed("UPDATE events SET at_ms = 200 WHERE entity_id = ? AND kind = 'ticket.done'", [a]);
+    seed("UPDATE events SET at_ms = 100 WHERE entity_id = ? AND kind = 'ticket.done'", [b]);
+    expect(doneAt("q1")).toBe(100); // b has the newest events.seq
+  });
+
+  test("Request done", async () => {
+    await move(await ticket("q1"), "done");
+    const r = await t.turnEnd();
+    expect((r.json as any).action).toBe("note_asked");
+    const cp = (await t.list())[0];
+    expect(cp).toMatchObject({ trigger: "rule", status: "noting" });
+    // The same done time does not start a second one after this checkpoint.
+    await t.turnEnd();
+    await waitFor(async () => (await t.list())[0].status === "clearing");
+  });
+
+  test("Done before newest checkpoint", async () => {
+    await move(await ticket("q1"), "done");
+    await sleep(5);
+    expect((await t.start()).status).toBe(201);
+    await t.turnEnd();
+    await t.turnEnd();
+    Bun.spawnSync(["bash", join(HOOKS, "checkpoint-session-start.sh")], { env: { ...process.env, CHATBRIDGE_AGENT: LEAD, CUBILOT_DATA_DIR: dataDir(t.hub) } });
+    await waitFor(async () => (await t.list())[0].status === "done");
+    expect(await action()).toBe("none");
+    expect(await t.list()).toHaveLength(1);
+    // A request that ends after that checkpoint is due again.
+    await sleep(5);
+    await move(await ticket("q2"), "done");
+    expect(await action()).toBe("note_asked");
+  });
+
+  test("Context full", async () => {
+    writeContext(t.hub, 59);
+    expect(await action()).toBe("none");
+    writeContext(t.hub, 60);
+    expect(await action()).toBe("note_asked");
+    expect((await t.list())[0]).toMatchObject({ trigger: "rule", context_pct_before: 60 });
+  });
+
+  test("Approval open", async () => {
+    writeContext(t.hub, 90);
+    const a = await ticket("q1");
+    await ticket("q1", { blast_radius: "high" });
+    seed(
+      `INSERT INTO stage (id, ticket_id, request_id, review, verdict, role, attempt, status, session, slot_seq, created_seq, updated_seq, version)
+       VALUES ('s_00000000000000a1', NULL, 'q1', 'spec', 'PASS', 'validator', 1, 'passed', 'validator-1', NULL, 1, 1, 1)`,
+    );
+    seed("INSERT INTO stage_scope (stage_id, ticket_id) VALUES ('s_00000000000000a1', ?)", [a]);
+    expect(await action()).toBe("none");
+    expect(await t.list()).toHaveLength(0);
+  });
+
+  const humanRequest = async (id: string) => expect((await postJson(t.hub, "/requests", { by: t.hub.humanName, room: "r1", request_id: id, origin: "human" })).status).toBe(201);
+
+  test("Approval open: human request with only low draft tickets", async () => {
+    writeContext(t.hub, 90);
+    await humanRequest("q1");
+    await ticket("q1");
+    expect(await action()).toBe("none");
+    expect(await t.list()).toHaveLength(0);
+  });
+
+  test("Approval open: scope changed after the Approve", async () => {
+    writeContext(t.hub, 90);
+    await humanRequest("q1");
+    await ticket("q1");
+    expect((await postJson(t.hub, "/requests/r1/q1/approve", { by: t.hub.humanName })).status).toBe(200);
+    await ticket("q1");
+    expect(await action()).toBe("none");
+    expect(await t.list()).toHaveLength(0);
+    expect((await postJson(t.hub, "/requests/r1/q1/approve", { by: t.hub.humanName })).status).toBe(200);
+    expect(await action()).toBe("note_asked");
+  });
+
+  test("Decision open", async () => {
+    writeContext(t.hub, 90);
+    seed("INSERT INTO decisions (id, room, decider, fail_count, status, created_by, created_at_ms) VALUES ('d_a', 'r1', 'human', 0, 'open', 'boss', 1)");
+    expect(await action()).toBe("none");
+    seed("UPDATE decisions SET status = 'answered' WHERE id = 'd_a'");
+    expect(await action()).toBe("note_asked");
+  });
+
+  test("Live spec stage", async () => {
+    writeContext(t.hub, 90);
+    const a = await ticket("q1");
+    seed(
+      `INSERT INTO stage (id, ticket_id, request_id, review, verdict, role, attempt, status, session, slot_seq, created_seq, updated_seq, version)
+       VALUES ('s_00000000000000b1', NULL, 'q1', 'spec', NULL, 'validator', 1, 'running', 'validator-1', NULL, 1, 1, 1)`,
+    );
+    seed("INSERT INTO stage_scope (stage_id, ticket_id) VALUES ('s_00000000000000b1', ?)", [a]);
+    expect(await action()).toBe("none");
+    seed("UPDATE stage SET status = 'passed' WHERE id = 's_00000000000000b1'");
+    expect(await action()).toBe("note_asked");
+  });
+
+  test("non-lead turn end", async () => {
+    writeContext(t.hub, 90);
+    await move(await ticket("q1"), "done");
+    const other = await registerAgent(t.hub, "worker-9", { room: "r1" });
+    writeContext(t.hub, 90, "worker-9");
+    expect(await action("worker-9")).toBe("none");
+    expect(await t.list()).toHaveLength(0);
+    other.close();
   });
 });
