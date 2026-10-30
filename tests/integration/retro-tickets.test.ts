@@ -210,6 +210,76 @@ describe("the request of an accepted result", () => {
   });
 });
 
+describe("recovery after a stop in the middle", () => {
+  // A trigger makes one step throw. The result handoff row is what a restart finds. Dropping the trigger and a sweep must finish the work.
+  const fail = (db: Database, name: string, table: string, when: string) =>
+    db.exec(`CREATE TRIGGER ${name} BEFORE INSERT ON ${table} WHEN ${when} BEGIN SELECT RAISE(ABORT, 'injected'); END`);
+  const stored = (e: ReturnType<typeof env>, stageId: string, c: Record<string, unknown>) =>
+    e.db.run("INSERT INTO handoffs (id, from_agent, to_agent, task, context_json, status, created_at_ms, expires_at_ms) VALUES ('h_1', 'x', 'y', 't', ?, 'accepted', 1, 2)", [JSON.stringify({ stage_id: stageId, notes: "n", ...c })]);
+  const result = { proposals: [proposal(), proposal({ title: "Second change", measure: { name: "fails", now: 3, target: 1 }, files: ["x.ts:1"] })] };
+  const shape = (e: ReturnType<typeof env>) => ({
+    requests: e.requests().length,
+    drafts: e.drafts("r-2026-11-09-retro").length,
+    spec: e.db.query("SELECT 1 FROM stage WHERE review = 'spec'").all().length,
+    scope: e.db.query("SELECT 1 FROM stage_scope").all().length,
+  });
+
+  test("a stop before the first draft", () => {
+    const e = env();
+    e.ticket("queued", at(5, 12));
+    const w = e.week(MON1);
+    fail(e.db, "no_draft", "tickets", "NEW.request_id = 'r-2026-11-09-retro'");
+    w.send(result);
+    expect(shape(e)).toEqual({ requests: 1, drafts: 0, spec: 0, scope: 0 });
+    stored(e, w.stageId, result);
+    e.db.exec("DROP TRIGGER no_draft");
+    e.rt.sweep(e.cap, MON1 + 60_000);
+    expect(shape(e)).toEqual({ requests: 1, drafts: 2, spec: 1, scope: 2 });
+  });
+
+  test("a stop after the first draft", () => {
+    const e = env();
+    e.ticket("queued", at(5, 12));
+    const w = e.week(MON1);
+    fail(e.db, "one_draft", "tickets", "NEW.request_id = 'r-2026-11-09-retro' AND (SELECT COUNT(*) FROM tickets WHERE request_id = 'r-2026-11-09-retro') >= 1");
+    w.send(result);
+    expect(shape(e)).toEqual({ requests: 1, drafts: 1, spec: 0, scope: 0 });
+    stored(e, w.stageId, result);
+    e.db.exec("DROP TRIGGER one_draft");
+    e.rt.sweep(e.cap, MON1 + 60_000);
+    expect(shape(e)).toEqual({ requests: 1, drafts: 2, spec: 1, scope: 2 });
+  });
+
+  test("a stop before the spec review", () => {
+    const e = env();
+    e.ticket("queued", at(5, 12));
+    const w = e.week(MON1);
+    fail(e.db, "no_spec", "stage", "NEW.review = 'spec'");
+    w.send(result);
+    expect(shape(e)).toEqual({ requests: 1, drafts: 2, spec: 0, scope: 0 });
+    stored(e, w.stageId, result);
+    e.db.exec("DROP TRIGGER no_spec");
+    e.rt.sweep(e.cap, MON1 + 60_000);
+    expect(shape(e)).toEqual({ requests: 1, drafts: 2, spec: 1, scope: 2 });
+  });
+
+  test("a second sweep adds nothing and a cancelled draft stays cancelled", async () => {
+    const e = env();
+    e.ticket("queued", at(5, 12));
+    const w = e.week(MON1);
+    fail(e.db, "no_spec", "stage", "NEW.review = 'spec'");
+    w.send(result);
+    stored(e, w.stageId, result);
+    const [a] = e.drafts("r-2026-11-09-retro");
+    expect((await e.cancel(a.id)).status).toBe(200);
+    e.db.exec("DROP TRIGGER no_spec");
+    e.rt.sweep(e.cap, MON1 + 60_000);
+    e.rt.sweep(e.cap, MON1 + 120_000);
+    expect(shape(e)).toEqual({ requests: 1, drafts: 2, spec: 1, scope: 2 });
+    expect(e.drafts("r-2026-11-09-retro").map((t) => t.status)).toEqual(["cancelled", "draft"]);
+  });
+});
+
 describe("two weeks end to end", () => {
   test("week 2 judges week 1", () => {
     const e = env();

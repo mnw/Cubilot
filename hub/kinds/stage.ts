@@ -1267,6 +1267,27 @@ export function createStageRuntime(
     });
   }
 
+  /** A passed retro stage whose draft tickets or spec review are missing (a stop after the pass): run the idempotent steps again from its stored result. */
+  function resumeRetroRequests(cap: HubCapabilities): void {
+    try {
+      const retros = db.query<{ id: string }, []>("SELECT id FROM stage WHERE review = 'retro' AND status = 'passed' AND retro_week IS NOT NULL ORDER BY created_seq").all();
+      for (const { id } of retros) {
+        if (retroMaterialised.has(id)) continue;
+        try {
+          const rows = db.query<{ context_json: string | null }, [string]>("SELECT context_json FROM handoffs WHERE json_extract(context_json, '$.stage_id') = ? ORDER BY created_at_ms DESC, id DESC").all(id);
+          const c = rows.map((r) => (r.context_json ? (JSON.parse(r.context_json) as Record<string, unknown>) : {})).find((x) => Array.isArray(x.proposals) || Array.isArray(x.verdicts));
+          if (c) createRetroRequest(id, c, cap);
+          retroMaterialised.add(id);
+        } catch (e) {
+          console.error(`[stage] the draft tickets of retrospective ${id} failed, the sweep retries:`, e);
+        }
+      }
+    } catch (e) {
+      console.error("[stage] retrospective resume failed:", e);
+    }
+  }
+  const retroMaterialised = new Set<string>();
+
   function sweep(cap: HubCapabilities, now: number = Date.now()): void {
     // A passed stage whose turn-end report never came (5.3b): after the grace, queue its close anyway.
     for (const session of [...awaitingClose]) {
@@ -1296,6 +1317,7 @@ export function createStageRuntime(
       console.error("[stage] blocker re-check failed:", e);
     }
     startRetrospectives(cap, now);
+    resumeRetroRequests(cap);
     const running = db.query<{ id: string }, []>("SELECT id FROM stage WHERE status = 'running' AND session IS NOT NULL").all();
     const ids = new Set(running.map((r) => r.id));
     for (const id of runningSeen.keys()) if (!ids.has(id)) runningSeen.delete(id);
@@ -2343,12 +2365,19 @@ export function createStageRuntime(
     const drafts = retroDrafts(c, stageId, (id) => db.query<{ title: string }, [string, string]>("SELECT title FROM tickets WHERE id = ? AND room = ?").get(id, room)?.title ?? null);
     if (!drafts.length) return;
     const requestId = `r-${localDate(w.until)}-retro`;
-    createRequestBySystem(db, cap, { room, request_id: requestId, origin: "factory", features: ["retrospective"], parent_request_id: null, source: stageId });
-    const ids = drafts.map((d) => createDraftBySystem(db, cap, { room, request_id: requestId, ...d }).id);
-    const created = api.create({ request_id: requestId, review: "spec", role: "validator" }, "system", cap, (ctx) => {
-      for (const t of ids) ctx.tx.run("INSERT INTO stage_scope (stage_id, ticket_id) VALUES (?, ?)", [ctx.next.id, t]);
-    });
-    drainQueue(created, cap);
+    // Every step checks the ledger first, so a rerun after a stop at any step adds only what is missing. A cancelled draft stays cancelled.
+    if (!db.query("SELECT 1 FROM requests WHERE room = ? AND request_id = ?").get(room, requestId)) {
+      createRequestBySystem(db, cap, { room, request_id: requestId, origin: "factory", features: ["retrospective"], parent_request_id: null, source: stageId });
+    }
+    const have = new Set(db.query<{ title: string; acceptance_criteria: string }, [string, string]>("SELECT title, acceptance_criteria FROM tickets WHERE room = ? AND request_id = ?").all(room, requestId).map((t) => `${t.title}\n${t.acceptance_criteria}`));
+    for (const d of drafts) if (!have.has(`${d.title}\n${d.acceptance_criteria}`)) createDraftBySystem(db, cap, { room, request_id: requestId, ...d });
+    if (!db.query("SELECT 1 FROM stage WHERE review = 'spec' AND request_id = ?").get(requestId)) {
+      const ids = db.query<{ id: string }, [string, string]>("SELECT id FROM tickets WHERE room = ? AND request_id = ? ORDER BY rowid").all(room, requestId).map((t) => t.id);
+      const created = api.create({ request_id: requestId, review: "spec", role: "validator" }, "system", cap, (ctx) => {
+        for (const t of ids) ctx.tx.run("INSERT INTO stage_scope (stage_id, ticket_id) VALUES (?, ?)", [ctx.next.id, t]);
+      });
+      drainQueue(created, cap);
+    }
     cap.briefing.refresh();
   }
 
@@ -2558,7 +2587,7 @@ export function createStageRuntime(
             try {
               createRetroRequest(stage.id, c, cap);
             } catch (e) {
-              console.error(`[stage] the draft tickets of retrospective ${stage.id} failed:`, e);
+              console.error(`[stage] the draft tickets of retrospective ${stage.id} failed, the sweep retries:`, e);
             }
           }
           if (highValidator && !secondPass && db.query<{ s: string }, [string]>("SELECT status AS s FROM tickets WHERE id = ?").get(ticketId!)?.s === "in_review") {
