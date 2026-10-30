@@ -20,7 +20,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Attachments persist at CUBILOT_ATTACHMENTS_DIR/<id>.<ext>.** docs/rules/core.md
 - **JSON bodies capped at 256 KiB.** docs/rules/core.md
 - **One event plus one table update per state change.** Same transaction; never bypass. docs/rules/kinds.md
-- **Only three cross-kind transactions.** Add no fourth without updating docs/PROTOCOL.md. docs/rules/kinds.md
+- **Only three cross-kind transactions.** Add no fourth without updating docs/PROTOCOL.md. The Approve writes `request.approved` in its own transaction; the queue transaction after it writes only `ticket.queued`. docs/rules/kinds.md
 - **Broadcasts carry version = events.seq.** docs/rules/kinds.md
 - **by/from are self-asserted.** Not cryptographically verified. docs/rules/permissions.md
 - **Terminal-state retries.** Same-status retry returns 200 (idempotent); different-status retry returns 409. docs/rules/kinds.md
@@ -56,8 +56,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Permissions have no TTL.** docs/rules/permissions.md
 - **State-machine kinds live in hub/kinds/<kind>.ts (KindModule).** Never add kind branches to hub.ts. docs/rules/kinds.md
 - **Broadcast with cap.sse.emit(entry, scope).** Never enumerate agent queues in a kind. docs/rules/kinds.md
-- **Tickets need acceptance criteria.** Agent moves a ticket to done only with its Validator PASSes; no human Allow step. docs/rules/kinds.md
-- **A draft ticket starts nothing.** An open blocker stops a claim. docs/rules/kinds.md
+- **Tickets need acceptance criteria.** An agent moves a ticket to done only with its Validator PASSes. A high ticket closes on the full suite (`full_suite`, exit 0) and two Validator PASSes on one commit. No human Allow step, no approval route. docs/rules/kinds.md
+- **A draft ticket starts nothing.** An open blocker stops a claim; a blocker clears when it is done or its Tester PASS commit is on staging (L3). docs/rules/kinds.md
+- **One Approve per request; an edit keeps the ticket status.** The human approves a request once (L1): later tickets of it queue without a new Approve. A request of origin `human`, or with a high ticket or a feature, needs the Approve. An edit changes no status (L2). docs/rules/kinds.md
+- **Radius has a floor from the rule.** `blast_radius` is never below `radius_rule` (config `radius_rule`). The lead or the creator raises it. Only the human lowers it below the rule. docs/rules/permissions.md
+- **A checkpoint clears the lead's session.** The hub writes the note request and the summary file, and sends `/clear` as an `input` launch request to one named session. docs/rules/kinds.md
 - **Hub decides launches; Rust shell only executes.** docs/rules/kinds.md
 - **Stage state changes only via createStageApi.** docs/rules/kinds.md
 - **system is the hub's own actor, never a caller's.** Hub returns 400 if a body names it. docs/rules/kinds.md
