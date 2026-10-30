@@ -20,6 +20,7 @@ const RETRY_MS = 2000;
 
 export type BridgeEvent = {
   id?: number;
+  reply_to?: number; // the id of the chat message this one answers
   type?: string;
   force?: boolean; // agent.reload: reload the version the agent already has
   reload_id?: string; // agent.reload: the id of the request, echoed back with the result
@@ -220,6 +221,7 @@ export function renderEnvelope(evt: BridgeEvent, room: string): string {
     if (typeof v === "number" && Number.isFinite(v)) bits.push(`${k}=${v}`);
   };
   num("id", evt.id);
+  num("reply_to", evt.reply_to);
   str("from", evt.from);
   str("to", evt.to);
   str("room", evt.room ?? room);

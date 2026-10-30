@@ -93,6 +93,12 @@ describe("envelope", () => {
     );
   });
 
+  test("reply_to shows right after id; absent or non-number reply_to is omitted", () => {
+    expect(renderEnvelope({ id: 7, reply_to: 3, from: "a" }, "r")).toBe('[chatbridge id=7 reply_to=3 from="a" room="r"]');
+    expect(renderEnvelope({ id: 7, from: "a" }, "r")).toBe('[chatbridge id=7 from="a" room="r"]');
+    expect(renderEnvelope({ id: 7, reply_to: "3" as unknown as number, from: "a" }, "r")).toBe('[chatbridge id=7 from="a" room="r"]');
+  });
+
   test("room falls back to the bridge room; absent keys are omitted", () => {
     expect(renderEnvelope({ from: "you", to: "bob" }, "r1")).toBe('[chatbridge from="you" to="bob" room="r1"]');
   });
