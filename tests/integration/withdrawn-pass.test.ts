@@ -338,6 +338,10 @@ describe("real hub", () => {
     const db = new Database(hub.ledgerPath, { readonly: true });
     try { return fn(db); } finally { db.close(); }
   };
+  const ledgerWrite = (fn: (db: Database) => void) => {
+    const db = new Database(hub.ledgerPath);
+    try { fn(db); } finally { db.close(); }
+  };
   const stages = (id: string) => ledger((db) => db.query("SELECT id, role, status, verdict, session FROM stage WHERE ticket_id = ? ORDER BY created_seq").all(id) as Stage[]);
   const ticketStatus = (id: string) => ledger((db) => db.query<{ status: string }, [string]>("SELECT status FROM tickets WHERE id = ?").get(id)!.status);
   const interruptRow = (id: string) => ledger((db) => db.query<{ ticket_id: string | null; stage_id: string | null; status: string }, [string]>("SELECT ticket_id, stage_id, status FROM interrupts WHERE id = ?").get(id)!);
@@ -478,6 +482,28 @@ describe("real hub", () => {
     const m = await mergeMessage(t.id);
     expect(m.status).toBe(409);
     expect(err(m)).toContain(i.id);
+  });
+
+  test("cancelled PASS handoff does not count in the delivery report (GET /requests/<room>/<id>/delivery)", async () => {
+    expect((await postJson(hub, "/requests", { by: hub.humanName, room: ROOM, request_id: "wph-delivery" })).status).toBe(201);
+    const t = await start("high");
+    // The request is not approved, so the ticket joins it by SQL, as tests/integration/delivery-report.test.ts does.
+    ledgerWrite((db) => void db.run("UPDATE tickets SET request_id = 'wph-delivery' WHERE id = ?", [t.id]));
+    const withdrawn = await passAndWithdraw(t);
+    await closeSession(t.first.id, t.session);
+    const second = stages(t.id).find((s) => s.role === "validator" && s.id !== t.first.id)!;
+    expect(second).toBeDefined();
+    const session2 = await run(second.id);
+    const p2 = await pass(session2, second, t.id);
+    expect(p2.status).toBe(201);
+    const kept = (p2.json as { id: string }).id;
+    await closeSession(second.id, session2);
+    expect((await postJson(hub, `/tickets/${t.id}/transition`, { by: hub.humanName, to: "done" })).status).toBe(200);
+    const rep = await getJson(hub, `/requests/${ROOM}/wph-delivery/delivery`);
+    expect(rep.status).toBe(200);
+    const row = (rep.json as { checks: { high_radius: { ticket_id: string; pass_handoffs: string[] }[] } }).checks.high_radius.find((h) => h.ticket_id === t.id)!;
+    expect(row.pass_handoffs).toEqual([kept]);
+    expect(row.pass_handoffs).not.toContain(withdrawn);
   });
 
   test("human completes the ticket directly", async () => {
