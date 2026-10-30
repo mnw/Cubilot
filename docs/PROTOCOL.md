@@ -1201,6 +1201,7 @@ routing bug would show up as a surge, not silent context pollution.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/room-default` | Returns `{ room: <CUBILOT_DEFAULT_ROOM> }`; read-auth. Used as fallback when an external-spawn channel-bin has no `CHATBRIDGE_ROOM`. |
+| GET | `/search?q=&agent=` | Read-auth, read-only. Up to 20 `{kind, id, title, room, status}` for tickets (id prefix with or without `t_`, or all words in the title), requests (`request_id` prefix) and agents (name prefix). `q` under 2 characters gives `[]`. `agent` is required (400 if missing or unknown; the name is self-asserted, as everywhere). The human's name searches all rooms; any other name limits to that agent's room. Order: exact id or name, then open items, then newest. |
 
 ### Pause / Resume
 
