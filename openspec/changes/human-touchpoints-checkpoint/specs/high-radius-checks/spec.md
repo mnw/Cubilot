@@ -31,19 +31,39 @@ After the first Validator PASS of a high-radius ticket, the hub SHALL create one
 - **WHEN** the hub starts
 - **THEN** one second review stage exists
 
-### Requirement: Two PASSes move a high-radius ticket to done
-The PASS of the second review SHALL move the ticket to `done`, actor `system`, in the transaction of `stage.passed`. A FAIL of either review SHALL count as a ticket review FAIL. An agent's move to `done` on a high-radius ticket SHALL get 409 when the ticket has no first and second PASS after its last FAIL. The human SHALL move it.
+### Requirement: A final PASS gives a high-radius ticket to the room lead
+The PASS of the second review SHALL NOT move the ticket to `done`. The hub SHALL give the ticket to the room lead, who moves it to `done`. A FAIL of either review SHALL count as a ticket review FAIL. An agent's move to `done` on a high-radius ticket SHALL get 409 when the ticket has no first and second PASS after its last FAIL. The human SHALL be able to move it directly.
 
 #### Scenario: Both PASS
 - **WHEN** the second review sends PASS
-- **THEN** the ticket is `done` and no human action was needed
+- **THEN** the ticket stays `in_review` with the room lead as assignee and the lead moves it to `done`
 
 #### Scenario: Agent moves early
 - **WHEN** the assignee moves a high-radius ticket with one PASS to `done`
-- **THEN** the hub returns 409 "a high-radius ticket needs the review PASS and the second review PASS"
+- **THEN** the hub returns 409 "done of a high-blast-radius ticket needs the second Validator PASS: it is missing"
+
+### Requirement: A withdrawn PASS does not count
+A Validator PASS SHALL NOT count when the result handoff of its stage is cancelled by its sender. The result handoff is the newest handoff from the stage session with `context.stage_id` of the stage. The rule SHALL hold for the move to `done`, for `GET /tickets/<id>/merge-message`, for `validator_passes` on `GET /tickets` and for the delivery report.
+
+#### Scenario: Validator cancels its PASS
+- **GIVEN** a stage passed and its Validator cancelled the PASS handoff
+- **WHEN** the lead moves the ticket to `done`
+- **THEN** the hub returns 409 "done needs a Validator PASS: none yet"
+
+### Requirement: An open Validator interrupt holds the ticket
+The hub SHALL set `ticket_id` and `stage_id` of an interrupt from the launch record at send time. A sender that the launch record does not hold SHALL get no `ticket_id`. A `pending` interrupt whose stage is a Validator stage of the ticket SHALL hold the ticket. The hub SHALL NOT read its text. An agent's move to `done` and `GET /tickets/<id>/merge-message` SHALL get 409 with a reason that names the interrupt id. After `ack_interrupt` the hold SHALL end.
+
+#### Scenario: Stop interrupt after a withdrawn PASS
+- **GIVEN** PASS 1 was withdrawn, its Validator sent an interrupt and a second session sent PASS 2
+- **WHEN** the lead moves the high-radius ticket to `done`
+- **THEN** the hub returns 409 "done needs an answer to the Validator interrupt <id>: acknowledge it first" and the ticket stays `in_review`
+
+#### Scenario: Reused session name
+- **WHEN** a later stage of another ticket uses the same session name and sends an interrupt
+- **THEN** the interrupt has the id of the later ticket and the earlier ticket is not held
 
 ### Requirement: The hub gives the merge message
-`GET /tickets/<id>/merge-message` SHALL return `Merge ticket/<id>: <title> (validator PASS <h1>)` for a low-radius ticket and `Merge ticket/<id>: <title> (validator PASS <h1>, second review PASS <h2>)` for a high-radius ticket, where `h1` and `h2` are the result handoff ids. It SHALL return 409 when a PASS is missing.
+`GET /tickets/<id>/merge-message` SHALL return `Merge ticket/<id>: <title> (validator PASS <h1>)` for a low-radius ticket and `Merge ticket/<id>: <title> (validator PASS <h1>, second review PASS <h2>)` for a high-radius ticket, where `h1` and `h2` are the result handoff ids. It SHALL return 409 when a PASS is missing (a withdrawn PASS is missing) and while a Validator interrupt of the ticket is `pending`.
 
 #### Scenario: High-radius message
 - **WHEN** the Orchestrator reads the merge message of a done high-radius ticket

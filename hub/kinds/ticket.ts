@@ -654,6 +654,26 @@ const LEGAL_FROM: Record<string, ReadonlySet<string>> = {
 };
 
 /**
+ * SQL for "the PASS of stage `x` was withdrawn": the newest result handoff of the stage (sent by its session, with context.stage_id
+ * of the stage) is cancelled by its sender. One rule for done, merge-message, validator_passes and the delivery report.
+ */
+const withdrawn = (x: string) =>
+  `EXISTS (SELECT 1 FROM handoffs r WHERE r.id = (SELECT h.id FROM handoffs h WHERE h.from_agent = ${x}.session AND json_extract(h.context_json, '$.stage_id') = ${x}.id ORDER BY h.rowid DESC LIMIT 1)
+             AND r.status = 'cancelled' AND r.cancelled_by = r.from_agent)`;
+
+/** The id of a pending interrupt that a Validator stage of the ticket sent, else null. Every such interrupt is a stop. */
+export function openValidatorStop(db: Database, ticketId: string): string | null {
+  return (
+    db
+      .query<{ id: string }, [string]>(
+        `SELECT i.id FROM interrupts i JOIN stage s ON s.id = i.stage_id
+          WHERE i.ticket_id = ? AND i.status = 'pending' AND s.role = 'validator' ORDER BY i.rowid LIMIT 1`,
+      )
+      .get(ticketId)?.id ?? null
+  );
+}
+
+/**
  * L4: commits of the Validator PASS stages of a ticket since its latest worker stage, oldest first. A commit is the context.commit
  * of the handoff that started the stage (null when it has none). A rework starts a new worker stage, so the list restarts there.
  */
@@ -667,11 +687,11 @@ function validatorPassCommits(db: Database, ticketId: string): (string | null)[]
                 ORDER BY (SELECT MIN(e.seq) FROM events e WHERE e.entity_id = h.id) DESC LIMIT 1) AS context_json
          FROM stage s
          LEFT JOIN stage f ON f.id = (SELECT p.id FROM stage p
-                WHERE p.ticket_id = ?1 AND p.role = 'validator' AND p.review IS NULL AND p.status = 'passed' AND p.verdict = 'PASS'
+                WHERE p.ticket_id = ?1 AND p.role = 'validator' AND p.review IS NULL AND p.status = 'passed' AND p.verdict = 'PASS' AND NOT ${withdrawn("p")}
                   AND p.created_seq < s.created_seq
                   AND p.created_seq > COALESCE((SELECT MAX(w.created_seq) FROM stage w WHERE w.ticket_id = ?2 AND w.role = 'worker'), 0)
                 ORDER BY p.created_seq LIMIT 1)
-        WHERE s.ticket_id = ?1 AND s.role = 'validator' AND s.review IS NULL AND s.status = 'passed' AND s.verdict = 'PASS'
+        WHERE s.ticket_id = ?1 AND s.role = 'validator' AND s.review IS NULL AND s.status = 'passed' AND s.verdict = 'PASS' AND NOT ${withdrawn("s")}
           AND s.created_seq > COALESCE((SELECT MAX(w.created_seq) FROM stage w WHERE w.ticket_id = ?2 AND w.role = 'worker'), 0)
         ORDER BY s.created_seq`,
     )
@@ -697,7 +717,7 @@ export function validatorPassHandoffs(db: Database, ticketId: string): { stage_i
               (SELECT h.id FROM handoffs h WHERE h.from_agent = s.session AND json_extract(h.context_json, '$.stage_id') = s.id
                 ORDER BY h.rowid DESC LIMIT 1) AS handoff_id
          FROM stage s
-        WHERE s.ticket_id = ?1 AND s.role = 'validator' AND s.review IS NULL AND s.status = 'passed' AND s.verdict = 'PASS'
+        WHERE s.ticket_id = ?1 AND s.role = 'validator' AND s.review IS NULL AND s.status = 'passed' AND s.verdict = 'PASS' AND NOT ${withdrawn("s")}
           AND s.created_seq > COALESCE((SELECT MAX(w.created_seq) FROM stage w WHERE w.ticket_id = ?2 AND w.role = 'worker'), 0)
         ORDER BY s.created_seq`,
     )
@@ -717,6 +737,8 @@ function mergedIntoStaging(cap: HubCapabilities, room: string, commit: string): 
 
 /** L4: why an agent may not move this ticket to done yet, else null. One PASS for low, two for high, merged into staging. */
 function doneGateMissing(cap: HubCapabilities, t: TicketSnapshot): string | null {
+  const stop = openValidatorStop(cap.db, t.id);
+  if (stop) return `done needs an answer to the Validator interrupt ${stop}: acknowledge it first`;
   const commits = validatorPassCommits(cap.db, t.id);
   const need = t.blast_radius === "high" ? 2 : 1;
   if (commits.length === 0) return "done needs a Validator PASS: none yet";
@@ -1205,6 +1227,8 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
         if (!TICKET_ID_RE.test(params.id)) return Response.json({ error: "invalid ticket id" }, { status: 400 });
         const t = entity.load(params.id);
         if (!t) return Response.json({ error: "not found" }, { status: 404 });
+        const stop = openValidatorStop(cap.db, t.id);
+        if (stop) return Response.json({ error: `merge message needs an answer to the Validator interrupt ${stop}: acknowledge it first` }, { status: 409 });
         const passes = validatorPassHandoffs(cap.db, t.id);
         const high = t.blast_radius === "high";
         const need = high ? 2 : 1;

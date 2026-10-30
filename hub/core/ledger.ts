@@ -5,7 +5,7 @@ import { chmodSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomId } from "./ids";
 
-export const LEDGER_SCHEMA_VERSION = 19;
+export const LEDGER_SCHEMA_VERSION = 20;
 
 export type LedgerOpenResult =
   | { db: Database; enabled: true }
@@ -468,6 +468,18 @@ export function migrateLedger(db: Database): void {
     // so that openLedger copies the ledger before the column appears.
     db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '19')");
     console.log(`[ledger] applied migration v19`);
+  }
+  if (current < 20) {
+    // v20: an interrupt of a stage session carries the ticket and the stage that the launch record held at send time.
+    // Null for old rows and for a sender that is no stage session.
+    db.transaction(() => {
+      // Re-run safe: a ledger that was moved back in version, or one whose kind migrate ran first, already holds the columns.
+      const have = new Set(db.query<{ name: string }, []>("PRAGMA table_info(interrupts)").all().map((c) => c.name));
+      for (const col of ["ticket_id", "stage_id"]) if (!have.has(col)) db.exec(`ALTER TABLE interrupts ADD COLUMN ${col} TEXT`);
+      db.exec("CREATE INDEX IF NOT EXISTS idx_interrupts_ticket ON interrupts(ticket_id, status)");
+      db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '20')");
+    })();
+    console.log(`[ledger] applied migration v20`);
   }
 }
 

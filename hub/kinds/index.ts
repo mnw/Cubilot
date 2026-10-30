@@ -54,7 +54,7 @@ export function buildKinds(db: Database | null, launchRecord?: LaunchRecord): re
   });
   return [
     createHandoffKind(db, stage.hooks),
-    createInterruptKind(db),
+    createInterruptKind(db, launchRecord),
     createPermissionKind(db),
     createTicketKind(db, stage.hooks),
     // After the ticket kind: its migration reads the tickets table.
