@@ -289,7 +289,8 @@ fi
 # A split run: one bun test process for each part, all at the same time.
 TEST_ROOT=${CUBILOT_TEST_ROOT:-$ROOT}
 REPORT=${CUBILOT_TEST_REPORT:-$ROOT/test-reports/part20-measure/junit.xml}
-RUNDIR=$(mktemp -d "${TMPDIR:-/tmp}/cubilot-test-run.XXXXXX") || { echo "scripts/test.sh: no run folder" >&2; exit 1; }
+# Under /tmp, not $TMPDIR: the macOS $TMPDIR is long, and a tmux socket below a part TMPDIR would pass the socket path limit.
+RUNDIR=$(mktemp -d /tmp/cubilot-test-run.XXXXXX) || { echo "scripts/test.sh: no run folder" >&2; exit 1; }
 RUN_ID="$$-$(date +%s)"
 bun "$ROOT/scripts/split-tests.ts" "$TEST_ROOT" "$REPORT" "$PARTS" > "$RUNDIR/split.txt" || { echo "scripts/test.sh: the split of the test files failed" >&2; exit 1; }
 [ -s "$RUNDIR/split.txt" ] || { echo "scripts/test.sh: no test file found under $TEST_ROOT/tests" >&2; exit 1; }
