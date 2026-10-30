@@ -98,7 +98,7 @@ describe("writing roles queue", () => {
       const id = await draft(`rq-high-${role}`, role, { blast_radius: "high" });
       const r = await move(id, LEAD);
       expect(r.status).toBe(403);
-      expect((r.json as any).error).toContain("high blast_radius");
+      expect((r.json as any).error).toContain("needs the human's Approve");
       expect((await move(id, hub.humanName)).status).toBe(200);
     });
   }

@@ -25,6 +25,12 @@ function makeEnv() {
        VALUES (?, 'r1', 'T', 'c', ?, 'medium', 'a', ?, ?, ?, 1, 1, 1)`,
       [id, over.radius ?? "low", over.status ?? "draft", over.role === undefined ? null : over.role, over.request ?? "req-1"],
     );
+    // The request row of the label (plan-approval): factory, no feature, so only a high ticket holds it.
+    db.run(
+      `INSERT OR IGNORE INTO requests (id, room, request_id, origin, features, status, created_by, created_at_ms, version)
+       VALUES (?, ?, ?, 'factory', '[]', 'open', 'test', 1, 1)`,
+      [`rq_${"r1"}_${over.request ?? "req-1"}`, "r1", over.request ?? "req-1"],
+    );
     return id;
   };
   const specStage = (scope: string[]) => {

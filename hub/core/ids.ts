@@ -33,6 +33,14 @@ export function mintInterruptId(): string {
   return out;
 }
 
+export function mintRequestRowId(): string {
+  const buf = new Uint8Array(8);
+  crypto.getRandomValues(buf);
+  let out = "rq_";
+  for (const b of buf) out += b.toString(16).padStart(2, "0");
+  return out;
+}
+
 export function mintDecisionId(): string {
   const buf = new Uint8Array(8);
   crypto.getRandomValues(buf);
