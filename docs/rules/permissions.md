@@ -16,7 +16,13 @@ Permission relay, no-TTL rule and trust-model accepted risks.
 
 ## A token holder can act as the human, so `blast_radius: high` is advisory
 
-- **A token holder can act as the human, so `blast_radius: high` is advisory.** Any agent that can run Bash can read `hub.token` (mode `0600`, same user) and send `by: "<human name>"`. That opens the ticket approval gate (`/permissions/:id/verdict`, or `/tickets/:id/transition` as the human), and lets it dismiss any permission request (`/permissions/:id/dismiss`). The gate holds against an agent that reports its own name honestly (an agent's Allow never opens it), not against a hostile one. Accepted until per-agent tokens bound to identity exist; do not describe the high-radius gate as enforcement.
+- **A token holder can act as the human, so `blast_radius: high` is advisory.** Any agent that can run Bash can read `hub.token` (mode `0600`, same user) and send `by: "<human name>"`. That lets it do what only the human may do: approve a request (`/requests/<room>/<id>/approve`), answer a decision (`/decisions/<id>/answer`), start a checkpoint (`/checkpoints`), lower a radius below the rule, move a ticket to any column, and dismiss any permission request (`/permissions/:id/dismiss`). The checks hold against an agent that reports its own name honestly, not against a hostile one. Accepted until per-agent tokens bound to identity exist. P6-03 does not change this: the radius rule sets a floor for honest callers only. Do not describe a radius, an Approve or a decision as enforcement.
+
+## Who decides what
+
+- **The human approves.** One Approve per request releases its draft tickets, and later tickets of it (L1). Only the human approves a request, answers a decision (`escalate`) and changes the origin of a request. A high ticket has no Allow step: it closes on the full suite and two Validator PASSes (P6-04). No route and no `ticket:done` permission exist for it.
+- **The radius has a floor.** The radius rule (terms and paths in `config.yml`, `hub/core/radius-rule.ts`) gives the lowest `blast_radius` of a ticket text. The stored radius is never below it. The room lead, the creator or the human raises a radius with `edit_ticket`. Only the human lowers it below the rule. A permission request (`/permissions`) is for a Claude Code tool call and has no link to the radius.
+- **The room lead opens, the human answers.** Only the room lead opens a decision. Another agent and the human get 403. Only the human answers it.
 
 ## The launch stream has no per-role token
 

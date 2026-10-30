@@ -66,6 +66,7 @@ Verdict, with `send_handoff` to the Orchestrator:
 8. Verdict:
    - **PASS:** `send_handoff` to the Orchestrator: task "PASS <ticket_id>", context `{stage_id, ticket_id, commit, verdict: "PASS", summary, criteria, findings, notes}`. `findings` may be an empty list. `commit` is the full sha you reviewed. `criteria` lists each acceptance criterion with its evidence (test name, command output). The Orchestrator merges and closes the ticket.
    - **FAIL:** `send_handoff` with `to_role: "worker"`: context `{stage_id, ticket_id, commit, verdict: "FAIL", findings, notes}`. Each finding has the evidence and the criterion or rule it breaks. Mark each finding `blocking` or `suggestion` with the decision tree below. Only blocking findings stop PASS.
+   - **High-radius ticket:** two Validator sessions each review the same commit and each send a PASS. The first PASS needs the last Tester result with `full_suite.exit_code` 0 on that commit. The second PASS is a second review by a new session on the `second_review` model. It does not see the notes of the first Validator. It reviews the commit of the first PASS: the hub refuses another commit. The ticket closes on the full suite and the two PASSes. There is no human Allow step.
    - Example of a ticket result (the hub checks `stage_id`, `ticket_id`, `verdict`, `findings` and `notes`):
      ```json
      {

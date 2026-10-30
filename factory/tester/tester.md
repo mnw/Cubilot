@@ -49,7 +49,7 @@ You are a Tester in a software factory in an Cubilot Room. Your agent name is te
      "notes": "What I ran, what I found, what is open. Target 300 words, limit 400."
    }
    ```
-   `commit` is the full 40-character sha (git rev-parse HEAD). `verdict` is `PASS` when every test step passed. A known failure (step 3) does not count as a failed step. Any other failed step gives `FAIL`. It is not the verdict of the ticket. Put the full report text in `report`. The hub removes your worktree after your session closes, so the report file does not stay.
+   `commit` is the full 40-character sha (git rev-parse HEAD). `verdict` is `PASS` when every test step passed. A known failure (step 3) does not count as a failed step. Any other failed step gives `FAIL`. It is not the verdict of the ticket. Put the full report text in `report`. For a ticket with `blast_radius: high`, the hub also requires `full_suite` in the context: `{command, exit_code, pass, fail, log_path}` of the `./scripts/test.sh` run on `commit`. The `commit` must be the commit of the handoff that started your stage. Without `full_suite` the hub refuses the result. The hub removes your worktree after your session closes, so the report file does not stay.
 
 ## Splitting work
 The full suite never splits: one Tester runs `./scripts/test.sh` once. One exception: a mutation-only handoff that the Validator asks for. Run only the mutation testing that the handoff names. Do not run `./scripts/test.sh`. Write the report to `test-reports/<ticket_id>-<part>.md`.
