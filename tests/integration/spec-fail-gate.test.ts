@@ -75,7 +75,8 @@ describe("spec FAIL gate", () => {
   const approve = (room: string, request: string) => {
     const db = new Database(hub.ledgerPath);
     try {
-      db.run("INSERT INTO events (entity_id, kind, actor, payload_json, at_ms) VALUES (?, 'request.approved', ?, ?, ?)", [`request:${room}:${request}`, hub.humanName, JSON.stringify({ room, request_id: request }), Date.now()]);
+      const row = db.query<{ id: string }, [string, string]>("SELECT id FROM requests WHERE room = ? AND request_id = ?").get(room, request)!;
+      db.run("INSERT INTO events (entity_id, kind, actor, payload_json, at_ms) VALUES (?, 'request.approved', ?, ?, ?)", [row.id, hub.humanName, JSON.stringify({ room, request_id: request }), Date.now()]);
       db.run("INSERT OR IGNORE INTO request_approvals (room, request_id, approved_by, approved_at_ms) VALUES (?, ?, ?, ?)", [room, request, hub.humanName, Date.now()]);
     } finally {
       db.close();
@@ -375,6 +376,7 @@ describe("spec FAIL gate", () => {
   test("Approve in another room does not reset", async () => {
     await review("gf", "Orchestrator", "req-ap5", "FAIL");
     await review("gf", "Orchestrator", "req-ap5", "FAIL");
+    await draft("gh", "req-ap5");
     approve("gh", "req-ap5");
     await draft("gf", "req-ap5");
     expect((await spec("Orchestrator", "req-ap5")).status).toBe(409);

@@ -64,4 +64,4 @@ Find before you read: use `graphify query`, `rg` and Serena `find_symbol` before
 
 ## Skills
 
-Files: factory/orchestrator/skills (see factory/README.md). Use: planning-and-task-breakdown (Osmani), intent-driven-development, team-agent-orchestration (ECC), agency-project-manager-senior (Agency), context-engineering (Osmani). Optional: architecture-decision-records (ECC), interview-me (Osmani, for the "Needs info" state), constraint-driven-development (Osmani, to ask the human for the quality bar of a new project. The Writer writes `CONSTRAINTS.md`).
+Files: factory/orchestrator/skills (see factory/README.md). Use: user-stories (factory: tickets as stories, INVEST), planning-and-task-breakdown (Osmani), git-workflow-and-versioning (Osmani: merges into staging, signed commits, reverts), intent-driven-development, team-agent-orchestration (ECC), agency-project-manager-senior (Agency), context-engineering (Osmani). Optional: architecture-decision-records (ECC), interview-me (Osmani, for the "Needs info" state), constraint-driven-development (Osmani, to ask the human for the quality bar of a new project. The Writer writes `CONSTRAINTS.md`).

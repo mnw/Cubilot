@@ -23,7 +23,9 @@ import type {
 } from "../core/types";
 import { createLedgerEntity, ledgerConflictResponse, withLedgerRequired } from "../core/ledger-entity";
 import { validName, validRoomLabel } from "../core/ids";
+import { deliveriesNotInMain } from "../core/delivery-report";
 import { openBlockerIds } from "./ticket-blockers";
+import { flowReport } from "../core/flow";
 import { getRoomSettings, DEFAULT_ROLE_LIMITS, DEFAULT_STAGE_TIMEOUT_MIN, STAGE_ROLES, type StageRole } from "../core/ledger";
 import { LedgerConflict } from "../core/types";
 import type { LaunchRecord } from "../core/launch-record";
@@ -490,7 +492,7 @@ const pathSegment = (x: string) => x.replace(/[^A-Za-z0-9_.-]/g, "_");
  * The room of a stage: the room of its ticket, or for a spec stage (no ticket) the room of its scope tickets. A spec handoff
  * checks that all of them are in one room (the agent's room, or for a human sender the room of the named tickets), so the first one tells. Used by the role limit and the free-slot start.
  */
-const STAGE_ROOM_SQL = `COALESCE(
+export const STAGE_ROOM_SQL = `COALESCE(
   (SELECT room FROM tickets WHERE id = s.ticket_id),
   (SELECT t.room FROM stage_scope sc JOIN tickets t ON t.id = sc.ticket_id WHERE sc.stage_id = s.id ORDER BY sc.ticket_id LIMIT 1))`;
 
@@ -586,8 +588,10 @@ export function specFailState(db: Database, room: string, requestId: string): { 
   // The human's Approve of the request in this room starts the count again, like a PASS: the later of the two ends the old run.
   const lastApprove =
     db
-      .query<{ n: number | null }, [string]>("SELECT MAX(e.seq) AS n FROM events e WHERE e.entity_id = ?1 AND e.kind = 'request.approved'")
-      .get(`request:${room}:${requestId}`)?.n ?? 0;
+      .query<{ n: number | null }, [string, string]>(
+        "SELECT MAX(e.seq) AS n FROM events e JOIN requests r ON r.id = e.entity_id WHERE r.room = ?1 AND r.request_id = ?2 AND e.kind = 'request.approved'",
+      )
+      .get(room, requestId)?.n ?? 0;
   const since = Math.max(lastPass, lastApprove);
   const fails = db
     .query<{ id: string }, [string, string, number]>(
@@ -1848,7 +1852,7 @@ export function createStageRuntime(
       handler: (_req, _cap, params) => {
         const room = decodeURIComponent(params.id);
         if (!validRoomLabel(room)) return Response.json({ error: "invalid room" }, { status: 400 });
-        return Response.json({ room, requests: needsYouRequests(db, room), waiting: waitsForYou(db, room) });
+        return Response.json({ room, requests: needsYouRequests(db, room), waiting: waitsForYou(db, room), deliveries: deliveriesNotInMain(db, room) });
       },
     },
     {
@@ -1860,6 +1864,24 @@ export function createStageRuntime(
         const room = decodeURIComponent(params.id);
         if (!validRoomLabel(room)) return Response.json({ error: "invalid room" }, { status: 400 });
         return Response.json({ room, roles: metricsByRole(db, room, STAGE_ROOM_SQL) });
+      },
+    },
+    {
+      // The flow of one room over a window, from the ledger and git (Part 18 flow measure). Read only.
+      method: "GET",
+      path: /^\/rooms\/([^/]+)\/flow$/,
+      auth: "read",
+      handler: (req, _cap, params) => {
+        const room = decodeURIComponent(params.id);
+        if (!validRoomLabel(room)) return Response.json({ error: "invalid room" }, { status: 400 });
+        const q = new URL(req.url).searchParams;
+        const now = Date.now();
+        const until = q.has("until") ? Number(q.get("until")) : now;
+        const since = q.has("since") ? Number(q.get("since")) : until - 24 * 3_600_000;
+        if (!Number.isInteger(since) || !Number.isInteger(until) || since < 0 || since >= until) {
+          return Response.json({ error: "since and until must be integer ms with since < until" }, { status: 400 });
+        }
+        return Response.json(flowReport(db, room, since, until, now));
       },
     },
     {
