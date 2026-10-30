@@ -52,7 +52,8 @@ describe("cancel traces on a real hub", () => {
 
   test("(g) refusals change nothing: agent 403, missing by 400, unknown by 400, unknown id 404, other room 404", async () => {
     expect((await clear("ct", X, { by: "claude-a" })).status).toBe(403);
-    expect((await clear("ct", X, {})).status).toBe(400);
+    // A missing by is 400 for an agent. The human token needs no by: the caller is the human.
+    expect((await authedFetch(hub, `/rooms/ct/cancel-traces/${X}/clear`, { method: "POST", headers: { Authorization: `Bearer ${hub.token}` }, body: "{}" })).status).toBe(400);
     expect((await clear("ct", X, { by: "nobody-here" })).status).toBe(400);
     expect((await clear("ct", "ct_" + "9".repeat(16), { by: hub.humanName })).status).toBe(404);
     expect((await clear("ct", Z, { by: hub.humanName })).status).toBe(404);

@@ -262,8 +262,10 @@ async function bootOn(ledgerPath: string, token: string): Promise<{ hub: HubHand
       CUBILOT_ATTACHMENTS_DIR: join(base, "att"), CUBILOT_TRANSCRIPTS_DIR: join(base, "tr"), CUBILOT_DATA_DIR: join(base, "data"),
       CUBILOT_HUMAN_NAME: "human", CUBILOT_DEFAULT_ROOM: "default",
     },
-    stdout: "pipe", stderr: "pipe",
+    stdin: "pipe", stdout: "pipe", stderr: "pipe",
   });
+  proc.stdin.write("hum-restart-token-0123456789\n");
+  proc.stdin.end();
   const reader = proc.stdout!.getReader();
   const dec = new TextDecoder();
   let buf = "";
@@ -278,6 +280,6 @@ async function bootOn(ledgerPath: string, token: string): Promise<{ hub: HubHand
   }
   if (!url) { proc.kill(); throw new Error(`hub did not boot:\n${buf}`); }
   void (async () => { try { while (!(await reader.read()).done) {} } catch {} })();
-  const hub = { url, token, ledgerPath, attachmentsDir: join(base, "att"), transcriptsDir: join(base, "tr"), humanName: "human", kill: async () => { proc.kill(); await proc.exited; } } as HubHandle;
+  const hub = { url, token, humanToken: "hum-restart-token-0123456789", pid: proc.pid, ledgerPath, attachmentsDir: join(base, "att"), transcriptsDir: join(base, "tr"), humanName: "human", kill: async () => { proc.kill(); await proc.exited; } } as HubHandle;
   return { hub, kill: hub.kill };
 }

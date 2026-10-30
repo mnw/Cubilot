@@ -40,7 +40,7 @@ export async function giveProjectHttp(hub: { url: string; token: string }, ...ro
   for (const r of rooms) {
     const res = await fetch(`${hub.url}/rooms/${encodeURIComponent(r)}/settings`, {
       method: "PUT",
-      headers: { Authorization: `Bearer ${hub.token}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${hub.humanToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({ project_folder: projectRepo() }),
     });
     if (!res.ok) throw new Error(`project_folder for ${r}: ${res.status} ${await res.text()}`);

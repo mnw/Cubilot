@@ -370,6 +370,7 @@ export function createCheckpointKind(db: Database, deps: CheckpointDeps): Checkp
       method: "POST",
       path: "/checkpoints",
       auth: "mutating",
+      caller: "human",
       handler: async (req, cap) => {
         const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
         const by = typeof b.by === "string" ? b.by.trim() : "";

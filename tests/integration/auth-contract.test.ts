@@ -50,7 +50,7 @@ describe("auth contract — mutating routes", () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${hub.token}`,
+          "Authorization": `Bearer ${hub.humanToken}`,
         },
         body: JSON.stringify({ _pad: oversize }),
       });

@@ -3,7 +3,7 @@
 import type { Database } from "bun:sqlite";
 import type { AgentCtx, Entry, HubCapabilities, Scope } from "./types";
 import type { AgentRegistry } from "./agents";
-import type { AuthHelpers } from "./auth";
+import type { AuthHelpers, Caller } from "./auth";
 import { insertEvent } from "./events";
 
 export type CapabilityDeps = {
@@ -21,12 +21,13 @@ export type CapabilityDeps = {
   };
 };
 
-export function createCapBuilder(deps: CapabilityDeps): () => HubCapabilities {
+export function createCapBuilder(deps: CapabilityDeps): (caller?: Caller) => HubCapabilities {
   const { agents, ensureAgent, fanoutSend, auth, config } = deps;
 
-  return function buildCap(): HubCapabilities {
+  return function buildCap(caller: Caller = "agent"): HubCapabilities {
     return {
       db: deps.db!,
+      caller,
       agents: {
         get(name): AgentCtx | null {
           const a = agents.get(name);

@@ -118,7 +118,7 @@ there is no creation-side idempotency because `id` is server-minted.
 
 All tools are exposed by the channel-mode `cubilot-bin` sidecar. Every tool call
 becomes an authenticated POST to the hub; the sidecar attaches
-`Authorization: Bearer <hub.token>` and retries once on HTTP 401 after
+`Authorization: Bearer <hub.token>` (the agent token) and retries once on HTTP 401 after
 re-reading the token file (to handle app-restart rotations transparently).
 
 ### `send_handoff`
@@ -251,8 +251,7 @@ All routes are under `http://127.0.0.1:<hub-port>` (dynamic; see
 
 `by` is the actor's name. It is validated against the route's expected
 actor (recipient for accept/decline, sender-or-human for cancel) but NOT
-cryptographically tied to the token — any token-holder can claim any name
-(see trust model below).
+cryptographically tied to the agent token — any agent-token holder can claim any agent name. The human name is the exception: see "Identity and trust model".
 
 ---
 
@@ -743,8 +742,8 @@ The hub does not start or stop an agent session. It queues requests, and the Rus
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| GET | `/launches/stream` | Bearer header OR `?token=` | SSE stream of launch and close requests. Each event has `id: <request id>` and `data: <request JSON>`. |
-| POST | `/launches/{id}/ack` | Bearer header | The shell's answer to one request. |
+| GET | `/launches/stream` | Bearer (human token) header OR `?token=` | SSE stream of launch and close requests. Each event has `id: <request id>` and `data: <request JSON>`. |
+| POST | `/launches/{id}/ack` | Bearer (human token) header | The shell's answer to one request. |
 
 Request formats (`id` has the format `l_[0-9a-f]{16}`):
 
@@ -799,7 +798,7 @@ Rules:
 
 **Who can queue a launch.** No route and no chatbridge tool has a launch parameter. One function, `enqueueLaunch` in `hub/kinds/stage.ts`, queues launch requests. Only the stage evaluator and the retry path call it. `tests/unit/launch-queue.test.ts` checks that `enqueueLaunch` is named, and the launch queue is imported, only in `hub/kinds/stage.ts`. Each call checks the launch conditions again. The ticket is not `draft`, `done` or `cancelled`, no blocker is open, and the role has a free slot. When a check fails, the stage stays as it is.
 
-**Accepted risk.** There is no per-role token. Any holder of `hub.token` can read `/launches/stream` and send acks. The code path is the only control. See "Identity and trust model".
+**Accepted risk.** There is no per-role token. The launch routes need the human token (they give 403 to the agent token), and no file holds it. The code path is the only control. See "Identity and trust model".
 
 ### Worktrees
 
@@ -1071,6 +1070,222 @@ The spec-review PASS queues the scope tickets in the same way, whatever their ro
 | GET | `/requests/{room}/waiting` | Bearer header OR `?token=` | The requests of the room that wait for approval: `{room, waiting: [{request_id, stage_id, high_tickets, draft_tickets, origin, features, tickets, scope_change}]}`. `tickets` lists each ticket of the request that is not cancelled with `radius`, `source` and `reasons` of its radius. |
 | GET | `/requests/{room}/needs-you` | Bearer header OR `?token=` | The requests of the room with two or more spec FAILs since its last PASS or the human's Approve of the request: `{room, requests: [{request_id, fail_count, latest_fail_stage_id, findings}]}`. The findings come from the latest FAIL, `blocking` first. `latest_fail_stage_id` is the newest FAIL stage of the request (the board keys Collapse and Clear on it). A finding is left out when its ticket has, with `seq` greater than the `stage.passed` event of that FAIL stage, a `ticket.done`, a `ticket.cancelled` or a `ticket.edited` whose `fields` include `acceptance_criteria` or `title`, or when the ticket is `done` or `cancelled` now. Assigned, noted, attached, archived and other edits do not count. A request is left out when all its findings are left out (a FAIL with no findings keeps its row), or when it has tickets in the room and all are `done` or `cancelled`. A request with no ticket left in it stays. Finding titles come from tickets of the same room. A newer open spec review of the request does not hide it: the row stays until a PASS (spec-fail-gate 5). After two FAILs since its last PASS or the human's Approve of the request, `POST /handoffs` with `review: "spec"` from a sender that is not the human gets 409 ("the human must send this review"), and each queued spec stage of the request from a non-human handoff moves to `failed` with the reason "spec FAIL limit: the human must send this review". Each spec FAIL result is stored with `fail_count` (the hub count, over any sender value). A newer FAIL becomes the latest FAIL (count and findings). A newer PASS or Approve removes the row, and the next `fail_count` starts at 1. A newer review that ends `failed` with no verdict does not count as a FAIL. |
 | GET | `/requests/{room}/{request_id}/delivery` | Bearer header OR `?token=` | The delivery report of a request (P6-08), built from the ledger and git with no model: `origin`, `features`, `tickets` (each with its `merge_commit` on staging, or `no merge commit`), `criteria_edits` after the newest Approve (both texts), child `factory_requests`, `known_limits` (follow-up tickets, open suggestions) and `checks` (`high_radius` PASS handoff ids, `test_counts` from the staging suite log or `no staging log`, `live_check`). 409 while a ticket of the request is open, 404 for an unknown request, 400 for a bad room or id. Read only. |
+| POST | `/requests/{room}/{request_id}/approve` | Bearer (human token) header | The human's approval (see "Spec-review stages"). |
+| POST | `/requests` | Bearer header | Create a request (see "The `request` kind"). |
+| POST | `/requests/{room}/{request_id}/edit` | Bearer header | Change the features or the origin of a request. |
+| GET | `/requests?room=` | Bearer header OR `?token=` | The requests of the room with `scope_change`. |
+| GET | `/rooms/{room}/requests` | Bearer header OR `?token=` | One row for each request of the room: `{room, requests: [{request_id, origin, status, tickets_done, tickets_total, high_radius_count, last_event_ms}]}`. `status` is `draft` (no ticket, or a draft ticket with no Approve), `waiting_for_approve`, `building`, `ready_for_test`, `merged` (each done ticket's staging merge commit is an ancestor of `main`) or `cancelled` (tickets, all cancelled). `tickets_total` and `high_radius_count` skip cancelled tickets. `last_event_ms` is the newest event of the request or of one of its tickets. 400 for a bad room, 200 with an empty list for a room with no request. Read only: no event. |
+
+No endpoint directly accepts a stage-create or arbitrary-transition command. A `to_role` handoff (`POST /handoffs`) can create a stage through the evaluator. Some routes cause fixed moves as a result of their input. `POST /launches/{id}/ack` moves `launching` to `running` (or to `retrying` or `failed` on an error). `POST /stages/{id}/turn-end` can move `running` to `retrying` or `failed` (a stop). A valid result handoff moves `running` to `passed`.
+
+### SSE events
+
+- `stage.queued`, `stage.launching`, `stage.running`, `stage.retrying`, `stage.passed`, `stage.failed`: scope `ui-only-ambient`. They go to the UI stream only. They are not in the chat log or the transcript. No agent receives them.
+- `stage.reminder`: scope `to-agents`, to the stage's session. The bridge delivers it in `wake` mode.
+- `stage.rejected`: scope `to-agents`, to the session that sent the result. The bridge delivers it in `context` mode, because the 400 of the handoff call already told the session.
+- Stages are not replayed on reconnect.
+
+## The `request` kind
+
+The plan label of tickets with an origin, features and the scope of the newest Approve (`hub/kinds/request.ts`, P6-02). Status: `open` until the first Approve, then `approved`. Events: `request.created`, `request.edited`, `request.approved` (entity: the id of the request row). Existing `request_id` labels get a request row at hub start (origin `human`, no features), and an `approved` one when a ticket is past `draft`. A second run changes nothing.
+
+Snapshot: `id`, `room`, `request_id`, `origin` (`human` | `factory`), `features` (up to 50 texts of 200 characters), `parent_request_id`, `source`, `approved` (the scope at the newest Approve: the features and `{id, radius}` of each ticket that was not cancelled), `status`, `created_by`, `created_at_ms`, `version`.
+
+A request **needs the human's Approve** when its origin is `human`, or when it has a non-terminal `high` ticket or any feature. A request of origin `factory` with none of these is queued by the spec-review PASS. A later change of scope (tickets added, removed or raised, features changed) is shown on the Approve card (`scope_change`) and holds no ticket (L1).
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/requests` | Bearer, body `{by, request_id, origin?, features?, parent_request_id?, source?}` | The room lead or the human creates a request (origin default `human`). 403 for another caller, 409 for an existing request, 400 for a bad field. An agent that creates a request of origin `factory` names a `source`: a ticket, decision or stage of this room. When the source belongs to a request, `parent_request_id` names that request. |
+| POST | `/requests/{room}/{request_id}/edit` | Bearer, body `{by, features?, origin?}` | The room lead or the human changes the features. Only the human changes the origin (403 otherwise). |
+| GET | `/requests?room=` | read | The requests of the room, each with `scope_change`. |
+| POST | `/requests/{room}/{request_id}/approve` | Bearer (human token) | The human's Approve (see "Spec-review stages"). |
+
+The agent tool is `create_request`.
+
+## The `decision` kind
+
+A human question from the room lead (`hub/kinds/decision.ts`). The lead opens it with the tool `escalate`, in the five-part format of `factory/orchestrator/unblocking.md`: `block` (one sentence), `facts` (each names a commit or a record id), `options` (2 or 3, one recommended), `human_actions` (full ticket ids with the exact action) and `next`. Status `open`, then `answered` (final). Events: `decision.open`, `decision.answered`. The arbiter statuses of this table are Part 19 and are not part of this protocol.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/decisions` | Bearer, body `{by, reason, block, facts, options, human_actions, next, ticket_id?, request_id?}` | Only the room lead (403 otherwise). `reason` is `scope`, `feature`, `irreversible` or `security`. `ticket_id` or `request_id` is required. → 201 `{id, snapshot}`. |
+| POST | `/decisions/{id}/answer` | Bearer (human token), body `{by, option, text?}` | Only the human (403 otherwise). `option` is one of the option ids. → 200. The hub sends the lead one entry with the answer and, when the decision has a `ticket_id`, writes one note on that ticket (a request-only decision writes no note). A repeat returns `idempotent: true`. |
+| GET | `/decisions?room=` | read | The open decisions of the room, newest first (the Needs-you list). |
+
+Decision entries go to the UI stream only. The lead gets its one entry from the answer route, and gets an answer it has not received at reconnect.
+
+## Rooms (v0.9)
+
+A **room** is a first-class routing dimension that lets one hub host multiple
+isolated projects in a single window without cross-project context pollution.
+Every agent is registered in exactly one room; the human is a super-user in
+every room.
+
+### Identity
+
+- Agent room is captured on first `/agent-stream` connect for that agent
+  (`&room=<label>` query param, mirrored into each MCP config as
+  `CHATBRIDGE_ROOM=<label>`). Room is **immutable** for the lifetime of the
+  agent's presence in the hub — reconnects with a different room arg are
+  ignored.
+- The human's room is `null` in the roster record, which the broadcast layer
+  treats as "every room". There is no `CHATBRIDGE_ROOM` equivalent for the
+  webview.
+- Room labels follow the same charset + length rules as agent names
+  (`[A-Za-z0-9_.-]` plus internal spaces, 1..=64 chars).
+
+### Routing scope
+
+For any event from sender `S` targeting room `R`:
+
+```
+recipients(event) =
+    agents whose room == R           // same-room peers
+  ∪ {human}                          // super-user
+  ∪ ({event.to} if named peer)       // explicit cross-room
+```
+
+`target: "all"` from an agent expands to same-room peers + human. `target: "all"`
+from the human requires an explicit `room` in the request body (otherwise "all"
+is ambiguous across projects). Explicit `to: "<name>"` always delivers,
+crossing rooms when needed — useful for pulling in a reviewer from another
+project.
+
+### Per-kind rules
+
+| Kind | Same-room only? | Notes |
+|---|---|---|
+| `chat` (`/post`, `/send`) | Yes for `target: "all"`; No for named target | Sender's room tagged on entry. |
+| `handoff` | Yes (from non-human) | 403 `cross-room handoff not permitted` otherwise. Human is super-user. |
+| `interrupt` (single) | Yes (from non-human) | 403 `cross-room interrupt not permitted`. |
+| `interrupt` (bulk) | Human-only | `{ from: <human>, rooms: [<labels>], text }`. Fans out one interrupt per non-human agent in each listed room. |
+| `permission` request | Fan-out scoped to same room | Peers in other rooms never see the prompt. |
+| `permission` verdict | Voter must be same-room or human | 403 `cross-room verdict not permitted` otherwise. |
+| `nutshell` | One row per room | Edits propagate to same-room agents live + included in briefing on connect. |
+
+### Nutshell per room
+
+- Table schema: `nutshell(room TEXT PRIMARY KEY, text, version, updated_at_ms, updated_by)`.
+- `GET /nutshell?room=<label>` is now required; no-arg returns 400.
+- Empty sentinel returned when a room has no row: `{ room, text: "", version: 0, ... }`.
+- Edit handoff: `context = { patch: "<text>", room: "<label>" }`. The accept
+  path keys the write by that room (the human can target any room;
+  non-human senders are restricted to their own).
+- `nutshell.updated` SSE carries `room`; channel-bin forwards the update to
+  same-room agents live (not just on next reconnect).
+
+### Wire format
+
+Every `/stream` payload and every `<channel>` tag forwarded by channel-bin
+now includes a `room` field. The value is:
+
+- The sender's room for agent-originated events.
+- The target room for human-originated broadcasts (`/send` `room` body field).
+- `null` for strictly global events (roster snapshots, presence).
+
+Channel-bin re-validates `meta.room` against its configured `CHATBRIDGE_ROOM`
+on every inbound event, dropping mismatches as defense-in-depth (mirrors the
+upstream ["Gate inbound messages"](https://code.claude.com/docs/en/channels-reference#gate-inbound-messages)
+pattern). Dropped events hit stderr with an explicit mismatch log so a hub
+routing bug would show up as a surge, not silent context pollution.
+
+### Handoff gate
+
+`CHATBRIDGE_HANDOFF_GATE=<command>` in an agent's launch environment makes the bridge run the command (`/bin/sh -c`) before `send_handoff` posts to the hub. The command gets `{"tool_name":"mcp__chatbridge__send_handoff","tool_input":{...}}` on stdin, the shape of a Claude Code PreToolUse hook. Exit 2 blocks the handoff, and the command's stderr is the tool error the agent reads. Exit 0 lets it through. Any other result (another exit code, a start failure, no answer within 60 s) is a fault of the gate: the bridge logs it and the handoff goes on. No variable: nothing runs. Both harnesses use it, because plugin hooks do not run for chatbridge tools.
+
+### HTTP
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/room-default` | Returns `{ room: <CUBILOT_DEFAULT_ROOM> }`; read-auth. Used as fallback when an external-spawn channel-bin has no `CHATBRIDGE_ROOM`. |
+
+### Pause / Resume
+
+A UI affordance on top of the existing `interrupt` primitive — not a new
+kind. The Pause button POSTs `/interrupts` with the bulk shape targeting
+the selected room, canned text `"Pause — stop current task, hold state,
+await resume."`. Resume does the same with the Resume text. Cooperative,
+not preemptive — agents finish their current tool call before reading the
+card. See [CLAUDE.md → hard rules](../CLAUDE.md) for why bulk targeting is
+human-only.
+
+### Agent pause (`POST /agents/<name>/pause`)
+
+Separate from the interrupt-based Pause button above. The human sets it with
+`{ "paused": true|false, "by": "<human name>" }`; in memory, per agent object.
+While an agent is paused:
+
+- **Its writes that reach others get `423 {"error":"agent is paused"}`:**
+  `POST /post`, `/handoffs`, `/interrupts`, and the ticket routes create, claim,
+  transition, assign, archive, notes and attachments. Not refused: the
+  permission requests and verdicts on its own
+  requests (a running tool call must not get stuck), and handoff decline, handoff
+  cancel and interrupt ack (they only reduce the agent's involvement). Handoff
+  accept is refused with 423: taking work is intervening.
+- **Nothing from agents reaches it as chat:** broadcasts and direct posts from other
+  agents are skipped (`AgentRegistry.enqueueFor`).
+- **Structured events still arrive but carry `"paused": true`** (handoff, interrupt, ticket
+  kinds; not `permission.*`). The bridge must deliver a `paused` event as `context`,
+  never `wake` or `steer`.
+- **Only the human lifts it:** the toggle, or a direct human message to the agent.
+
+---
+
+## The briefing (onboarding notification)
+
+When an agent's channel sidecar connects to `/agent-stream` for the first
+time during a given hub process lifetime, the hub pushes a single briefing
+event to that agent's queue **before** any chat or structured-message
+replay. The briefing shape:
+
+```json
+{
+  "type": "briefing",
+  "tools": ["post","post_file","send_handoff","accept_handoff",
+            "decline_handoff","cancel_handoff","send_interrupt","ack_interrupt"],
+  "peers": [{ "name": "alice", "online": true }, { "name": "human", "online": true }],
+  "attachments_dir": "/Users/<you>/cubilot-attachments",
+  "human_name": "human",
+  "nutshell": "...current nutshell text, or null...",
+  "ts": "HH:MM:SS"
+}
+```
+
+The channel sidecar renders it into a prose paragraph and forwards as a
+`notifications/claude/channel` event with `meta.kind="briefing"`. Reconnects
+within the same hub process do **not** trigger a new briefing; hub restart
+does.
+
+---
+
+## Identity and trust model
+
+Two tokens are issued per running hub instance, each 32 random bytes in URL-safe base64, and both are re-minted on every app launch and settings reload:
+
+- The **agent token** is written to `~/Library/Application Support/Cubilot/hub.token` (mode `0600`, atomic write) and to the hub env `CUBILOT_TOKEN`. The channel-mode sidecar reads the file on startup, attaches it to every POST, and re-reads on HTTP 401 to handle rotations transparently.
+- The **human token** is the first line of the hub's stdin. The hub reads it at start within 5 s. If none comes, the hub logs one line and no caller is the human. No file and no env value holds it. The desktop window gets it from `get_hub_url`, which returns `{url, token}`.
+
+Each request has a **caller**: `human` (human token), `agent` (agent token) or none (401). Both tokens are compared in constant time. The caller is `cap.caller` in a route handler. A browser session is a later group.
+
+- An `agent` caller whose JSON body names the human name in `by`, `from`, `actor`, `voter`, `requester`, `agent` or `creator` (case and surrounding spaces ignored) gets `403 {"error":"the human acts only from the UI"}`.
+- For a `human` caller the hub uses the human name as the acting name of `by` and `from`, whatever they hold. A field that names a target (`agent` on `/remove`) keeps its value.
+- A route with `RouteDef.caller: "human"` gives `403 {"error":"only the human may call this route"}` to an `agent` caller. On staging these are: `POST /requests/{room}/{request_id}/approve`, `POST /decisions/{id}/answer`, `POST /checkpoints`, `PUT /rooms/{room}/settings`, `POST /agents/{name}/pause`, `POST /remove`, `GET /launches/stream`, `POST /launches/{id}/ack`. The permission verdict and dismiss routes stay open to agents (the relay hook dismisses as the agent).
+- `GET /stream` gives 403 to the `agent` caller. `GET /agent-stream` gives 403 to the `human` caller.
+
+**Trust-on-self-assertion (agents).** The `by` and `from` fields of an agent are validated against the expected actor for each route but are **not** cryptographically bound to the agent token. Any process holding `hub.token` can claim any agent identity. The human identity is bound to the human token. Accepted risk: an agent with an unrestricted shell runs as the human's OS user, so the guard stops a forged `by` over HTTP, not a hostile local process.
+
+**The `system` actor.** On the spec-review path, the hub writes `system` for every stage event: the creation (`stage.queued`), the launch, `running`, the retry moves, PASS and FAIL. The PASS transaction also writes each `ticket.queued` with `system`. The approval route writes the human's name. Every mutating route refuses `system` as an actor with 400 (see "Launch ownership and the `system` actor").
+
+### Read routes
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/stages?status=&role=&limit=` | Bearer header OR `?token=` | List snapshots. `status` is a stage status or `all` (default `queued`). `limit` 1 to 1000, default 100. |
+| GET | `/stages/{id}` | Bearer header OR `?token=` | One snapshot, or 404. |
+| POST | `/stages/{id}/turn-end` | Bearer header | End-of-turn report of the stage's session (see above). |
+| GET | `/requests/{room}/waiting` | Bearer header OR `?token=` | The requests of the room that wait for approval: `{room, waiting: [{request_id, stage_id, high_tickets, draft_tickets, origin, features, tickets, scope_change}]}`. `tickets` lists each ticket of the request that is not cancelled with `radius`, `source` and `reasons` of its radius. |
+| GET | `/requests/{room}/needs-you` | Bearer header OR `?token=` | The requests of the room with two or more spec FAILs since its last PASS or the human's Approve of the request: `{room, requests: [{request_id, fail_count, latest_fail_stage_id, findings}]}`. The findings come from the latest FAIL, `blocking` first. `latest_fail_stage_id` is the newest FAIL stage of the request (the board keys Collapse and Clear on it). A finding is left out when its ticket has, with `seq` greater than the `stage.passed` event of that FAIL stage, a `ticket.done`, a `ticket.cancelled` or a `ticket.edited` whose `fields` include `acceptance_criteria` or `title`, or when the ticket is `done` or `cancelled` now. Assigned, noted, attached, archived and other edits do not count. A request is left out when all its findings are left out (a FAIL with no findings keeps its row), or when it has tickets in the room and all are `done` or `cancelled`. A request with no ticket left in it stays. Finding titles come from tickets of the same room. A newer open spec review of the request does not hide it: the row stays until a PASS (spec-fail-gate 5). After two FAILs since its last PASS or the human's Approve of the request, `POST /handoffs` with `review: "spec"` from a sender that is not the human gets 409 ("the human must send this review"), and each queued spec stage of the request from a non-human handoff moves to `failed` with the reason "spec FAIL limit: the human must send this review". Each spec FAIL result is stored with `fail_count` (the hub count, over any sender value). A newer FAIL becomes the latest FAIL (count and findings). A newer PASS or Approve removes the row, and the next `fail_count` starts at 1. A newer review that ends `failed` with no verdict does not count as a FAIL. |
+| GET | `/requests/{room}/{request_id}/delivery` | Bearer header OR `?token=` | The delivery report of a request (P6-08), built from the ledger and git with no model: `origin`, `features`, `tickets` (each with its `merge_commit` on staging, or `no merge commit`), `criteria_edits` after the newest Approve (both texts), child `factory_requests`, `known_limits` (follow-up tickets, open suggestions) and `checks` (`high_radius` PASS handoff ids, `test_counts` from the staging suite log or `no staging log`, `live_check`). 409 while a ticket of the request is open, 404 for an unknown request, 400 for a bad room or id. Read only. |
 | POST | `/requests/{room}/{request_id}/approve` | Bearer header | The human's approval (see "Spec-review stages"). |
 | POST | `/requests` | Bearer header | Create a request (see "The `request` kind"). |
 | POST | `/requests/{room}/{request_id}/edit` | Bearer header | Change the features or the origin of a request. |
@@ -1276,7 +1491,7 @@ claim any identity. This matches the trust model of the pre-existing
 
 **The `system` actor.** The hub writes its own events with the actor `system`. Every mutating route refuses `system` as an actor (400). See "Launch ownership and the `system` actor" under the `stage` kind.
 
-**Launch stream.** A holder of `hub.token` can also read `/launches/stream` and acknowledge launch requests. No per-role token exists. This is an accepted risk.
+**Launch stream.** The launch routes are human-only: a caller needs the human token. No per-role token exists. A process of the same OS user that reads the shell memory can still get it. This is an accepted risk.
 
 **Hardening target.** Per-sidecar cryptographic identity (one token per
 channel-mode sidecar, bound to a specific agent name on issue, verified on
@@ -1420,7 +1635,7 @@ A checkpoint makes the room lead write a short note, clears its context and star
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| POST | `/checkpoints` | Bearer, body `{by, room}` | The human starts a checkpoint for the lead of `room`. 400 for a Pi lead, 403 for a caller that is not the human, 404 for a room with no lead, 409 when a checkpoint of that lead is not finished. |
+| POST | `/checkpoints` | Bearer (human token), body `{by, room}` | The human starts a checkpoint for the lead of `room`. 400 for a Pi lead, 403 for a caller that is not the human, 404 for a room with no lead, 409 when a checkpoint of that lead is not finished. |
 | GET | `/checkpoints?room=` | read | The record of a room, newest first: time (`started_at_ms`), `trigger` (`human` or `rule`), `context_pct_before`, `context_pct_after`, `summary_bytes`, `status`, `reason`. |
 | GET | `/checkpoints/{id}` | read | One record. |
 | POST | `/agents/{name}/turn-end` | Bearer, body `{by}` | The Stop hook of the lead. The first turn end after the start asks the lead to call the tool `checkpoint_note`. The next one writes the summary file (with the note, if one came) and asks the shell for `/clear`. A turn end of any other agent changes nothing (`{"action":"none"}`). |

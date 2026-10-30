@@ -2,9 +2,9 @@
 
 Permission relay, no-TTL rule and trust-model accepted risks.
 
-## Mutating structured-message endpoints use trust-on-self-assertion
+## An agent's by and from are self-asserted
 
-- **Mutating structured-message endpoints use trust-on-self-assertion.** `by` and `from` are validated against the expected actor for the route but not cryptographically verified. Token-holder can claim any identity. Documented hardening target: per-sidecar tokens bound to agent identity.
+- **Mutating structured-message endpoints use trust-on-self-assertion for agents.** `by` and `from` are validated against the expected actor for the route but not cryptographically verified. An agent token holder can claim any agent identity. Documented hardening target: per-sidecar tokens bound to agent identity. The human is not self-asserted: see the item on the human token below.
 
 ## Permission relay is a hub-first wait in the `classic.PermissionRequest` hook
 
@@ -14,9 +14,10 @@ Permission relay, no-TTL rule and trust-model accepted risks.
 
 - **Permissions have no TTL.** Claude Code's local dialog owns the effective timeout. Never add auto-expiry to the `permissions` table — auto-denying a tool the human actually wanted is annoying, auto-allowing is a security violation, and there is no safe default. Policy-driven per-tool timeouts may land later as a separate feature.
 
-## A token holder can act as the human, so `blast_radius: high` is advisory
+## An agent with an unrestricted shell is the human's OS user, so `blast_radius: high` is advisory
 
-- **A token holder can act as the human, so `blast_radius: high` is advisory.** Any agent that can run Bash can read `hub.token` (mode `0600`, same user) and send `by: "<human name>"`. That lets it do what only the human may do: approve a request (`/requests/<room>/<id>/approve`), answer a decision (`/decisions/<id>/answer`), start a checkpoint (`/checkpoints`), lower a radius below the rule, move a ticket to any column, and dismiss any permission request (`/permissions/:id/dismiss`). The checks hold against an agent that reports its own name honestly, not against a hostile one. Accepted until per-agent tokens bound to identity exist. P6-03 does not change this: the radius rule sets a floor for honest callers only. Do not describe a radius, an Approve or a decision as enforcement.
+- **An agent with an unrestricted shell is the human's OS user, so `blast_radius: high` is advisory.** The hub has two tokens (hub-first-browser, group 11). `hub.token` is the agent token. The human token goes from the shell to the hub on stdin and to the window through `get_hub_url`: no file and no env value holds it. Each request has a caller, and the human is known by the credential. An agent caller that names the human in `by`, `from`, `actor`, `voter`, `requester`, `agent` or `creator` gets 403 (`the human acts only from the UI`). The routes that only the human may call (`RouteDef.caller: "human"`: request Approve, decision answer, checkpoint create, room settings, agent pause, `/remove`, `/launches/*`) give 403 to the agent token, also without a `by`. `/stream` refuses the agent token and `/agent-stream` refuses the human token. This stops a forged `by` over HTTP. It does not stop a hostile local process: an agent with an unrestricted shell runs as the same OS user, so it can read the memory and the process list of the app and the window. Accepted. P6-03 does not change this: the radius rule sets a floor for honest callers. Do not describe a radius, an Approve or a decision as enforcement against a hostile local process.
+- **The permission verdict and dismiss routes are not human-only.** The relay hook dismisses as the requesting agent after a timeout, and a peer of the room may vote (see above). The actor guard still refuses an agent that names the human there.
 
 ## Who decides what
 
@@ -26,4 +27,4 @@ Permission relay, no-TTL rule and trust-model accepted risks.
 
 ## The launch stream has no per-role token
 
-- **The launch stream has no per-role token.** Any holder of `hub.token` can read `GET /launches/stream` (the prompts and the stage ids of every launch) and send `POST /launches/<id>/ack`. A forged ack can mark a launch `running` that never started, or end an attempt. Launches are gated by code path only (`enqueueLaunch`). Accepted for the same reason as the item above. Fix it together with per-agent tokens.
+- **The launch stream has no per-role token.** The routes are human-only, and the human token is in no file, so a process needs the human token to read `GET /launches/stream` (the prompts and the stage ids of every launch) and send `POST /launches/<id>/ack`. A process of the same OS user that reads the shell's memory or the window's token can do it. A forged ack can mark a launch `running` that never started, or end an attempt. Launches are gated by code path only (`enqueueLaunch`). Accepted for the same reason as the item above. Fix it together with per-agent tokens.

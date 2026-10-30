@@ -1,6 +1,7 @@
 // types.ts — KindModule runtime contract + LedgerEntity types + DI surface for persistent state-machine kinds.
 
 import type { Database } from "bun:sqlite";
+import type { Caller } from "./auth";
 
 // ---------- LedgerEntity / Kind orchestration types (architecture-cycle-2a) ----------
 //
@@ -166,6 +167,8 @@ export type RouteDef = {
   method: "GET" | "POST" | "PUT";
   path: string | RegExp;
   auth: "mutating" | "read";
+  /** "human": the dispatcher answers 403 to an agent caller (design decision 5 of hub-first-browser). */
+  caller?: "human";
   bodyMax?: number;
   /**
    * If true, dispatcher returns 503 when ledger is disabled. Default: false (in-memory
@@ -197,6 +200,8 @@ export type HubFeature = {
 // Sole access path kinds have to shared hub services.
 export type HubCapabilities = {
   db: Database;
+  /** Who made the request. A call from inside the hub (no request) counts as an agent: the safe default. */
+  caller: Caller;
   agents: {
     get(name: string): AgentCtx | null;
     isPermanent(name: string): boolean;
@@ -209,8 +214,8 @@ export type HubCapabilities = {
     emit(entry: Entry, scope: Scope): void;
   };
   auth: {
-    requireAuth(req: Request): Response | null;
-    requireReadAuth(req: Request, url: URL): Response | null;
+    requireAuth(req: Request): Response | Caller;
+    requireReadAuth(req: Request, url: URL): Response | Caller;
     requireJsonBody(req: Request, max?: number): Response | null;
   };
   events: {

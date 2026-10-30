@@ -13,6 +13,7 @@
 
 import type {
   AuthHelpers,
+  Caller,
 } from "./auth";
 import { corsHeaders } from "./auth";
 import type { HubCapabilities, HubFeature, RouteDef } from "./types";
@@ -33,6 +34,7 @@ type CompiledRoute = {
   auth: "mutating" | "read";
   bodyMax?: number;
   requiresLedger: boolean;
+  caller?: "human";
   handler: RouteDef["handler"];
 };
 
@@ -44,7 +46,8 @@ export type DispatcherOptions = {
   features: readonly HubFeature[];
   auth: AuthHelpers;
   ledgerGuard: () => Response | null;
-  buildCap: () => HubCapabilities;
+  buildCap: (caller?: Caller) => HubCapabilities;
+  humanName: string;
 };
 
 // `system` is the actor of the hub's own writes (a stage launch, a retry). No HTTP caller may use it: validName() refuses
@@ -54,11 +57,40 @@ export type DispatcherOptions = {
 // A request that is not a JSON object is left to its route.
 const ACTOR_FIELDS = ["by", "from", "actor", "voter", "requester", "agent", "creator"] as const;
 
+// The human acts only from the UI: an agent caller that names the human in one of these fields gets 403 (design decision 5).
+// The fields that name a target (`agent` on /remove) are in the list too: an agent may not aim a human action at the human either.
+async function namesActor(req: Request, name: string): Promise<boolean> {
+  const body: unknown = await req.clone().json().catch(() => null);
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return false;
+  const o = body as Record<string, unknown>;
+  const want = name.trim().toLowerCase();
+  return ACTOR_FIELDS.some((f) => typeof o[f] === "string" && (o[f] as string).trim().toLowerCase() === want);
+}
+
+// A human caller acts as the human whatever `by` and `from` hold. Other fields keep their value.
+async function asHuman(req: Request, humanName: string): Promise<Request> {
+  const body: unknown = await req.clone().json().catch(() => null);
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return req;
+  const o = { ...(body as Record<string, unknown>) };
+  let changed = false;
+  for (const f of ["by", "from"]) {
+    if (f in o && o[f] !== humanName) { o[f] = humanName; changed = true; }
+  }
+  if (!changed) return req;
+  const headers = new Headers(req.headers);
+  headers.delete("content-length");
+  return new Request(req.url, { method: req.method, headers, body: JSON.stringify(o) });
+}
+
 async function namesSystemActor(req: Request): Promise<boolean> {
   const body: unknown = await req.clone().json().catch(() => null);
   if (body === null || typeof body !== "object" || Array.isArray(body)) return false;
   const o = body as Record<string, unknown>;
   return ACTOR_FIELDS.some((f) => typeof o[f] === "string" && (o[f] as string).trim().toLowerCase() === "system");
+}
+
+function humanOnly(): Response {
+  return Response.json({ error: "only the human may call this route" }, { status: 403 });
 }
 
 export function createDispatcher(opts: DispatcherOptions): Dispatcher {
@@ -83,6 +115,7 @@ export function createDispatcher(opts: DispatcherOptions): Dispatcher {
       auth: r.auth,
       bodyMax: r.bodyMax,
       requiresLedger: r.requiresLedger ?? false,
+      caller: r.caller,
       handler: r.handler,
     };
   });
@@ -93,23 +126,32 @@ export function createDispatcher(opts: DispatcherOptions): Dispatcher {
       if (r.method !== req.method) continue;
       const params = r.matcher(pathname);
       if (!params) continue;
+      let caller: Caller;
       if (r.auth === "mutating") {
-        const authFail = opts.auth.requireAuth(req);
-        if (authFail) return withCors(authFail);
+        const auth = opts.auth.requireAuth(req);
+        if (auth instanceof Response) return withCors(auth);
+        caller = auth;
+        if (r.caller === "human" && caller !== "human") return withCors(humanOnly());
         const size = opts.auth.requireJsonBody(req, r.bodyMax);
         if (size) return withCors(size);
         if (await namesSystemActor(req)) {
           return withCors(Response.json({ error: "the actor 'system' is reserved for the hub" }, { status: 400 }));
         }
+        if (caller === "agent" && (await namesActor(req, opts.humanName))) {
+          return withCors(Response.json({ error: "the human acts only from the UI" }, { status: 403 }));
+        }
+        if (caller === "human") req = await asHuman(req, opts.humanName);
       } else {
-        const authFail = opts.auth.requireReadAuth(req, url);
-        if (authFail) return withCors(authFail);
+        const auth = opts.auth.requireReadAuth(req, url);
+        if (auth instanceof Response) return withCors(auth);
+        caller = auth;
+        if (r.caller === "human" && caller !== "human") return withCors(humanOnly());
       }
       if (r.requiresLedger) {
         const guard = opts.ledgerGuard();
         if (guard) return withCors(guard);
       }
-      return withCors(await r.handler(req, opts.buildCap(), params));
+      return withCors(await r.handler(req, opts.buildCap(caller), params));
     }
     return null;
   }

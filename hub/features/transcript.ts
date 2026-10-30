@@ -94,6 +94,7 @@ export function createTranscriptFeature(deps: TranscriptDeps): HubFeature {
         method: "PUT",
         path: ROOM_SETTINGS_RE,
         auth: "mutating",
+        caller: "human",
         requiresLedger: true,
         handler: async (req, cap, params) => {
           const room = decodeRoom(params.id);

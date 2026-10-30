@@ -2043,6 +2043,7 @@ export function createStageRuntime(
       method: "GET",
       path: "/launches/stream",
       auth: "read",
+      caller: "human",
       handler: (_req, cap) =>
         makeSSE(async (send, signal) => {
           queue.attach((r) => send(r, r.id), signal, cap);
@@ -2053,6 +2054,7 @@ export function createStageRuntime(
       method: "POST",
       path: /^\/launches\/([^/]+)\/ack$/,
       auth: "mutating",
+      caller: "human",
       handler: async (req, cap, params) => {
         if (!LAUNCH_ID_RE.test(params.id)) return Response.json({ error: "invalid launch id" }, { status: 400 });
         const raw: unknown = await req.json().catch(() => null);

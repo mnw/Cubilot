@@ -1059,6 +1059,7 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
       method: "POST",
       path: /^\/requests\/([^/]+)\/([^/]+)\/approve$/,
       auth: "mutating",
+      caller: "human",
       bodyMax: TICKET_BODY_MAX,
       handler: async (req, cap, params) => {
         // The dispatcher passes only the first capture group (the room); the request id comes from the path.
