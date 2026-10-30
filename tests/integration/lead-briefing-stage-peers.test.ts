@@ -9,7 +9,7 @@ import { openSSE, postJson, registerAgent } from "../helpers/fetch";
 
 const ROOM = "lb";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const PAST_DEBOUNCE_MS = 1200; // the dispatcher debounce is 500 ms
+const PAST_DEBOUNCE_MS = 700; // the dispatcher debounce is 500 ms
 
 async function until<T>(f: () => T | undefined, ms = 5000): Promise<T> {
   const end = Date.now() + ms;
@@ -42,7 +42,7 @@ describe("lead briefing and stage sessions", () => {
     await giveProjectHttp(hub, ROOM);
     open.push(join(hub, `/agent-stream?agent=Orchestrator&room=${ROOM}`, leadEvents));
     open.push(join(hub, "/launches/stream", launches));
-    await sleep(300);
+    await until(() => (leadBriefings().length > 0 ? true : undefined));
 
     const t = await postJson(hub, "/tickets", { by: "Orchestrator", title: "Lead ticket", acceptance_criteria: "c", blast_radius: "low", priority: "high" });
     expect(t.status).toBe(201);
@@ -89,15 +89,15 @@ describe("lead briefing and stage sessions across a hub restart", () => {
     const hub = await spawnHub();
     await giveProjectHttp(hub, RROOM);
     const launches: any[] = [];
-    const lead = join(hub, `/agent-stream?agent=Orchestrator&room=${RROOM}`);
+    const leadSeen: any[] = [];
+    const lead = join(hub, `/agent-stream?agent=Orchestrator&room=${RROOM}`, leadSeen);
     const s = join(hub, "/launches/stream", launches);
-    await sleep(300);
+    await until(() => (leadSeen.some((e) => e.type === "briefing") ? true : undefined));
     const t = await postJson(hub, "/tickets", { by: "Orchestrator", title: "Restart ticket", acceptance_criteria: "c", blast_radius: "low", priority: "high" });
     const ticket = (t.json as any).snapshot.id;
     await postJson(hub, "/handoffs", { from: "Orchestrator", to_role: "worker", task: `work ${ticket}`, context: { ticket_id: ticket } });
     const req = await until(() => launches.find((l) => l.kind === "launch"));
     if (ack) expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
-    await sleep(300);
     lead.close();
     s.close();
     return { hub, session: req.session, stageId: req.stage_id };
@@ -155,10 +155,11 @@ describe("the release mark in the ledger", () => {
     const hub = await spawnHub();
     const launches: any[] = [];
     const s = join(hub, "/launches/stream", launches);
-    const lead = join(hub, "/agent-stream?agent=Orchestrator&room=lbm");
+    const leadSeen: any[] = [];
+    const lead = join(hub, "/agent-stream?agent=Orchestrator&room=lbm", leadSeen);
     try {
       await giveProjectHttp(hub, "lbm");
-      await sleep(300);
+      await until(() => (leadSeen.some((e) => e.type === "briefing") ? true : undefined));
       const t = await postJson(hub, "/tickets", { by: "Orchestrator", title: "Mark ticket", acceptance_criteria: "c", blast_radius: "low", priority: "high" });
       const ticket = (t.json as any).snapshot.id;
       await postJson(hub, "/handoffs", { from: "Orchestrator", to_role: "worker", task: `work ${ticket}`, context: { ticket_id: ticket } });
