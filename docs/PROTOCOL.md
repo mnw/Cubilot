@@ -1076,6 +1076,7 @@ The spec-review PASS queues the scope tickets in the same way, whatever their ro
 | POST | `/requests` | Bearer header | Create a request (see "The `request` kind"). |
 | POST | `/requests/{room}/{request_id}/edit` | Bearer header | Change the features or the origin of a request. |
 | GET | `/requests?room=` | Bearer header OR `?token=` | The requests of the room with `scope_change`. |
+| GET | `/rooms/{room}/requests` | Bearer header OR `?token=` | One row for each request of the room: `{room, requests: [{request_id, origin, status, tickets_done, tickets_total, high_radius_count, last_event_ms}]}`. `status` is `draft` (no ticket, or a draft ticket with no Approve), `waiting_for_approve`, `building`, `ready_for_test`, `merged` (each done ticket's staging merge commit is an ancestor of `main`) or `cancelled` (tickets, all cancelled). `tickets_total` and `high_radius_count` skip cancelled tickets. `last_event_ms` is the newest event of the request or of one of its tickets. 400 for a bad room, 200 with an empty list for a room with no request. Read only: no event. |
 
 No endpoint directly accepts a stage-create or arbitrary-transition command. A `to_role` handoff (`POST /handoffs`) can create a stage through the evaluator. Some routes cause fixed moves as a result of their input. `POST /launches/{id}/ack` moves `launching` to `running` (or to `retrying` or `failed` on an error). `POST /stages/{id}/turn-end` can move `running` to `retrying` or `failed` (a stop). A valid result handoff moves `running` to `passed`.
 
