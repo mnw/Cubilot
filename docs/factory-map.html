@@ -253,7 +253,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
       <div class="head"><h3>Orchestrator</h3><span class="model">Claude · opus</span></div>
       <span class="track">Both tracks · room lead</span>
       <p class="job">Turns requests into user stories (Given/When/Then, INVEST) with agent notes for the facts, keeps every slot busy, answers the Validator's spec findings, checks each PASS, merges into staging and closes the ticket. Parks a ticket after two FAILs and asks you; the rest goes on.</p>
-      <dl><dt>skills</dt><dd>planning-and-task-breakdown, context-engineering, intent-driven-development, team-agent-orchestration, project-manager-senior</dd>
+      <dl><dt>skills</dt><dd>user-stories (factory, new), planning-and-task-breakdown, git-workflow-and-versioning, context-engineering, intent-driven-development, team-agent-orchestration, project-manager-senior</dd>
       <dt>optional</dt><dd>interview-me, constraint-driven-development, architecture-decision-records</dd>
       <dt>never</dt><dd>writes code or docs, tests, reviews</dd></dl>
     </article>
@@ -279,7 +279,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
       <div class="head"><h3>Validator</h3><span class="model oa">OpenAI · Pi</span></div>
       <span class="track">Technical track · challenger</span>
       <p class="job">Four eyes on the plan: checks the tickets of each request against the spec, once, and proposes the fix for each gap. Then PASS or FAIL on code against the ticket, the tests and security; the PASS goes to the Orchestrator. A high ticket gets a second, independent Validator.</p>
-      <dl><dt>skills</dt><dd>code-review (merged), security-and-hardening, ai-regression-testing, intent-driven-development, silent-failure-hunter, pr-test-analyzer, reality-checker</dd>
+      <dl><dt>skills</dt><dd>spec-driven-development (spec review), code-review (merged), security-and-hardening, ai-regression-testing, intent-driven-development, silent-failure-hunter, pr-test-analyzer, reality-checker</dd>
       <dt>optional</dt><dd>constraint-driven-development, code-simplification, php/typescript-reviewer, accessibility</dd>
       <dt>never</dt><dd>edits files, runs changed code</dd></dl>
     </article>
@@ -328,6 +328,14 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
       <dl><dt>skills</dt><dd>retrospective-review (factory, new), loop-design-check, agent-architecture-audit, agent-introspection-debugging, growth-log (ECC), workflow-optimizer, test-results-analyzer (Agency), context-engineering (Osmani)</dd>
       <dt>not used</dt><dd>continuous-learning (writes skills by itself)</dd>
       <dt>never</dt><dd>changes files, tickets or settings; proposes to remove a human gate; proposes without numbers</dd></dl>
+    </article>
+
+    <article class="n idea role">
+      <div class="head"><h3>Arbiter</h3><span class="model">Claude · opus</span></div>
+      <span class="track">Technical track · §19 · after the measure</span>
+      <p class="job">After a second review FAIL, picks one option from a fixed list (scoped rework, waiver, third review, follow-up, cancel, human). Code applies the ruling; you can overrule it in the delivery report.</p>
+      <dl><dt>skills</dt><dd>intent-driven-development, reality-checker, code-review (decision tree), architecture-decision-records, council (ECC, to copy)</dd>
+      <dt>never</dt><dd>changes scope or features, rules on implementation details without a code reference</dd></dl>
     </article>
 
     <article class="n defined role">

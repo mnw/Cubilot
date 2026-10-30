@@ -17,6 +17,15 @@ When a ticket fails review twice, an arbiter stage decides the next step instead
 
 The detailed spec is in `openspec/changes/human-touchpoints-checkpoint/specs/arbiter/` and tasks groups 5 to 8 of that change (FAIL count gate, arbiter stage, rulings applied, overrule). Move them to their own change `openspec/changes/arbiter/` so that the Part 6 change can be archived without them.
 
+## Role and skills
+
+A stage role `arbiter` with its own role file `factory/arbiter/arbiter.md` (Claude, opus, effort high, read-only). Skills, all from repos the factory already uses:
+- `intent-driven-development` (Osmani, in `validator/skills/`): judge a finding against what the ticket is for.
+- `agency-testing-reality-checker` (Agency, in `validator/skills/`): check claims against evidence.
+- `code-review` (factory, in `validator/skills/`): the decision tree for blocking or suggestion.
+- `architecture-decision-records` (ECC, in `orchestrator/skills/`): write the ruling with its reason, so that a later ruling can cite it.
+- `council` (ECC, not yet copied): for a dispute that is a decision between two valid options, not a technical failure.
+
 ## Tickets
 
 Request `r-2026-10-29-part6-arbiter` (to be renamed for this part), archived until the decision:
