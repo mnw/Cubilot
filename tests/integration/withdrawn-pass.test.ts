@@ -2,9 +2,11 @@
 // validator_passes, delivery report). The hub sets an interrupt's ticket_id from the launch record at send time.
 // In-process hub kinds, like tests/integration/high-ticket-two-validators.test.ts.
 
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { giveProject, projectRepo } from "../helpers/repo";
+import { giveProject, giveProjectHttp, projectRepo } from "../helpers/repo";
+import { spawnHub, type HubHandle } from "../helpers/hub";
+import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
 import { insertEvent } from "../../hub/core/events";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createLaunchRecord } from "../../hub/core/launch-record";
@@ -302,5 +304,189 @@ describe("open Validator interrupt", () => {
     await e.sendInterrupt("validator-1");
     expect((await e.transition(t, "human")).status).toBe(200);
     expect(e.status(t)).toBe("done");
+  });
+});
+
+// The same rules through a real hub (spawnHub): buildKinds wiring, launch-record binding, routes. Like the
+// "high ticket through POST /handoffs" block of tests/integration/high-ticket-two-validators.test.ts.
+describe("real hub", () => {
+  const ROOM = "wph";
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  let hub: HubHandle;
+  let stream: ReturnType<typeof openSSE>;
+  const launches: any[] = [];
+  const open: Array<{ close: () => void }> = [];
+  type Stage = { id: string; role: string; status: string; verdict: string | null; session: string | null };
+
+  beforeAll(async () => {
+    hub = await spawnHub();
+    await giveProjectHttp(hub, ROOM);
+    open.push(await registerAgent(hub, "wph-lead", { room: ROOM }));
+    const put = await authedFetch(hub, `/rooms/${ROOM}/settings`, { method: "PUT", body: JSON.stringify({ role_limits: { worker: 10, tester: 10, validator: 10, writer: 10 } }) });
+    expect(put.status).toBe(200);
+    stream = openSSE(hub, "/launches/stream");
+    void (async () => { try { for await (const e of stream.events) launches.push(e); } catch { /* closed */ } })();
+    await sleep(200);
+  });
+  afterAll(async () => {
+    stream.close();
+    for (const c of open) c.close();
+    await hub.kill();
+  });
+
+  const ledger = <T>(fn: (db: Database) => T): T => {
+    const db = new Database(hub.ledgerPath, { readonly: true });
+    try { return fn(db); } finally { db.close(); }
+  };
+  const stages = (id: string) => ledger((db) => db.query("SELECT id, role, status, verdict, session FROM stage WHERE ticket_id = ? ORDER BY created_seq").all(id) as Stage[]);
+  const ticketStatus = (id: string) => ledger((db) => db.query<{ status: string }, [string]>("SELECT status FROM tickets WHERE id = ?").get(id)!.status);
+  const interruptRow = (id: string) => ledger((db) => db.query<{ ticket_id: string | null; stage_id: string | null; status: string }, [string]>("SELECT ticket_id, stage_id, status FROM interrupts WHERE id = ?").get(id)!);
+
+  const run = async (stageId: string) => {
+    let req: any;
+    for (let i = 0; i < 100 && !(req = launches.find((r) => r.kind === "launch" && r.stage_id === stageId)); i++) await sleep(50);
+    expect(req).toBeDefined();
+    expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+    open.push(await registerAgent(hub, req.session, { room: ROOM }));
+    return req.session as string;
+  };
+  const closeSession = async (stageId: string, session: string) => {
+    expect((await postJson(hub, `/stages/${stageId}/turn-end`, { agent: session })).status).toBeLessThan(300);
+    let req: any;
+    for (let i = 0; i < 100 && !(req = launches.find((r) => r.kind === "close" && r.session === session && !r.seen)); i++) await sleep(50);
+    expect(req).toBeDefined();
+    req.seen = true;
+    expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+    await sleep(300);
+  };
+  const pass = (session: string, stage: Stage, ticket: string) =>
+    postJson(hub, "/handoffs", { from: session, to: "wph-lead", task: "result", context: { notes: "n", stage_id: stage.id, ticket_id: ticket, verdict: "PASS", findings: [], commit: C1 } });
+  const interrupt = (from: string) => postJson(hub, "/interrupts", { from, to: "wph-lead", text: "stop" });
+  /** The launch gave the ticket to the Validator session; the room lead takes it back, then moves it. */
+  const done = async (id: string) => {
+    await postJson(hub, `/tickets/${id}/assign`, { by: "wph-lead", assignee: "wph-lead" });
+    return postJson(hub, `/tickets/${id}/transition`, { by: "wph-lead", to: "done" });
+  };
+  const mergeMessage = (id: string) => getJson(hub, `/tickets/${id}/merge-message`);
+  const err = (r: { json: unknown }) => JSON.stringify(r.json);
+
+  /** An in_review ticket held by the lead with a running Validator stage. High tickets get a passed Tester stage first. */
+  const start = async (radius: "low" | "high") => {
+    const r = await postJson(hub, "/tickets", { by: "wph-lead", title: "t", acceptance_criteria: "c", blast_radius: radius, role: null });
+    expect(r.status).toBe(201);
+    const id = (r.json as { snapshot: { id: string } }).snapshot.id;
+    for (const to of ["claim", "transition:in_progress", "transition:in_review"]) {
+      const [verb, target] = to.split(":");
+      const res = await postJson(hub, `/tickets/${id}/${verb}`, { by: "wph-lead", ...(target ? { to: target } : {}), ...(target === "in_review" ? { note: "built" } : {}) });
+      expect(res.status).toBe(200);
+    }
+    if (radius === "high") {
+      expect((await postJson(hub, "/handoffs", { from: "wph-lead", to_role: "tester", task: "test", context: { ticket_id: id, commit: C1 } })).status).toBe(201);
+      await sleep(400);
+      const ts = stages(id)[0];
+      const tsession = await run(ts.id);
+      const suite = { command: "./scripts/test.sh", exit_code: 0, pass: 1, fail: 0, log_path: "/tmp/l.log" };
+      expect((await postJson(hub, "/handoffs", { from: tsession, to: "wph-lead", task: "result", context: { notes: "n", stage_id: ts.id, ticket_id: id, commit: C1, full_suite: suite } })).status).toBe(201);
+      await closeSession(ts.id, tsession);
+    }
+    expect((await postJson(hub, "/handoffs", { from: "wph-lead", to_role: "validator", task: "validate", context: { ticket_id: id, commit: C1 } })).status).toBe(201);
+    await sleep(400);
+    const first = stages(id).find((s) => s.role === "validator")!;
+    return { id, first, session: await run(first.id) };
+  };
+  /** The Validator passes, then cancels its own result handoff. */
+  const passAndWithdraw = async (t: Awaited<ReturnType<typeof start>>) => {
+    const p = await pass(t.session, t.first, t.id);
+    expect(p.status).toBe(201);
+    const hid = (p.json as { id: string }).id;
+    expect((await postJson(hub, `/handoffs/${hid}/cancel`, { by: t.session, reason: "withdrawn" })).status).toBe(200);
+    return hid;
+  };
+
+  test("cancelled PASS handoff does not count for done, merge-message and validator_passes", async () => {
+    const ok = await start("low");
+    expect((await pass(ok.session, ok.first, ok.id)).status).toBe(201);
+    await closeSession(ok.first.id, ok.session);
+    expect((await mergeMessage(ok.id)).status).toBe(200);
+    const list = async (id: string) => ((await getJson(hub, `/tickets?room=${ROOM}&status=all`)).json as { id: string; validator_passes: number }[]).find((x) => x.id === id)?.validator_passes;
+    expect(await list(ok.id)).toBe(1);
+
+    const t = await start("low");
+    await passAndWithdraw(t);
+    await closeSession(t.first.id, t.session);
+    expect(await list(t.id)).toBe(0);
+    expect(err(await mergeMessage(t.id))).not.toContain("interrupt");
+    expect((await mergeMessage(t.id)).status).toBe(409);
+    const d = await done(t.id);
+    expect(d.status).toBe(409);
+    expect(err(d)).toContain("Validator PASS");
+    expect(ticketStatus(t.id)).toBe("in_review");
+  });
+
+  test("interrupt from a stage session gets its ticket id at send time", async () => {
+    const t = await start("low");
+    const i = await interrupt(t.session);
+    expect(i.status).toBe(201);
+    expect(interruptRow((i.json as { id: string }).id)).toMatchObject({ ticket_id: t.id, stage_id: t.first.id, status: "pending" });
+    // A body field never sets the binding, and a sender that is no stage session gets none.
+    const forged = await postJson(hub, "/interrupts", { from: "wph-lead", to: t.session, text: "x", ticket_id: t.id, stage_id: t.first.id });
+    expect(interruptRow((forged.json as { id: string }).id)).toMatchObject({ ticket_id: null, stage_id: null });
+  });
+
+  test("pending Validator interrupt blocks done and merge-message with 409; an acknowledged one does not", async () => {
+    const t = await start("low");
+    expect((await pass(t.session, t.first, t.id)).status).toBe(201);
+    const i = (await interrupt(t.session)).json as { id: string };
+    await closeSession(t.first.id, t.session);
+    const m = await mergeMessage(t.id);
+    expect(m.status).toBe(409);
+    expect(err(m)).toContain(i.id);
+    const d = await done(t.id);
+    expect(d.status).toBe(409);
+    expect(err(d)).toContain(i.id);
+    expect(ticketStatus(t.id)).toBe("in_review");
+    expect((await postJson(hub, `/interrupts/${i.id}/ack`, { by: "wph-lead" })).status).toBe(200);
+    expect((await mergeMessage(t.id)).status).toBe(200);
+    expect((await done(t.id)).status).toBe(200);
+  });
+
+  test("reused session name: the later interrupt binds to the later ticket", async () => {
+    const a = await start("low");
+    expect((await pass(a.session, a.first, a.id)).status).toBe(201);
+    await closeSession(a.first.id, a.session);
+    const b = await start("low");
+    expect(b.session).toBe(a.session);
+    const i = await interrupt(b.session);
+    expect(interruptRow((i.json as { id: string }).id)).toMatchObject({ ticket_id: b.id, stage_id: b.first.id });
+    expect((await mergeMessage(a.id)).status).toBe(200);
+    expect((await done(a.id)).status).toBe(200);
+  });
+
+  test("s_cc42 case leaves the ticket in_review", async () => {
+    const t = await start("high");
+    await passAndWithdraw(t);
+    const i = (await interrupt(t.session)).json as { id: string };
+    await closeSession(t.first.id, t.session);
+    const second = stages(t.id).find((s) => s.role === "validator" && s.id !== t.first.id)!;
+    expect(second).toBeDefined();
+    const session2 = await run(second.id);
+    expect((await pass(session2, second, t.id)).status).toBe(201);
+    const d = await done(t.id);
+    expect(d.status).toBe(409);
+    expect(err(d)).toContain(i.id);
+    expect(ticketStatus(t.id)).toBe("in_review");
+    const m = await mergeMessage(t.id);
+    expect(m.status).toBe(409);
+    expect(err(m)).toContain(i.id);
+  });
+
+  test("human completes the ticket directly", async () => {
+    const t = await start("high");
+    await passAndWithdraw(t);
+    const i = await interrupt(t.session);
+    expect(i.status).toBe(201);
+    const r = await postJson(hub, `/tickets/${t.id}/transition`, { by: hub.humanName, to: "done" });
+    expect(r.status).toBe(200);
+    expect(ticketStatus(t.id)).toBe("done");
   });
 });
