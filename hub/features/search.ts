@@ -121,10 +121,12 @@ export function createSearchFeature(deps: SearchDeps): HubFeature {
         auth: "read",
         handler: (req) => {
           const url = new URL(req.url);
-          // Hub tokens carry no identity: an agent names itself with ?agent=. No name is the human's UI.
+          // Hub tokens carry no identity: the caller names itself with ?agent=, as on the other read routes.
+          // No caller is 400, never all rooms. Only the human sees all rooms.
           const who = (url.searchParams.get("agent") ?? "").trim();
+          if (who === "") return Response.json({ error: "agent required" }, { status: 400 });
           let room: string | null = null;
-          if (who !== "" && who !== humanName) {
+          if (who !== humanName) {
             const a = validName(who) ? agents.get(who) : null;
             if (!a) return Response.json({ error: `unknown agent: ${who}` }, { status: 400 });
             room = a.room;

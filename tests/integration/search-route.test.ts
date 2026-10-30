@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { authedFetch, getJson, postJson, registerAgent } from "../helpers/fetch";
@@ -11,9 +12,15 @@ describe("GET /search", () => {
   let betaTicket = "";
   let doneTicket = "";
 
-  const search = async (q: string, agent?: string) => {
+  // Default caller is the human, so a test without a caller name sees all rooms.
+  const search = async (q: string, agent: string | null = hub.humanName) => {
     const a = agent ? `&agent=${encodeURIComponent(agent)}` : "";
     return getJson(hub, `/search?q=${encodeURIComponent(q)}${a}`);
+  };
+  const mk = async (by: string, title: string, request_id: string) => {
+    const r = await postJson(hub, "/tickets", { by, title, acceptance_criteria: "c", blast_radius: "low", request_id, status: "draft" });
+    expect(r.status).toBe(201);
+    return (r.json as { snapshot: { id: string } }).snapshot.id;
   };
   const ids = (j: unknown) => (j as Hit[]).map((h) => h.id);
 
@@ -21,11 +28,6 @@ describe("GET /search", () => {
     hub = await spawnHub();
     closers.push((await registerAgent(hub, "zelda-1", { room: "alpha" })).close);
     closers.push((await registerAgent(hub, "zelda-2", { room: "beta" })).close);
-    const mk = async (by: string, title: string, request_id: string) => {
-      const r = await postJson(hub, "/tickets", { by, title, acceptance_criteria: "c", blast_radius: "low", request_id, status: "draft" });
-      expect(r.status).toBe(201);
-      return (r.json as { snapshot: { id: string } }).snapshot.id;
-    };
     alphaTicket = await mk("zelda-1", "Frobnicate the gizmo", "req-alpha-one");
     betaTicket = await mk("zelda-2", "Frobnicate the widget", "req-beta-one");
     doneTicket = await mk("zelda-1", "Frobnicate old thing", "req-alpha-one");
@@ -36,7 +38,7 @@ describe("GET /search", () => {
 
   test("needs read auth", async () => {
     expect((await fetch(`${hub.url}/search?q=zelda`)).status).toBe(401);
-    expect((await fetch(`${hub.url}/search?q=zelda`, { headers: { Authorization: `Bearer ${hub.token}` } })).status).toBe(200);
+    expect((await fetch(`${hub.url}/search?q=zelda&agent=${hub.humanName}`, { headers: { Authorization: `Bearer ${hub.token}` } })).status).toBe(200);
   });
 
   test("q shorter than 2 characters gives 200 and an empty list", async () => {
@@ -79,8 +81,7 @@ describe("GET /search", () => {
   test("the human sees all rooms, an agent sees only its own", async () => {
     const human = (await search("frobnicate", hub.humanName)).json as Hit[];
     expect(human.map((h) => h.room)).toContain("beta");
-    const none = (await search("frobnicate")).json as Hit[];
-    expect(ids(none)).toEqual(expect.arrayContaining([alphaTicket, betaTicket]));
+    expect(ids(human)).toEqual(expect.arrayContaining([alphaTicket, betaTicket]));
     const scoped = (await search("req-", "zelda-1")).json as Hit[];
     expect(scoped.every((h) => h.room === "alpha")).toBe(true);
     expect(ids(scoped)).toContain("req-alpha-one");
@@ -88,6 +89,30 @@ describe("GET /search", () => {
     const agents = ((await search("zelda", "zelda-1")).json as Hit[]).filter((h) => h.kind === "agent");
     expect(agents.map((h) => h.id)).toEqual(["zelda-1"]);
     expect((await search("zelda", "nobody-here")).status).toBe(400);
+  });
+
+  test("a request with no caller gives 400, never all rooms", async () => {
+    for (const a of [null, "", " "]) {
+      const r = await search("frobnicate", a);
+      expect(r.status).toBe(400);
+      expect(Array.isArray(r.json)).toBe(false);
+    }
+  });
+
+  test("an agent that is not the human gets only its own room", async () => {
+    const r = (await search("frobnicate", "zelda-2")).json as Hit[];
+    expect(ids(r)).toEqual([betaTicket]);
+    expect(r.every((h) => h.room === "beta")).toBe(true);
+  });
+
+  test("an archived ticket is hidden, even by exact id", async () => {
+    const id = await mk("zelda-1", "Archivable thing", "req-alpha-one");
+    expect(ids((await search(id)).json)).toEqual([id]);
+    const db = new Database(hub.ledgerPath);
+    db.query("UPDATE tickets SET archived_at_ms = ? WHERE id = ?").run(Date.now(), id);
+    db.close();
+    expect(ids((await search(id)).json)).toEqual([]);
+    expect(ids((await search("archivable")).json)).toEqual([]);
   });
 
   test("order: exact id first, then open items, then the newest", async () => {
@@ -106,8 +131,16 @@ describe("GET /search", () => {
     expect(((await search("bulkword")).json as Hit[]).length).toBe(20);
     expect((await search("%%")).json).toEqual([]);
     expect((await search("' OR 1=1 --")).json).toEqual([]);
-    const before = await (await authedFetch(hub, "/agents")).text();
-    await search("zelda");
-    expect(await (await authedFetch(hub, "/agents")).text()).toBe(before);
+    const counts = () => {
+      const db = new Database(hub.ledgerPath, { readonly: true });
+      try {
+        const tables = db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
+        return Object.fromEntries(tables.map((t) => [t.name, db.query<{ n: number }, []>(`SELECT count(*) AS n FROM "${t.name}"`).get()!.n]));
+      } finally { db.close(); }
+    };
+    const before = counts();
+    expect(before.events).toBeGreaterThan(0);
+    await search("zelda"); await search(alphaTicket); await search("req-alpha");
+    expect(counts()).toEqual(before);
   });
 });
