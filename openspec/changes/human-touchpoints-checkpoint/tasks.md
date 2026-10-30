@@ -38,8 +38,8 @@ One group = one ticket (design decision 16). Each group names its radius and its
 
 ## 8. Delivery report (radius high: security, R8; blocked_by: 2, output request Kind)
 
-- [ ] 8.1 `hub/core/delivery-report.ts` and `GET /requests/<room>/<id>/delivery` (ledger and git, no model): origin, features, criteria edits with both texts, child factory requests → verify: `bun test tests/integration/delivery-report.test.ts` with a temp git repo: spec scenarios "Open ticket", "Criteria edit", "Factory follow-up", "High-radius change", "Test counts"; `no merge commit` and `no staging log` cases
-- [ ] 8.2 Needs-you line for each delivered request until each merge commit is on `main` → verify: `bun test tests/integration/delivery-report.test.ts` (spec scenario "Merged into main")
+- [x] 8.1 `hub/core/delivery-report.ts` and `GET /requests/<room>/<id>/delivery` (ledger and git, no model): origin, features, criteria edits with both texts, child factory requests → verify: `bun test tests/integration/delivery-report.test.ts` with a temp git repo: spec scenarios "Open ticket", "Criteria edit", "Factory follow-up", "High-radius change", "Test counts"; `no merge commit` and `no staging log` cases
+- [x] 8.2 Needs-you line for each delivered request until each merge commit is on `main` → verify: `bun test tests/integration/delivery-report.test.ts` (spec scenario "Merged into main")
 
 ## 9. Measure what reaches the lead (radius low; blocked_by: none)
 

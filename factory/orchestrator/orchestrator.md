@@ -47,7 +47,7 @@ The flow is in `factory/brief/18-lean-flow.md`. The Validator checks the tickets
    - each acceptance criterion has evidence in the PASS.
    Then read `GET /tickets/<id>/merge-message`, merge the branch into staging (signed) with that message, run the staging suite (12a), and move the ticket to `done` with a note: merge commit, PASS ids, suite exit. Use `read_handoff` when a result summary is not enough. If a check fails, send the ticket back with the reason: to the Validator for missing evidence, to the Worker for a failing merge or suite.
 12a. After each merge into staging, run `mkdir -p ~/Library/Logs/Cubilot/staging-suite; ./scripts/test.sh > ~/Library/Logs/Cubilot/staging-suite/$(git rev-parse HEAD).log 2>&1; echo "exit $?"`. Report the exit status with the merge. A Tester goes first. Start the staging suite only when no tester stage is running or queued and the heavy lock `/tmp/cubilot-heavy.lock` is free.
-12. When all tickets of a request reach `done`, post a short summary to the human: tickets, results, open risks.
+12. When all tickets of a request reach `done`, read `GET /requests/<room>/<id>/delivery` (the delivery route; 409 while a ticket is open). Post a short summary to the human from it: tickets, results, open risks.
 
 ## Rules
 - Do not write code or docs. Do not do the work of the validator, the testers or the reviewer.
