@@ -17,14 +17,14 @@ import type {
 } from "../core/types";
 import { actorOr400 } from "../core/auth";
 import { LedgerConflict } from "../core/types";
-import { createLedgerEntity, ledgerConflictResponse, withLedgerRequired } from "../core/ledger-entity";
+import { createLedgerEntity, withLedgerRequired } from "../core/ledger-entity";
 import { IMAGE_URL_RE, imageUrlToPath } from "../core/attachments";
 import { insertEvent } from "../core/events";
 import { ts, validRoomLabel } from "../core/ids";
 import { validateBlockedBy, openBlockerIds } from "./ticket-blockers";
 import { STAGE_ROLES, getRoomSettings, type StageRole } from "../core/ledger";
 import { ruleRadius } from "../core/radius-rule";
-import { createPermissionWithSideEffect, dismissPendingPermission } from "./permission";
+import { dismissPendingPermission } from "./permission";
 import type { StageHooks } from "./stage";
 
 // ---------- Types ----------
@@ -103,11 +103,6 @@ const TICKET_LIST_LIMIT = 500;
 const BRIEFING_TICKET_LIMIT = 20;
 const BRIEFING_CRITERIA_CHARS = 300;
 const APPROVAL_TOOL_NAME = "ticket:done";
-const APPROVAL_BLOCK_MESSAGE = "high-blast-radius ticket needs the human's approval";
-// Claude mints request ids from a-z without 'l'. Ticket approvals use the same letters in UPPER case:
-// PERMISSION_ID_RE is case-insensitive so every route accepts them, and SQLite compares ids
-// case-sensitively, so a ticket approval id can never equal an id Claude mints.
-const PERMISSION_ID_ALPHABET = "ABCDEFGHIJKMNOPQRSTUVWXYZ";
 
 function mintTicketId(): string {
   const buf = new Uint8Array(8);
@@ -115,12 +110,6 @@ function mintTicketId(): string {
   let out = "t_";
   for (const b of buf) out += b.toString(16).padStart(2, "0");
   return out;
-}
-
-function mintPermissionId(): string {
-  const buf = new Uint8Array(5);
-  crypto.getRandomValues(buf);
-  return Array.from(buf, (b) => PERMISSION_ID_ALPHABET[b % PERMISSION_ID_ALPHABET.length]).join("");
 }
 
 // ---------- StateMachine declaration ----------
@@ -798,28 +787,29 @@ async function readBody(req: Request): Promise<Record<string, unknown>> {
   return b && typeof b === "object" && !Array.isArray(b) ? (b as Record<string, unknown>) : {};
 }
 
-// Only the approval-gate 409 carries `approval_request_id`; clients use the key to tell it from an ordinary state conflict.
 function conflictResponse(e: LedgerConflict): Response {
   const snap = e.snapshot as TicketSnapshot | null;
   const body: Record<string, unknown> = { error: e.message };
   if (snap) body.snapshot = snap;
-  if (snap && e.message === APPROVAL_BLOCK_MESSAGE) body.approval_request_id = snap.approval_request_id;
   return Response.json(body, { status: e.httpStatus });
 }
 
 export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicketChanged"> & Partial<Pick<StageHooks, "onTicketCancelled" | "onTicketParked" | "onTicketEdited">>): KindModule {
   const entity = createLedgerEntity({ decl: ticketDecl, db });
 
-  // Rework, cancel, a direct done and a reassignment leave the ticket's `ticket:done` request moot.
-  // It would sit pending (and replay on every reconnect), so dismiss it: its own transaction, after
-  // the ticket's (one event per transaction). A failure leaves a stale card, not a failed move.
-  function retireStaleApproval(before: TicketSnapshot | null, after: TicketSnapshot, actor: string, cap: HubCapabilities): void {
-    const stale = before?.approval_request_id;
-    if (!stale || (after.status === "in_review" && after.approval_request_id === stale)) return;
-    try {
-      dismissPendingPermission(db, cap, stale, actor);
-    } catch (e) {
-      console.error(`[ticket] could not dismiss stale approval request ${stale}:`, e);
+  // P6-04: the Allow step for done is gone. A `ticket:done` permission left pending by an older hub is dismissed at
+  // start, each in its own transaction. A second run finds none pending and changes nothing.
+  function dismissOldAllows(cap: HubCapabilities): void {
+    const ids = db
+      .query<{ id: string }, [string]>("SELECT id FROM permissions WHERE tool_name = ? AND status = 'pending' ORDER BY created_at_ms, id")
+      .all(APPROVAL_TOOL_NAME)
+      .map((r) => r.id);
+    for (const id of ids) {
+      try {
+        dismissPendingPermission(db, cap, id, "system");
+      } catch (e) {
+        console.error(`[ticket] could not dismiss old ticket:done request ${id}:`, e);
+      }
     }
   }
 
@@ -1281,11 +1271,9 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
           return Response.json({ error: "assignee required (a name, or null to unassign)" }, { status: 400 });
         }
         try {
-          const before = entity.load(params.id);
           const r = entity.apply(params.id, assignTicketVerb, { assignee: body.assignee === null ? null : body.assignee.trim() }, a.name, cap);
           if (r.emitted) {
             cap.briefing.refresh();
-            retireStaleApproval(before, r.snapshot, a.name, cap);
           }
           return Response.json({ snapshot: r.snapshot, ...(r.emitted ? {} : { idempotent: true }) });
         } catch (e) {
@@ -1357,12 +1345,10 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
           return Response.json({ error: "nothing to edit (title, acceptance_criteria, blast_radius, priority, external_ref, planning_note, request_id, role or blocked_by)" }, { status: 400 });
         }
         try {
-          const before = entity.load(params.id);
           const r = entity.applyWithSideEffect(params.id, editTicketVerb, input, a.name, cap, ({ tx }) =>
             input.blocked_by === undefined ? undefined : writeBlockers(tx, params.id, input.blocked_by));
           if (r.emitted) {
             cap.briefing.refresh();
-            retireStaleApproval(before, r.snapshot, a.name, cap);
             stage?.onTicketEdited?.(params.id);
           }
           return Response.json({ snapshot: r.snapshot, ...(r.emitted ? {} : { idempotent: true }) });
@@ -1398,7 +1384,6 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
             : entity.apply(params.id, transitionTicketVerb, input, a.name, cap);
           if (r.emitted) {
             cap.briefing.refresh();
-            retireStaleApproval(before, r.snapshot, a.name, cap);
             if (stage) {
               // Run the stage evaluator after the commit: a draft that became queued, and every ticket that was
               // waiting for this one when it became done. A cancelled ticket does not unblock anything.
@@ -1422,74 +1407,6 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
     },
 
     {
-      method: "POST",
-      path: /^\/tickets\/([^/]+)\/approval$/,
-      auth: "mutating",
-      bodyMax: TICKET_BODY_MAX,
-      handler: async (req, cap, params) => {
-        if (!TICKET_ID_RE.test(params.id)) return Response.json({ error: "invalid ticket id" }, { status: 400 });
-        const body = await readBody(req);
-        const a = actorOr400(body.by, cap, true);
-        if (a instanceof Response) return a;
-
-        // ponytail: this check and the write below run with no await between them, so two calls cannot both
-        // create a request. That relies on the hub's single JS thread; move the check into the transaction
-        // if the hub ever serves requests in parallel.
-        const t = entity.load(params.id);
-        if (!t) return Response.json({ error: "not found" }, { status: 404 });
-        if (!inRoom(a.name, t.room, cap)) {
-          return Response.json({ error: "ticket is in another room" }, { status: 403 });
-        }
-        if (t.assignee === null || a.name !== t.assignee) {
-          return Response.json({ error: "only the assignee may request approval" }, { status: 403 });
-        }
-        if (t.status !== "in_review" || t.blast_radius !== "high") {
-          return Response.json(
-            { error: "approval applies to a high-blast-radius ticket in in_review", snapshot: t },
-            { status: 409 },
-          );
-        }
-        if (t.approval_request_id) {
-          const cur = db
-            .query<{ status: string; resolved_by: string | null }, [string]>(
-              "SELECT status, resolved_by FROM permissions WHERE id = ?",
-            )
-            .get(t.approval_request_id);
-          if (cur?.status === "pending") {
-            return Response.json({ request_id: t.approval_request_id, created: false, status: "pending" });
-          }
-          // The human allowed it between the blocked `done` and this call: keep that Allow. A new
-          // request would discard it and ask the human twice. An Allow by an agent does not count.
-          if (cur?.status === "allowed" && cur.resolved_by === cap.config.humanName) {
-            return Response.json({ request_id: t.approval_request_id, created: false, status: "allowed" });
-          }
-        }
-        let requestId = mintPermissionId();
-        while (db.query("SELECT 1 FROM permissions WHERE id = ?").get(requestId)) requestId = mintPermissionId();
-        const rid = requestId;
-        try {
-          createPermissionWithSideEffect(
-            db,
-            cap,
-            {
-              agent: a.name,
-              request_id: rid,
-              tool_name: APPROVAL_TOOL_NAME,
-              description: `Approve completion of ticket ${t.id}: ${oneLine(t.title)}`,
-              input_preview: JSON.stringify({ ticket_id: t.id }),
-              room: t.room,
-            },
-            ({ tx }) => tx.run("UPDATE tickets SET approval_request_id = ? WHERE id = ?", [rid, t.id]),
-          );
-        } catch (e) {
-          if (e instanceof LedgerConflict) return ledgerConflictResponse(e);
-          throw e;
-        }
-        return Response.json({ request_id: rid, created: true, status: "pending" });
-      },
-    },
-
-    {
       method: "GET",
       path: "/tickets",
       auth: "read",
@@ -1508,10 +1425,10 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
         if (requestId !== null && !REQUEST_ID_RE.test(requestId)) return Response.json({ error: "invalid request_id" }, { status: 400 });
         const rows = db
           .query<Record<string, unknown>, (string | number)[]>(
-            `SELECT t.*, p.status AS p_status, p.resolved_by AS p_resolved_by, p.version AS p_version,
+            `SELECT t.*,
                     (SELECT COUNT(*) FROM ticket_notes n WHERE n.ticket_id = t.id) AS notes_count,
                     (SELECT COUNT(*) FROM ticket_attachments x WHERE x.ticket_id = t.id) AS attachments_count
-               FROM tickets t LEFT JOIN permissions p ON p.id = t.approval_request_id
+               FROM tickets t
               WHERE t.room = ?${status === "open" ? " AND t.status NOT IN ('done','cancelled')" : ""}${withArchived ? "" : " AND t.archived_at_ms IS NULL"}${requestId === null ? "" : " AND t.request_id = ?"}
               ORDER BY ${rankSql("t.priority")} DESC, t.created_at_ms ASC LIMIT ?`,
           )
@@ -1519,15 +1436,7 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
         return Response.json(
           rows.map((row) => {
             const snap = ticketDecl.rowToSnapshot(row);
-            const approval = snap.approval_request_id
-              ? {
-                  id: snap.approval_request_id,
-                  status: (row.p_status as string | null) ?? null,
-                  resolved_by: (row.p_resolved_by as string | null) ?? null,
-                  version: (row.p_version as number | null) ?? null,
-                }
-              : null;
-            return { ...snap, ...blockerFields(db, snap.id), approval, notes_count: Number(row.notes_count ?? 0), attachments_count: Number(row.attachments_count ?? 0) };
+            return { ...snap, ...blockerFields(db, snap.id), validator_passes: validatorPassCommits(db, snap.id).length, notes_count: Number(row.notes_count ?? 0), attachments_count: Number(row.attachments_count ?? 0) };
           }),
         );
       },
@@ -1602,6 +1511,7 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
 
   return {
     kind: "ticket",
+    start: (cap) => dismissOldAllows(cap),
     migrate: (d: Database) => {
       entity.migrate(d);
       // A ledger made before archiving has the table without the column: add it.

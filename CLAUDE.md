@@ -56,7 +56,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Permissions have no TTL.** docs/rules/permissions.md
 - **State-machine kinds live in hub/kinds/<kind>.ts (KindModule).** Never add kind branches to hub.ts. docs/rules/kinds.md
 - **Broadcast with cap.sse.emit(entry, scope).** Never enumerate agent queues in a kind. docs/rules/kinds.md
-- **Tickets need acceptance criteria.** Agent moves high blast_radius ticket to done only after human's Allow. docs/rules/kinds.md
+- **Tickets need acceptance criteria.** Agent moves a ticket to done only with its Validator PASSes; no human Allow step. docs/rules/kinds.md
 - **A draft ticket starts nothing.** An open blocker stops a claim. docs/rules/kinds.md
 - **Hub decides launches; Rust shell only executes.** docs/rules/kinds.md
 - **Stage state changes only via createStageApi.** docs/rules/kinds.md

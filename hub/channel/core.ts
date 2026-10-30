@@ -120,12 +120,6 @@ const CONTEXT_KINDS = new Set(["permission.resolved", "permission.dismissed", "i
 
 export function modeFor(evt: BridgeEvent, agent: string, stageSession = false): DeliveryMode {
   if (evt.type === "briefing" || evt.type === "nutshell.updated") return "context";
-  // A ticket:done approval: the human's answer wakes the requester (it waits for it),
-  // and nobody else is woken for the request (only the human votes on it).
-  if (evt.snapshot?.tool_name === "ticket:done") {
-    if (evt.kind === "permission.resolved" && evt.from === agent) return "wake";
-    if (evt.kind === "permission.new") return "context";
-  }
   if (evt.kind && CONTEXT_KINDS.has(evt.kind)) return "context";
   // A paused agent (the hub stamps `paused`) reads handoff, interrupt and ticket events as context; nothing wakes or steers it.
   if (evt.paused && !evt.kind?.startsWith("permission.")) return "context";

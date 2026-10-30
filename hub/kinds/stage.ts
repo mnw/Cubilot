@@ -659,17 +659,17 @@ export type WaitsForYou = {
   ticket_id: string;
   title: string;
   request_id: string | null;
-  case: "approve" | "allow";
+  case: "approve";
   /** The commit of the newest tester PASS result of the ticket, else null. */
   commit: string | null;
-  /** The pending ticket:done permission (case allow), else null. */
+  /** Always null: the Allow step for done is gone (P6-04). */
   permission_id: string | null;
   question: string;
 };
 
 /**
  * The tickets of one room that wait for the human: a draft ticket of a request that holds a non-terminal high ticket
- * (approve), and a non-terminal high ticket with a pending ticket:done permission (allow). Derived from the tables.
+ * (approve). Derived from the tables.
  */
 export function waitsForYou(db: Database, room: string): WaitsForYou[] {
   type Row = { id: string; title: string; request_id: string | null; permission_id?: string | null };
@@ -689,16 +689,7 @@ export function waitsForYou(db: Database, room: string): WaitsForYou[] {
     )
     .all(room)
     .map((t): WaitsForYou => ({ ticket_id: t.id, title: t.title, request_id: t.request_id, case: "approve", commit: commit(t.id), permission_id: null, question: `Approve request ${t.request_id}?` }));
-  const allow = db
-    .query<Row, [string]>(
-      `SELECT t.id, t.title, t.request_id, p.id AS permission_id FROM tickets t
-        JOIN permissions p ON p.id = t.approval_request_id AND p.tool_name = 'ticket:done' AND p.status = 'pending'
-        WHERE t.room = ?1 AND t.blast_radius = 'high' AND t.status NOT IN ('done', 'cancelled', 'queued')
-        ORDER BY t.created_at_ms, t.id`,
-    )
-    .all(room)
-    .map((t): WaitsForYou => ({ ticket_id: t.id, title: t.title, request_id: t.request_id, case: "allow", commit: commit(t.id), permission_id: t.permission_id ?? null, question: `Allow done of ${t.id}?` }));
-  return [...approve, ...allow];
+  return approve;
 }
 
 /** The requests of one room that wait for the human's approval, each with the stage and the tickets behind it. */
