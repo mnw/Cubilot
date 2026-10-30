@@ -156,6 +156,25 @@ describe("a final PASS hands the ticket to the lead and never closes it (L4)", (
     }
   });
 
+  test("a worker result with the extra field verdict FAIL still moves a queued ticket to in_review", () => {
+    const e = makeEnv();
+    const t = e.running({ role: "worker", status: "queued" });
+    e.rt.hooks.onResult(t.session, { stage_id: t.stage, verdict: "FAIL" }, e.cap);
+    expect(e.ticket(t.id).status).toBe("in_review");
+  });
+
+  test("the review move is its own ticket-only transaction, before stage.passed", () => {
+    const e = makeEnv();
+    const t = e.running({ role: "worker", status: "queued" });
+    e.rt.hooks.onResult(t.session, { stage_id: t.stage, verdict: "PASS" }, e.cap);
+    const seq = (entity: string, kind: string) => e.db.query<{ seq: number }, [string, string]>("SELECT seq FROM events WHERE entity_id = ? AND kind = ?").get(entity, kind)!.seq;
+    const review = seq(t.id, "ticket.in_review");
+    const passed = seq(t.stage, "stage.passed");
+    expect(review).toBeLessThan(passed);
+    // stage.passed writes no ticket event in its own transaction: the ticket events around it are only the review move.
+    expect(e.events(t.id).map((x) => x.kind)).toEqual(["ticket.in_review"]);
+  });
+
   test("a draft or cancelled ticket is unchanged", () => {
     for (const status of ["draft", "cancelled"]) {
       const e = makeEnv();
