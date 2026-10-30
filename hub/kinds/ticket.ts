@@ -466,6 +466,27 @@ export function assignBySystemInTx(db: Database, ticketId: string, assignee: str
   return { snapshot, entry: ticketEntry(db, snapshot, "ticket.assigned", SYSTEM_ACTOR, false, null) };
 }
 
+/**
+ * Creates a `draft` ticket with actor `system` (Part 21 group 6): one `ticket.created` event and one row insert, through the
+ * create verb, so the radius rule applies. It queues nothing. The caller checks that the request exists.
+ */
+export function createDraftBySystem(
+  db: Database,
+  cap: HubCapabilities,
+  t: { room: string; title: string; acceptance_criteria: string; request_id: string },
+): TicketSnapshot {
+  const id = mintTicketId();
+  const entity = createLedgerEntity({ decl: ticketDecl, db });
+  const r = entity.apply(
+    id,
+    createTicketVerb,
+    { id, room: t.room, title: t.title, acceptance_criteria: t.acceptance_criteria, blast_radius: "low", priority: "medium", external_ref: null, planning_note: null, request_id: t.request_id, role: null, assignee: null, status: "draft" },
+    SYSTEM_ACTOR,
+    cap,
+  );
+  return r.snapshot;
+}
+
 export type SystemQueue = { snapshot: TicketSnapshot; entry: Entry } | null;
 
 /**

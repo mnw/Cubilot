@@ -26,17 +26,17 @@ import { validName, validRoomLabel } from "../core/ids";
 import { deliveriesNotInMain } from "../core/delivery-report";
 import { openBlockerIds } from "./ticket-blockers";
 import { flowReport } from "../core/flow";
-import { checkRetroResult, previousProposalTitles, retroWeekAt, retroWeekWindow, roomsWithTicketEvents, savedDoneImprovements, writeEvidenceFile } from "../core/retro";
+import { checkRetroResult, localDate, previousProposalTitles, retroDrafts, retroWeekAt, retroWeekWindow, roomsWithTicketEvents, savedDoneImprovements, writeEvidenceFile } from "../core/retro";
 import { getRoomSettings, DEFAULT_ROLE_LIMITS, DEFAULT_STAGE_TIMEOUT_MIN, STAGE_ROLES, type StageRole } from "../core/ledger";
 import { LedgerConflict } from "../core/types";
 import type { LaunchRecord } from "../core/launch-record";
-import { heldForApprove, requestFacts, scopeChange, type ScopeChange } from "./request";
+import { createRequestBySystem, heldForApprove, requestFacts, scopeChange, type ScopeChange } from "./request";
 import { createLaunchQueue, type LaunchEnd, type LaunchQueue, type LaunchRequest } from "../core/launch-queue";
 import { roleHarness } from "../core/role-harness";
 import { roleModelFor, secondReviewModel, type RoleModel } from "../core/role-models";
 import { metricsByRole, recordStageMetrics, stagesMissingMetrics, type Launch } from "../core/stage-metrics";
 import { makeSSE } from "../core/sse";
-import { assignBySystemInTx, closeReviewedBySystemInTx, queueBySystemInTx } from "./ticket";
+import { assignBySystemInTx, closeReviewedBySystemInTx, createDraftBySystem, queueBySystemInTx } from "./ticket";
 import type { CancelTraceCaller, CancelTraceInput } from "./cancel-trace";
 
 export type StageStatus = "queued" | "launching" | "running" | "retrying" | "passed" | "failed" | "cancelled";
@@ -2330,6 +2330,28 @@ export function createStageRuntime(
     });
   }
 
+  /**
+   * Part 21 group 6: an accepted retro result becomes the request `r-<window end date>-retro` with one draft ticket for each
+   * proposal and each `revert` verdict, and its spec review as `system`. No ticket is queued: the human's Approve starts them.
+   * A result with no proposal and no revert creates nothing.
+   */
+  function createRetroRequest(stageId: string, c: Record<string, unknown>, cap: HubCapabilities): void {
+    const row = db.query<{ room: string | null; retro_week: string | null }, [string]>("SELECT room, retro_week FROM stage WHERE id = ?").get(stageId);
+    const w = row?.retro_week ? retroWeekWindow(row.retro_week) : null;
+    if (!row?.room || !w) return;
+    const room = row.room;
+    const drafts = retroDrafts(c, stageId, (id) => db.query<{ title: string }, [string, string]>("SELECT title FROM tickets WHERE id = ? AND room = ?").get(id, room)?.title ?? null);
+    if (!drafts.length) return;
+    const requestId = `r-${localDate(w.until)}-retro`;
+    createRequestBySystem(db, cap, { room, request_id: requestId, origin: "factory", features: ["retrospective"], parent_request_id: null, source: stageId });
+    const ids = drafts.map((d) => createDraftBySystem(db, cap, { room, request_id: requestId, ...d }).id);
+    const created = api.create({ request_id: requestId, review: "spec", role: "validator" }, "system", cap, (ctx) => {
+      for (const t of ids) ctx.tx.run("INSERT INTO stage_scope (stage_id, ticket_id) VALUES (?, ?)", [ctx.next.id, t]);
+    });
+    drainQueue(created, cap);
+    cap.briefing.refresh();
+  }
+
   const hooks: StageHooks = {
     onTicketEdited(ticketId) {
       try {
@@ -2532,6 +2554,13 @@ export function createStageRuntime(
               cap.briefing.refresh();
             },
           );
+          if (stage.review === "retro") {
+            try {
+              createRetroRequest(stage.id, c, cap);
+            } catch (e) {
+              console.error(`[stage] the draft tickets of retrospective ${stage.id} failed:`, e);
+            }
+          }
           if (highValidator && !secondPass && db.query<{ s: string }, [string]>("SELECT status AS s FROM tickets WHERE id = ?").get(ticketId!)?.s === "in_review") {
             // Same commit: the starting handoff of the first stage is the newest one before this stage too.
             const second = api.create({ ticket_id: ticketId!, role: "validator" }, "system", cap);
