@@ -197,13 +197,41 @@ describe("checkpoint failures", () => {
       const before = t.leadGot.length;
       await t.turnEnd();
       await waitFor(() => t.leadGot.length > before);
-      const text = JSON.stringify(t.leadGot.slice(before));
-      const m = text.match(/Run: (bash '[^']+')/);
+      const text = String(t.leadGot.slice(before).map((e: any) => e.text ?? JSON.stringify(e)).join("\n"));
+      const m = text.match(/^(bash '[^'\n]+') <<'(CKPT_NOTE_[0-9a-f]{32})'$/m);
       expect(m).not.toBeNull();
       // The shell reads the quoted path as one word.
       const argv = Bun.spawnSync(["bash", "-c", `set -- ${m![1].slice(5)}; echo $#`]).stdout.toString().trim();
       expect(argv).toBe("1");
       expect(m![1]).toContain(join(dir, "v1", "orchestrator", "hooks", "checkpoint-note.sh"));
+    } finally {
+      await t.close();
+    }
+  });
+
+  test("the note command does not expand shell metacharacters in the note", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cubilot-note-"));
+    const t = await boot();
+    try {
+      writeContext(t.hub, 10);
+      await t.start();
+      const before = t.leadGot.length;
+      await t.turnEnd();
+      await waitFor(() => t.leadGot.length > before);
+      const text = String(t.leadGot.slice(before).map((e: any) => e.text ?? JSON.stringify(e)).join("\n"));
+      const m = text.match(/^bash '[^'\n]+' <<'(CKPT_NOTE_[0-9a-f]{32})'$/m);
+      expect(m).not.toBeNull();
+      const tag = m![1];
+      const marker = join(dir, "marker");
+      const out = join(dir, "out");
+      const stub = join(dir, "stub.sh");
+      writeFileSync(stub, `#!/bin/bash\ncat > '${out}'\n`);
+      const note = `a $(touch ${marker}) \`touch ${marker}\` "$HOME" 'q' \\ !x`;
+      // The command the hub gives, with the stub as script and the note between the tag lines.
+      const cmd = `bash '${stub}' <<'${tag}'\n${note}\n${tag}\n`;
+      expect(Bun.spawnSync(["bash", "-c", cmd]).exitCode).toBe(0);
+      expect(existsSync(marker)).toBe(false);
+      expect(readFileSync(out, "utf8")).toBe(note + "\n");
     } finally {
       await t.close();
     }

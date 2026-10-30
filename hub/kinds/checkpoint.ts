@@ -329,8 +329,10 @@ export function createCheckpointKind(db: Database, deps: CheckpointDeps): Checkp
     sweep,
   };
 
-  const askForNote = (cap: HubCapabilities, cp: CheckpointSnapshot) =>
-    cap.sse.emit(
+  const askForNote = (cap: HubCapabilities, cp: CheckpointSnapshot) => {
+    // A quoted here-document delimiter stops all shell expansion. The random tag cannot appear in a note by chance.
+    const tag = `CKPT_NOTE_${crypto.randomUUID().replace(/-/g, "")}`;
+    return cap.sse.emit(
       {
         from: "system",
         to: cp.agent,
@@ -339,10 +341,13 @@ export function createCheckpointKind(db: Database, deps: CheckpointDeps): Checkp
         image: null,
         text:
           `Checkpoint ${cp.id}: write a note of at most ${NOTE_MAX_WORDS} words with the open points that are not on the board. ` +
-          `Run: bash ${shellQuote(noteScript())} "<note>". Then end your turn. The hub clears your context after that turn and gives you the note and the state summary.`,
+          `Run this command with your note on the lines between the two ${tag} lines. The shell does not expand the note. Do not change the ${tag} lines.\n` +
+          `bash ${shellQuote(noteScript())} <<'${tag}'\n<note>\n${tag}\n` +
+          `Then end your turn. The hub clears your context after that turn and gives you the note and the state summary.`,
       },
       { kind: "to-agents", agents: [cp.agent] },
     );
+  };
 
   /** Turn ends and notes are posted by the lead's own hooks: `by` is self-asserted and must be the agent in the path. */
   async function agentCall(req: Request, name: string): Promise<{ body: Record<string, unknown> } | Response> {
