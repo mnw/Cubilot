@@ -10,6 +10,8 @@ export type LaunchRecord = {
   release(session: string, stageId?: string): void;
   /** Adds bindings read from the ledger (at start). */
   load(bindings: Iterable<[string, string]>): void;
+  /** The stage that a session is bound to, else undefined (the session is not one the hub launched, or it was released). */
+  stageOf(session: string): string | undefined;
   /** Names of the sessions the hub launched and has not seen closed. */
   sessions(): Set<string>;
 };
@@ -32,6 +34,7 @@ export function createLaunchRecord(initial: Iterable<[string, string]> = []): La
     bind: (session, stageId) => void bound.set(session, stageId),
     release: (session, stageId) => void (stageId === undefined || bound.get(session) === stageId ? bound.delete(session) : false),
     load: (bindings) => void [...bindings].forEach(([session, stageId]) => bound.set(session, stageId)),
+    stageOf: (session) => bound.get(session),
     sessions: () => new Set(bound.keys()),
   };
 }

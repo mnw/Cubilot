@@ -57,7 +57,7 @@ describe("stage session bindings in the ledger", () => {
     const db = openLedger(path, snaps).db!;
     const files = readdirSync(snaps);
     expect(files).toHaveLength(1);
-    expect(files[0]).toMatch(/18to19\.db$/);
+    expect(files[0]).toMatch(/18to20\.db$/);
     const snap = new Database(join(snaps, files[0]));
     expect(cols(snap)).not.toContain("session_released_at_ms");
     snap.close();
