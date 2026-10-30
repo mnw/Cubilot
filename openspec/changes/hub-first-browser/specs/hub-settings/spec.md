@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: The hub serves the settings the UI reads
-The hub SHALL serve, to a human caller, the values that the Tauri commands `get_ui_settings`, `get_human_name`, `get_app_version`, `get_mcp_template`, `resolve_default_room`, `list_roles`, `pty_roles` and `pty_harness` return today, with the same values. The hub SHALL read `config.yml` at each request, so a theme or font scale change shows at the next request without a reload.
+The hub SHALL serve, to a human caller, the values that the Tauri commands `get_ui_settings`, `get_human_name`, `get_app_version`, `get_mcp_template`, `resolve_default_room`, `list_roles`, `pty_roles` and `pty_harness` return today, with the same values. The hub SHALL read `config.yml` at each request, so a theme or font scale change shows at the next request without a reload. The hub SHALL NOT restage the Claude mod: when the mod folder is stale, missing or incomplete, the mcp template answers 503, and the next Claude spawn in the shell stages the mod again.
 
 #### Scenario: Theme change without reload
 - **GIVEN** `config.yml` has `theme: dark`

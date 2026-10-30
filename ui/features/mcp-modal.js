@@ -15,7 +15,7 @@ const mcpCopyBtn = document.getElementById('mcp-copy-btn');
 const mcpCloseBtn = document.getElementById('mcp-close-btn');
 const mcpCopiedStatus = document.getElementById('mcp-copied-status');
 
-// The mod path is only known to the Rust shell, so the fallback keeps a placeholder.
+// The mod path comes from the hub, so the fallback (hub unreachable or mod not staged) keeps a placeholder.
 function fallbackTemplate() {
   return "CHATBRIDGE_AGENT='agent' CHATBRIDGE_ROOM='default' claude --plugin-dir '<path to bundled chatbridge mod>'";
 }
@@ -23,7 +23,7 @@ function fallbackTemplate() {
 async function openMcpModal() {
   let text;
   try {
-    text = await tauriInvoke('get_mcp_template');
+    text = (await hubGet('/settings/mcp-template')).template;
   } catch {
     text = fallbackTemplate();
   }
