@@ -237,7 +237,7 @@ test.skipIf(!TMUX)("each case on control mode and on a raw PTY", async () => {
 }, 90000);
 
 // Opt-in manual run: TT_REAL="claude" (or "pi") bun test tests/spike/terminal-transport.test.ts -t "real program"
-// Starts the real program in a throw-away folder, attaches on each transport, resizes, sends Up and Esc, and prints
+// Starts the real program in a throw-away folder, attaches on each transport, resizes, sends paste, Shift+Tab, Up, Ctrl+C and Esc, and prints
 // what the viewer shows. It sends no prompt, so it spends no model tokens. Needs the program installed.
 test.skipIf(!TMUX || !process.env.TT_REAL)("real program on both transports", async () => {
   const cmd = process.env.TT_REAL!;
@@ -265,9 +265,26 @@ test.skipIf(!TMUX || !process.env.TT_REAL)("real program on both transports", as
     await sleep(2500); await v.settle();
     const tmuxSize = tmux("display", "-p", "-t", `=${session}:`, "#{pane_width}x#{pane_height}").out.trim();
     const after = stats();
-    t.send(session, [0x1b, 0x5b, 0x41]); await sleep(300); t.send(session, [0x1b]); await sleep(900); await v.settle();
+    // Cursor and alternate screen: the viewer must agree with tmux's own pane state.
+    const info = tmux("display", "-p", "-t", `=${session}:`, "#{cursor_x},#{cursor_y},#{alternate_on}").out.trim().split(",");
+    const norm = (x: string) => x.split("\n").map((l) => l.trimEnd()).join("\n").trimEnd();
+    const paneText = norm(tmux("capture-pane", "-p", "-t", `=${session}:`).out);
+    const viewText = norm(Array.from({ length: v.term.rows }, (_, y) => v.term.buffer.active.getLine(y)?.translateToString(true) ?? "").join("\n"));
+    const cursor = { tmux: `${info[0]},${info[1]}`, viewer: `${v.term.buffer.active.cursorX},${v.term.buffer.active.cursorY}`, textMatchesPane: paneText === viewText };
+    const altScreen = { tmuxAlternateOn: info[2] === "1", viewerBuffer: v.term.buffer.active.type };
+    // Keys one by one. Each step records whether the pane lives and whether the screen changed. No prompt is sent.
+    // Claude Code is on its trust prompt, so Ctrl+C or Esc may close it: that is the program's reaction, not a lost key.
+    const keys: [string, number[]][] = [["paste", [...Buffer.from("\x1b[200~a b\x1b[201~")]], ["Shift+Tab", [0x1b, 0x5b, 0x5a]], ["Up", [0x1b, 0x5b, 0x41]], ["Ctrl+C", [0x03]], ["Esc", [0x1b]]];
+    const keyLog: Record<string, string> = {};
+    for (const [name, bytes] of keys) {
+      if (!tmux("has-session", "-t", `=${session}`).ok) { keyLog[name] = "not sent: program had exited"; continue; }
+      const prev = v.text();
+      t.send(session, bytes); await sleep(name === "Esc" ? 900 : 500); await v.settle();
+      const alive = tmux("has-session", "-t", `=${session}`).ok;
+      keyLog[name] = `${alive ? "alive" : "program exited"}, screen ${v.text() === prev ? "unchanged" : "changed"}`;
+    }
     const alive = tmux("has-session", "-t", `=${session}`).ok;
-    out[t.name] = { before, after, paneSizeAfterResize: tmuxSize, alive, head: v.text().split("\n").filter(Boolean).slice(0, 6) };
+    out[t.name] = { before, after, paneSizeAfterResize: tmuxSize, cursor, altScreen, keyLog, alive, head: v.text().split("\n").filter(Boolean).slice(0, 6) };
     t.close();
     tmux("kill-session", "-t", `=${session}`);
   }

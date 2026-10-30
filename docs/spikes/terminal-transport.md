@@ -24,23 +24,31 @@ Transport: raw PTY
 
 Notes:
 - Raw PTY: the viewer stays on the alternate screen for the whole attach, because tmux draws its own client on it. After the program leaves its alternate screen, the viewer shows the main-screen text on that screen. The case passes on "the text is visible".
-- Truecolour on the raw PTY needs `set-option -sa terminal-features ",xterm-256color:RGB"` on the tmux server. Without it, tmux reduces `38;2;0;128;255` to a 256-colour index and the red cell becomes palette 196. A first run without the option failed SGR and Cursor on the raw PTY. `src-tauri/src/pty.rs` does not set this option. The hub terminal (group 3) must set it.
+- Truecolour on the raw PTY needs `set-option -sa terminal-features ",xterm-256color:RGB"` on the tmux server. Without it, tmux reduces `38;2;0;128;255` to a 256-colour index and the red cell becomes palette 196. A first run without the option failed SGR and Cursor on the raw PTY. `src-tauri/src/pty.rs` does not set this option. The hub terminal (group 5) must set it.
 - Input: a lone Esc reaches the program after the tmux `escape-time` (default 500 ms). The test waits 700 ms after Esc.
 - The headless viewer defaults to Unicode 6 and counts the glyph as one cell. The test loads the Unicode 11 addon. The browser xterm.js needs the same addon for the same result.
 
 ## Manual run with real programs
 
-Run: `TT_REAL=claude bun test tests/spike/terminal-transport.test.ts -t "real program"` and the same with `pi`. The test starts the program in a new folder, waits 9 s, resizes to 120x40, sends Up and Esc, and does not send a prompt.
+Run: `TT_REAL=claude bun test tests/spike/terminal-transport.test.ts -t "real program"` and the same with `pi`. The test starts the program in a new folder, waits 9 s, resizes to 120x40, sends paste, Shift+Tab, Up, Ctrl+C and Esc one by one, and does not send a prompt.
 
 | Item | claude, control mode | claude, raw PTY | pi, control mode | pi, raw PTY |
 |---|---|---|---|---|
 | Colours (coloured cells at 80x24 / 120x40) | 147 / 187 | 147 / 187 | 641 / 1710 | 641 / 1710 |
+| Real cursor addressing (viewer cursor and text equal tmux's `cursor_x,cursor_y` and `capture-pane`) | pass (1,13) | pass (1,13) | pass (0,35) | pass (0,35) |
+| Real alternate screen (tmux `alternate_on` / viewer buffer) | claude: off / normal | claude: off / alternate (tmux client screen) | on / alternate | on / alternate |
 | Layout redrawn after resize | pass | pass | pass | pass |
 | Pane size after resize | 120x40 | 120x40 | 120x40 | 120x40 |
-| Keys Up and Esc | pass (Esc closed the trust prompt and claude exited) | same | pass (session alive) | same |
+| Bracketed paste `a b` | alive, screen unchanged | same | alive, screen changed | same |
+| Shift+Tab | alive, screen unchanged | same | alive, screen changed | same |
+| Up | alive, screen changed | same | alive, screen unchanged | same |
+| Ctrl+C | alive, screen changed | same | alive, screen changed | same |
+| Esc | claude exited | claude exited | alive, screen unchanged | same |
 | Glyphs | box-drawing lines shown | same | text shown | same |
 
-Limits of the manual run: Claude Code showed its folder trust prompt, not the chat screen, because the folder is new. The run did not test typing a prompt or a model answer. The result was read from the viewer text and cell counts, not from a screenshot. Pi printed its start screen (`~/.pi/agent/AGENTS.md`, skills list) and stayed alive after Up and Esc.
+Key rows record that the program lived and whether the screen changed. They do not prove which byte the program read: a real program has no hex log. Claude Code sat on its folder trust prompt, so Esc closed it and the process exited on both transports. Both transports gave the same answer for each item and each program.
+
+Limits of the manual run: Claude Code showed its folder trust prompt, not the chat screen, because the folder is new. The run did not test typing a prompt or a model answer. Paste and Shift+Tab reach the trust prompt, not the chat input, so their effect on the real input box is not verified. Claude Code does not use the alternate screen on its trust prompt: not checked on its chat screen. The result was read from the viewer text and cell counts, not from a screenshot. Pi printed its start screen (`~/.pi/agent/AGENTS.md`, skills list) and stayed alive after Up and Esc.
 
 ## Bytes per second at a full redraw
 
