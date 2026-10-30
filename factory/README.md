@@ -275,6 +275,7 @@ Mutation testing is opt-in for each project, with `mutation_mode: off | advisory
 Copied on 2026-10-16. Both are MIT. The licenses are in `licenses/`.
 - ECC: https://github.com/affaan-m/ecc at commit `76aaa77`
 - Agency agents: https://github.com/msitarzewski/agency-agents at commit `652b269`
+- Retrospective skills (copied 2026-10-30): ECC `loop-design-check`, `agent-architecture-audit`, `agent-introspection-debugging` and `growth-log` at ECC commit `b38be6a7`. Agency `testing-workflow-optimizer`, converted to the skill `agency-testing-workflow-optimizer`, at agency-agents commit `b37b5bb`.
 - asd-ste100 v0.4.0 by Dustin Yuchen Teng, MIT: https://github.com/danyuchn/asd-ste100-skill at commit `3944283` (updated 2026-10-18). The license is in `editor/skills/asd-ste100/LICENSE`.
 - humanizer v3.1.0 by Siqi Chen, MIT: https://github.com/blader/humanizer at commit `8c307f3` (updated 2026-10-18, from v2.1.1). The license is in `editor/skills/humanizer/LICENSE`.
 - Osmani agent skills by Addy Osmani, MIT: https://github.com/addyosmani/agent-skills at commit `aeac41d` (copied 2026-10-19). Ten skills, each with a factory note at the top. The license is in `licenses/ADDY-OSMANI-AGENT-SKILLS-LICENSE`. Not copied: `doubt-driven-development` (it starts a sub-agent), `using-agent-skills` (a skill router), the personas, the hooks and the commands.

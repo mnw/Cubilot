@@ -45,6 +45,7 @@ description: Weekly review of the factory from one evidence file. Use when the h
       "change": "<what changes>",
       "kind": "code-check|script|role-file|setting",
       "files": ["<path>:<line>"],
+      "replaces": "<role-file only: the current text of the line in files, trimmed>",
       "measure": {"name": "<measure>", "now": 0, "target": 0},
       "risk": "<one sentence>"
     }
@@ -54,7 +55,7 @@ description: Weekly review of the factory from one evidence file. Use when the h
 }
 ```
 
-The hub refuses: more than three proposals, a proposal without `evidence` numbers, a proposal that removes a human gate, a role-file proposal without a line it replaces.
+The hub refuses: more than three proposals, a proposal without `evidence` numbers, a proposal that removes a human gate, a role-file proposal whose `replaces` differs from the line in `files` at the worktree commit. `replaces` is only for `kind: role-file`.
 
 ## Do not
 

@@ -1,6 +1,7 @@
-# Part 21 drafts: the retrospective role and its skills
+# Part 21: the retrospective role and its skills
 
-Drafts for the Part 21 tickets. They are here, not in `factory/retrospective/`, because the app stages every role folder at start: a role folder before the hub knows the role would show a role that cannot run. The Part 21 ticket that adds `retrospective` to the hub moves `retrospective/` to `factory/retrospective/`.
+The role folder is `factory/retrospective/` (moved from this folder by Part 21 group 2). This file keeps the list of skills and their sources.
+ECC skills are copied from affaan-m/ecc at commit `b38be6a7` (2026-10-30). The Agency `workflow-optimizer` is converted from agency-agents at commit `b37b5bb` (2026-10-30).
 
 ## Skills of the role
 
