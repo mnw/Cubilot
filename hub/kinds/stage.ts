@@ -26,17 +26,17 @@ import { validName, validRoomLabel } from "../core/ids";
 import { deliveriesNotInMain } from "../core/delivery-report";
 import { openBlockerIds } from "./ticket-blockers";
 import { flowReport } from "../core/flow";
-import { checkRetroResult, previousProposalTitles, retroWeekAt, retroWeekWindow, roomsWithTicketEvents, savedDoneImprovements, writeEvidenceFile } from "../core/retro";
+import { checkRetroResult, localDate, previousProposalTitles, retroDrafts, retroWeekAt, retroWeekWindow, roomsWithTicketEvents, savedDoneImprovements, writeEvidenceFile } from "../core/retro";
 import { getRoomSettings, DEFAULT_ROLE_LIMITS, DEFAULT_STAGE_TIMEOUT_MIN, STAGE_ROLES, type StageRole } from "../core/ledger";
 import { LedgerConflict } from "../core/types";
 import type { LaunchRecord } from "../core/launch-record";
-import { heldForApprove, requestFacts, scopeChange, type ScopeChange } from "./request";
+import { createRequestBySystem, heldForApprove, requestFacts, scopeChange, type ScopeChange } from "./request";
 import { createLaunchQueue, type LaunchEnd, type LaunchQueue, type LaunchRequest } from "../core/launch-queue";
 import { roleHarness } from "../core/role-harness";
 import { roleModelFor, secondReviewModel, type RoleModel } from "../core/role-models";
 import { metricsByRole, recordStageMetrics, stagesMissingMetrics, type Launch } from "../core/stage-metrics";
 import { makeSSE } from "../core/sse";
-import { assignBySystemInTx, closeReviewedBySystemInTx, queueBySystemInTx } from "./ticket";
+import { assignBySystemInTx, closeReviewedBySystemInTx, createDraftBySystem, queueBySystemInTx } from "./ticket";
 import type { CancelTraceCaller, CancelTraceInput } from "./cancel-trace";
 
 export type StageStatus = "queued" | "launching" | "running" | "retrying" | "passed" | "failed" | "cancelled";
@@ -1267,6 +1267,27 @@ export function createStageRuntime(
     });
   }
 
+  /** A passed retro stage whose draft tickets or spec review are missing (a stop after the pass): run the idempotent steps again from its stored result. */
+  function resumeRetroRequests(cap: HubCapabilities): void {
+    try {
+      const retros = db.query<{ id: string }, []>("SELECT id FROM stage WHERE review = 'retro' AND status = 'passed' AND retro_week IS NOT NULL ORDER BY created_seq").all();
+      for (const { id } of retros) {
+        if (retroMaterialised.has(id)) continue;
+        try {
+          const rows = db.query<{ context_json: string | null }, [string]>("SELECT context_json FROM handoffs WHERE json_extract(context_json, '$.stage_id') = ? ORDER BY created_at_ms DESC, id DESC").all(id);
+          const c = rows.map((r) => (r.context_json ? (JSON.parse(r.context_json) as Record<string, unknown>) : {})).find((x) => Array.isArray(x.proposals) || Array.isArray(x.verdicts));
+          if (c) createRetroRequest(id, c, cap);
+          retroMaterialised.add(id);
+        } catch (e) {
+          console.error(`[stage] the draft tickets of retrospective ${id} failed, the sweep retries:`, e);
+        }
+      }
+    } catch (e) {
+      console.error("[stage] retrospective resume failed:", e);
+    }
+  }
+  const retroMaterialised = new Set<string>();
+
   function sweep(cap: HubCapabilities, now: number = Date.now()): void {
     // A passed stage whose turn-end report never came (5.3b): after the grace, queue its close anyway.
     for (const session of [...awaitingClose]) {
@@ -1296,6 +1317,7 @@ export function createStageRuntime(
       console.error("[stage] blocker re-check failed:", e);
     }
     startRetrospectives(cap, now);
+    resumeRetroRequests(cap);
     const running = db.query<{ id: string }, []>("SELECT id FROM stage WHERE status = 'running' AND session IS NOT NULL").all();
     const ids = new Set(running.map((r) => r.id));
     for (const id of runningSeen.keys()) if (!ids.has(id)) runningSeen.delete(id);
@@ -2331,6 +2353,35 @@ export function createStageRuntime(
     });
   }
 
+  /**
+   * Part 21 group 6: an accepted retro result becomes the request `r-<window end date>-retro` with one draft ticket for each
+   * proposal and each `revert` verdict, and its spec review as `system`. No ticket is queued: the human's Approve starts them.
+   * A result with no proposal and no revert creates nothing.
+   */
+  function createRetroRequest(stageId: string, c: Record<string, unknown>, cap: HubCapabilities): void {
+    const row = db.query<{ room: string | null; retro_week: string | null }, [string]>("SELECT room, retro_week FROM stage WHERE id = ?").get(stageId);
+    const w = row?.retro_week ? retroWeekWindow(row.retro_week) : null;
+    if (!row?.room || !w) return;
+    const room = row.room;
+    const drafts = retroDrafts(c, stageId, (id) => db.query<{ title: string }, [string, string]>("SELECT title FROM tickets WHERE id = ? AND room = ?").get(id, room)?.title ?? null);
+    if (!drafts.length) return;
+    const requestId = `r-${localDate(w.until)}-retro`;
+    // Every step checks the ledger first, so a rerun after a stop at any step adds only what is missing. A cancelled draft stays cancelled.
+    if (!db.query("SELECT 1 FROM requests WHERE room = ? AND request_id = ?").get(room, requestId)) {
+      createRequestBySystem(db, cap, { room, request_id: requestId, origin: "factory", features: ["retrospective"], parent_request_id: null, source: stageId });
+    }
+    const have = new Set(db.query<{ title: string; acceptance_criteria: string }, [string, string]>("SELECT title, acceptance_criteria FROM tickets WHERE room = ? AND request_id = ?").all(room, requestId).map((t) => `${t.title}\n${t.acceptance_criteria}`));
+    for (const d of drafts) if (!have.has(`${d.title}\n${d.acceptance_criteria}`)) createDraftBySystem(db, cap, { room, request_id: requestId, ...d });
+    if (!db.query(`SELECT 1 FROM stage s WHERE s.review = 'spec' AND s.request_id = ?1 AND ${STAGE_ROOM_SQL} = ?2`).get(requestId, room)) {
+      const ids = db.query<{ id: string }, [string, string]>("SELECT id FROM tickets WHERE room = ? AND request_id = ? ORDER BY rowid").all(room, requestId).map((t) => t.id);
+      const created = api.create({ request_id: requestId, review: "spec", role: "validator" }, "system", cap, (ctx) => {
+        for (const t of ids) ctx.tx.run("INSERT INTO stage_scope (stage_id, ticket_id) VALUES (?, ?)", [ctx.next.id, t]);
+      });
+      drainQueue(created, cap);
+    }
+    cap.briefing.refresh();
+  }
+
   const hooks: StageHooks = {
     onTicketEdited(ticketId) {
       try {
@@ -2541,6 +2592,13 @@ export function createStageRuntime(
               cap.briefing.refresh();
             },
           );
+          if (stage.review === "retro") {
+            try {
+              createRetroRequest(stage.id, c, cap);
+            } catch (e) {
+              console.error(`[stage] the draft tickets of retrospective ${stage.id} failed, the sweep retries:`, e);
+            }
+          }
           if (highValidator && !secondPass && db.query<{ s: string }, [string]>("SELECT status AS s FROM tickets WHERE id = ?").get(ticketId!)?.s === "in_review") {
             // Same commit: the starting handoff of the first stage is the newest one before this stage too.
             const second = api.create({ ticket_id: ticketId!, role: "validator" }, "system", cap);

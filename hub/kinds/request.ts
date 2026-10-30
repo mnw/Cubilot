@@ -312,6 +312,12 @@ export function approveRequest(db: Database, cap: HubCapabilities, room: string,
 }
 
 /** The requests table and its unique index. The ticket kind calls it too: its create, edit and queue rules read the table. */
+/** Creates a request with actor `system` (Part 21 group 6): one `request.created` event and one row insert. Throws LedgerConflict when it exists. */
+export function createRequestBySystem(db: Database, cap: HubCapabilities, input: Omit<CreateInput, "id">): RequestSnapshot {
+  const id = mintRequestRowId();
+  return createLedgerEntity({ decl: requestDecl, db }).apply(id, createVerb, { id, ...input }, "system", cap).snapshot;
+}
+
 export function ensureRequestsTable(d: Database): void {
   createLedgerEntity({ decl: requestDecl, db: d }).migrate(d);
   d.exec(`CREATE UNIQUE INDEX IF NOT EXISTS "idx_requests_room_request" ON "requests" ("room", "request_id")`);

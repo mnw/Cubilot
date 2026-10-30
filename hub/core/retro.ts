@@ -380,3 +380,47 @@ export function checkRetroResult(c: Record<string, unknown>, env: RetroResultEnv
   }
   return errors;
 }
+
+// The draft tickets of an accepted result (Part 21 group 6). Pure: the caller gives the titles of the judged tickets.
+
+export type RetroDraft = { title: string; acceptance_criteria: string };
+
+const TITLE_MAX = 200;
+const clip = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, max - 1)}…`);
+const oneWord = (text: string) => text.trim().replace(/\s+/g, "_");
+
+/** `YYYY-MM-DD` of a time in the hub's local time zone. */
+export function localDate(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** One draft for each proposal, then one for each `revert` verdict. A `keep` verdict gives none. The context is already valid (checkRetroResult). */
+export function retroDrafts(c: Record<string, unknown>, stageId: string, titleOf: (ticketId: string) => string | null): RetroDraft[] {
+  const drafts: RetroDraft[] = [];
+  for (const p of (Array.isArray(c.proposals) ? c.proposals : []) as Record<string, any>[]) {
+    const m = p.measure;
+    drafts.push({
+      title: clip(`As the human, I want ${p.title}, so that ${m.name} moves from ${m.now} to ${m.target}`, TITLE_MAX),
+      acceptance_criteria: [
+        `Problem: ${p.problem}`,
+        `Change: ${p.change}`,
+        `Files: ${(p.files as string[]).join(", ")}`,
+        `Target measure: ${oneWord(m.name)} from ${m.now} to ${m.target} (retrospective ${stageId})`,
+      ].join("\n"),
+    });
+  }
+  for (const v of (Array.isArray(c.verdicts) ? c.verdicts : []) as Record<string, any>[]) {
+    if (v.verdict !== "revert") continue;
+    const title = titleOf(v.improvement) ?? "";
+    drafts.push({
+      title: clip(`Revert ${v.improvement}: ${title}`, TITLE_MAX),
+      acceptance_criteria: [
+        `Undo the change of ticket ${v.improvement}${title ? ` (${title})` : ""}. Restore the state before it.`,
+        `Reason: ${v.note}`,
+        `Target measure: ${oneWord(v.measure)} from ${v.after} to ${v.before} (retrospective ${stageId})`,
+      ].join("\n"),
+    });
+  }
+  return drafts;
+}
