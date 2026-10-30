@@ -2,7 +2,7 @@
 // Real hub per test (helpers/hub.ts); config.yml, the factory tree, the mod folder and tmux are fixtures in a temp folder.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnHub, type HubHandle } from "../helpers/hub";
@@ -99,6 +99,15 @@ describe("settings routes", () => {
     expect((await (await get("/settings/mcp-template")).json()).template).toBe(
       `CHATBRIDGE_AGENT='agent' CHATBRIDGE_ROOM='default' claude --plugin-dir '${modDir}'`,
     );
+  });
+
+  test("mcp template: a mod folder that lost a file gives 503", async () => {
+    const f = join(modDir, "hooks/register.js");
+    const keep = readFileSync(f);
+    rmSync(f);
+    expect((await get("/settings/mcp-template")).status).toBe(503);
+    writeFileSync(f, keep);
+    expect((await get("/settings/mcp-template")).status).toBe(200);
   });
 
   test("Same values as the shell: roles are the staged single-agent roles, sorted", async () => {

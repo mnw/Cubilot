@@ -903,13 +903,19 @@ fn ensure_staged(
     stage().map_err(|e| format!("chatbridge mod is not staged and retrying failed: {e}"))
 }
 
+fn staged_mod_dir_for_env(staged: &std::sync::atomic::AtomicBool, dir: PathBuf) -> Option<PathBuf> {
+    (staged.load(std::sync::atomic::Ordering::SeqCst) && mod_dir_is_complete(&dir)).then_some(dir)
+}
+
 // Env the hub reads for the settings routes: what only the shell knows (app version, bundled tmux, bundled factory
 // source, staged mod folder). The hub serves them to the UI (hub/features/settings.ts).
 fn hub_settings_env() -> Vec<(&'static str, String)> {
-    let mut env = vec![
-        ("CUBILOT_APP_VERSION", env!("CARGO_PKG_VERSION").to_string()),
-        ("CUBILOT_MOD_DIR", chatbridge_mod_dir().to_string_lossy().into_owned()),
-    ];
+    let mut env = vec![("CUBILOT_APP_VERSION", env!("CARGO_PKG_VERSION").to_string())];
+    // Only a folder this process staged and that is still complete: a stale folder from an older build
+    // is not exported, so the hub answers 503 for the mcp template (what get_mcp_template did).
+    if let Some(dir) = staged_mod_dir_for_env(&CHATBRIDGE_MOD_STAGED, chatbridge_mod_dir()) {
+        env.push(("CUBILOT_MOD_DIR", dir.to_string_lossy().into_owned()));
+    }
     if let Ok(tmux) = pty::resolve_tmux_bin() {
         env.push(("CUBILOT_TMUX", tmux.to_string_lossy().into_owned()));
     }
@@ -1530,7 +1536,7 @@ mod attachment_default_tests {
 
 #[cfg(test)]
 mod chatbridge_mod_tests {
-    use super::{ensure_staged, install_mod_dir_with, mod_dir_is_complete, pid_is_running, stage_chatbridge_mod, sweep_stale_staging};
+    use super::{ensure_staged, install_mod_dir_with, mod_dir_is_complete, pid_is_running, stage_chatbridge_mod, staged_mod_dir_for_env, sweep_stale_staging};
     use std::fs;
     use std::sync::atomic::AtomicBool;
 
@@ -1623,6 +1629,22 @@ mod chatbridge_mod_tests {
         }).unwrap_err();
         assert_eq!(calls, 1);
         assert!(err.contains("register.js") && err.contains("not staged"), "{err}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn hub_env_exports_the_mod_dir_only_when_this_process_staged_it_and_it_is_complete() {
+        let root = scratch("hubenv");
+        let dir = root.join("data/chatbridge-mod");
+        stage_into(&dir);
+        // A complete folder this process did not stage (older build) is not exported.
+        assert_eq!(staged_mod_dir_for_env(&AtomicBool::new(false), dir.clone()), None);
+        // Staged this process and complete: exported.
+        let staged = AtomicBool::new(true);
+        assert_eq!(staged_mod_dir_for_env(&staged, dir.clone()), Some(dir.clone()));
+        // Staged this process but a file was lost afterwards: not exported.
+        fs::remove_file(dir.join("hooks/register.js")).unwrap();
+        assert_eq!(staged_mod_dir_for_env(&staged, dir), None);
         let _ = fs::remove_dir_all(&root);
     }
 

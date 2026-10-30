@@ -3,7 +3,7 @@
 // (from GET /settings/paths) with a Copy button, and Reload shows the restart text. No Tauri command runs in a browser.
 
 const RESTART_TEXT = 'Restart the hub to apply these settings';
-const RESTART_COMMAND = 'bun run hub/hub.ts';
+const RESTART_COMMAND = 'PORT=<hub port> bun run hub/hub.ts';
 
 const NATIVE_ACTIONS = {
   config: { cmd: 'open_config_file', key: 'config', title: 'Config file' },
@@ -55,7 +55,7 @@ async function openNative(kind) {
 // Returns true when it handled the click (a browser); the desktop window keeps its own reload.
 function reloadInBrowser() {
   if (hasTauri()) return false;
-  showPathModal(RESTART_TEXT, 'Run this command in the project folder.', RESTART_COMMAND);
+  showPathModal(RESTART_TEXT, 'Stop the running hub. Then run this command in the project folder.', RESTART_COMMAND);
   return true;
 }
 

@@ -146,7 +146,7 @@ type Pill = { role: string; model: string; provider: string; effort: string; har
 
 // A session is listed when it has a role or a harness record; sessions with neither were not launched by this app.
 export function parseRolePills(out: string): Record<string, Pill> {
-  const map: Record<string, Pill> = {};
+  const map: Record<string, Pill> = Object.create(null); // a session may be named __proto__
   for (const line of out.split("\n")) {
     const f = line.split("\t");
     if (f.length < 4) continue;
