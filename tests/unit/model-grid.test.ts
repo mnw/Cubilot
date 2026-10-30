@@ -373,11 +373,19 @@ describe("spawn modal grid glue", () => {
     expect(t.els.spawnHarnessPi.checked).toBe(false);
   });
 
-  test("pty.listRoles rejects when the command fails (it no longer answers [])", async () => {
-    const win: any = { __TAURI__: { core: { invoke: async () => { throw new Error("nope"); } } } };
-    new Function("window", "TextEncoder", readFileSync("ui/terminal/pty.js", "utf8"))(win, TextEncoder);
-    await expect(win.__CUBILOT_TERM__.pty.listRoles()).rejects.toThrow("nope");
+  test("pty.listRoles reads GET /roles and rejects when the hub fails (it no longer answers [])", async () => {
+    const load = (hubGet: (p: string) => Promise<unknown>) => {
+      const win: any = {};
+      new Function("window", "TextEncoder", "hubGet", readFileSync("ui/terminal/pty.js", "utf8"))(win, TextEncoder, hubGet);
+      return win.__CUBILOT_TERM__.pty;
+    };
+    const paths: string[] = [];
+    const ok = load(async (p) => { paths.push(p); return { roles: [{ name: "worker" }], pills: {} }; });
+    expect(await ok.listRoles()).toEqual([{ name: "worker" }]);
+    expect(paths).toEqual(["/roles"]);
+    await expect(load(async () => { throw new Error("nope"); }).listRoles()).rejects.toThrow("nope");
   });
+
 });
 
 describe("spawn modal markup", () => {

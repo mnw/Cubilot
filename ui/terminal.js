@@ -516,7 +516,7 @@
     } catch {}
   }
 
-  // The details of an open row: the same recorded values the old pill card showed (pillCardFields over pty_roles).
+  // The details of an open row: the same recorded values the old pill card showed (pillCardFields over GET /roles).
   const HARNESS_LABEL = { claude: 'claude \u00b7 Claude Code', pi: 'pi \u00b7 pi.dev' };
   function renderRowDetails(agent) {
     const el = tabs.get(agent)?.tabEl?.querySelector('.row-details');
@@ -805,7 +805,7 @@
     t.factory = s.factory || null;
     renderRowDetails(agent);
     if (!t.tabEl.querySelector('.row-details')?.hidden) refreshSkills(agent);   // a reload may have loaded or dropped skills
-    if (typeof refreshRolePills === 'function') refreshRolePills();   // pty_roles: role, model and effort again
+    if (typeof refreshRolePills === 'function') refreshRolePills();   // GET /roles: role, model and effort again
   }
 
   // The result of THIS click: factory.last (written by the hub when the agent reports) with the reload_id that the
@@ -1590,12 +1590,12 @@
     // Pre-fill Room with git-root basename for one-click common case.
     if (spawnRoomEl && !spawnRoomEl.value.trim()) {
       try {
-        const suggested = await invoke('resolve_default_room', { cwd: dir });
+        const suggested = (await hubGet(`/room-default?cwd=${encodeURIComponent(dir)}`)).room;
         if (typeof suggested === 'string' && suggested) {
           spawnRoomEl.value = suggested;
         }
       } catch (e) {
-        console.warn('[terminal] resolve_default_room failed:', e);
+        console.warn('[terminal] GET /room-default failed:', e);
       }
       updateSpawnForm();
     }
