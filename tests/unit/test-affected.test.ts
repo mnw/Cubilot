@@ -97,6 +97,17 @@ describe("test-affected", () => {
     expect(select(r)).toEqual(["tests/contract/c.test.ts"]);
   });
 
+  test("a deleted or renamed hub file runs its importers", () => {
+    const r = repo(FILES);
+    run(r.d, ["git", "rm", "-q", "hub/b.ts"]);
+    git(r.d, "commit", "-qm", "rm b");
+    expect(select(r)).toContain("tests/unit/uses-b.test.ts");
+    const q = repo(FILES);
+    run(q.d, ["git", "mv", "hub/b.ts", "hub/b2.ts"]);
+    git(q.d, "commit", "-qm", "mv b");
+    expect(select(q)).toContain("tests/unit/uses-b.test.ts");
+  });
+
   test("the script runs the selected files through test.sh", () => {
     const r = repo(FILES);
     r.change("hub/b.ts", "export const b = 3;\n");

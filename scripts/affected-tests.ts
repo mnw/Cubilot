@@ -42,10 +42,11 @@ const resolveSpec = (from: string, spec: string, known: Set<string>): string | n
 
 try {
   git("rev-parse", "--verify", `${base}^{commit}`);
-  const changed = new Set(git("diff", "--name-only", "--diff-filter=d", base, "HEAD").split("\n").filter(Boolean));
+  // --no-renames lists the old path of a rename as deleted. A deleted production file stays a dependency target.
+  const changed = new Set(git("diff", "--name-only", "--no-renames", base, "HEAD").split("\n").filter(Boolean));
   const files: string[] = [];
   for (const r of ROOTS) walk(r, files);
-  const known = new Set(files);
+  const known = new Set([...files, ...changed]);
 
   const imports = new Map<string, Set<string>>(); // file -> files it imports or re-exports
   const reexports = new Map<string, Set<string>>(); // file -> files it re-exports
