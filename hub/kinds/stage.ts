@@ -2405,6 +2405,14 @@ export function createStageRuntime(
             for (const k of ["command", "exit_code", "pass", "fail", "log_path"]) if (bad(k)) errors.push(`context.full_suite.${k} is missing or invalid`);
           }
         }
+        if (stage.role === "tester" && stage.ticket_id && c.verdict === "PASS" && !isHighTicket(stage.ticket_id)) {
+          // Every Tester PASS says which tests ran: a full_suite object, or full_suite false with tests_run.
+          const fs = c.full_suite;
+          const obj = fs && typeof fs === "object" && !Array.isArray(fs) ? (fs as Record<string, unknown>) : null;
+          const objOk = !!obj && ["command", "log_path"].every((k) => typeof obj[k] === "string" && (obj[k] as string).trim()) && ["exit_code", "pass", "fail"].every((k) => Number.isInteger(obj[k]));
+          const listOk = fs === false && Array.isArray(c.tests_run) && c.tests_run.length > 0 && c.tests_run.every((x) => typeof x === "string" && x.trim() !== "");
+          if (!objOk && !listOk) errors.push("a Tester PASS needs context.full_suite {command, exit_code, pass, fail, log_path} or context.full_suite false with context.tests_run, a non-empty list of test file paths");
+        }
         if (stage.role === "validator" && stage.ticket_id && c.verdict === "PASS" && isHighTicket(stage.ticket_id)) {
           const last = lastFullSuite(stage.ticket_id);
           const fs = last?.full_suite;

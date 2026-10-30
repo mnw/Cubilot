@@ -133,7 +133,7 @@ describe("tester result needs a full commit sha", () => {
   const send = (commit?: unknown) =>
     postJson(hub, "/handoffs", {
       from: "tester-1", to_role: "validator", task: "validate",
-      context: { notes: "n", stage_id: stageId, ticket_id: ticketId, verdict: "PASS", report: "r", ...(commit === undefined ? {} : { commit }) },
+      context: { notes: "n", stage_id: stageId, ticket_id: ticketId, verdict: "PASS", report: "r", full_suite: false, tests_run: ["tests/unit/a.test.ts"], ...(commit === undefined ? {} : { commit }) },
     });
   const validatorStages = async () => ((await getJson(hub, "/stages")).json as Array<{ role: string }>).filter((s) => s.role === "validator").length;
   const FULL = "a".repeat(40);
