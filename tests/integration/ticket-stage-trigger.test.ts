@@ -127,12 +127,12 @@ describe("ticket changes start stages", () => {
     expect(launches).toHaveLength(n);
   });
 
-  test("a role edit starts nothing by itself (the draft to queued move does)", async () => {
+  test("a role edit on a queued ticket starts its stage", async () => {
     const t = await mk({ role: null });
     const n = launches.length;
     expect((await postJson(hub, `/tickets/${t}/edit`, { by: "ts-alice", role: "worker" })).status).toBe(200);
     await settle();
-    expect(await stagesOf(t)).toEqual([]);
-    expect(launches).toHaveLength(n);
+    expect(await stagesOf(t)).toHaveLength(1);
+    expect(launches).toHaveLength(n + 1);
   });
 });

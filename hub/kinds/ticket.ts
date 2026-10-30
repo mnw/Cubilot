@@ -1410,6 +1410,8 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
           if (r.emitted) {
             cap.briefing.refresh();
             stage?.onTicketEdited?.(params.id);
+            // An edit can make a queued ticket ready (role added, last blocker removed): run the stage evaluator.
+            if (r.snapshot.status === "queued") stage?.onTicketChanged(params.id, cap);
           }
           return Response.json({ snapshot: r.snapshot, ...(r.emitted ? {} : { idempotent: true }) });
         } catch (e) {
