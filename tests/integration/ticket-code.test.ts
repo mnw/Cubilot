@@ -89,6 +89,41 @@ describe("GET /tickets/<id>/code", () => {
     expect(body.totals).toEqual({ added: 3, removed: 1 });
   });
 
+  test("open branch already on staging: the diff is empty", async () => {
+    const id = await newTicket("on staging");
+    sh("checkout", "-q", "-b", `ticket/${id}`);
+    write("os.txt", "x\n");
+    commit("work");
+    const head = sh("rev-parse", "HEAD");
+    sh("checkout", "-q", "staging");
+    sh("-c", "commit.gpgsign=false", "merge", "-q", "--no-ff", `ticket/${id}`, "-m", `Merge ticket/${id}: on staging (validator PASS h_2)`);
+
+    const body = (await code(id)).json as { head: string; on_staging: boolean; files: unknown[]; totals: { added: number; removed: number } };
+    expect(body.head).toBe(head);
+    expect(body.on_staging).toBe(true);
+    expect(body.files).toEqual([]);
+    expect(body.totals).toEqual({ added: 0, removed: 0 });
+  });
+
+  test("deleted branch: the ticket.done note names the merge commit, the subject does not", async () => {
+    const id = await newTicket("by note");
+    sh("checkout", "-q", "-b", `ticket/${id}`);
+    write("n1.txt", "p\nq\n");
+    commit("work");
+    const head = sh("rev-parse", "HEAD");
+    sh("checkout", "-q", "staging");
+    sh("-c", "commit.gpgsign=false", "merge", "-q", "--no-ff", `ticket/${id}`, "-m", "staging batch, no ticket name");
+    const merge = sh("rev-parse", "HEAD");
+    sh("branch", "-q", "-D", `ticket/${id}`);
+    const done = await postJson(hub, `/tickets/${id}/transition`, { by: "human", to: "done", note: `merged as ${merge}` });
+    expect(done.status).toBe(200);
+
+    const body = (await code(id)).json as { head: string; on_staging: boolean; files: { path: string; added: number; removed: number }[] };
+    expect(body.head).toBe(head);
+    expect(body.on_staging).toBe(true);
+    expect(body.files).toEqual([{ path: "n1.txt", added: 2, removed: 0 }]);
+  });
+
   test("no branch and no merge: head null, empty files", async () => {
     const id = await newTicket("nothing");
     const r = await code(id);

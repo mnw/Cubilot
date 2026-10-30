@@ -1232,7 +1232,11 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
         if (!TICKET_ID_RE.test(params.id)) return Response.json({ error: "invalid ticket id" }, { status: 400 });
         const t = entity.load(params.id);
         if (!t) return Response.json({ error: "not found" }, { status: 404 });
-        return Response.json(ticketCodeState(getRoomSettings(cap.db, t.room)?.project_folder, t.id));
+        const doneNotes = cap.db
+          .query<{ text: string }, [string]>("SELECT n.text FROM ticket_notes n JOIN events e ON e.seq = n.id WHERE n.ticket_id = ? AND e.kind = 'ticket.done' ORDER BY n.id DESC")
+          .all(t.id)
+          .map((r) => r.text);
+        return Response.json(ticketCodeState(getRoomSettings(cap.db, t.room)?.project_folder, t.id, doneNotes));
       },
     },
 

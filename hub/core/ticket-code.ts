@@ -48,8 +48,25 @@ const withTotals = (branch: string, head: string | null, on_staging: boolean, fi
   totals: { added: files.reduce((n, f) => n + f.added, 0), removed: files.reduce((n, f) => n + f.removed, 0) },
 });
 
-/** The newest merge commit on staging whose subject starts `Merge ticket/<id>:`, with its two parents. */
-function mergeOf(project: string, ticketId: string): { first: string; second: string; sha: string } | null {
+type Merge = { first: string; second: string; sha: string };
+
+/** `sha` as a merge commit on staging with two parents, or null. */
+function mergeAt(project: string, sha: string): Merge | null {
+  if (git(project, ["merge-base", "--is-ancestor", sha, STAGING]).code !== 0) return null;
+  const r = git(project, ["rev-list", "--parents", "-n", "1", sha]);
+  const [h, first, second, third] = r.out.trim().split(" ");
+  return r.code === 0 && h === sha && SHA_RE.test(first ?? "") && SHA_RE.test(second ?? "") && !third ? { sha, first, second } : null;
+}
+
+/** The merge commit of the ticket: a commit that a ticket.done note names (newest note first), else the newest merge on staging whose subject starts `Merge ticket/<id>:`. */
+function mergeOf(project: string, ticketId: string, doneNotes: string[]): Merge | null {
+  for (const note of doneNotes) {
+    for (const tok of note.match(/\b[0-9a-f]{7,40}\b/g) ?? []) {
+      const full = tok.length === 40 ? tok : sha(project, ["rev-parse", "--verify", "--quiet", `${tok}^{commit}`]);
+      const m = full ? mergeAt(project, full) : null;
+      if (m) return m;
+    }
+  }
   const r = git(project, ["log", STAGING, "--merges", "--format=%H%x00%P%x00%s"]);
   if (r.code !== 0) return null;
   for (const line of r.out.split("\n")) {
@@ -61,19 +78,16 @@ function mergeOf(project: string, ticketId: string): { first: string; second: st
   return null;
 }
 
-export function ticketCodeState(project: string | null | undefined, ticketId: string): CodeState {
+export function ticketCodeState(project: string | null | undefined, ticketId: string, doneNotes: string[] = []): CodeState {
   const branch = `ticket/${ticketId}`;
   if (!project) return withTotals(branch, null, false, []);
   const head = sha(project, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}^{commit}`]);
   if (head) {
     const onStaging = git(project, ["merge-base", "--is-ancestor", head, STAGING]).code === 0;
-    // A merged branch that still exists: its head is on staging, so merge-base..head is empty. Show what the merge brought.
-    const merge = onStaging ? mergeOf(project, ticketId) : null;
-    if (merge) return withTotals(branch, head, true, numstat(project, merge.first, merge.sha));
     const base = sha(project, ["merge-base", STAGING, head]);
     return withTotals(branch, head, onStaging, base ? numstat(project, base, head) : []);
   }
-  const merge = mergeOf(project, ticketId);
+  const merge = mergeOf(project, ticketId, doneNotes);
   if (!merge) return withTotals(branch, null, false, []);
   return withTotals(branch, merge.second, true, numstat(project, merge.first, merge.sha));
 }
