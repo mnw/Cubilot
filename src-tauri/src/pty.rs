@@ -1513,6 +1513,31 @@ pub fn pty_write(
     Ok(())
 }
 
+/// The bytes of one input line: the text and Enter. `None` when the text is empty, too long or holds a control character,
+/// so one request is one line and never a key sequence.
+pub fn input_line(text: &str) -> Option<Vec<u8>> {
+    if text.is_empty() || text.len() > 1024 || text.chars().any(char::is_control) {
+        return None;
+    }
+    let mut b = text.as_bytes().to_vec();
+    b.push(b'\r');
+    Some(b)
+}
+
+/// Writes `text` and Enter to the PTY of the named session and to no other (P6-15, the checkpoint `/clear`). Raw PTY
+/// write, the same path as `pty_write`; never `tmux send-keys`. An unknown session is an error, never a fallback.
+pub fn write_input(state: &PtyRegistry, session: &str, text: &str) -> Result<(), String> {
+    let bytes = input_line(text).ok_or("the input is empty, too long or holds a control character")?;
+    let handle_arc = {
+        let map = state.0.lock().unwrap();
+        map.get(session).cloned().ok_or_else(|| format!("unknown session: {session}"))?
+    };
+    let mut h = handle_arc.lock().unwrap();
+    h.writer.write_all(&bytes).map_err(|e| format!("write: {e}"))?;
+    h.writer.flush().map_err(|e| format!("flush: {e}"))?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn pty_resize(
     state: State<'_, PtyRegistry>,
@@ -4011,5 +4036,24 @@ mod first_message_tests {
         // they differ only in the session name and the message file
         let strip = |c: &str, n: &str| c.replace(n, "SESSION");
         assert_eq!(strip(&first, "worker-1"), strip(&second, "worker-2"));
+    }
+}
+
+#[cfg(test)]
+mod input_line_tests {
+    use super::input_line;
+
+    #[test]
+    fn one_line_and_enter() {
+        assert_eq!(input_line("/clear"), Some(b"/clear\r".to_vec()));
+    }
+
+    #[test]
+    fn empty_long_or_control_text_is_refused() {
+        assert_eq!(input_line(""), None);
+        assert_eq!(input_line("a\nb"), None);
+        assert_eq!(input_line("a\rb"), None);
+        assert_eq!(input_line("\u{1b}[A"), None);
+        assert_eq!(input_line(&"x".repeat(1025)), None);
     }
 }

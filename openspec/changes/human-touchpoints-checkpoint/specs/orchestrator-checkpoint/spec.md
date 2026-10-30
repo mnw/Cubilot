@@ -60,7 +60,7 @@ A request SHALL be done when each ticket of the request is `done` or `cancelled`
 - **THEN** `r-1` is not done
 
 ### Requirement: A checkpoint is due by a fixed rule
-A checkpoint of a Claude room lead SHALL be due when a request of the room reached `done` after the newest checkpoint of the lead (R4, see "A request is done by a fixed predicate"), or when `context_pct` is at least `checkpoint.context_pct` of `config.yml` (default 60). It SHALL start only at the end of a lead turn, and only when the room has no request that waits for approval, no `open` decision and no live spec review or arbiter stage.
+A checkpoint of a Claude room lead SHALL be due when a request of the room reached `done` after the newest checkpoint of the lead (R4, see "A request is done by a fixed predicate"), or when `context_pct` is at least `checkpoint.context_pct` of `config.yml` (default 60). It SHALL start only at the end of a lead turn, and only when the room has no request that waits for approval, no `open` decision and no live spec review.
 
 #### Scenario: Request done
 - **WHEN** a request reaches done and the lead ends its turn with no open decision

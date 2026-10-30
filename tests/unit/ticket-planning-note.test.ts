@@ -76,6 +76,8 @@ describe("ticket planning_note", () => {
 
   test("assignee edit of the grouping fields still 403, with or without agent notes", async () => {
     const id = snapOf(await make({ planning_note: "keep", assignee: "bob" })).id;
+    // The request exists, so the refusal is the 403 of the grouping rule, not the 400 of an unknown request.
+    expect((await postJson(hub, "/requests", { by: hub.humanName, room: "r1", request_id: "r-9" })).status).toBe(201);
     for (const extra of [{ request_id: "r-9" }, { role: "worker" }, { blocked_by: [] }]) {
       expect((await postJson(hub, `/tickets/${id}/edit`, { by: "bob", ...extra })).status).toBe(403);
       expect((await postJson(hub, `/tickets/${id}/edit`, { by: "bob", planning_note: "sneaky", ...extra })).status).toBe(403);
@@ -144,7 +146,7 @@ describe("ticket planning_note", () => {
     const esc = '"' + "\\u0001".repeat(4000) + '"';
     const raw = (path: string, fields: string) =>
       authedFetch(hub, path, { method: "POST", body: `{"by":"alice",${fields}}` });
-    const c = await raw("/tickets", `"title":"T","acceptance_criteria":"c","blast_radius":"low","planning_note":${esc}`);
+    const c = await raw("/tickets", `"title":"T","acceptance_criteria":"c","blast_radius":"low","status":"draft","planning_note":${esc}`);
     expect(c.status).toBe(201);
     const id = ((await c.json()) as { snapshot: Snap }).snapshot.id;
     expect(stored(id)).toBe(note);
@@ -158,7 +160,7 @@ describe("ticket planning_note", () => {
     const esc = '"' + "\\ud83d\\ude00".repeat(4000) + '"';
     const c = await authedFetch(hub, "/tickets", {
       method: "POST",
-      body: `{"by":"alice","title":"T","acceptance_criteria":"c","blast_radius":"low","planning_note":${esc}}`,
+      body: `{"by":"alice","title":"T","acceptance_criteria":"c","blast_radius":"low","status":"draft","planning_note":${esc}}`,
     });
     expect(c.status).toBe(201);
   });

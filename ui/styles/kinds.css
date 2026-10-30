@@ -440,7 +440,7 @@ body.board-open .board-col {
 .ticket-notes-empty { color: var(--text-muted); font-size: 0.9em; }
 .ticket-card.archived { opacity: 0.6; border-style: dashed; }
 .ticket-title { font-weight: 600; }
-.ticket-meta, .ticket-approval { color: var(--text-muted); font-size: 0.9em; }
+.ticket-meta { color: var(--text-muted); font-size: 0.9em; }
 .ticket-assignee-row { display: flex; flex-direction: column; gap: 4px; }
 /* Move to and Assignee: two equal columns, label on top of its select; two rows only when the card is narrow. */
 .ticket-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 4px 8px; margin-top: 4px; }
@@ -727,7 +727,7 @@ label[for="ticket-filter-request"] { color: var(--text); }
 .ticket-chip.ticket-radius { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--text); }
 .ticket-status-line { display: flex; align-items: center; gap: var(--sp-4); font-size: var(--fs-sm); color: var(--text); }
 .ticket-status-line.is-blocked .ticket-icon { color: var(--amber); }
-.ticket-status-line.is-approval .ticket-icon, .ticket-status-line.is-human .ticket-icon { color: var(--red); }
+.ticket-status-line.is-human .ticket-icon { color: var(--red); }
 .ticket-card-foot { display: flex; align-items: center; gap: var(--sp-8); padding-top: var(--sp-6); border-top: 1px solid var(--line); min-width: 0; }
 .ticket-who { display: inline-flex; align-items: center; gap: var(--sp-6); font-family: var(--mono); font-size: var(--fs-sm); min-width: 0; color: var(--text); }
 .ticket-who-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -837,17 +837,6 @@ label[for="ticket-filter-request"] { color: var(--text); }
 .ticket-blocker-opt.active, .ticket-blocker-opt:hover { background: var(--bg-elev); }
 .ticket-blocker-none { padding: var(--sp-6) var(--sp-8); color: var(--text-meta); font-size: var(--fs-sm); }
 
-/* The approval banner at the top of the dialog body: a pending ticket:done request for the human. */
-.ticket-approval-banner {
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-8);
-  padding: var(--sp-8) var(--sp-10, 10px); margin-bottom: var(--sp-10, 10px);
-  border: 1px solid color-mix(in srgb, var(--red) 50%, transparent); border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--red) 10%, transparent); color: var(--text); font-size: var(--fs-sm);
-}
-.ticket-approval-text { flex: 1 1 240px; }
-.ticket-approval-actions { display: flex; gap: var(--sp-6); }
-.ticket-approval-actions button:disabled { opacity: 0.6; cursor: default; }
-
 /* ---- 15.10: files and notes ---- */
 .ticket-attach-list li { padding: var(--sp-6) var(--sp-8); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-inset); }
 .ticket-attach-thumb { width: 44px; height: 44px; }
@@ -888,6 +877,9 @@ label[for="ticket-filter-request"] { color: var(--text); }
 .plan-text { flex: 1; min-width: 0; }
 .plan-title { font-size: var(--fs-sm); color: var(--text); font-weight: 600; }
 .plan-why { margin-top: var(--sp-2); font-size: var(--fs-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-origin, .plan-features, .plan-changes-head { margin-top: var(--sp-2); font-size: var(--fs-xs); color: var(--text-muted); }
+.plan-tickets, .plan-changes { margin: var(--sp-2) 0 0; padding-left: 1.2em; font-size: var(--fs-xs); color: var(--text-muted); }
+.plan-ticket.high { font-weight: 600; }
 .plan-approve { flex: none; background: var(--orange); color: var(--bg-inset); border: none; font-weight: 600; padding: var(--sp-4) var(--sp-12); border-radius: var(--radius-md); }
 .plan-approve:hover:not(:disabled) { background: var(--orange-hover); }
 .plan-approve:disabled { opacity: 0.5; cursor: default; }

@@ -307,6 +307,8 @@ Rule for new role-file rules: when a rule protects the flow (a limit, a stop, an
 
 ### 11. Human touchpoints: start and delivery only
 
+Decision 2026-10-30 (human): Part 6 ships without the arbiter. The arbiter is now its own part: Part 19 (`19-arbiter.md`). The subsection "The arbiter" below is kept for reference only.
+
 Status: decision 2026-10-27 (human). Build it first in this part, with item 7. The interim rule below applies now.
 
 #### Goal
@@ -507,6 +509,8 @@ The Orchestrator checks each open `blocked_by` against rule 1 and removes each l
 ## Ideas for later
 
 ### 12. Learning from the human's corrections
+
+Folded into Part 21 (weekly retrospective), 2026-10-30.
 
 Skill: `.agents/skills/improve-review-pr/SKILL.md`. A daily job reads how humans reacted to automated review comments. It opens a change to the review skill when it finds knowledge that the reviewer must keep.
 

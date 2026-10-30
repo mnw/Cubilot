@@ -93,10 +93,10 @@ fn stage_role(src: &Path, role: &str, tmp: &Path) -> Result<(), String> {
     if src.join("first-message.md").is_file() {
         fs::copy(src.join("first-message.md"), dst.join("first-message.md")).map_err(|e| e.to_string())?;
     }
-    // hooks/hooks.json only; no `agents/` (the role plugin has skills and hooks only).
+    // hooks/ with hooks.json and the scripts it names (the Orchestrator checkpoint hooks); no `agents/` (the role plugin
+    // has skills and hooks only).
     if src.join("hooks/hooks.json").is_file() {
-        fs::create_dir_all(dst.join("hooks")).map_err(|e| e.to_string())?;
-        fs::copy(src.join("hooks/hooks.json"), dst.join("hooks/hooks.json")).map_err(|e| e.to_string())?;
+        copy_tree(&src.join("hooks"), &dst.join("hooks"))?;
     }
     Ok(())
 }
@@ -904,6 +904,7 @@ mod tests {
         fs::write(w.join("skills/tdd/SKILL.md"), "tdd v1").unwrap();
         fs::write(w.join("agents/helper.md"), "agent").unwrap();
         fs::write(w.join("hooks/hooks.json"), "{\"hooks\":{}}").unwrap();
+        fs::write(w.join("hooks/run.sh"), "#!/bin/bash\n").unwrap();
         let e = src.join("editor");
         fs::create_dir_all(e.join("skills/ste")).unwrap();
         fs::write(e.join("editor.md"), "no frontmatter body").unwrap();
@@ -931,6 +932,7 @@ mod tests {
         assert!(w.join("skills/tdd/SKILL.md").is_file());
         assert!(!w.join("agents").exists(), "test 7: no agents/ folder");
         assert!(w.join("hooks/hooks.json").is_file(), "test 8: hooks copied");
+        assert!(w.join("hooks/run.sh").is_file(), "the scripts that hooks.json names are copied too");
         let e = dest.join(&v).join("editor");
         assert!(!e.join("hooks").exists());
         assert_eq!(fs::read_to_string(e.join("role.md")).unwrap(), "no frontmatter body");

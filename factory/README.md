@@ -60,17 +60,17 @@ The Validator and the Reviewer challenge the work. They run on OpenAI through th
 ## Ground rules
 
 1. **A ticket is the unit of work. A handoff is a stage move inside a ticket.** Every handoff carries `context.ticket_id`.
-2. **The producer owns the ticket to the end.** The Worker or the Writer moves it to `done` after the final verdict.
+2. **The lead owns the close.** After the final PASS, the Orchestrator merges the branch into staging and moves the ticket to `done`. The producer does not.
 3. **Verdicts travel as handoffs back to the producer**, with findings in `context`. Each finding is `blocking` or `suggestion`.
 4. **Title prefixes route work:** `[code]` to a Worker, `[doc]` and `[spec]` to the Writer, `[seo]` to the SEO council, `[a11y]` to the accessibility and usability council.
-5. **`blast_radius: high`** for releases, production config, public docs, data migrations and security. `done` then needs the human's Allow.
+5. **`blast_radius: high`** for releases, production config, public docs, data migrations and security. It closes on the full suite and two Validator PASSes on one commit. It needs no Allow.
 6. **Evidence beats opinion.** A finding names the file and line, the command output, or the criterion.
 7. **Only the human acks permissions.**
 8. **Interrupts are for "stop now"** only.
 9. **After two FAIL or CHANGES loops on one ticket**, or a dispute that does not settle, the Orchestrator decides or escalates to the human.
 10. **No sub-agents.** No role starts a sub-agent. Claude Code roles start with the `Task` and `Agent` tools blocked. Pi has no sub-agents. All work happens in sessions that the human can see.
 11. **One new session for each ticket stage.** The Orchestrator decides which tickets exist, their roles and their dependencies. The app starts the agents. When a ticket stage is ready, the app starts a new session for that role. The session has its own worktree and its own pane. Its first message is the ticket context. When the agent posts its result, the app closes the session. Only the Orchestrator stays open for the whole room. Details: `brief/04-sessions.md`.
-12. **Spec review before work.** The Orchestrator creates the tickets of a request as `draft` and sends the plan to the Validator. No `draft` ticket can start. On FAIL, the Orchestrator changes the plan and sends it again. After two FAIL loops, the human decides. On PASS, the tickets become `queued`. A `blast_radius: high` request also needs the human's approval of the plan.
+12. **Spec review before work.** The Orchestrator creates the tickets of a request as `draft` and sends the plan of the request to the Validator. One review covers the plan, not each draft. No `draft` ticket can start. On FAIL, the Orchestrator changes the plan and sends it again. After two FAIL loops, the human decides. On PASS, the tickets become `queued`. The human's approval of the plan is also needed for a request of origin `human`, a request with a `blast_radius: high` ticket and a request with a feature.
 13. **Agents never reach the client's repository.** Agents work only in the internal remote, a bare Git repository in the app data folder. The hub creates one `ticket/<id>` branch for each ticket. Only the human's Deliver step sends a clean, squashed branch to the client, after the leak gate passes. Details: `brief/05-delivery-backup.md`.
 14. **One folder is the whole factory.** The app backs up the app data folder each hour, encrypted, to one target. Recovery: install the app, select "Restore from backup", sign in. Details: `brief/05-delivery-backup.md`.
 
@@ -99,8 +99,8 @@ queued [code] ticket (after spec review PASS)
        needs more evidence -> handoff Validator -> tester-N {commands}
        ticket is wrong     -> handoff Validator -> Orchestrator {reason}; the changed ticket goes to spec review
        FAIL -> handoff Validator -> Worker {findings, surviving mutants}; Worker fixes, repeats
-       PASS -> handoff Validator -> Worker "close T"
-  -> Worker: transition done (high radius: waits for the human's Allow)
+       PASS -> handoff Validator -> Orchestrator "PASS T" (high radius: two PASSes on one commit, full suite exit 0, no Allow)
+  -> Orchestrator: merge into staging, transition done
 ```
 
 ## Writing track (`[doc]`)
@@ -111,9 +111,9 @@ queued [doc] ticket (after spec review PASS; audience and sources in the ticket)
   -> handoff Writer -> Editor     {ticket_id, path, style_guide}
   -> Editor edits in place
   -> handoff Editor -> Reviewer   {ticket_id, path, change_summary, open_questions}
-  -> Reviewer: APPROVE -> handoff -> Writer "close T"
+  -> Reviewer: APPROVE -> handoff -> Orchestrator "APPROVE T"
                CHANGES -> handoff -> Writer {findings}
-  -> Writer: transition done
+  -> Orchestrator: merge into staging, transition done
 ```
 
 For a feature with docs, the Orchestrator creates two tickets. The Orchestrator assigns the `[doc]` ticket after the `[code]` ticket gets a Validator PASS.

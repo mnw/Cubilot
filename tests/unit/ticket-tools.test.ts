@@ -92,48 +92,12 @@ describe("transition_ticket", () => {
     expect(await run("transition_ticket", f.host, { ticket_id: TID, to: "in_review", note: "built and tested" })).toContain("in_review");
     expect(f.calls[0].body).toEqual({ by: "alice", to: "in_review", note: "built and tested" });
   });
-  test("blocked done requests approval and reports the id", async () => {
-    const f = fake({
-      [`POST /tickets/${TID}/transition`]: { status: 409, body: { error: "approval", approval_request_id: null } },
-      [`POST /tickets/${TID}/approval`]: { status: 200, body: { request_id: "p_1", created: true } },
-    });
-    const text = await run("transition_ticket", f.host, { ticket_id: TID, to: "done" });
-    expect(text).toContain("approval_request_id=p_1");
+  test("a 409 on done is an error and the tool makes no second call", async () => {
+    const f = fake({ [`POST /tickets/${TID}/transition`]: { status: 409, body: { error: "done needs a Validator PASS: none yet" } } });
+    await expect(run("transition_ticket", f.host, { ticket_id: TID, to: "done" })).rejects.toThrow("409 done needs a Validator PASS: none yet");
+    expect(f.calls.map((c) => c.key)).toEqual([`POST /tickets/${TID}/transition`]);
   });
-  test("the human allowed in between: the approval call returns the allowed request and the move is retried once", async () => {
-    const f = fake({
-      [`POST /tickets/${TID}/transition`]: [
-        { status: 409, body: { error: "approval", approval_request_id: "p_1" } },
-        { status: 200 },
-      ],
-      [`POST /tickets/${TID}/approval`]: { status: 200, body: { request_id: "p_1", created: false, status: "allowed" } },
-    });
-    const text = await run("transition_ticket", f.host, { ticket_id: TID, to: "done" });
-    expect(text).toContain(`ticket ${TID} is now done`);
-    expect(text).toContain("p_1");
-    expect(f.calls.map((c) => c.key)).toEqual([
-      `POST /tickets/${TID}/transition`, `POST /tickets/${TID}/approval`, `POST /tickets/${TID}/transition`,
-    ]);
-  });
-  test("the retry that fails again is an error, and the move is tried only twice", async () => {
-    const f = fake({
-      [`POST /tickets/${TID}/transition`]: { status: 409, body: { error: "approval", approval_request_id: "p_1" } },
-      [`POST /tickets/${TID}/approval`]: { status: 200, body: { request_id: "p_1", created: false, status: "allowed" } },
-    });
-    await expect(run("transition_ticket", f.host, { ticket_id: TID, to: "done" })).rejects.toThrow("retry after the human's approval failed: 409");
-    expect(f.calls.filter((c) => c.key.endsWith("/transition")).length).toBe(2);
-  });
-  test("a pending request (created:false) is not retried: the agent waits", async () => {
-    const f = fake({
-      [`POST /tickets/${TID}/transition`]: { status: 409, body: { error: "approval", approval_request_id: "p_1" } },
-      [`POST /tickets/${TID}/approval`]: { status: 200, body: { request_id: "p_1", created: false, status: "pending" } },
-    });
-    const text = await run("transition_ticket", f.host, { ticket_id: TID, to: "done" });
-    expect(text).toContain("approval_request_id=p_1");
-    expect(text).toContain("Wait for the human");
-    expect(f.calls.filter((c) => c.key.endsWith("/transition")).length).toBe(1);
-  });
-  test("a plain 409 is an error, no approval call", async () => {
+  test("a plain 409 is an error, one call", async () => {
     const f = fake({ [`POST /tickets/${TID}/transition`]: { status: 409, body: { error: "wrong state" } } });
     await expect(run("transition_ticket", f.host, { ticket_id: TID, to: "done" })).rejects.toThrow("409 wrong state");
     expect(f.calls.length).toBe(1);
@@ -177,17 +141,6 @@ describe("transition_ticket notes", () => {
     expect((tool.inputSchema as { required: string[] }).required).toEqual(["ticket_id", "to"]);
     expect(tool.description).toContain("audit trail");
     expect(tool.description).toContain("does not replace your chatbridge messages");
-  });
-
-  test("the retry after the human's approval carries the same note", async () => {
-    const f = fake({
-      [`POST /tickets/${TID}/transition`]: { status: 409, body: { error: "approval", approval_request_id: null } },
-      [`POST /tickets/${TID}/approval`]: { status: 200, body: { request_id: "p_1", created: false, status: "allowed" } },
-    });
-    // first call blocked, the approval says allowed, the retry is the same move (here it hits the same blocked route)
-    await expect(send(f, { to: "done", note: "ok" })).rejects.toThrow();
-    expect(f.calls[0].body).toEqual({ by: "alice", to: "done", note: "ok" });
-    expect(f.calls[2].body).toEqual({ by: "alice", to: "done", note: "ok" });
   });
 });
 
@@ -301,18 +254,16 @@ describe("create_ticket and list_tickets", () => {
 describe("ticket ids are path-encoded", () => {
   const evil = "../permissions/x/verdict";
   const enc = encodeURIComponent(evil);
-  test("claim, transition and approval send an encoded id", async () => {
+  test("claim and transition send an encoded id", async () => {
     const f = fake({
       [`POST /tickets/${enc}/claim`]: { status: 200 },
-      [`POST /tickets/${enc}/transition`]: { status: 409, body: { error: "a", approval_request_id: null } },
-      [`POST /tickets/${enc}/approval`]: { status: 200, body: { request_id: "p" } },
+      [`POST /tickets/${enc}/transition`]: { status: 409, body: { error: "a" } },
     });
     await run("claim_ticket", f.host, { ticket_id: evil });
-    await run("transition_ticket", f.host, { ticket_id: evil, to: "done" });
+    await expect(run("transition_ticket", f.host, { ticket_id: evil, to: "done" })).rejects.toThrow("409 a");
     expect(f.calls.map((c) => c.key)).toEqual([
       `POST /tickets/${enc}/claim`,
       `POST /tickets/${enc}/transition`,
-      `POST /tickets/${enc}/approval`,
     ]);
   });
   test("accept_handoff claim encodes a ticket_id from the handoff context", async () => {

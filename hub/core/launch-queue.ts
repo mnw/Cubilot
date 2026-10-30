@@ -25,7 +25,9 @@ export type LaunchRequest =
       prompt: string;
       env: Record<string, string>;
     }
-  | { id: string; kind: "close"; session: string };
+  | { id: string; kind: "close"; session: string }
+  /** Text for the PTY of one named session (the checkpoint `/clear`). The shell writes `text` and Enter to that session only. */
+  | { id: string; kind: "input"; session: string; text: string };
 
 /**
  * `spawned` means done: the session started (launch) or was closed (close). `error` for a launch ends the attempt. For a
@@ -45,6 +47,11 @@ export type LaunchQueueOpts = {
   onLaunchEnd(req: Extract<LaunchRequest, { kind: "launch" }>, end: LaunchEnd, cap: HubCapabilities): void;
   /** A close is done: the shell closed the session, or reported that it does not exist. Never throws into the ack. */
   onCloseEnd?(session: string, cap: HubCapabilities, id: string): void;
+  /**
+   * A launch ack arrives after its time-out. True: the stage logic takes it (the ack is recorded and answered ok). False or
+   * absent: the ack is refused with a conflict. A throw keeps the time-out state, so the shell can ack again.
+   */
+  onLateAck?(req: Extract<LaunchRequest, { kind: "launch" }>, outcome: AckOutcome, cap: HubCapabilities): boolean;
 };
 
 export type AckStatus = "ok" | "idempotent" | "unknown" | "conflict" | "error" | "pending";
@@ -108,6 +115,12 @@ export function createLaunchQueue(opts: LaunchQueueOpts): LaunchQueue {
         // Nothing to undo for a close: it is sent again when the shell reconnects. The timer only makes it visible.
         console.error(`[launch-queue] close ${req.session} has no ack after ${opts.ackMs} ms`);
         arm(entry);
+        return;
+      }
+      if (req.kind === "input") {
+        // An input is written once and never sent again: no ack in time is only logged. The checkpoint has its own time-out.
+        console.error(`[launch-queue] input for ${req.session} has no ack after ${opts.ackMs} ms`);
+        finish(req.id, entry, "timeout");
         return;
       }
       try {
@@ -178,7 +191,20 @@ export function createLaunchQueue(opts: LaunchQueueOpts): LaunchQueue {
     ack(id, outcome, cap) {
       const entry = sent.get(id);
       if (!entry) return { status: "unknown" };
-      if (entry.done === "timeout") return { status: "conflict", message: "the launch timed out" };
+      if (entry.done === "timeout") {
+        if (entry.req.kind === "launch" && opts.onLateAck) {
+          try {
+            if (opts.onLateAck(entry.req, outcome, cap)) {
+              finish(id, entry, outcome);
+              return { status: "ok" };
+            }
+          } catch (e) {
+            console.error("[launch-queue] late-ack handler failed, request stays timed out:", e);
+            return { status: "error", message: "could not record the ack; send it again" };
+          }
+        }
+        return { status: "conflict", message: "the launch timed out" };
+      }
       if (entry.done) {
         return entry.done.result === outcome.result
           ? { status: "idempotent" }
@@ -192,6 +218,8 @@ export function createLaunchQueue(opts: LaunchQueueOpts): LaunchQueue {
           console.error("[launch-queue] ack handler failed, request stays pending:", e);
           return { status: "error", message: "could not record the ack; send it again" };
         }
+      } else if (entry.req.kind === "input") {
+        if (outcome.result === "error") console.error(`[launch-queue] input for ${entry.req.session} failed: ${outcome.error}`);
       } else if (outcome.result === "error" && !outcome.absent) {
         // The close did not happen (for example tmux was unavailable). It stays pending, is sent again on the next
         // connection, and keeps its session name reserved. Only "the session does not exist" completes it.

@@ -1,5 +1,5 @@
-// Plan waits for your approval (spec-review-stage 4.4). A request whose spec review passed but that still holds a high
-// ticket shows one row above the board: what holds it and an Approve button. The button calls the human-only route
+// Plan waits for your approval (spec-review-stage 4.4, plan-approval). A request whose spec review passed but that the Approve
+// rule holds shows one row above the board: its origin, features, tickets with radius, the changes since the last Approve, and an Approve button. The button calls the human-only route
 // POST /requests/<room>/<request_id>/approve, which queues every draft ticket of the request.
 // The rows come from GET /requests/<room>/waiting and are read again on ticket.* and stage.* events.
 // The same area also holds "Needs you" (spec-review-stage 4.3): a request whose spec review failed twice or more shows the
@@ -19,6 +19,7 @@ const PlanApproval = (() => {
   let waiting = [];
   let needs = [];
   let waits = [];   // tickets that wait for the human (needs-you `waiting`)
+  let deliveries = [];   // delivered requests with a merge commit not on main yet (needs-you `deliveries`)
   let traces = [];
   const traceBusy = new Set();       // trace ids whose Clear is in flight
   const traceButtons = new Map();    // trace id -> its Clear button of the last render, for the focus after Clear
@@ -69,6 +70,13 @@ const PlanApproval = (() => {
     } catch { storeBroken = true; /* storage unavailable: show every block */ }
   }
 
+  function detail(cls, textContent) {
+    const d = document.createElement('div');
+    d.className = cls;
+    d.textContent = textContent;
+    return d;
+  }
+
   function row(w) {
     const el = document.createElement('div');
     el.className = 'plan-row';
@@ -82,15 +90,59 @@ const PlanApproval = (() => {
     why.className = 'plan-why';
     const n = w.draft_tickets.length;
     const held = w.high_tickets.map((t) => t.title || t.id).join(', ');
-    why.textContent = `${n} draft ticket${n === 1 ? ' waits' : 's wait'}. Held by high-risk: ${held}`;
+    why.textContent = `${n} draft ticket${n === 1 ? ' waits' : 's wait'}.` + (held ? ` Held by high-risk: ${held}` : '');
     why.title = why.textContent;
     text.append(title, why);
+    // The scope the Approve covers (plan-approval): origin, features, each ticket with its radius, source and reasons.
+    if (w.origin) text.appendChild(detail('plan-origin', `Origin: ${w.origin}`));
+    const features = Array.isArray(w.features) ? w.features : [];
+    if (features.length) text.appendChild(detail('plan-features', `Features: ${features.join(', ')}`));
+    const tickets = Array.isArray(w.tickets) ? w.tickets : [];
+    if (tickets.length) {
+      const list = document.createElement('ul');
+      list.className = 'plan-tickets';
+      for (const t of tickets) {
+        const li = document.createElement('li');
+        li.className = `plan-ticket ${t.radius}`;
+        const bits = [`${t.title || t.id}: radius ${t.radius}`];
+        if (t.source) bits.push(`source ${t.source}`);
+        if (Array.isArray(t.reasons) && t.reasons.length) bits.push(`reasons ${t.reasons.join(', ')}`);
+        li.textContent = bits.join('; ');
+        list.appendChild(li);
+      }
+      text.appendChild(list);
+    }
+    // Since the last Approve: what the scope changed by. The lists are empty before the first Approve.
+    const c = w.scope_change;
+    if (c && c.approved) {
+      const lines = [];
+      const name = (id) => tickets.find((t) => t.id === id)?.title || id;
+      for (const id of c.added || []) {
+        const t = tickets.find((x) => x.id === id);
+        lines.push(`Added ticket: ${name(id)}${t ? ` (radius ${t.radius})` : ''}`);
+      }
+      for (const id of c.removed || []) lines.push(`Removed ticket: ${name(id)}`);
+      for (const id of c.raised || []) lines.push(`Radius raised: ${name(id)}`);
+      for (const f of c.features?.added || []) lines.push(`Added feature: ${f}`);
+      for (const f of c.features?.removed || []) lines.push(`Removed feature: ${f}`);
+      if (lines.length) {
+        const list = document.createElement('ul');
+        list.className = 'plan-changes';
+        list.setAttribute('aria-label', 'Changes since the last Approve');
+        for (const l of lines) {
+          const li = document.createElement('li');
+          li.textContent = l;
+          list.appendChild(li);
+        }
+        text.append(detail('plan-changes-head', 'Changes since the last Approve:'), list);
+      }
+    }
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'plan-approve';
     btn.textContent = 'Approve';
     btn.disabled = busy.has(w.request_id);
-    btn.addEventListener('click', () => approve(w.request_id, btn));
+    btn.addEventListener('click', () => approve(w, btn));
     el.append(text, btn);
     return el;
   }
@@ -173,6 +225,29 @@ const PlanApproval = (() => {
       li.className = 'needs-finding';
       li.dataset.ticket = w.ticket_id;
       li.textContent = `${w.question} ${w.ticket_id} ${w.title} (request ${w.request_id ?? 'none'}, ${w.case}, commit ${w.commit ?? 'none'}, permission ${w.permission_id ?? 'none'})`;
+      list.appendChild(li);
+    }
+    el.append(h, list);
+    return el;
+  }
+
+  // "Delivered": one text line for each request whose merge commits are not all on main. The li is a tab stop so a keyboard
+  // user reaches it. Every field goes in as text, never as markup.
+  function deliveriesSection() {
+    const el = document.createElement('section');
+    el.className = 'needs-row deliveries-not-in-main';
+    const h = document.createElement('h3');
+    h.className = 'plan-title';
+    h.textContent = 'Delivered, not in main';
+    const list = document.createElement('ul');
+    list.className = 'needs-findings';
+    for (const d of deliveries) {
+      const li = document.createElement('li');
+      li.className = 'needs-finding delivery-line';
+      li.dataset.request = d.request_id;
+      li.setAttribute('tabindex', '0');
+      const n = d.unmerged_commits.length;
+      li.textContent = `Request ${d.request_id} is delivered. ${n} merge commit${n === 1 ? ' is' : 's are'} not on main. Report: GET /requests/${room}/${d.request_id}/delivery`;
       list.appendChild(li);
     }
     el.append(h, list);
@@ -273,8 +348,8 @@ const PlanApproval = (() => {
     collapseButtons.clear();
     traceButtons.clear();
     const shown = room ? visibleNeeds(room, needs) : needs;
-    r.replaceChildren(...waiting.map(row), ...(waits.length ? [waitsSection()] : []), ...shown.map(needsRow), ...traces.map(traceRow));
-    r.hidden = waiting.length === 0 && waits.length === 0 && shown.length === 0 && traces.length === 0;
+    r.replaceChildren(...waiting.map(row), ...(waits.length ? [waitsSection()] : []), ...(deliveries.length ? [deliveriesSection()] : []), ...shown.map(needsRow), ...traces.map(traceRow));
+    r.hidden = waiting.length === 0 && waits.length === 0 && deliveries.length === 0 && shown.length === 0 && traces.length === 0;
     if (focused !== null && traceFocus === null && pendingFocus === null && traceButtons.has(focused)) traceFocus = focused;
     applyFocus();
   }
@@ -289,6 +364,7 @@ const PlanApproval = (() => {
       waiting = [];
       needs = [];
       waits = [];
+      deliveries = [];
       traces = [];
       room = shown;
       render();
@@ -312,6 +388,7 @@ const PlanApproval = (() => {
         if (seq !== loadSeq) return;
         needs = Array.isArray(body?.requests) ? body.requests : [];
         waits = Array.isArray(body?.waiting) ? body.waiting : [];
+        deliveries = Array.isArray(body?.deliveries) ? body.deliveries : [];
       }
       if (tres.ok) {
         const body = await tres.json();
@@ -325,14 +402,22 @@ const PlanApproval = (() => {
     render();
   }
 
-  async function approve(requestId, btn) {
+  async function approve(w, btn) {
+    const requestId = w.request_id;
     if (busy.has(requestId) || !room) return;
     busy.add(requestId);
     btn.disabled = true;
     try {
       const res = await authedFetch(`/requests/${encodeURIComponent(room)}/${encodeURIComponent(requestId)}/approve`, {
         method: 'POST',
-        body: JSON.stringify({ by: HUMAN_NAME }),
+        body: JSON.stringify({
+          by: HUMAN_NAME,
+          // The scope the card shows: the hub refuses the Approve when a lead edit changed it since the card loaded.
+          scope: {
+            features: w.features || [],
+            tickets: (w.tickets || []).map((t) => ({ id: t.id, radius: t.radius })).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
+          },
+        }),
       });
       if (!res.ok) {
         const err = await res.json().then((j) => j?.error, () => null);
@@ -358,6 +443,7 @@ const PlanApproval = (() => {
     globalThis.syncPlanApproval = load;
     KindCardRenderer.observe('stage', onEvent);
     KindCardRenderer.observe('ticket', onEvent);
+    KindCardRenderer.observe('request', onEvent);
     KindCardRenderer.observe('cancel_trace', onEvent);
     load();
   }

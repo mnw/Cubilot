@@ -100,8 +100,16 @@ beforeEach(() => {
   t.roster.dave = "r2";
 });
 
+// A queued ticket of a plain agent needs a request (criterion 2.2): both rooms get a seeded one.
 async function create(over: Record<string, unknown> = {}): Promise<string> {
-  const r = await t.call("POST", "/tickets", spec(over));
+  for (const room of ["r1", "r2"]) {
+    t.db.run(
+      `INSERT OR IGNORE INTO requests (id, room, request_id, origin, features, parent_request_id, source, approved, status, created_by, created_at_ms, version)
+       VALUES (?, ?, 'req-default', 'factory', '[]', NULL, NULL, NULL, 'open', 'test', 1, 1)`,
+      [`rq_${room}`, room],
+    );
+  }
+  const r = await t.call("POST", "/tickets", spec({ request_id: "req-default", ...over }));
   expect(r.status).toBe(201);
   return r.json.snapshot.id;
 }
