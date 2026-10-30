@@ -162,6 +162,17 @@ describe("delivery report", () => {
     expect(j.known_limits.follow_up_tickets).toEqual([{ id: f, title: "Fix it", status: "draft", request_id: "dr-fu-fu-1" }]);
   });
 
+  test("Factory follow-up: a human-origin child request is not listed", async () => {
+    await mkRequest("dr-hc");
+    const t = await mkTicket("dr-hc");
+    await mkRequest("dr-hc-child", { origin: "human", parent_request_id: "dr-hc" });
+    await mkTicket("dr-hc-child", { title: "Human child" });
+    setStatus(t, "done");
+    const j = (await report("dr-hc")).json as any;
+    expect(j.factory_requests).toEqual([]);
+    expect(j.known_limits.follow_up_tickets).toEqual([]);
+  });
+
   test("Known limits: open suggestions of the Validator PASS results", async () => {
     await mkRequest("dr-kl");
     const t = await mkTicket("dr-kl");

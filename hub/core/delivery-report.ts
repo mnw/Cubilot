@@ -97,7 +97,7 @@ export function buildDeliveryReport(db: Database, room: string, requestId: strin
   const criteriaEdits = approveSeq === null ? [] : criteriaEditsAfter(db, room, requestId, approveSeq);
 
   const children = db
-    .query<{ request_id: string }, [string, string]>("SELECT request_id FROM requests WHERE room = ? AND parent_request_id = ? ORDER BY created_at_ms, id")
+    .query<{ request_id: string }, [string, string]>("SELECT request_id FROM requests WHERE room = ? AND parent_request_id = ? AND origin = 'factory' ORDER BY created_at_ms, id")
     .all(room, requestId);
   const factory = children.map((c) => ({
     request_id: c.request_id,
