@@ -771,7 +771,7 @@ Ack body:
 | Unknown request id | 404 |
 | First answer | 200 `{"ok": true}` |
 | Same answer again | 200 `{"idempotent": true}` |
-| Other `result` than the recorded one, or an ack after the time-out | 409 |
+| Other `result` than the recorded one, or an ack after the time-out | 409. Exception: the late `spawned` or `error` ack of a cancelled stage gets 200 (see "Cancelled stages" item 2). |
 | Close with `error` and no `absent` | 200 `{"ok": true, "pending": true, …}`. The close stays pending. |
 | The hub could not record the stage change | 500. Send the ack again. |
 
@@ -810,11 +810,12 @@ When a stage moves to `launching`, the hub sets the ticket's `assignee` to the s
 `cancelled` is terminal and has no retry. A cancelled stage is not a failure: it has no final-failure handoff to the Orchestrator, no Needs-you line, no FAIL count (`specFailState` reads `verdict` only), no failure record and no input to a diagnosis.
 
 1. **Ticket cancel.** After the commit of `ticket.cancelled`, the hub moves each `queued`, `launching`, `running` or `retrying` stage of the ticket to `cancelled` with the reason `ticket cancelled` and actor `system`. It does this through the stage API, one transaction per stage, after the ticket transaction. This adds no cross-kind transaction. A live stage (`launching`, `running`, or `retrying` with a session) first gets one close request. A `queued` stage gets none. A `passed` or `failed` stage does not change.
-2. **Release rule.** The session name, the role slot and the worktree of a cancelled stage stay reserved until a close ack arrives while no launch of that stage is in flight. A close ack (`absent` included) while its launch is in flight releases nothing. When the launch ends later (`spawned`, `error` or no ack), the hub queues one more close and only the ack of that close releases. The stage never moves to `running` and is never retried. A launch the shell never received is dropped, with no close, and releases at once.
+2. **Release rule.** The session name, the role slot and the worktree of a cancelled stage stay reserved until a close ack arrives while no launch of that stage is in flight. A close ack (`absent` included) while its launch is in flight releases nothing. When the launch ends later (`spawned`, `error` or no ack), the hub queues one more close and only the ack of that close releases. When the launch timed out, the hub queues no close at the time-out and keeps the reservation, even after a close ack (`absent` included). The late `spawned` or `error` ack is accepted (200) and queues one more close. A repeat of it is idempotent. A late ack of a stage that is not cancelled gets 409. The stage never moves to `running` and is never retried. A launch the shell never received is dropped, with no close, and releases at once.
 3. **Worktree.** A `ticket/<id>` worktree (worker, writer, editor) stays. A temporary worktree goes at the releasing close ack (or at once for a dropped launch).
 4. **Hub start.** Before the sweep of `launching` stages, each open stage of a cancelled ticket moves to `cancelled` with the reason `ticket cancelled` and each live one gets one close request. The sweep then skips them.
 5. **Move to draft or done (G10).** After the commit of a move of a ticket to `draft` or `done`, the hub moves each `queued` stage of the ticket to `cancelled` with the reason `ticket moved to draft` or `ticket moved to done`, actor `system`, through the stage API, one transaction per stage. The routes are a transition and the final Validator or Reviewer PASS (after the `stage.passed` transaction). This adds no cross-kind transaction. A `launching`, `running` or `retrying` stage does not change. At hub start, the queued stages of a draft or done ticket move the same way, before the sweep of `launching` stages. The launch check refuses a stage whose ticket is `draft`, `done` or `cancelled`. A refusal writes nothing, so the stage row does not change.
-6. **Limits.** A time-out race on a launch (`t_b073b26136e9cf61`) and a shell restart (`t_81bfa8a84ecc06e5`) are out of scope. A launch ack lost in a shell restart holds the reservation until the hub restarts. The human closes an orphan pane.
+6. **Shell close order.** The shell keeps the session names of its launches in progress. A close for such a name waits until that launch ends. A close for another name runs at once. A close waits for at most one launch of its name.
+7. **Limits.** A shell restart (`t_81bfa8a84ecc06e5`) is out of scope. A launch ack that never arrives (for example lost in a shell restart) holds the reservation until the hub restarts. The human closes an orphan pane.
 
 ### Results
 

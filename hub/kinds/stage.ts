@@ -785,9 +785,16 @@ export function createStageRuntime(
   const rerender = new Map<string, { id: string; render: () => string }>();
   /**
    * G4: a stage cancelled while its launch is in flight. Its session name, slot and worktree stay reserved until a close ack
-   * arrives with no launch in flight (and, once a late launch end queued the last close, only that close's ack).
+   * arrives with no launch in flight (and, once a late launch end queued the last close, only that close's ack). A launch that
+   * timed out (`timedOut`) is still in flight for the shell: nothing is released until its late ack queues the last close.
    */
-  const cancelHolds = new Map<string, { stageId: string; lastCloseId: string | null }>();
+  const cancelHolds = new Map<string, { stageId: string; lastCloseId: string | null; timedOut: boolean }>();
+
+  /** The launch of a cancelled stage ended (ack, or its late ack after a time-out): one more close; only its ack releases. */
+  function queueLastClose(hold: { lastCloseId: string | null }, session: string): void {
+    hold.lastCloseId = mintLaunchId();
+    queue.push({ id: hold.lastCloseId, kind: "close", session });
+  }
 
   const queue = createLaunchQueue({
     ackMs: opts.ackMs ?? DEFAULT_LAUNCH_ACK_MS,
@@ -796,7 +803,7 @@ export function createStageRuntime(
       const hold = cancelHolds.get(session);
       if (hold) {
         // A close ack (absent included) while the launch is in flight releases nothing: the session may appear after it.
-        if (inflight.has(hold.stageId)) return;
+        if (inflight.has(hold.stageId) || hold.timedOut) return;
         if (hold.lastCloseId !== null && hold.lastCloseId !== closeId) return;
         if (queue.pendingCloses().includes(session)) return;
         cancelHolds.delete(session);
@@ -821,6 +828,14 @@ export function createStageRuntime(
         if (BRANCH_ROLES.has(held.role)) for (const r of BRANCH_ROLES) if (r !== held.role) startWaiting(r, held.room, cap);
       }
     },
+    onLateAck(req) {
+      // Only a cancelled stage that waits for its late launch takes a late ack; any other late ack is refused.
+      const hold = cancelHolds.get(req.session);
+      if (!hold || hold.stageId !== req.stage_id || !hold.timedOut || api.load(req.stage_id)?.status !== "cancelled") return false;
+      hold.timedOut = false;
+      queueLastClose(hold, req.session);
+      return true;
+    },
     onLaunchEnd(req, end: LaunchEnd, cap) {
       if (req.kind !== "launch") return;
       const fromRoleModels = roleModelLaunches.delete(req.id);
@@ -833,8 +848,10 @@ export function createStageRuntime(
           // and only its ack releases the reservation. No running move, no retry, no final failure.
           const hold = cancelHolds.get(req.session);
           if (hold?.stageId === req.stage_id) {
-            hold.lastCloseId = mintLaunchId();
-            queue.push({ id: hold.lastCloseId, kind: "close", session: req.session });
+            if (end.by === "timeout") {
+              // No ack in time: the session may still appear. The first close is not enough, so the hold stays until the late ack.
+              hold.timedOut = true;
+            } else queueLastClose(hold, req.session);
           }
           return;
         }
@@ -1060,7 +1077,7 @@ export function createStageRuntime(
         const taken = atStart && !!db.query("SELECT 1 FROM stage WHERE session = ? AND id != ? AND status IN ('launching', 'running') LIMIT 1").get(session, stageId);
         if (!ownClose && !taken) {
           if (!closing.has(session)) closing.set(session, { role: stage.role, room: roomOfStage(stageId), stageId });
-          if (stage.status === "launching" && inflight.has(stageId)) cancelHolds.set(session, { stageId, lastCloseId: null });
+          if (stage.status === "launching" && inflight.has(stageId)) cancelHolds.set(session, { stageId, lastCloseId: null, timedOut: false });
           queue.push({ id: mintLaunchId(), kind: "close", session });
         }
       }

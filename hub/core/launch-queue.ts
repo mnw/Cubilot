@@ -45,6 +45,11 @@ export type LaunchQueueOpts = {
   onLaunchEnd(req: Extract<LaunchRequest, { kind: "launch" }>, end: LaunchEnd, cap: HubCapabilities): void;
   /** A close is done: the shell closed the session, or reported that it does not exist. Never throws into the ack. */
   onCloseEnd?(session: string, cap: HubCapabilities, id: string): void;
+  /**
+   * A launch ack arrives after its time-out. True: the stage logic takes it (the ack is recorded and answered ok). False or
+   * absent: the ack is refused with a conflict. A throw keeps the time-out state, so the shell can ack again.
+   */
+  onLateAck?(req: Extract<LaunchRequest, { kind: "launch" }>, outcome: AckOutcome, cap: HubCapabilities): boolean;
 };
 
 export type AckStatus = "ok" | "idempotent" | "unknown" | "conflict" | "error" | "pending";
@@ -178,7 +183,20 @@ export function createLaunchQueue(opts: LaunchQueueOpts): LaunchQueue {
     ack(id, outcome, cap) {
       const entry = sent.get(id);
       if (!entry) return { status: "unknown" };
-      if (entry.done === "timeout") return { status: "conflict", message: "the launch timed out" };
+      if (entry.done === "timeout") {
+        if (entry.req.kind === "launch" && opts.onLateAck) {
+          try {
+            if (opts.onLateAck(entry.req, outcome, cap)) {
+              finish(id, entry, outcome);
+              return { status: "ok" };
+            }
+          } catch (e) {
+            console.error("[launch-queue] late-ack handler failed, request stays timed out:", e);
+            return { status: "error", message: "could not record the ack; send it again" };
+          }
+        }
+        return { status: "conflict", message: "the launch timed out" };
+      }
       if (entry.done) {
         return entry.done.result === outcome.result
           ? { status: "idempotent" }
