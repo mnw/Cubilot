@@ -81,7 +81,7 @@ A per-**Room** single-row document (the `nutshell` table) that captures the curr
 _Avoid_: doc, summary (collides with **Room summary** — keep them distinct), status (too vague).
 
 **Ticket**:
-A per-**Room** **Kind** for work that exists before it has an owner: `title`, required `acceptance_criteria`, `blast_radius` (`low` | `high`), `priority` (JIRA levels `highest` … `lowest`, default `medium`), optional `assignee` and opaque `external_ref`. Lifecycle `queued → claimed → in_progress → in_review → done`, rework `in_review → in_progress`, terminal `cancelled`. An **Agent** moves a `high` ticket to `done` only after the **Human** allows its `ticket:done` **Permission**; the **Human** may complete it directly. Where the **Nutshell** is the strategic picture the human curates, **Tickets** are the discrete work items agents claim and move; neither replaces the other.
+A per-**Room** **Kind** for work that exists before it has an owner: `title`, required `acceptance_criteria`, `blast_radius` (`low` | `high`), `priority` (JIRA levels `highest` … `lowest`, default `medium`), optional `assignee` and opaque `external_ref`. Lifecycle `queued → claimed → in_progress → in_review → done`, rework `in_review → in_progress`, terminal `cancelled`. An **Agent** moves a ticket to `done` only with its Validator PASSes (two for `high`); the **Human** may complete it directly. Where the **Nutshell** is the strategic picture the human curates, **Tickets** are the discrete work items agents claim and move; neither replaces the other.
 _Avoid_: task (collides with the **Handoff** `task` field), issue, story, backlog item.
 
 **Room summary**:

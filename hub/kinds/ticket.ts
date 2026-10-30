@@ -24,7 +24,7 @@ import { ts, validRoomLabel } from "../core/ids";
 import { validateBlockedBy, openBlockerIds } from "./ticket-blockers";
 import { STAGE_ROLES, getRoomSettings, type StageRole } from "../core/ledger";
 import { ruleRadius } from "../core/radius-rule";
-import { createPermissionWithSideEffect, dismissPendingPermission } from "./permission";
+import { dismissPendingPermission } from "./permission";
 import type { StageHooks } from "./stage";
 import { approveRequest, currentScope, ensureRequestsTable, needsApprove, needsFirstApprove, requestExists, requestFacts } from "./request";
 
@@ -104,11 +104,6 @@ const TICKET_LIST_LIMIT = 500;
 const BRIEFING_TICKET_LIMIT = 20;
 const BRIEFING_CRITERIA_CHARS = 300;
 const APPROVAL_TOOL_NAME = "ticket:done";
-const APPROVAL_BLOCK_MESSAGE = "high-blast-radius ticket needs the human's approval";
-// Claude mints request ids from a-z without 'l'. Ticket approvals use the same letters in UPPER case:
-// PERMISSION_ID_RE is case-insensitive so every route accepts them, and SQLite compares ids
-// case-sensitively, so a ticket approval id can never equal an id Claude mints.
-const PERMISSION_ID_ALPHABET = "ABCDEFGHIJKMNOPQRSTUVWXYZ";
 
 function mintTicketId(): string {
   const buf = new Uint8Array(8);
@@ -116,12 +111,6 @@ function mintTicketId(): string {
   let out = "t_";
   for (const b of buf) out += b.toString(16).padStart(2, "0");
   return out;
-}
-
-function mintPermissionId(): string {
-  const buf = new Uint8Array(5);
-  crypto.getRandomValues(buf);
-  return Array.from(buf, (b) => PERMISSION_ID_ALPHABET[b % PERMISSION_ID_ALPHABET.length]).join("");
 }
 
 // ---------- StateMachine declaration ----------
@@ -327,9 +316,6 @@ const createTicketVerb: VerbDecl<TicketSnapshot, CreateInput> = {
     if (prior) return conflict("ticket id collision");
     // A ticket created as done skips the whole workflow, so only the human may do it.
     if (payload.status === "done" && !isHuman(actor, cap)) return forbidden("only the human may create a done ticket");
-    if (payload.status === "queued" && payload.role !== null && hasNoChain(payload.role)) {
-      return conflict(`role ${payload.role} has no hub stage chain: create the ticket as draft`);
-    }
     const blockers = validateBlockedBy(cap.db, payload.room, null, payload.blocked_by);
     if (blockers.error !== undefined) return { kind: "conflict", httpStatus: 400, message: blockers.error };
     const now = Date.now();
@@ -451,35 +437,6 @@ const assignTicketVerb: VerbDecl<TicketSnapshot, AssignInput> = {
 /** The actor the hub uses for its own writes. validName() refuses it (reserved), so no HTTP route can claim it. */
 export const SYSTEM_ACTOR = "system";
 
-/**
- * Stage roles with no hub stage chain: a queued ticket of one of them would never start and nothing would say so.
- * Temporary: the writing chain (t_922581db0beb6fe4) removes this gate.
- */
-export const NO_CHAIN_ROLES: readonly StageRole[] = ["writer", "editor", "reviewer"];
-const hasNoChain = (role: StageRole | null): boolean => role !== null && NO_CHAIN_ROLES.includes(role);
-
-/** A draft that queueDraftInTx left alone because its role has no chain. */
-export type HeldDraft = { id: string; role: StageRole; reason: string };
-
-/** One message from system to the room lead, after the commit, that names each draft that stayed draft. No lead, no message. */
-export function notifyHeldDrafts(cap: HubCapabilities, room: string, held: HeldDraft[]): void {
-  const lead = roomLead(cap, room);
-  if (!lead || held.length === 0) return;
-  const lines = held.map((h) => `- ${h.id} (role ${h.role})`);
-  cap.sse.emit(
-    {
-      from: "system",
-      to: lead,
-      text: `These tickets stayed draft because their role has no hub stage chain:\n${lines.join("\n")}`,
-      ts: ts(),
-      image: null,
-      room,
-      kind: "ticket.held",
-    } as Entry,
-    { kind: "to-agents", agents: [lead] },
-  );
-}
-
 export type SystemAssign = { snapshot: TicketSnapshot; entry: Entry } | null;
 
 /**
@@ -515,23 +472,18 @@ export type SystemQueue = { snapshot: TicketSnapshot; entry: Entry } | null;
  * (`stage.passed` + one `ticket.queued` per scope ticket commit together). A ticket that is not `draft` is left alone
  * (returns null), and so is one whose request is not `requestId` (when given); a ticket that does not exist throws and rolls the PASS back. The caller emits the entry after the commit.
  */
-export function queueBySystemInTx(db: Database, cap: HubCapabilities, ticketId: string, requestId?: string | null, held?: HeldDraft[]): SystemQueue {
-  return queueDraftInTx(db, cap, ticketId, SYSTEM_ACTOR, requestId, held);
+export function queueBySystemInTx(db: Database, cap: HubCapabilities, ticketId: string, requestId?: string | null): SystemQueue {
+  return queueDraftInTx(db, cap, ticketId, SYSTEM_ACTOR, requestId);
 }
 
 /** The body of queueBySystemInTx for any actor (the human's request approval uses it with the human name). Same rules. */
-export function queueDraftInTx(db: Database, cap: HubCapabilities, ticketId: string, actor: string, requestId?: string | null, held?: HeldDraft[]): SystemQueue {
+export function queueDraftInTx(db: Database, cap: HubCapabilities, ticketId: string, actor: string, requestId?: string | null): SystemQueue {
   const row = db.query<Record<string, unknown>, [string]>("SELECT * FROM tickets WHERE id = ?").get(ticketId);
   if (!row) throw new Error(`queue: no such ticket ${ticketId}`);
   const prior = ticketDecl.rowToSnapshot(row);
   if (prior.status !== "draft") return null;
   // A ticket that left the request after the scope was set was not reviewed with it: leave it alone.
   if (requestId !== undefined && prior.request_id !== requestId) return null;
-  // A role with no chain stays draft; the caller reports it. The rest of the batch still queues.
-  if (prior.role !== null && hasNoChain(prior.role)) {
-    held?.push({ id: ticketId, role: prior.role, reason: `role ${prior.role} has no hub stage chain` });
-    return null;
-  }
   const now = Date.now();
   const seq = insertEvent(db, ticketId, "ticket.queued", actor, { from: "draft", to: "queued" }, now);
   db.run("UPDATE tickets SET status = 'queued', updated_at_ms = ?, version = ? WHERE id = ?", [now, seq, ticketId]);
@@ -734,6 +686,24 @@ function validatorPassCommits(db: Database, ticketId: string): (string | null)[]
   });
 }
 
+/**
+ * The result handoff ids of the Validator PASS stages of a ticket since its latest worker stage, oldest first. A stage's result
+ * is the last handoff its own session sent with context.stage_id = the stage (null when none is recorded).
+ */
+function validatorPassHandoffs(db: Database, ticketId: string): { stage_id: string; handoff_id: string | null }[] {
+  return db
+    .query<{ stage_id: string; handoff_id: string | null }, [string, string]>(
+      `SELECT s.id AS stage_id,
+              (SELECT h.id FROM handoffs h WHERE h.from_agent = s.session AND json_extract(h.context_json, '$.stage_id') = s.id
+                ORDER BY h.rowid DESC LIMIT 1) AS handoff_id
+         FROM stage s
+        WHERE s.ticket_id = ?1 AND s.role = 'validator' AND s.review IS NULL AND s.status = 'passed' AND s.verdict = 'PASS'
+          AND s.created_seq > COALESCE((SELECT MAX(w.created_seq) FROM stage w WHERE w.ticket_id = ?2 AND w.role = 'worker'), 0)
+        ORDER BY s.created_seq`,
+    )
+    .all(ticketId, ticketId);
+}
+
 /** True when `commit` is an ancestor of the staging branch of the room's project. Fails closed on any git problem. */
 function mergedIntoStaging(cap: HubCapabilities, room: string, commit: string): boolean {
   const project = getRoomSettings(cap.db, room)?.project_folder;
@@ -784,10 +754,6 @@ const transitionTicketVerb: VerbDecl<TicketSnapshot, TransitionInput> = {
       // The human's first Approve releases every ticket of the request, also one added later (Part 18 L1).
       if (needsFirstApprove(cap.db, prior.room, prior.request_id)) return forbidden("the request needs the human's Approve");
     }
-    // A state check after every authorization check: it refuses the human and the lead alike.
-    if (to === "queued" && prior.role !== null && hasNoChain(prior.role)) {
-      return conflict(`role ${prior.role} has no hub stage chain: ticket ${prior.id} cannot enter queued`);
-    }
     if (to !== "cancelled" && !human && !intake && !LEGAL_FROM[to]?.has(prior.status)) {
       return conflict(`cannot move ${prior.status} → ${to}`);
     }
@@ -829,28 +795,29 @@ async function readBody(req: Request): Promise<Record<string, unknown>> {
   return b && typeof b === "object" && !Array.isArray(b) ? (b as Record<string, unknown>) : {};
 }
 
-// Only the approval-gate 409 carries `approval_request_id`; clients use the key to tell it from an ordinary state conflict.
 function conflictResponse(e: LedgerConflict): Response {
   const snap = e.snapshot as TicketSnapshot | null;
   const body: Record<string, unknown> = { error: e.message };
   if (snap) body.snapshot = snap;
-  if (snap && e.message === APPROVAL_BLOCK_MESSAGE) body.approval_request_id = snap.approval_request_id;
   return Response.json(body, { status: e.httpStatus });
 }
 
 export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicketChanged"> & Partial<Pick<StageHooks, "onTicketCancelled" | "onTicketParked" | "onTicketEdited">>): KindModule {
   const entity = createLedgerEntity({ decl: ticketDecl, db });
 
-  // Rework, cancel, a direct done and a reassignment leave the ticket's `ticket:done` request moot.
-  // It would sit pending (and replay on every reconnect), so dismiss it: its own transaction, after
-  // the ticket's (one event per transaction). A failure leaves a stale card, not a failed move.
-  function retireStaleApproval(before: TicketSnapshot | null, after: TicketSnapshot, actor: string, cap: HubCapabilities): void {
-    const stale = before?.approval_request_id;
-    if (!stale || (after.status === "in_review" && after.approval_request_id === stale)) return;
-    try {
-      dismissPendingPermission(db, cap, stale, actor);
-    } catch (e) {
-      console.error(`[ticket] could not dismiss stale approval request ${stale}:`, e);
+  // P6-04: the Allow step for done is gone. A `ticket:done` permission left pending by an older hub is dismissed at
+  // start, each in its own transaction. A second run finds none pending and changes nothing.
+  function dismissOldAllows(cap: HubCapabilities): void {
+    const ids = db
+      .query<{ id: string }, [string]>("SELECT id FROM permissions WHERE tool_name = ? AND status = 'pending' ORDER BY created_at_ms, id")
+      .all(APPROVAL_TOOL_NAME)
+      .map((r) => r.id);
+    for (const id of ids) {
+      try {
+        dismissPendingPermission(db, cap, id, "system");
+      } catch (e) {
+        console.error(`[ticket] could not dismiss old ticket:done request ${id}:`, e);
+      }
     }
   }
 
@@ -1095,7 +1062,6 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
           throw e;
         }
         const queuedNow: Array<NonNullable<SystemQueue>> = [];
-        const held: HeldDraft[] = [];
         // One transaction: every draft ticket of the request gets its ticket.queued event and its row update, or none does.
         db.transaction(() => {
           // One row for the legacy lookup; approveRequest wrote the one request.approved event.
@@ -1107,16 +1073,15 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
             .query<{ id: string }, [string, string]>("SELECT id FROM tickets WHERE request_id = ? AND room = ? AND status = 'draft' ORDER BY created_at_ms, id")
             .all(requestId, room);
           for (const { id } of drafts) {
-            const q = queueDraftInTx(db, cap, id, a.name, requestId, held);
+            const q = queueDraftInTx(db, cap, id, a.name, requestId);
             if (q) queuedNow.push(q);
           }
         })();
         for (const q of queuedNow) cap.sse.emit(q.entry, { kind: "room", room });
         if (queuedNow.length) cap.briefing.refresh();
-        notifyHeldDrafts(cap, room, held);
         // The evaluator runs after the commit, as for a draft the human queues by hand.
         for (const q of queuedNow) stage?.onTicketChanged(q.snapshot.id, cap);
-        return Response.json({ room, request_id: requestId, queued: queuedNow.map((q) => q.snapshot.id), not_queued: held, ...(queuedNow.length === 0 && held.length === 0 ? { idempotent: true } : {}) });
+        return Response.json({ room, request_id: requestId, queued: queuedNow.map((q) => q.snapshot.id), ...(queuedNow.length === 0 ? { idempotent: true } : {}) });
       },
     },
 
@@ -1234,6 +1199,27 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
 
     {
       method: "GET",
+      path: /^\/tickets\/([^/]+)\/merge-message$/,
+      auth: "read",
+      handler: (_req, cap, params) => {
+        if (!TICKET_ID_RE.test(params.id)) return Response.json({ error: "invalid ticket id" }, { status: 400 });
+        const t = entity.load(params.id);
+        if (!t) return Response.json({ error: "not found" }, { status: 404 });
+        const passes = validatorPassHandoffs(cap.db, t.id);
+        const high = t.blast_radius === "high";
+        const need = high ? 2 : 1;
+        if (passes.length === 0) return Response.json({ error: "merge message needs a Validator PASS: none yet" }, { status: 409 });
+        if (passes.length < need) return Response.json({ error: "merge message of a high-blast-radius ticket needs the second Validator PASS: it is missing" }, { status: 409 });
+        const ids = passes.slice(0, need);
+        const lost = ids.find((p) => p.handoff_id === null);
+        if (lost) return Response.json({ error: `merge message needs the result handoff of stage ${lost.stage_id}: it is missing` }, { status: 409 });
+        const evidence = high ? `validator PASS ${ids[0].handoff_id}, second review PASS ${ids[1].handoff_id}` : `validator PASS ${ids[0].handoff_id}`;
+        return new Response(`Merge ticket/${t.id}: ${t.title} (${evidence})`, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+      },
+    },
+
+    {
+      method: "GET",
       path: /^\/tickets\/([^/]+)\/attachments$/,
       auth: "read",
       handler: (_req, cap, params) => {
@@ -1341,11 +1327,9 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
           return Response.json({ error: "assignee required (a name, or null to unassign)" }, { status: 400 });
         }
         try {
-          const before = entity.load(params.id);
           const r = entity.apply(params.id, assignTicketVerb, { assignee: body.assignee === null ? null : body.assignee.trim() }, a.name, cap);
           if (r.emitted) {
             cap.briefing.refresh();
-            retireStaleApproval(before, r.snapshot, a.name, cap);
           }
           return Response.json({ snapshot: r.snapshot, ...(r.emitted ? {} : { idempotent: true }) });
         } catch (e) {
@@ -1425,7 +1409,6 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
             input.blocked_by === undefined ? undefined : writeBlockers(tx, params.id, input.blocked_by));
           if (r.emitted) {
             cap.briefing.refresh();
-            retireStaleApproval(before, r.snapshot, a.name, cap);
             stage?.onTicketEdited?.(params.id);
           }
           return Response.json({ snapshot: r.snapshot, ...(r.emitted ? {} : { idempotent: true }) });
@@ -1461,7 +1444,6 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
             : entity.apply(params.id, transitionTicketVerb, input, a.name, cap);
           if (r.emitted) {
             cap.briefing.refresh();
-            retireStaleApproval(before, r.snapshot, a.name, cap);
             if (stage) {
               // Run the stage evaluator after the commit: a draft that became queued, and every ticket that was
               // waiting for this one when it became done. A cancelled ticket does not unblock anything.
@@ -1485,74 +1467,6 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
     },
 
     {
-      method: "POST",
-      path: /^\/tickets\/([^/]+)\/approval$/,
-      auth: "mutating",
-      bodyMax: TICKET_BODY_MAX,
-      handler: async (req, cap, params) => {
-        if (!TICKET_ID_RE.test(params.id)) return Response.json({ error: "invalid ticket id" }, { status: 400 });
-        const body = await readBody(req);
-        const a = actorOr400(body.by, cap, true);
-        if (a instanceof Response) return a;
-
-        // ponytail: this check and the write below run with no await between them, so two calls cannot both
-        // create a request. That relies on the hub's single JS thread; move the check into the transaction
-        // if the hub ever serves requests in parallel.
-        const t = entity.load(params.id);
-        if (!t) return Response.json({ error: "not found" }, { status: 404 });
-        if (!inRoom(a.name, t.room, cap)) {
-          return Response.json({ error: "ticket is in another room" }, { status: 403 });
-        }
-        if (t.assignee === null || a.name !== t.assignee) {
-          return Response.json({ error: "only the assignee may request approval" }, { status: 403 });
-        }
-        if (t.status !== "in_review" || t.blast_radius !== "high") {
-          return Response.json(
-            { error: "approval applies to a high-blast-radius ticket in in_review", snapshot: t },
-            { status: 409 },
-          );
-        }
-        if (t.approval_request_id) {
-          const cur = db
-            .query<{ status: string; resolved_by: string | null }, [string]>(
-              "SELECT status, resolved_by FROM permissions WHERE id = ?",
-            )
-            .get(t.approval_request_id);
-          if (cur?.status === "pending") {
-            return Response.json({ request_id: t.approval_request_id, created: false, status: "pending" });
-          }
-          // The human allowed it between the blocked `done` and this call: keep that Allow. A new
-          // request would discard it and ask the human twice. An Allow by an agent does not count.
-          if (cur?.status === "allowed" && cur.resolved_by === cap.config.humanName) {
-            return Response.json({ request_id: t.approval_request_id, created: false, status: "allowed" });
-          }
-        }
-        let requestId = mintPermissionId();
-        while (db.query("SELECT 1 FROM permissions WHERE id = ?").get(requestId)) requestId = mintPermissionId();
-        const rid = requestId;
-        try {
-          createPermissionWithSideEffect(
-            db,
-            cap,
-            {
-              agent: a.name,
-              request_id: rid,
-              tool_name: APPROVAL_TOOL_NAME,
-              description: `Approve completion of ticket ${t.id}: ${oneLine(t.title)}`,
-              input_preview: JSON.stringify({ ticket_id: t.id }),
-              room: t.room,
-            },
-            ({ tx }) => tx.run("UPDATE tickets SET approval_request_id = ? WHERE id = ?", [rid, t.id]),
-          );
-        } catch (e) {
-          if (e instanceof LedgerConflict) return ledgerConflictResponse(e);
-          throw e;
-        }
-        return Response.json({ request_id: rid, created: true, status: "pending" });
-      },
-    },
-
-    {
       method: "GET",
       path: "/tickets",
       auth: "read",
@@ -1571,10 +1485,10 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
         if (requestId !== null && !REQUEST_ID_RE.test(requestId)) return Response.json({ error: "invalid request_id" }, { status: 400 });
         const rows = db
           .query<Record<string, unknown>, (string | number)[]>(
-            `SELECT t.*, p.status AS p_status, p.resolved_by AS p_resolved_by, p.version AS p_version,
+            `SELECT t.*,
                     (SELECT COUNT(*) FROM ticket_notes n WHERE n.ticket_id = t.id) AS notes_count,
                     (SELECT COUNT(*) FROM ticket_attachments x WHERE x.ticket_id = t.id) AS attachments_count
-               FROM tickets t LEFT JOIN permissions p ON p.id = t.approval_request_id
+               FROM tickets t
               WHERE t.room = ?${status === "open" ? " AND t.status NOT IN ('done','cancelled')" : ""}${withArchived ? "" : " AND t.archived_at_ms IS NULL"}${requestId === null ? "" : " AND t.request_id = ?"}
               ORDER BY ${rankSql("t.priority")} DESC, t.created_at_ms ASC LIMIT ?`,
           )
@@ -1582,15 +1496,7 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
         return Response.json(
           rows.map((row) => {
             const snap = ticketDecl.rowToSnapshot(row);
-            const approval = snap.approval_request_id
-              ? {
-                  id: snap.approval_request_id,
-                  status: (row.p_status as string | null) ?? null,
-                  resolved_by: (row.p_resolved_by as string | null) ?? null,
-                  version: (row.p_version as number | null) ?? null,
-                }
-              : null;
-            return { ...snap, ...blockerFields(db, snap.id), approval, notes_count: Number(row.notes_count ?? 0), attachments_count: Number(row.attachments_count ?? 0) };
+            return { ...snap, ...blockerFields(db, snap.id), validator_passes: validatorPassCommits(db, snap.id).length, notes_count: Number(row.notes_count ?? 0), attachments_count: Number(row.attachments_count ?? 0) };
           }),
         );
       },
@@ -1665,6 +1571,7 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
 
   return {
     kind: "ticket",
+    start: (cap) => dismissOldAllows(cap),
     migrate: (d: Database) => {
       entity.migrate(d);
       ensureRequestsTable(d);
