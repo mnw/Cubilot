@@ -89,6 +89,7 @@ describe("GET /rooms/<room>/flow", () => {
       if (s.end !== undefined) ev(s.endKind ?? "stage.passed", s.end);
       return id;
     });
+  const setRole = (id: string, role: string | null) => db((d) => d.run("UPDATE tickets SET role = ? WHERE id = ?", [role, id]));
   const flow = async (r: R | string, query = WINDOW) => {
     const res = await getJson(hub, `/rooms/${typeof r === "string" ? r : r.name}/flow?${query}`);
     expect(res.status).toBe(200);
@@ -162,14 +163,17 @@ describe("GET /rooms/<room>/flow", () => {
   test("wait reasons do not overlap", async () => {
     const r = await room();
     const blocker = await mk(r, { status: "queued" });
+    setRole(blocker, "worker");
     timeline(blocker, "done", [["ticket.created", 0, { status: "queued" }], ["ticket.done", 5]]);
     // draft 0-2, queued with a blocker until 5, queued with no slot 5-7, then claimed
     const w = await mk(r, { status: "draft", blocked_by: [blocker] });
+    setRole(w, "worker");
     timeline(w, "claimed", [["ticket.created", 0, { status: "draft" }], ["ticket.queued", 2], ["ticket.claimed", 7]]);
     // draft 0-1, waiting for approval 1-4 (spec PASS at 1, the request holds a high ticket), queued with no slot 4-5
     const high = await mk(r, { status: "draft", request_id: "rq-wait", blast_radius: "high" });
     const p = await mk(r, { status: "draft", request_id: "rq-wait" });
     timeline(high, "draft", [["ticket.created", 0, { status: "draft" }]]);
+    setRole(p, "worker");
     timeline(p, "claimed", [["ticket.created", 0, { status: "draft" }], ["ticket.queued", 4], ["ticket.claimed", 5]]);
     stage({ request: "rq-wait", scope: [p], role: "validator", verdict: "PASS", launch: 0, end: 1 });
     // both worker slots (default limit 2) are in use for the whole window
@@ -184,6 +188,7 @@ describe("GET /rooms/<room>/flow", () => {
   test("queued time with a free slot counts for no reason", async () => {
     const r = await room();
     const w = await mk(r, { status: "queued" });
+    setRole(w, "worker");
     timeline(w, "claimed", [["ticket.created", 0, { status: "queued" }], ["ticket.claimed", 4]]);
     // one of two worker slots is busy from 0 to 2, both from 1 to 2
     stage({ ticket: w, role: "worker", verdict: "PASS", launch: 0, end: 2 });
@@ -222,6 +227,23 @@ describe("GET /rooms/<room>/flow", () => {
     stage({ ticket: o, role: "tester", verdict: "PASS", launch: 1, end: 4 });
     const f = await flow(r);
     expect(f.wait_hours.no_slot).toBe(4);
+  });
+
+  test("a ticket with no role has no session and waits for no slot", async () => {
+    const r = await room();
+    const w = await mk(r, { status: "queued" });
+    setRole(w, null);
+    timeline(w, "claimed", [["ticket.created", 0, { status: "queued" }], ["ticket.claimed", 4]]);
+    const o = await mk(r);
+    stage({ ticket: o, role: "worker", status: "running", launch: 0 });
+    stage({ ticket: o, role: "worker", status: "running", launch: 0 });
+    expect((await flow(r)).wait_hours.no_slot).toBe(0);
+    // null to tester at 2: only the tester span counts (both tester slots busy 1-4)
+    timeline(w, "claimed", [["ticket.created", 0, { status: "queued" }], ["ticket.edited", 2, { fields: ["role"], role: { from: null, to: "tester" } }], ["ticket.claimed", 4]]);
+    setRole(w, "tester");
+    stage({ ticket: o, role: "tester", verdict: "PASS", launch: 1, end: 4 });
+    stage({ ticket: o, role: "tester", verdict: "PASS", launch: 1, end: 4 });
+    expect((await flow(r)).wait_hours.no_slot).toBe(2);
   });
 
   test("terminal high ticket does not hold approval", async () => {
