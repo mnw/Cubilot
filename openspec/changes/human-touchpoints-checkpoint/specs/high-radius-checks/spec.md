@@ -7,8 +7,6 @@ Makes a high blast radius mean stricter checks by code instead of a human gate: 
 ### Requirement: The Tester runs the full suite on a high-radius ticket
 The first message of a Tester stage of a high-radius ticket SHALL name `./scripts/test.sh`. Its result SHALL hold `full_suite`: `command`, `exit_code`, `pass`, `fail` and `log_path`. A result without it SHALL be refused by the schema check.
 
-A Tester result of a low-radius ticket SHALL name the run. An affected run (`scripts/test-affected.sh`) SHALL set `full_suite: false` and `tests_run`, an array of test file paths relative to the repo root. A full run, also a fallback to the full suite, SHALL set the `full_suite` object and no `tests_run`.
-
 #### Scenario: Missing full suite
 - **WHEN** the Tester of a high-radius ticket sends a result without `full_suite`
 - **THEN** the hub refuses it and the stage stays `running`
@@ -16,6 +14,13 @@ A Tester result of a low-radius ticket SHALL name the run. An affected run (`scr
 #### Scenario: Affected run on a high-radius ticket
 - **WHEN** the Tester of a high-radius ticket sends a result with `full_suite: false`
 - **THEN** the hub refuses it and the stage stays `running`
+
+### Requirement: A Tester result of a low-radius ticket names the run
+An affected run (`scripts/test-affected.sh`) SHALL set `full_suite: false` and `tests_run`, an array of test file paths relative to the repo root. A full run, also a fallback to the full suite, SHALL set the `full_suite` object and no `tests_run`.
+
+#### Scenario: Affected run on a low-radius ticket
+- **WHEN** the Tester of a low-radius ticket sends a result with `full_suite: false` and `tests_run`
+- **THEN** the hub accepts it
 
 ### Requirement: A review PASS on a high-radius ticket needs a passing full suite
 A Validator PASS on a high-radius ticket SHALL be refused by the schema check when the last Tester result of the ticket has no `full_suite` with `exit_code` 0.
