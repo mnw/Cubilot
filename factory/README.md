@@ -70,7 +70,7 @@ The Validator and the Reviewer challenge the work. They run on OpenAI through th
 9. **After two FAIL or CHANGES loops on one ticket**, or a dispute that does not settle, the Orchestrator decides or escalates to the human.
 10. **No sub-agents.** No role starts a sub-agent. Claude Code roles start with the `Task` and `Agent` tools blocked. Pi has no sub-agents. All work happens in sessions that the human can see.
 11. **One new session for each ticket stage.** The Orchestrator decides which tickets exist, their roles and their dependencies. The app starts the agents. When a ticket stage is ready, the app starts a new session for that role. The session has its own worktree and its own pane. Its first message is the ticket context. When the agent posts its result, the app closes the session. Only the Orchestrator stays open for the whole room. Details: `brief/04-sessions.md`.
-12. **Spec review before work.** The Orchestrator creates the tickets of a request as `draft` and sends the plan of the request to the Validator. One review covers the plan, not each draft. No `draft` ticket can start. On FAIL, the Orchestrator changes the plan and sends it again. After two FAIL loops, the human decides. On PASS, the tickets become `queued`. A `blast_radius: high` request also needs the human's approval of the plan.
+12. **Spec review before work.** The Orchestrator creates the tickets of a request as `draft` and sends the plan of the request to the Validator. One review covers the plan, not each draft. No `draft` ticket can start. On FAIL, the Orchestrator changes the plan and sends it again. After two FAIL loops, the human decides. On PASS, the tickets become `queued`. The human's approval of the plan is also needed for a request of origin `human`, a request with a `blast_radius: high` ticket and a request with a feature.
 13. **Agents never reach the client's repository.** Agents work only in the internal remote, a bare Git repository in the app data folder. The hub creates one `ticket/<id>` branch for each ticket. Only the human's Deliver step sends a clean, squashed branch to the client, after the leak gate passes. Details: `brief/05-delivery-backup.md`.
 14. **One folder is the whole factory.** The app backs up the app data folder each hour, encrypted, to one target. Recovery: install the app, select "Restore from backup", sign in. Details: `brief/05-delivery-backup.md`.
 
@@ -111,9 +111,9 @@ queued [doc] ticket (after spec review PASS; audience and sources in the ticket)
   -> handoff Writer -> Editor     {ticket_id, path, style_guide}
   -> Editor edits in place
   -> handoff Editor -> Reviewer   {ticket_id, path, change_summary, open_questions}
-  -> Reviewer: APPROVE -> handoff -> Writer "close T"
+  -> Reviewer: APPROVE -> handoff -> Orchestrator "APPROVE T"
                CHANGES -> handoff -> Writer {findings}
-  -> Writer: transition done
+  -> Orchestrator: merge into staging, transition done
 ```
 
 For a feature with docs, the Orchestrator creates two tickets. The Orchestrator assigns the `[doc]` ticket after the `[code]` ticket gets a Validator PASS.
