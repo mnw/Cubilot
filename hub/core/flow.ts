@@ -142,7 +142,7 @@ export function flowReport(db: Database, room: string, since: number, until: num
 
   // 3. Ticket-hours by one wait reason each.
   const git_ = stagingCommits(project);
-  const tickets = db.query<{ id: string; request_id: string | null; blast_radius: string; status: string }, [string]>("SELECT id, request_id, blast_radius, status FROM tickets WHERE room = ?").all(room);
+  const tickets = db.query<{ id: string; request_id: string | null; blast_radius: string; status: string; role: string | null }, [string]>("SELECT id, request_id, blast_radius, status, role FROM tickets WHERE room = ?").all(room);
   const ticketEvents = new Map<string, Ev[]>();
   for (const e of db
     .query<Ev, [string]>(
@@ -188,8 +188,10 @@ export function flowReport(db: Database, room: string, since: number, until: num
       } else if (s.status === "queued") {
         const cut = Math.min(Math.max(s.from, clearedAt), s.to);
         wait.blocked += overlap(s.from, cut, since, until);
-        // A ticket with no uncleared blocker waits for a slot only while every worker slot is in use.
-        wait.no_slot += fullMs(runs, "worker", limits.worker, Math.max(cut, since), Math.min(s.to, until));
+        // A ticket with no uncleared blocker waits for a slot only while every slot of its own stage role is in use.
+        // A ticket with no role waits for a worker.
+        const role = (STAGE_ROLES as readonly string[]).includes(t.role ?? "") ? (t.role as StageRole) : "worker";
+        wait.no_slot += fullMs(runs, role, limits[role], Math.max(cut, since), Math.min(s.to, until));
       }
     }
   }

@@ -192,6 +192,22 @@ describe("GET /rooms/<room>/flow", () => {
     expect(f.wait_hours).toEqual({ draft: 0, waiting_approval: 0, blocked: 0, no_slot: 1 });
   });
 
+  test("no slot is judged by the role of the ticket", async () => {
+    const r = await room();
+    const w = await mk(r, { status: "queued" });
+    db((d) => d.run("UPDATE tickets SET role = 'tester' WHERE id = ?", [w]));
+    timeline(w, "claimed", [["ticket.created", 0, { status: "queued" }], ["ticket.claimed", 4]]);
+    const o = await mk(r);
+    // both worker slots are busy from 0 to 4, which does not block a tester ticket
+    stage({ ticket: o, role: "worker", status: "running", launch: 0 });
+    stage({ ticket: o, role: "worker", status: "running", launch: 0 });
+    // both tester slots (default limit 2) are busy from 1 to 3
+    stage({ ticket: o, role: "tester", verdict: "PASS", launch: 1, end: 3 });
+    stage({ ticket: o, role: "tester", verdict: "PASS", launch: 1, end: 3 });
+    const f = await flow(r);
+    expect(f.wait_hours.no_slot).toBe(2);
+  });
+
   test("terminal high ticket does not hold approval", async () => {
     const r = await room();
     const high = await mk(r, { status: "draft", request_id: "rq-term", blast_radius: "high" });
