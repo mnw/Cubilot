@@ -233,6 +233,19 @@ role_models:
 - A key that is not a role is ignored (one log line). A `config.yml` that is missing, not valid YAML, or has a `role_models` that is not a map gives no entries (one log line). Every role then launches as before.
 - An empty string counts as not set.
 
+**Default model (`default_model`).** The model that the launch form offers for a new agent, for each harness. Both keys are optional strings:
+
+```yaml
+default_model:
+  claude: opus
+  pi: claude-sonnet-4-5
+```
+
+- The hub returns the values on `GET /config/default-model` as `{"default_model": {...}}`. It reads `config.yml` at each request. Do not click Reload.
+- Only agents that the human adds use it. Stage launches use `role_models`.
+- A missing key gives `{}`. The form then starts as before.
+- A key that is not `claude` or `pi`, a value that is not a string, or a `default_model` that is not a map is ignored (one log line). An empty string counts as not set.
+
 **Global MCP servers** at `~/Library/Application Support/Cubilot/mcp.json` (open via the connector-graph icon in the titlebar). Servers in this file are merged into every per-agent `.mcp.json` at spawn time; the `chatbridge` server name is reserved by Cubilot and silently stripped from your config.
 
 ## Architecture

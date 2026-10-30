@@ -11,15 +11,25 @@ import { validatorPassHandoffs } from "../kinds/ticket";
 const TERMINAL = new Set(["done", "cancelled"]);
 const NO_MERGE = "no merge commit";
 const NO_LOG = "no staging log";
+const NO_DATA = "no data" as const;
+const NO_STAGING = "no staging branch";
 const SHA_RE = /^[0-9a-f]{40}$/;
 
 type TicketRow = { id: string; title: string; status: string; blast_radius: "low" | "high"; acceptance_criteria: string; request_id: string };
+
+export type TicketFail = { handoff_id: string; findings: { severity: string; text: string }[]; fix_commit: string | null };
 
 export type DeliveryReport = {
   request_id: string;
   origin: string;
   features: string[];
-  tickets: { id: string; title: string; status: string; merge_commit: string }[];
+  tickets: { id: string; title: string; status: string; merge_commit: string; fails: TicketFail[] }[];
+  /** First ticket.claimed to last ticket.done of the done tickets, in ms. null when no ticket has both. */
+  build_ms: number | null;
+  /** Claude stage tokens (stage_metrics.tokens_before_action, source claude). A stage without Claude data adds "no data" for its ticket. */
+  cost: { tokens: number; tickets: { ticket_id: string; tokens: number | typeof NO_DATA; no_data_stages: string[] }[] };
+  /** The git command that merges staging into main at the staging head. */
+  merge_command: string;
   criteria_edits: { ticket_id: string; seq: number; by: string; from: string; to: string }[];
   factory_requests: { request_id: string; tickets: { id: string; title: string; status: string }[] }[];
   known_limits: {
@@ -90,7 +100,7 @@ export function buildDeliveryReport(db: Database, room: string, requestId: strin
   const project = getRoomSettings(db, room)?.project_folder;
   const merges = stagingMerges(project);
 
-  const ticketList = own.map((t) => ({ id: t.id, title: t.title, status: t.status, merge_commit: mergeOf(merges, t.id)?.sha ?? NO_MERGE }));
+  const ticketList = own.map((t) => ({ id: t.id, title: t.title, status: t.status, merge_commit: mergeOf(merges, t.id)?.sha ?? NO_MERGE, fails: ticketFails(db, t.id) }));
 
   // Edits of the criteria after the newest Approve, oldest first. A request without an Approve has none.
   const approveSeq = db.query<{ n: number | null }, [string]>("SELECT MAX(seq) AS n FROM events WHERE entity_id = ? AND kind = 'request.approved'").get(req.id)?.n ?? null;
@@ -136,6 +146,9 @@ export function buildDeliveryReport(db: Database, room: string, requestId: strin
       origin: req.origin,
       features: req.features ? (JSON.parse(req.features) as string[]) : [],
       tickets: ticketList,
+      build_ms: buildMs(db, own),
+      cost: stageCost(db, own),
+      merge_command: mergeCommand(project),
       criteria_edits: criteriaEdits,
       factory_requests: factory,
       known_limits: { follow_up_tickets: followUps, open_suggestions: suggestions },
@@ -147,6 +160,72 @@ export function buildDeliveryReport(db: Database, room: string, requestId: strin
     },
   };
 }
+
+/** The FAIL results of the Validator stages of a ticket, oldest first. The fix commit is the commit of the next tester hand-over after the FAIL. */
+function ticketFails(db: Database, ticketId: string): TicketFail[] {
+  const rows = db
+    .query<{ id: string; rid: number; c: string | null }, [string]>(
+      `SELECT h.id AS id, h.rowid AS rid, h.context_json AS c FROM stage s
+         JOIN handoffs h ON h.id = (SELECT x.id FROM handoffs x WHERE x.from_agent = s.session AND json_extract(x.context_json, '$.stage_id') = s.id ORDER BY x.rowid DESC LIMIT 1)
+        WHERE s.ticket_id = ?1 AND s.role = 'validator' AND s.review IS NULL AND s.verdict = 'FAIL' ORDER BY s.created_seq`,
+    )
+    .all(ticketId);
+  return rows.map((r) => {
+    let findings: unknown = [];
+    try { findings = (JSON.parse(r.c ?? "{}") as { findings?: unknown }).findings ?? []; } catch { /* no readable result */ }
+    const list = (Array.isArray(findings) ? findings : []).flatMap((f) => {
+      const o = f as { severity?: unknown; text?: unknown } | null;
+      return o && typeof o.severity === "string" && typeof o.text === "string" ? [{ severity: o.severity, text: o.text }] : [];
+    });
+    const next = db
+      .query<{ c: string | null }, [string, number]>(
+        "SELECT context_json AS c FROM handoffs WHERE to_agent = 'role:tester' AND json_extract(context_json, '$.ticket_id') = ?1 AND rowid > ?2 ORDER BY rowid LIMIT 1",
+      )
+      .get(ticketId, r.rid)?.c;
+    let commit: unknown = null;
+    try { commit = next ? (JSON.parse(next) as { commit?: unknown }).commit : null; } catch { /* no readable hand-over */ }
+    return { handoff_id: r.id, findings: list, fix_commit: typeof commit === "string" ? commit : null };
+  });
+}
+
+/** First claim to last done of the done tickets. */
+function buildMs(db: Database, own: TicketRow[]): number | null {
+  const ids = own.map((t) => t.id);
+  if (ids.length === 0) return null;
+  const marks = ids.map(() => "?").join(",");
+  const first = db.query<{ t: number | null }, string[]>(`SELECT MIN(at_ms) AS t FROM events WHERE kind = 'ticket.claimed' AND entity_id IN (${marks})`).get(...ids)?.t ?? null;
+  const done = own.filter((t) => t.status === "done").map((t) => t.id);
+  if (first === null || done.length === 0) return null;
+  const last = db.query<{ t: number | null }, string[]>(`SELECT MAX(at_ms) AS t FROM events WHERE kind = 'ticket.done' AND entity_id IN (${done.map(() => "?").join(",")})`).get(...done)?.t ?? null;
+  return last === null ? null : Math.max(0, last - first);
+}
+
+/** The Claude tokens of the stages of each ticket. A stage with no Claude row or a Pi row adds "no data", never 0. */
+function stageCost(db: Database, own: TicketRow[]): DeliveryReport["cost"] {
+  let total = 0;
+  const tickets = own.map((t) => {
+    const stages = db.query<{ id: string }, [string]>("SELECT id FROM stage WHERE ticket_id = ? AND review IS NULL ORDER BY created_seq").all(t.id);
+    let tokens = 0;
+    let claude = 0;
+    const noData: string[] = [];
+    for (const s of stages) {
+      const rows = db.query<{ source: string; t: number | null }, [string]>("SELECT source, tokens_before_action AS t FROM stage_metrics WHERE stage_id = ?").all(s.id);
+      if (rows.length === 0) continue;
+      for (const m of rows) {
+        if (m.source === "claude" && m.t !== null) { tokens += m.t; claude++; }
+        else if (!noData.includes(s.id)) noData.push(s.id);
+      }
+    }
+    total += tokens;
+    return { ticket_id: t.id, tokens: claude === 0 && noData.length > 0 ? NO_DATA : tokens, no_data_stages: noData };
+  });
+  return { tokens: total, tickets };
+}
+
+const mergeCommand = (project: string | null | undefined): string => {
+  const head = project ? git(project, ["rev-parse", "refs/heads/staging"])?.trim() : null;
+  return head && SHA_RE.test(head) ? `git checkout main && git merge --ff-only ${head}` : NO_STAGING;
+};
 
 function criteriaEditsAfter(db: Database, room: string, requestId: string, approveSeq: number): DeliveryReport["criteria_edits"] {
   return db
@@ -160,6 +239,18 @@ function criteriaEditsAfter(db: Database, room: string, requestId: string, appro
       const c = (JSON.parse(e.payload_json) as { acceptance_criteria: { from: string; to: string } }).acceptance_criteria;
       return { ticket_id: e.entity_id, seq: e.seq, by: e.actor, from: c.from, to: c.to };
     });
+}
+
+/** The ids of the tickets whose newest staging merge commit is an ancestor of main. Read-only git. */
+export function ticketsMergedIntoMain(project: string | null | undefined, ticketIds: string[]): Set<string> {
+  const out = new Set<string>();
+  if (!project || ticketIds.length === 0) return out;
+  const merges = stagingMerges(project);
+  for (const id of ticketIds) {
+    const m = mergeOf(merges, id);
+    if (m && git(project, ["merge-base", "--is-ancestor", m.sha, "refs/heads/main"]) !== null) out.add(id);
+  }
+  return out;
 }
 
 /**
