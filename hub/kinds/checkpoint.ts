@@ -18,6 +18,7 @@ import { LedgerConflict } from "../core/types";
 import { createLedgerEntity, ledgerConflictResponse, withLedgerRequired } from "../core/ledger-entity";
 import { ts, validName, validRoomLabel } from "../core/ids";
 import { readContextPct } from "../core/context-usage";
+import { checkpointDueReason } from "../core/checkpoint-due";
 import { roleHarness } from "../core/role-harness";
 import { buildStateSummary } from "../core/state-summary";
 import { roomLead } from "./ticket";
@@ -317,6 +318,24 @@ export function createCheckpointKind(db: Database, deps: CheckpointDeps): Checkp
     sweep,
   };
 
+  /** The newest checkpoint of `agent`, whatever its status: its start is the line a request must pass to be due again. */
+  const newestStartMs = (agent: string): number | null =>
+    db.query<{ t: number | null }, [string]>("SELECT MAX(started_at_ms) AS t FROM checkpoints WHERE agent = ?").get(agent)?.t ?? null;
+
+  /** The safe-point start (R4): only for the room lead (never a Pi lead), with no checkpoint active. Null when none is due. */
+  function startByRule(cap: HubCapabilities, name: string): CheckpointSnapshot | null {
+    const room = cap.agents.get(name)?.room;
+    if (!room || roomLead(cap, room) !== name || leadHarness() === "pi") return null;
+    const pct = readContextPct(name);
+    if (!checkpointDueReason(db, room, newestStartMs(name), pct)) return null;
+    try {
+      return api.start(cap, { room, trigger: "rule" }, "system");
+    } catch (e) {
+      if (e instanceof LedgerConflict) return null;
+      throw e;
+    }
+  }
+
   const askForNote = (cap: HubCapabilities, cp: CheckpointSnapshot) => {
     // The note comes back through the chatbridge tool checkpoint_note: no shell, no model text in a command.
     return cap.sse.emit(
@@ -389,7 +408,7 @@ export function createCheckpointKind(db: Database, deps: CheckpointDeps): Checkp
       },
     },
     {
-      // The Stop hook of the lead. The turn end of any other agent, or of a lead with no checkpoint, changes nothing.
+      // The Stop hook of the lead. With no checkpoint active, a due one starts here (safe point). The turn end of any other agent changes nothing.
       method: "POST",
       path: /^\/agents\/([^/]+)\/turn-end$/,
       auth: "mutating",
@@ -397,7 +416,8 @@ export function createCheckpointKind(db: Database, deps: CheckpointDeps): Checkp
         const name = decodeURIComponent(params.id);
         const call = await agentCall(req, name);
         if (call instanceof Response) return call;
-        const cp = active(name);
+        let cp = active(name);
+        if (!cp) cp = startByRule(cap, name);
         if (!cp || cp.status !== "noting") return Response.json({ action: "none" });
         try {
           if (!cp.note_asked) {
