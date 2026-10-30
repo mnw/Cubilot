@@ -120,6 +120,10 @@ export async function handleSend(req: Request, deps: ChatDeps): Promise<Response
     if (rooms.size === 1) entryRoom = [...rooms][0] ?? null;
   }
 
+  // A reply needs one concrete room: targets in several rooms without body.room cannot be checked.
+  if (body.reply_to !== undefined && body.reply_to !== null && entryRoom === null) {
+    return json({ error: "reply_to needs a room" }, { status: 400 });
+  }
   const replyErr = replyToError(body.reply_to, entryRoom, deps.chatLog);
   if (replyErr) return json({ error: replyErr }, { status: 400 });
 

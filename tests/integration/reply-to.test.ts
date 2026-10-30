@@ -78,6 +78,8 @@ describe("reply_to", () => {
     expect(wrongRoom.status).toBe(400);
     const wrongRoomSend = await postJson(hub, "/send", { target: "rt-o", text: "x", room: "rt-other", reply_to: q.id });
     expect(wrongRoomSend.status).toBe(400);
+    const mixedRooms = await postJson(hub, "/send", { targets: ["rt-a", "rt-o"], text: "x", reply_to: q.id });
+    expect(mixedRooms.status).toBe(400);
     const badType = await postJson(hub, "/send", { target: "rt-a", text: "x", room: "rt-room", reply_to: "1" });
     expect(badType.status).toBe(400);
 
