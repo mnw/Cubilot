@@ -54,7 +54,7 @@ async function boot(env: Record<string, string> = {}) {
   })();
   await sleep(150);
   const start = () => postJson(hub, "/checkpoints", { by: hub.humanName, room: "r1" });
-  const turnEnd = (agent = LEAD) => postJson(hub, `/agents/${encodeURIComponent(agent)}/turn-end`, { by: agent });
+  const turnEnd = (agent = LEAD, text?: string) => postJson(hub, `/agents/${encodeURIComponent(agent)}/turn-end`, text === undefined ? { by: agent } : { by: agent, text });
   const note = (text: string, agent = LEAD) => postJson(hub, `/agents/${encodeURIComponent(agent)}/checkpoint-note`, { by: agent, text });
   const list = async () => ((await getJson(hub, "/checkpoints?room=r1")).json as { checkpoints: Cp[] }).checkpoints;
   const close = async () => { leadSse.close(); shellSse.close(); lead.close(); await hub.kill(); };
@@ -78,9 +78,13 @@ describe("checkpoint", () => {
     const before = t.leadGot.length;
     expect(((await t.turnEnd()).json as any).action).toBe("note_asked");
     await waitFor(() => t.leadGot.length > before);
-    expect(JSON.stringify(t.leadGot.slice(before))).toContain("checkpoint-note.sh");
-    expect((await t.note("Open: the install of P6-15. Ask the human about the Pi lead.")).status).toBe(200);
-    expect(((await t.turnEnd()).json as any).action).toBe("clearing");
+    // The request needs no tool and no command: the note is the final message of the next turn.
+    const asked = JSON.stringify(t.leadGot.slice(before));
+    expect(asked).toContain("final message");
+    expect(asked).not.toContain("Write tool");
+    expect(asked).not.toContain("bash ");
+    expect(((await t.turnEnd(LEAD, "Open: the install of P6-15. Ask the human about the Pi lead.")).json as any).action).toBe("clearing");
+    expect((await t.list()).find((c) => c.id === id)!.note).toBe("Open: the install of P6-15. Ask the human about the Pi lead.");
     const input = await waitFor(() => t.shellGot.find((r) => r.kind === "input"));
     expect(input).toMatchObject({ kind: "input", session: LEAD, text: "/clear" });
     const size = statSync(summaryFile(t.hub)).size;
@@ -187,29 +191,7 @@ describe("checkpoint failures", () => {
     }
   });
 
-  test("the note command is shell-safe for a factory path with spaces", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "cubilot factory "));
-    mkdirSync(join(dir, "v1", "orchestrator"), { recursive: true });
-    const t = await boot({ CUBILOT_FACTORY_DIR: dir, CUBILOT_FACTORY_VERSION: "v1" });
-    try {
-      writeContext(t.hub, 10);
-      await t.start();
-      const before = t.leadGot.length;
-      await t.turnEnd();
-      await waitFor(() => t.leadGot.length > before);
-      const text = String(t.leadGot.slice(before).map((e: any) => e.text ?? JSON.stringify(e)).join("\n"));
-      const m = text.match(/^Step 2: run this command: (bash '[^'\n]+' --file '[^'\n]+')$/m);
-      expect(m).not.toBeNull();
-      // The shell reads the quoted script path and the note file path as one word each.
-      const argv = Bun.spawnSync(["bash", "-c", `set -- ${m![1].slice(5)}; echo $#`]).stdout.toString().trim();
-      expect(argv).toBe("3");
-      expect(m![1]).toContain(join(dir, "v1", "orchestrator", "hooks", "checkpoint-note.sh"));
-    } finally {
-      await t.close();
-    }
-  });
-
-  test("the note never passes through a shell: hostile note text reaches the hub whole", async () => {
+  test("the Stop hook sends the final message as the note and no shell reads it", async () => {
     const t = await boot();
     try {
       writeContext(t.hub, 10);
@@ -217,27 +199,19 @@ describe("checkpoint failures", () => {
       const before = t.leadGot.length;
       await t.turnEnd();
       await waitFor(() => t.leadGot.length > before);
-      const text = String(t.leadGot.slice(before).map((e: any) => e.text ?? JSON.stringify(e)).join("\n"));
-      const cmdLine = text.match(/^Step 2: run this command: (.+)$/m)![1];
-      const file = text.match(/^Step 1: write the note to this file with the Write tool: (.+)$/m)![1];
-      // The command has no model text and no here-document.
-      expect(cmdLine).not.toContain("<<");
       const dir = mkdtempSync(join(tmpdir(), "cubilot-note-"));
       const marker = join(dir, "marker");
-      // Lines that would end or escape a here-document or run a command if a shell read them.
       const note = `a $(touch ${marker})\n\`touch ${marker}\` "$HOME" 'q' \\ !x\nEOF\nCKPT\ntouch ${marker}\n`;
-      mkdirSync(dirname(file), { recursive: true });
-      writeFileSync(file, note);
       writeFileSync(join(dataDir(t.hub), "hub.url"), t.hub.url);
       writeFileSync(join(dataDir(t.hub), "hub.token"), t.hub.token);
-      const run = Bun.spawnSync(["bash", "-c", cmdLine], {
+      const run = Bun.spawnSync(["bash", join(HOOKS, "checkpoint-turn-end.sh")], {
         env: { ...process.env, CHATBRIDGE_AGENT: LEAD, CUBILOT_DATA_DIR: dataDir(t.hub) },
+        stdin: new TextEncoder().encode(JSON.stringify({ hook_event_name: "Stop", last_assistant_message: note })),
       });
       expect(run.exitCode).toBe(0);
       expect(existsSync(marker)).toBe(false);
-      expect(existsSync(file)).toBe(false);
+      await waitFor(async () => (await t.list())[0].status === "clearing");
       const cp = (await t.list())[0];
-      // The hub stored the first 200 words of the whole text, in order, with the shell text intact.
       expect(cp.note).toContain("$(touch");
       expect(cp.note).toContain("EOF");
       expect(cp.note).toContain("CKPT");
