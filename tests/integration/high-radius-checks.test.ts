@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { authedFetch, postJson, registerAgent } from "../helpers/fetch";
 import { giveProject, projectRepo } from "../helpers/repo";
+import { renderFirstMessage } from "../../hub/core/first-message";
 import { insertEvent } from "../../hub/core/events";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createPermissionKind, createPermissionWithSideEffect } from "../../hub/kinds/permission";
@@ -212,6 +213,150 @@ describe("high radius: second review", () => {
     expect(l.prompt.length).toBeGreaterThan(0);
     expect(l.prompt).not.toContain("VERDICT-MARK");
     expect(l.prompt).not.toContain("FAIL-MARK");
+  });
+});
+
+const SHA = "a".repeat(40);
+const SUITE = { command: "./scripts/test.sh", exit_code: 0, pass: 10, fail: 0, log_path: "/tmp/suite.log" };
+
+function makeSuiteEnv() {
+  const db = new Database(":memory:");
+  migrateLedger(db);
+  createPermissionKind(db).migrate(db);
+  createTicketKind(db).migrate(db);
+  const rt = createStageRuntime(db, { ackMs: 60_000 });
+  rt.module.migrate(db);
+  giveProject(db, "r1");
+  const cap = {
+    db,
+    sse: { emit: () => {} },
+    briefing: { refresh: () => {} },
+    agents: { get: () => undefined, isPermanent: () => false, isPaused: () => false, all: () => [], ensure: () => null },
+    auth: {},
+    events: { insert: insertEvent },
+    config: { humanName: "human" },
+  } as unknown as HubCapabilities;
+  let n = 0;
+  const ticket = (radius: "low" | "high") => {
+    const id = `t_${(++n).toString(16).padStart(16, "0")}`;
+    db.run(
+      `INSERT INTO tickets (id, room, title, acceptance_criteria, blast_radius, priority, creator, assignee, status, created_at_ms, updated_at_ms, version)
+       VALUES (?, 'r1', 'T', 'c', ?, 'medium', 'a', 'x', 'in_review', 1, 1, 1)`,
+      [id, radius],
+    );
+    return id;
+  };
+  const running = (ticketId: string, role: string, session: string) => {
+    const s = rt.api.create({ ticket_id: ticketId, role }, "system", cap);
+    db.run("UPDATE stage SET status = 'running', session = ? WHERE id = ?", [session, s.id]);
+    return s.id;
+  };
+  /** A Tester result already recorded as a handoff of the Tester session. */
+  const testerResult = (ticketId: string, context: Record<string, unknown>) => {
+    const sid = running(ticketId, "tester", `tester-${++n}`);
+    const session = db.query<{ session: string }, [string]>("SELECT session FROM stage WHERE id = ?").get(sid)!.session;
+    db.run(
+      "INSERT INTO handoffs (id, from_agent, to_agent, task, context_json, status, created_at_ms, expires_at_ms) VALUES (?, ?, 'x', 'result', ?, 'accepted', 1, 9999999999999)",
+      [`h_${++n}`, session, JSON.stringify({ stage_id: sid, ticket_id: ticketId, commit: SHA, ...context })],
+    );
+    db.run("UPDATE stage SET status = 'passed', verdict = 'PASS' WHERE id = ?", [sid]);
+  };
+  const testerCheck = (ticketId: string, extra: Record<string, unknown>) => {
+    const sid = running(ticketId, "tester", `tester-${++n}`);
+    const session = db.query<{ session: string }, [string]>("SELECT session FROM stage WHERE id = ?").get(sid)!.session;
+    const errors = rt.hooks.checkResult(session, { stage_id: sid, ticket_id: ticketId, notes: "ok", commit: SHA, ...extra }, cap);
+    return { sid, errors: errors ?? [] };
+  };
+  const validatorCheck = (ticketId: string, commit = SHA) => {
+    const session = `validator-${++n}`;
+    const sid = running(ticketId, "validator", session);
+    return rt.hooks.checkResult(session, { stage_id: sid, ticket_id: ticketId, notes: "ok", verdict: "PASS", findings: [], commit }, cap) ?? [];
+  };
+  /** A Tester stage started by a handoff for `startCommit`; the result names `resultCommit`. */
+  const testerFromHandoff = (ticketId: string, startCommit: string, resultCommit: string) => {
+    const h = `h_${++n}`;
+    db.run(
+      "INSERT INTO handoffs (id, from_agent, to_agent, task, context_json, status, created_at_ms, expires_at_ms) VALUES (?, 'worker-1', 'role:tester', 'test', ?, 'accepted', 1, 9999999999999)",
+      [h, JSON.stringify({ ticket_id: ticketId, commit: startCommit })],
+    );
+    db.run("INSERT INTO events (entity_id, kind, actor, payload_json, at_ms) VALUES (?, 'handoff.created', 'worker-1', '{}', 1)", [h]);
+    const session = `tester-${++n}`;
+    const sid = running(ticketId, "tester", session);
+    return rt.hooks.checkResult(session, { stage_id: sid, ticket_id: ticketId, notes: "ok", commit: resultCommit, full_suite: SUITE }, cap) ?? [];
+  };
+  const status = (sid: string) => db.query<{ status: string }, [string]>("SELECT status FROM stage WHERE id = ?").get(sid)!.status;
+  return { testerCheck, validatorCheck, testerResult, testerFromHandoff, ticket, status };
+}
+
+describe("high radius checks", () => {
+  test("Missing full suite", () => {
+    const e = makeSuiteEnv();
+    const r = e.testerCheck(e.ticket("high"), {});
+    expect(r.errors.join(" ")).toContain("context.full_suite is required");
+    expect(e.status(r.sid)).toBe("running");
+  });
+
+  test("Partial full suite names each missing field", () => {
+    const e = makeSuiteEnv();
+    const r = e.testerCheck(e.ticket("high"), { full_suite: { command: "./scripts/test.sh", pass: 3 } });
+    const text = r.errors.join("\n");
+    for (const k of ["exit_code", "fail", "log_path"]) expect(text).toContain(`context.full_suite.${k}`);
+    expect(text).not.toContain("full_suite.command");
+    expect(text).not.toContain("full_suite.pass");
+    expect(e.status(r.sid)).toBe("running");
+  });
+
+  test("Complete full suite accepted", () => {
+    const e = makeSuiteEnv();
+    expect(e.testerCheck(e.ticket("high"), { full_suite: SUITE }).errors).toEqual([]);
+  });
+
+  test("Suite failed", () => {
+    const e = makeSuiteEnv();
+    const bad = e.ticket("high");
+    e.testerResult(bad, { full_suite: { ...SUITE, exit_code: 1, fail: 2 } });
+    expect(e.validatorCheck(bad).join(" ")).toContain("a high-radius PASS needs a full suite with exit code 0");
+    const none = e.ticket("high");
+    e.testerResult(none, {});
+    expect(e.validatorCheck(none).join(" ")).toContain("a high-radius PASS needs a full suite with exit code 0");
+    const good = e.ticket("high");
+    e.testerResult(good, { full_suite: SUITE });
+    expect(e.validatorCheck(good)).toEqual([]);
+  });
+
+  test("Suite of another commit", () => {
+    const e = makeSuiteEnv();
+    const t = e.ticket("high");
+    e.testerResult(t, { full_suite: SUITE });
+    expect(e.validatorCheck(t, "b".repeat(40)).join(" ")).toContain(`context.commit must be ${SHA}`);
+    expect(e.validatorCheck(t)).toEqual([]);
+  });
+
+  test("Tester result for another commit than its stage", () => {
+    const e = makeSuiteEnv();
+    const t = e.ticket("high");
+    expect(e.testerFromHandoff(t, SHA, "b".repeat(40)).join(" ")).toContain(`context.commit must be ${SHA}`);
+    expect(e.testerFromHandoff(e.ticket("high"), SHA, SHA)).toEqual([]);
+  });
+
+  test("Tester first message names test.sh", () => {
+    const input = {
+      stageId: "s_1",
+      role: "tester",
+      ticket: { id: "t_1", title: "T", acceptance_criteria: "c", blast_radius: "high", request_id: null },
+      branch: "ticket/t_1",
+      worktree: "/w",
+    };
+    expect(renderFirstMessage(input)).toContain("./scripts/test.sh");
+    expect(renderFirstMessage({ ...input, ticket: { ...input.ticket, blast_radius: "low" } })).not.toContain("./scripts/test.sh");
+  });
+
+  test("Low ticket without full suite accepted", () => {
+    const e = makeSuiteEnv();
+    const t = e.ticket("low");
+    expect(e.testerCheck(t, {}).errors).toEqual([]);
+    e.testerResult(t, {});
+    expect(e.validatorCheck(t)).toEqual([]);
   });
 });
 
