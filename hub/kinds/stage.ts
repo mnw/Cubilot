@@ -2070,10 +2070,12 @@ export function createStageRuntime(
     const earlier = earlierResults(ticketId, role === "writer" ? ["writer", "editor"] : ["worker"]);
     let base: string | null = null;
     const started = role === "writer" ? db.query<{ start_commit: string | null }, [string]>("SELECT start_commit FROM stage WHERE id = ?").get(stage.id)?.start_commit : null;
-    if (started && FULL_SHA_RE.test(started)) {
+    if (started) {
+      if (!FULL_SHA_RE.test(started)) return refuse("The recorded writer base is not a 40 hex commit.");
       const r = resolve(started);
       if (r.error) return refuse(r.error);
-      if (r.ok) base = started;
+      if (!r.ok) return refuse(`The recorded writer base ${started} does not resolve to a commit.`);
+      base = started;
     }
     for (const row of base ? [] : earlier) {
       const prev = (JSON.parse(row.context_json) as Record<string, unknown>).commit;

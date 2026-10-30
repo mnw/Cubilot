@@ -86,6 +86,11 @@ describe("writer without new commit refused", () => {
     expect(e.send("writer", e.c1, "role:editor", e.c3)[0]).toContain("ancestor");
     expect(e.send("writer", e.c3, "role:editor", e.c3)[0]).toContain("equals the base");
   });
+  test("a recorded base that is malformed or does not resolve refuses, never falls back", () => {
+    const e = makeEnv();
+    expect(e.send("writer", e.c1, "role:editor", "0".repeat(40))[0]).toContain("recorded writer base");
+    expect(e.send("writer", e.c1, "role:editor", "abc")[0]).toContain("recorded writer base");
+  });
   test("equal to the base is refused and says what is missing", () => {
     const e = makeEnv();
     expect(e.send("writer", e.c0, "role:editor")[0]).toContain("equals the base");
