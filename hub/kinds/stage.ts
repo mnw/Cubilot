@@ -32,7 +32,7 @@ import { roleHarness } from "../core/role-harness";
 import { roleModelFor, secondReviewModel } from "../core/role-models";
 import { metricsByRole, recordStageMetrics, stagesMissingMetrics, type Launch } from "../core/stage-metrics";
 import { makeSSE } from "../core/sse";
-import { assignBySystemInTx, closeReviewedBySystemInTx, notifyHeldDrafts, queueBySystemInTx, type HeldDraft } from "./ticket";
+import { assignBySystemInTx, closeReviewedBySystemInTx, queueBySystemInTx } from "./ticket";
 import type { CancelTraceCaller, CancelTraceInput } from "./cancel-trace";
 
 export type StageStatus = "queued" | "launching" | "running" | "retrying" | "passed" | "failed" | "cancelled";
@@ -666,17 +666,17 @@ export type WaitsForYou = {
   ticket_id: string;
   title: string;
   request_id: string | null;
-  case: "approve" | "allow";
+  case: "approve";
   /** The commit of the newest tester PASS result of the ticket, else null. */
   commit: string | null;
-  /** The pending ticket:done permission (case allow), else null. */
+  /** Always null: the Allow step for done is gone (P6-04). */
   permission_id: string | null;
   question: string;
 };
 
 /**
  * The tickets of one room that wait for the human: a draft ticket of a request that holds a non-terminal high ticket
- * (approve), and a non-terminal high ticket with a pending ticket:done permission (allow). Derived from the tables.
+ * (approve). Derived from the tables.
  */
 export function waitsForYou(db: Database, room: string): WaitsForYou[] {
   type Row = { id: string; title: string; request_id: string | null; permission_id?: string | null };
@@ -696,16 +696,7 @@ export function waitsForYou(db: Database, room: string): WaitsForYou[] {
     )
     .all(room)
     .map((t): WaitsForYou => ({ ticket_id: t.id, title: t.title, request_id: t.request_id, case: "approve", commit: commit(t.id), permission_id: null, question: `Approve request ${t.request_id}?` }));
-  const allow = db
-    .query<Row, [string]>(
-      `SELECT t.id, t.title, t.request_id, p.id AS permission_id FROM tickets t
-        JOIN permissions p ON p.id = t.approval_request_id AND p.tool_name = 'ticket:done' AND p.status = 'pending'
-        WHERE t.room = ?1 AND t.blast_radius = 'high' AND t.status NOT IN ('done', 'cancelled', 'queued')
-        ORDER BY t.created_at_ms, t.id`,
-    )
-    .all(room)
-    .map((t): WaitsForYou => ({ ticket_id: t.id, title: t.title, request_id: t.request_id, case: "allow", commit: commit(t.id), permission_id: t.permission_id ?? null, question: `Allow done of ${t.id}?` }));
-  return [...approve, ...allow];
+  return approve;
 }
 
 /** The requests of one room that wait for the human's approval, each with the stage and the tickets behind it. */
@@ -801,9 +792,16 @@ export function createStageRuntime(
   const rerender = new Map<string, { id: string; render: () => string }>();
   /**
    * G4: a stage cancelled while its launch is in flight. Its session name, slot and worktree stay reserved until a close ack
-   * arrives with no launch in flight (and, once a late launch end queued the last close, only that close's ack).
+   * arrives with no launch in flight (and, once a late launch end queued the last close, only that close's ack). A launch that
+   * timed out (`timedOut`) is still in flight for the shell: nothing is released until its late ack queues the last close.
    */
-  const cancelHolds = new Map<string, { stageId: string; lastCloseId: string | null }>();
+  const cancelHolds = new Map<string, { stageId: string; lastCloseId: string | null; timedOut: boolean }>();
+
+  /** The launch of a cancelled stage ended (ack, or its late ack after a time-out): one more close; only its ack releases. */
+  function queueLastClose(hold: { lastCloseId: string | null }, session: string): void {
+    hold.lastCloseId = mintLaunchId();
+    queue.push({ id: hold.lastCloseId, kind: "close", session });
+  }
 
   const queue = createLaunchQueue({
     ackMs: opts.ackMs ?? DEFAULT_LAUNCH_ACK_MS,
@@ -812,7 +810,7 @@ export function createStageRuntime(
       const hold = cancelHolds.get(session);
       if (hold) {
         // A close ack (absent included) while the launch is in flight releases nothing: the session may appear after it.
-        if (inflight.has(hold.stageId)) return;
+        if (inflight.has(hold.stageId) || hold.timedOut) return;
         if (hold.lastCloseId !== null && hold.lastCloseId !== closeId) return;
         if (queue.pendingCloses().includes(session)) return;
         cancelHolds.delete(session);
@@ -837,6 +835,14 @@ export function createStageRuntime(
         if (BRANCH_ROLES.has(held.role)) for (const r of BRANCH_ROLES) if (r !== held.role) startWaiting(r, held.room, cap);
       }
     },
+    onLateAck(req) {
+      // Only a cancelled stage that waits for its late launch takes a late ack; any other late ack is refused.
+      const hold = cancelHolds.get(req.session);
+      if (!hold || hold.stageId !== req.stage_id || !hold.timedOut || api.load(req.stage_id)?.status !== "cancelled") return false;
+      hold.timedOut = false;
+      queueLastClose(hold, req.session);
+      return true;
+    },
     onLaunchEnd(req, end: LaunchEnd, cap) {
       if (req.kind !== "launch") return;
       const fromRoleModels = roleModelLaunches.delete(req.id);
@@ -849,8 +855,10 @@ export function createStageRuntime(
           // and only its ack releases the reservation. No running move, no retry, no final failure.
           const hold = cancelHolds.get(req.session);
           if (hold?.stageId === req.stage_id) {
-            hold.lastCloseId = mintLaunchId();
-            queue.push({ id: hold.lastCloseId, kind: "close", session: req.session });
+            if (end.by === "timeout") {
+              // No ack in time: the session may still appear. The first close is not enough, so the hold stays until the late ack.
+              hold.timedOut = true;
+            } else queueLastClose(hold, req.session);
           }
           return;
         }
@@ -960,6 +968,23 @@ export function createStageRuntime(
             AND created_seq > COALESCE((SELECT MAX(created_seq) FROM stage WHERE ticket_id = ?2 AND role = 'worker'), 0)`,
       )
       .get(ticketId, ticketId)!.n;
+  /** The full_suite and commit of the newest Tester result of a ticket since its latest worker stage, else null. */
+  const lastFullSuite = (ticketId: string): { full_suite: unknown; commit: unknown } | null => {
+    const r = db
+      .query<{ c: string | null }, [string, string]>(
+        `SELECT h.context_json AS c FROM stage s
+           JOIN handoffs h ON json_extract(h.context_json, '$.stage_id') = s.id AND h.from_agent = s.session
+          WHERE s.ticket_id = ?1 AND s.role = 'tester' AND s.review IS NULL
+            AND s.created_seq > COALESCE((SELECT MAX(created_seq) FROM stage WHERE ticket_id = ?2 AND role = 'worker'), 0)
+          ORDER BY s.created_seq DESC, h.rowid DESC LIMIT 1`,
+      )
+      .get(ticketId, ticketId);
+    try {
+      if (!r?.c) return null;
+      const c = JSON.parse(r.c) as { full_suite?: unknown; commit?: unknown };
+      return { full_suite: c.full_suite, commit: c.commit };
+    } catch { return null; }
+  };
   const isHighTicket = (ticketId: string): boolean =>
     db.query<{ b: string }, [string]>("SELECT blast_radius AS b FROM tickets WHERE id = ?").get(ticketId)?.b === "high";
 
@@ -1076,7 +1101,7 @@ export function createStageRuntime(
         const taken = atStart && !!db.query("SELECT 1 FROM stage WHERE session = ? AND id != ? AND status IN ('launching', 'running') LIMIT 1").get(session, stageId);
         if (!ownClose && !taken) {
           if (!closing.has(session)) closing.set(session, { role: stage.role, room: roomOfStage(stageId), stageId });
-          if (stage.status === "launching" && inflight.has(stageId)) cancelHolds.set(session, { stageId, lastCloseId: null });
+          if (stage.status === "launching" && inflight.has(stageId)) cancelHolds.set(session, { stageId, lastCloseId: null, timedOut: false });
           queue.push({ id: mintLaunchId(), kind: "close", session });
         }
       }
@@ -1692,7 +1717,6 @@ export function createStageRuntime(
         ).get(prior.request_id ?? "", room)!.n > 0
       : false;
     const queuedNow: Array<NonNullable<ReturnType<typeof queueBySystemInTx>>> = [];
-    const held: HeldDraft[] = [];
     const stage = api.move(
       stageId,
       { to: "passed", verdict: "PASS" },
@@ -1702,14 +1726,13 @@ export function createStageRuntime(
         // A ticket that left `draft` meanwhile is skipped. With a high ticket in the request nothing moves.
         if (high) return;
         for (const { ticket_id } of scope) {
-          const q = queueBySystemInTx(db, cap, ticket_id, prior.request_id, held);
+          const q = queueBySystemInTx(db, cap, ticket_id, prior.request_id);
           if (q) queuedNow.push(q);
         }
       },
       () => {
         for (const q of queuedNow) cap.sse.emit(q.entry, { kind: "room", room: q.snapshot.room });
         if (queuedNow.length) cap.briefing.refresh();
-        if (room) notifyHeldDrafts(cap, room, held);
       },
     );
     for (const q of queuedNow) {
@@ -2158,6 +2181,23 @@ export function createStageRuntime(
           if (refusal) errors.push(refusal);
         } else if (c.ticket_id !== stage.ticket_id) errors.push(`context.ticket_id must be ${stage.ticket_id}`);
         if (stage.role === "tester" && (typeof c.commit !== "string" || !FULL_SHA_RE.test(c.commit))) errors.push("context.commit must be the full 40-character commit sha");
+        if (stage.role === "tester" && stage.ticket_id && isHighTicket(stage.ticket_id)) {
+          // High radius: the Tester result carries the full suite run (command, exit_code, pass, fail, log_path) for the commit that started this stage.
+          const started = handoffCommit(stage.id, stage.ticket_id, "tester");
+          if (started && c.commit !== started) errors.push(`context.commit must be ${started}, the commit of the handoff that started this stage`);
+          const fs = c.full_suite && typeof c.full_suite === "object" && !Array.isArray(c.full_suite) ? (c.full_suite as Record<string, unknown>) : null;
+          if (!fs) errors.push("context.full_suite is required for a high-radius ticket: {command, exit_code, pass, fail, log_path}");
+          else {
+            const bad = (k: string) => (k === "command" || k === "log_path" ? typeof fs[k] !== "string" || !(fs[k] as string).trim() : !Number.isInteger(fs[k]));
+            for (const k of ["command", "exit_code", "pass", "fail", "log_path"]) if (bad(k)) errors.push(`context.full_suite.${k} is missing or invalid`);
+          }
+        }
+        if (stage.role === "validator" && stage.ticket_id && c.verdict === "PASS" && isHighTicket(stage.ticket_id)) {
+          const last = lastFullSuite(stage.ticket_id);
+          const fs = last?.full_suite;
+          if (!fs || typeof fs !== "object" || (fs as Record<string, unknown>).exit_code !== 0) errors.push("a high-radius PASS needs a full suite with exit code 0");
+          else if (last!.commit !== c.commit) errors.push(`context.commit must be ${String(last!.commit)}, the commit of the full suite run`);
+        }
         if (stage.role === "validator" && stage.ticket_id && c.verdict === "PASS" && isHighTicket(stage.ticket_id) && validatorPasses(stage.ticket_id) >= 1) {
           // L4: the second PASS of a high ticket is for the commit of the first one.
           const expected = handoffCommit(stage.id, stage.ticket_id, "validator");
@@ -2165,7 +2205,27 @@ export function createStageRuntime(
         }
         if (REVIEW_ROLES.has(stage.role)) {
           if (typeof c.verdict !== "string" || !VERDICTS.has(c.verdict)) errors.push("context.verdict must be PASS or FAIL (upper case)");
-          if (!Array.isArray(c.findings)) errors.push("context.findings must be a list of {ticket_id, text}");
+          if (stage.role === "reviewer") {
+            // The Reviewer (writing chain): findings are {severity, text}; a PASS goes to the lead, a FAIL to the Writer.
+            let blocking = false;
+            if (!Array.isArray(c.findings)) errors.push("context.findings must be a list of {severity, text}");
+            else {
+              c.findings.forEach((f, i) => {
+                const o = f && typeof f === "object" ? (f as Record<string, unknown>) : null;
+                if (!o || (o.severity !== "blocking" && o.severity !== "suggestion")) errors.push(`context.findings[${i}].severity must be blocking or suggestion`);
+                if (!o || typeof o.text !== "string" || !o.text.trim()) errors.push(`context.findings[${i}].text must be a non-empty string`);
+                if (o?.severity === "blocking") blocking = true;
+              });
+            }
+            if (c.verdict === "PASS" && blocking) errors.push("a PASS must not have a blocking finding");
+            if (to !== undefined) {
+              const lead = leadOfRoom(roomOfStage(stage.id));
+              if (c.verdict === "PASS" && to !== lead) errors.push(`to: a Reviewer PASS must be sent to ${lead}, not to ${to}`);
+              // A lint FAIL (gate "ste-lint") goes back to the Editor; any other FAIL goes to the Writer.
+              if (c.verdict === "FAIL" && c.gate === "ste-lint" && to !== `${ROLE_RECIPIENT_PREFIX}editor`) errors.push(`to: a Reviewer FAIL with gate "ste-lint" must be sent with to_role "editor", not to ${to}`);
+              else if (c.verdict === "FAIL" && c.gate !== "ste-lint" && to !== `${ROLE_RECIPIENT_PREFIX}writer`) errors.push(`to: a Reviewer FAIL must be sent with to_role "writer", not to ${to}`);
+            }
+          } else if (!Array.isArray(c.findings)) errors.push("context.findings must be a list of {ticket_id, text}");
           else {
             c.findings.forEach((f, i) => {
               const o = f && typeof f === "object" ? (f as Record<string, unknown>) : null;

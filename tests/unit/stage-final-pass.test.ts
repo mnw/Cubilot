@@ -111,16 +111,13 @@ describe("a final PASS hands the ticket to the lead and never closes it (L4)", (
     expect(e.db.query("SELECT 1 FROM permissions").all()).toHaveLength(0);
   });
 
-  test("an agent's done on a high ticket without PASSes is 409, and the human's Allow does not change it", async () => {
+  test("an agent's done on a high ticket without PASSes is 409", async () => {
     const e = makeEnv();
     const t = e.running({ radius: "high" });
     e.db.run("UPDATE tickets SET assignee = 'lead-1' WHERE id = ?", [t.id]);
     const first = await e.call("POST", `/tickets/${t.id}/transition`, { by: "lead-1", to: "done" });
     expect(first.status).toBe(409);
     expect(first.json.error).toContain("Validator PASS");
-    const ask = await e.call("POST", `/tickets/${t.id}/approval`, { by: "lead-1" });
-    expect(ask.status).toBe(200);
-    expect((await e.call("POST", `/permissions/${ask.json.request_id}/verdict`, { by: "human", behavior: "allow" })).status).toBe(200);
     expect((await e.call("POST", `/tickets/${t.id}/transition`, { by: "lead-1", to: "done" })).status).toBe(409);
   });
 

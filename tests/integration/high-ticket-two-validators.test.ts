@@ -61,6 +61,15 @@ function makeEnv() {
        VALUES (?, 'r1', 'T', 'c', ?, 'medium', 'a', 'validator-1', 'in_review', 1, 1, 1)`,
       [id, radius],
     );
+    if (radius === "high") {
+      // The last Tester result of a high ticket holds a full suite with exit code 0.
+      const ts = rt.api.create({ ticket_id: id, role: "tester" }, "system", cap);
+      db.run("UPDATE stage SET status = 'passed', verdict = 'PASS', session = 'tester-1' WHERE id = ?", [ts.id]);
+      db.run(
+        "INSERT INTO handoffs (id, from_agent, to_agent, task, context_json, status, created_at_ms, expires_at_ms) VALUES (?, 'tester-1', 'lead-1', 'result', ?, 'accepted', 1, 9999999999999)",
+        [`h_t${n}`, JSON.stringify({ stage_id: ts.id, ticket_id: id, commit, full_suite: { command: "./scripts/test.sh", exit_code: 0, pass: 1, fail: 0, log_path: "/tmp/l.log" } })],
+      );
+    }
     db.run("INSERT OR REPLACE INTO ticket_room_lead (room, agent, updated_at_ms) VALUES ('r1', 'lead-1', 1)");
     const hid = `h_${n}`;
     db.run(
@@ -299,9 +308,17 @@ describe("high ticket through POST /handoffs", () => {
     expect((await postJson(hub, `/tickets/${id}/claim`, { by: "l4h-alice" })).status).toBe(200);
     expect((await postJson(hub, `/tickets/${id}/transition`, { by: "l4h-alice", to: "in_progress" })).status).toBe(200);
     expect((await postJson(hub, `/tickets/${id}/transition`, { by: "l4h-alice", to: "in_review", note: "built" })).status).toBe(200);
+    expect((await postJson(hub, "/handoffs", { from: "l4h-alice", to_role: "tester", task: "test", context: { ticket_id: id, commit: C1 } })).status).toBe(201);
+    await sleep(400);
+    const ts = stages(id)[0];
+    const tsession = await run(ts.id);
+    const suite = { command: "./scripts/test.sh", exit_code: 0, pass: 1, fail: 0, log_path: "/tmp/l.log" };
+    const tres = await postJson(hub, "/handoffs", { from: tsession, to: "l4h-alice", task: "result", context: { notes: "n", stage_id: ts.id, ticket_id: id, commit: C1, full_suite: suite } });
+    expect(tres.status).toBe(201);
+    await closeSession(ts.id, tsession);
     expect((await postJson(hub, "/handoffs", { from: "l4h-alice", to_role: "validator", task: "validate", context: { ticket_id: id, commit: C1 } })).status).toBe(201);
     await sleep(400);
-    const first = stages(id)[0];
+    const first = stages(id).find((s) => s.role === "validator")!;
     return { id, first, session: await run(first.id) };
   };
   /** The first PASS on C1, the close of its session, and the second Validator stage running. */

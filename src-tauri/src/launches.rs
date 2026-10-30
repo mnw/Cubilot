@@ -8,7 +8,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -241,6 +241,15 @@ enum CloseSeen {
 pub struct Closer {
     tx: Sender<Request>,
     seen: Arc<Mutex<HashMap<String, CloseSeen>>>,
+    launches: Arc<Mutex<Launches>>,
+}
+
+/// Session names with a launch in progress, and the closes that wait for one. A close for a name waits until that launch
+/// ends, so it cannot find "no such session" before pty_spawn creates it. A close for another name is not held.
+#[derive(Default)]
+struct Launches {
+    names: HashSet<String>,
+    waiting: Vec<Request>,
 }
 
 impl Closer {
@@ -253,9 +262,19 @@ impl Closer {
         let (tx, rx) = channel::<Request>();
         let seen: Arc<Mutex<HashMap<String, CloseSeen>>> = Arc::default();
         let map = seen.clone();
+        let launches: Arc<Mutex<Launches>> = Arc::default();
+        let gate = launches.clone();
         std::thread::spawn(move || {
             for r in rx {
                 let Request::Close { id, session } = r else { continue };
+                {
+                    let mut g = gate.lock().unwrap_or_else(|e| e.into_inner());
+                    if g.names.contains(&session) {
+                        // A launch of this name is in progress: the close waits for it. `end_launch` sends it again.
+                        g.waiting.push(Request::Close { id, session });
+                        continue;
+                    }
+                }
                 let stored = match map.lock().unwrap_or_else(|e| e.into_inner()).get(&id) {
                     Some(CloseSeen::Done(b)) => Some(b.clone()),
                     _ => None,
@@ -275,7 +294,28 @@ impl Closer {
                 ack_with(|| send_ack(&id, &body), tries, pause, &format!("ack {id}"));
             }
         });
-        Closer { tx, seen }
+        Closer { tx, seen, launches }
+    }
+
+    /// A launch of this session name starts: a close for the name waits until `end_launch`. Called before the launch runs.
+    pub fn begin_launch(&self, session: &str) {
+        self.launches.lock().unwrap_or_else(|e| e.into_inner()).names.insert(session.to_string());
+    }
+
+    /// The launch of this session name ended (the session exists or the launch failed): the closes that waited for it run now.
+    pub fn end_launch(&self, session: &str) {
+        let ready: Vec<Request> = {
+            let mut g = self.launches.lock().unwrap_or_else(|e| e.into_inner());
+            g.names.remove(session);
+            let (ready, rest) = std::mem::take(&mut g.waiting).into_iter().partition(|r| matches!(r, Request::Close { session: s, .. } if s == session));
+            g.waiting = rest;
+            ready
+        };
+        for r in ready {
+            if self.tx.send(r).is_err() {
+                eprintln!("[launches] the close worker is gone");
+            }
+        }
     }
 
     /// Queues a close unless the same id already waits in the queue. Returns at once.
@@ -317,7 +357,10 @@ fn closer() -> &'static Closer {
 fn route(r: Request, closer: &Closer, launch: impl FnOnce(Request), input: impl FnOnce(Request)) {
     match r {
         Request::Close { .. } => closer.submit(r),
-        Request::Launch { .. } => launch(r),
+        Request::Launch { ref session, .. } => {
+            closer.begin_launch(session);
+            launch(r)
+        }
         Request::Input { .. } => input(r),
     }
 }
@@ -339,11 +382,12 @@ fn start_input(app: &AppHandle, info: &HubInfo, r: Request) {
 }
 
 fn start_launch(app: &AppHandle, info: &HubInfo, r: Request) {
-    let Request::Launch { ref id, .. } = r else { return };
-    let (app, info, id) = (app.clone(), info.clone(), id.clone());
+    let Request::Launch { ref id, ref session, .. } = r else { return };
+    let (app, info, id, session) = (app.clone(), info.clone(), id.clone(), session.clone());
     tauri::async_runtime::spawn(async move {
         // The launch runs once, here. Only its answer is sent again if the hub does not record it.
         let done = launch(&app, r).await;
+        closer().end_launch(&session);
         let _ = tauri::async_runtime::spawn_blocking(move || {
             run_and_ack(|| done, |b| ack_once(&info, &id, b), ACK_TRIES, ACK_PAUSE, &format!("ack {id}"))
         })
@@ -620,5 +664,42 @@ mod tests {
         assert!(c.contains("url = \"http://127.0.0.1:1/launches/l_1/ack\""), "{c}");
         assert!(c.contains("Authorization: Bearer tok"));
         assert!(c.contains(r#"data = "{\"error\":\"a \\\"b\\\"\"}""#), "{c}");
+    }
+
+    fn launch_line(id: &str, session: &str) -> String {
+        format!(r#"{{"id":"{id}","kind":"launch","stage_id":"s_0123456789abcdef","session":"{session}","role":"worker","room":"r","harness":"claude","cwd":"/w"}}"#)
+    }
+
+    // A close that arrives while the launch of its name runs must wait: pty_spawn has not made the session yet.
+    #[test]
+    fn close_waits_for_the_in_flight_launch_of_its_name() {
+        let kills: Arc<Mutex<Vec<String>>> = Arc::default();
+        let k = kills.clone();
+        let closer = Closer::new(move |s| { k.lock().unwrap().push(s.to_string()); Ok(true) }, |_, _| AckTry::Done, 3, Duration::from_millis(1));
+        route(parse_request(&launch_line("l_L", "worker-1")).unwrap(), &closer, |_| {}, |_| {});
+        route(parse_request(&close_line("l_C", "worker-1")).unwrap(), &closer, |_| {}, |_| {});
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(kills.lock().unwrap().is_empty(), "the close ran before the launch ended");
+        // a repeat of the same close while it waits adds nothing
+        route(parse_request(&close_line("l_C", "worker-1")).unwrap(), &closer, |_| {}, |_| {});
+        closer.end_launch("worker-1");
+        wait_for("close ran", || !kills.lock().unwrap().is_empty());
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(*kills.lock().unwrap(), vec!["worker-1".to_string()]);
+    }
+
+    #[test]
+    fn close_for_another_name_runs_first() {
+        let kills: Arc<Mutex<Vec<String>>> = Arc::default();
+        let k = kills.clone();
+        let closer = Closer::new(move |s| { k.lock().unwrap().push(s.to_string()); Ok(true) }, |_, _| AckTry::Done, 3, Duration::from_millis(1));
+        route(parse_request(&launch_line("l_L", "worker-1")).unwrap(), &closer, |_| {}, |_| {});
+        route(parse_request(&close_line("l_C1", "worker-1")).unwrap(), &closer, |_| {}, |_| {});
+        route(parse_request(&close_line("l_C2", "worker-2")).unwrap(), &closer, |_| {}, |_| {});
+        wait_for("other name closed", || kills.lock().unwrap().contains(&"worker-2".to_string()));
+        assert_eq!(*kills.lock().unwrap(), vec!["worker-2".to_string()]);
+        closer.end_launch("worker-1");
+        wait_for("waiting close ran", || kills.lock().unwrap().len() == 2);
+        assert_eq!(*kills.lock().unwrap(), vec!["worker-2".to_string(), "worker-1".to_string()]);
     }
 }
