@@ -12,7 +12,7 @@ import { createTicketKind } from "../../hub/kinds/ticket";
 import { createStageRuntime } from "../../hub/kinds/stage";
 import { HANDOFF_SECTION_MAX, NOTES_SECTION_MAX, PACK_SECTION_MAX, renderFirstMessage } from "../../hub/core/first-message";
 import { renderStable } from "../../hub/core/primer";
-import { HEAD_CAP_BYTES, MAX_FIRST_MESSAGE_BYTES, claudeProjectFolder, metricsByRole, recordStageMetrics, selectTranscript, stagesMissingMetrics } from "../../hub/core/stage-metrics";
+import { HEAD_CAP_BYTES, MAX_FIRST_MESSAGE_BYTES, claudeProjectFolder, metricsByRole, piSessionFolder, recordStageMetrics, selectTranscript, stagesMissingMetrics } from "../../hub/core/stage-metrics";
 import type { Entry, HubCapabilities, RouteDef, Scope } from "../../hub/core/types";
 import type { LaunchRequest } from "../../hub/core/launch-queue";
 
@@ -327,23 +327,63 @@ describe("restart, old events and unreadable usage", () => {
   }
 });
 
-describe("pi usage source (5.3)", () => {
-  test("a pi stage row has source none and three NULLs, even when a matching Claude transcript exists", async () => {
-    capture();
+describe("pi usage source", () => {
+  const piLine = (o: unknown) => JSON.stringify(o);
+  const piUser = (ts: number, text: string) => piLine({ type: "message", timestamp: new Date(ts).toISOString(), message: { role: "user", content: [{ type: "text", text }] } });
+  const piAsst = (u: { input: number; output: number; cacheRead: number; cacheWrite: number }, tool?: string) =>
+    piLine({ type: "message", message: { role: "assistant", content: tool ? [{ type: "toolCall", name: tool }] : [{ type: "text", text: "x" }], usage: { ...u, totalTokens: u.input + u.output + u.cacheRead + u.cacheWrite } } });
+  function piFile(root: string, cwd: string, ts: number, firstText: string, ...rest: string[]): void {
+    const folder = piSessionFolder(cwd, root);
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "s.jsonl"), [piLine({ type: "session", timestamp: new Date(ts).toISOString(), cwd }), piUser(ts, firstText), ...rest].join("\n") + "\n");
+  }
+  const setup = (cwd: string) => {
     const db = new Database(":memory:");
     migrateLedger(db);
-    const projects = mkdtempSync(join(tmpdir(), "sm-pi-"));
-    const cwd = "/tmp/wt/pi-case";
-    const payload = JSON.stringify({ launch: { role: "worker", harness: "pi", cwd, bytes: 400 } });
+    const payload = JSON.stringify({ launch: { role: "validator", harness: "pi", cwd, bytes: 400 } });
     db.run("INSERT INTO events (entity_id, kind, actor, payload_json, at_ms) VALUES ('s_1', 'stage.launching', 'system', ?, 1000)", [payload]);
-    transcript(claudeProjectFolder(cwd, projects), "s1", 1500, "Stage: s_1", asst("a", usage(1, 0, 5, 1)));
-    await recordStageMetrics(db, "s_1", 7, console.error, projects);
-    const r = db.query<Record<string, unknown>, []>("SELECT * FROM stage_metrics").get()!;
-    expect(r).toMatchObject({
-      source: "none", prompt_tokens_first: null, cache_read_tokens: null, tokens_before_action: null,
+    return db;
+  };
+  const row = (db: Database) => db.query<Record<string, unknown>, []>("SELECT * FROM stage_metrics").get()!;
+
+  test("the folder name follows pi's own rule", () => {
+    expect(piSessionFolder("/Users/m n/wt/a:b", "/r")).toBe("/r/--Users-m n-wt-a-b--");
+  });
+
+  test("a pi stage row has source pi and the token counts of its session file", async () => {
+    capture();
+    const root = mkdtempSync(join(tmpdir(), "sm-pi-"));
+    const cwd = "/tmp/wt/pi-case";
+    piFile(root, cwd, 1500, "Stage: s_1",
+      piAsst({ input: 10, output: 2, cacheRead: 5, cacheWrite: 3 }, "read"),
+      piAsst({ input: 1, output: 4, cacheRead: 20, cacheWrite: 0 }, "write"),
+      piAsst({ input: 100, output: 100, cacheRead: 100, cacheWrite: 100 }));
+    const db = setup(cwd);
+    await recordStageMetrics(db, "s_1", 7, console.error, mkdtempSync(join(tmpdir(), "sm-none-")), false, root);
+    expect(row(db)).toMatchObject({
+      source: "pi", prompt_tokens_first: 18, cache_read_tokens: 5, tokens_before_action: 20 + 25,
       first_message_bytes: 400, first_message_tokens_est: 100, created_seq: 7,
     });
     expect(logged).toEqual([]);
+  });
+
+  test("no matching pi session file stores source none with NULL counts and one log line", async () => {
+    capture();
+    const root = mkdtempSync(join(tmpdir(), "sm-pi-"));
+    piFile(root, "/tmp/wt/pi-case", 1500, "Stage: s_other", piAsst({ input: 1, output: 1, cacheRead: 1, cacheWrite: 1 }));
+    const db = setup("/tmp/wt/pi-case");
+    await recordStageMetrics(db, "s_1", 7, console.error, root, false, root);
+    expect(row(db)).toMatchObject({ source: "none", prompt_tokens_first: null, cache_read_tokens: null, tokens_before_action: null });
+    expect(logged).toHaveLength(1);
+  });
+
+  test("a pi usage field that is not an integer stores source none", async () => {
+    capture();
+    const root = mkdtempSync(join(tmpdir(), "sm-pi-"));
+    piFile(root, "/tmp/wt/pi-case", 1500, "Stage: s_1", piAsst({ input: 1.5, output: 1, cacheRead: 1, cacheWrite: 1 }));
+    const db = setup("/tmp/wt/pi-case");
+    await recordStageMetrics(db, "s_1", 7, console.error, root, false, root);
+    expect(row(db)).toMatchObject({ source: "none", tokens_before_action: null });
   });
 });
 

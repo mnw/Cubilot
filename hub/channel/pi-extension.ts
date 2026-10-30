@@ -17,6 +17,9 @@ import { nodeHost, nodeSleep } from "./node-host";
 import { startBridge, REPLY_POLICY, ReloadTimeout, RELOAD_MS, type Bridge } from "./core";
 import type { Host } from "./host";
 import { authedPost } from "./hub-client";
+import { contextDir } from "../core/context-usage";
+import { chmodSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const AGENT = (process.env.CHATBRIDGE_AGENT ?? "").trim();
 const ROOM = (process.env.CHATBRIDGE_ROOM ?? "default").trim() || "default";
@@ -58,6 +61,31 @@ export function runAnswered(messages: unknown): boolean {
     | { stopReason?: string }
     | undefined;
   return last?.stopReason !== "aborted" && last?.stopReason !== "error";
+}
+
+// Context use after a run, from the last assistant message with usage (pi 1.4.0: `usage.totalTokens`) over the model's
+// `contextWindow`. An aborted or errored message has zero usage and is skipped. Null when either number is missing.
+export function contextPct(messages: unknown, contextWindow: unknown): number | null {
+  if (!Array.isArray(messages) || typeof contextWindow !== "number" || !(contextWindow > 0)) return null;
+  for (const m of [...messages].reverse()) {
+    const t = (m as { role?: string; usage?: { totalTokens?: unknown } })?.usage?.totalTokens;
+    if ((m as { role?: string })?.role === "assistant" && typeof t === "number" && t > 0) return Math.min(100, (t / contextWindow) * 100);
+  }
+  return null;
+}
+
+// The statusline format, as factory/shared/scripts/statusline.sh keeps it: <app data>/context/<agent>.json, mode 0600, tmpfile + rename.
+export function writeContextFile(agent: string, pct: number, contextWindow: number, dir: string = contextDir()): void {
+  if (!agent || agent.startsWith(".") || agent.includes("/") || agent.includes("\\")) return;
+  const tmp = join(dir, `.${agent}.json.tmp-${process.pid}`);
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(tmp, JSON.stringify({ context_window: { used_percentage: pct, context_window_size: contextWindow } }), { mode: 0o600 });
+    chmodSync(tmp, 0o600);
+    renameSync(tmp, join(dir, `${agent}.json`));
+  } catch {
+    rmSync(tmp, { force: true }); // the column keeps its last value; a failed write never stops the run end
+  }
 }
 
 function firstSentence(text: string): string {
@@ -207,5 +235,10 @@ export default function (pi: any): void {
 
   pi.on("agent_start", () => bridge?.onRunStart());
   // agent_end fires once per run; turn_end fires per model/tool iteration.
-  pi.on("agent_end", (event: { messages?: unknown }) => bridge?.onRunEnd(runAnswered(event?.messages)));
+  pi.on("agent_end", (event: { messages?: unknown }, ctx?: { model?: { contextWindow?: number }; getContextUsage?: () => { contextWindow?: number } | undefined }) => {
+    const window = ctx?.model?.contextWindow ?? ctx?.getContextUsage?.()?.contextWindow;
+    const pct = contextPct(event?.messages, window);
+    if (pct !== null) writeContextFile(AGENT, pct, window as number);
+    bridge?.onRunEnd(runAnswered(event?.messages));
+  });
 }

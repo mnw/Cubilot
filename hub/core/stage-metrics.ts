@@ -18,7 +18,7 @@ export type MetricsRow = {
   prompt_tokens_first: number | null;
   cache_read_tokens: number | null;
   tokens_before_action: number | null;
-  source: "claude" | "none";
+  source: "claude" | "pi" | "none";
   created_seq: number;
 };
 
@@ -55,6 +55,11 @@ export const claudeProjectsDir = (): string => process.env.CUBILOT_CLAUDE_PROJEC
 
 export const claudeProjectFolder = (cwd: string, root = claudeProjectsDir()): string => join(root, cwd.replace(/[^A-Za-z0-9]/g, "-"));
 
+/** Pi keeps `<sessions>/--<cwd without its first slash, "/" "\\" ":" as "-">--/<time>_<id>.jsonl` (pi 1.4.0, dist/migrations.js). */
+export const piSessionsDir = (): string => process.env.CUBILOT_PI_SESSIONS_DIR || join(homedir(), ".pi", "agent", "sessions");
+
+export const piSessionFolder = (cwd: string, root = piSessionsDir()): string => join(root, `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`);
+
 export const tokensEst = (bytes: number): number => Math.ceil(bytes / 4);
 
 type Head = { ts: number; firstUser: string };
@@ -68,7 +73,7 @@ function entry(line: string): any {
 }
 
 /** Reads whole lines from the start of `file` in small chunks and stops at the first user message. `stats.bytes` counts the bytes read. */
-async function readHead(file: string, stats?: { bytes: number }): Promise<Head | null> {
+async function readHead(file: string, stats?: { bytes: number }, pi = false): Promise<Head | null> {
   const fh = await open(file, "r");
   try {
     const buf = Buffer.alloc(CHUNK_BYTES);
@@ -91,7 +96,7 @@ async function readHead(file: string, stats?: { bytes: number }): Promise<Head |
           const t = Date.parse(d.timestamp);
           if (!Number.isNaN(t)) ts = t;
         }
-        if (d?.type === "user" && !d.isMeta) {
+        if (pi ? d?.type === "message" && d.message?.role === "user" : d?.type === "user" && !d.isMeta) {
           const c = d.message?.content;
           const text = typeof c === "string" ? c : Array.isArray(c) ? c.map((x: any) => (typeof x?.text === "string" ? x.text : "")).join("\n") : "";
           return ts === null ? null : { ts, firstUser: text };
@@ -108,7 +113,7 @@ async function readHead(file: string, stats?: { bytes: number }): Promise<Head |
  * The transcript of one attempt: of the files in `folder` whose first entry time is in [from, to), the earliest whose first
  * user message contains the stage id. A missing folder is no transcript (null); any other read error throws.
  */
-export async function selectTranscript(folder: string, stageId: string, from: number, to: number | null, stats?: { bytes: number }): Promise<string | null> {
+export async function selectTranscript(folder: string, stageId: string, from: number, to: number | null, stats?: { bytes: number }, pi = false): Promise<string | null> {
   let names: string[];
   try {
     names = (await readdir(folder)).filter((n) => n.endsWith(".jsonl"));
@@ -119,7 +124,7 @@ export async function selectTranscript(folder: string, stageId: string, from: nu
   let best: { file: string; ts: number } | null = null;
   for (const n of names) {
     const file = join(folder, n);
-    const h = await readHead(file, stats);
+    const h = await readHead(file, stats, pi);
     if (!h || h.ts < from || (to !== null && h.ts >= to) || !h.firstUser.includes(stageId)) continue;
     if (!best || h.ts < best.ts) best = { file, ts: h.ts };
   }
@@ -168,6 +173,42 @@ export async function readUsage(file: string): Promise<Usage | null> {
   };
 }
 
+const PI_TOKEN_FIELDS = ["input", "cacheWrite", "cacheRead", "output"] as const;
+const piReadable = (u: any): boolean => PI_TOKEN_FIELDS.every((k) => Number.isInteger(u?.[k]) && u[k] >= 0);
+const piSum = (u: any): number => PI_TOKEN_FIELDS.reduce((a, k) => a + u[k], 0);
+/** pi tool names that end "before the first action": the file writers and the result handoff. */
+const PI_ACTION_TOOLS = new Set(["edit", "write"]);
+
+/**
+ * The same three numbers from a pi session file (pi 1.4.0): each `{type:"message"}` line with `message.role = "assistant"` holds
+ * `message.usage = {input, output, cacheRead, cacheWrite, totalTokens}`; a tool call is a `{type:"toolCall", name}` part of
+ * `message.content`. Returns null on the same conditions as readUsage: no usage, a cut-off line, an unreadable field.
+ */
+export async function readPiUsage(file: string): Promise<Usage | null> {
+  const counted: any[] = [];
+  let acted = false;
+  for (const line of (await readFile(file, "utf8")).split("\n")) {
+    if (!line) continue;
+    let d: any;
+    try {
+      d = JSON.parse(line);
+    } catch {
+      return null;
+    }
+    const m = d?.message;
+    if (d?.type !== "message" || m?.role !== "assistant" || !m.usage || acted) continue;
+    counted.push(m.usage);
+    if (Array.isArray(m.content) && m.content.some((c: any) => c?.type === "toolCall" && typeof c.name === "string" && (PI_ACTION_TOOLS.has(c.name) || isResultTool(c.name)))) acted = true;
+  }
+  if (!counted.length || !counted.every(piReadable)) return null;
+  const first = counted[0];
+  return {
+    prompt_tokens_first: first.input + first.cacheWrite + first.cacheRead,
+    cache_read_tokens: first.cacheRead,
+    tokens_before_action: counted.reduce((a, u) => a + piSum(u), 0),
+  };
+}
+
 export type Launch = { role: string; harness: string; cwd: string | null; bytes: number };
 
 /** The `stage.launching` events of a stage, oldest first. The Nth is attempt N; its window ends at the (N+1)th. */
@@ -205,7 +246,7 @@ function attemptEndSeq(db: Database, stageId: string, launchSeq: number, nextLau
  * One row per attempt of an ended stage. The launch metadata (harness, cwd, role, first message size) is read from the
  * payload of the attempt's `stage.launching` event, so a hub restart loses nothing. An event without it (written before
  * this change) gets no row and one log line.
- * A pi attempt is `source = 'none'` (5.3). Every attempt logs at most one line through `log`; a write failure of one
+ * A pi attempt reads the pi session file of its cwd (`source = 'pi'`); with no readable file it is `source = 'none'`. Every attempt logs at most one line through `log`; a write failure of one
  * attempt does not stop the next.
  */
 export async function recordStageMetrics(
@@ -215,6 +256,7 @@ export async function recordStageMetrics(
   log: (line: string) => void,
   projectsRoot = claudeProjectsDir(),
   repair = false,
+  piRoot = piSessionsDir(),
 ): Promise<void> {
   let events: ReturnType<typeof launchEvents>;
   try {
@@ -235,16 +277,16 @@ export async function recordStageMetrics(
     }
     let usage: Usage | null = null;
     let why: string | null = null;
-    if (l.harness === "pi") {
-      why = null; // task 5.3: pi usage is not read in this change
-    } else if (!l.cwd) {
+    const pi = l.harness === "pi";
+    if (!l.cwd) {
       why = "no worktree cwd";
     } else {
       try {
-        const file = await selectTranscript(claudeProjectFolder(l.cwd, projectsRoot), stageId, ev.at_ms, events[i + 1]?.at_ms ?? null);
+        const folder = pi ? piSessionFolder(l.cwd, piRoot) : claudeProjectFolder(l.cwd, projectsRoot);
+        const file = await selectTranscript(folder, stageId, ev.at_ms, events[i + 1]?.at_ms ?? null, undefined, pi);
         if (!file) why = "no transcript matched";
         else {
-          usage = await readUsage(file);
+          usage = await (pi ? readPiUsage : readUsage)(file);
           if (!usage) why = "the transcript usage is not readable";
         }
       } catch (e) {
@@ -263,7 +305,7 @@ export async function recordStageMetrics(
       db.run(
         `INSERT OR IGNORE INTO stage_metrics (stage_id, attempt, role, first_message_bytes, first_message_tokens_est, prompt_tokens_first, cache_read_tokens, tokens_before_action, source, created_seq)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [stageId, attempt, l.role, bytes, tokensEst(bytes), usage?.prompt_tokens_first ?? null, usage?.cache_read_tokens ?? null, usage?.tokens_before_action ?? null, usage ? "claude" : "none", endSeq],
+        [stageId, attempt, l.role, bytes, tokensEst(bytes), usage?.prompt_tokens_first ?? null, usage?.cache_read_tokens ?? null, usage?.tokens_before_action ?? null, usage ? (pi ? "pi" : "claude") : "none", endSeq],
       );
       if (why) log(`[stage-metrics] ${stageId} attempt ${attempt}: ${why}; stored as source none`);
     } catch (e) {
