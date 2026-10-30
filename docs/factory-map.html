@@ -141,7 +141,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
 <div class="wrap">
 
 <header>
-  <div class="eyebrow">Cubilot · The Continuous Software Foundry · state on 28 October 2026</div>
+  <div class="eyebrow">Cubilot · The Continuous Software Foundry · state on 30 October 2026</div>
   <h1>Cubilot Factory Map</h1>
   <p class="sub">The whole factory on one page: what runs in the code today, what is defined in the <code>factory/</code> folder, what the implementation brief plans, and which ideas are only saved. Click a status to highlight it.</p>
   <div class="legend" role="group" aria-label="Highlight by status">
@@ -164,7 +164,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
       <div class="row">
         <div class="n built"><span class="t">Desktop app window</span><span class="d">macOS, Apple Silicon only</span></div>
         <div class="n planned"><span class="t">Browser and phone access</span><span class="d">Hub serves the UI; over the internet behind a TLS front with sign-in (passkey, step-up), or Tailscale; pairing by QR code</span><span class="ref">§12</span></div>
-        <div class="n built"><span class="t">Approval gate</span><span class="d">High blast-radius tickets need your Allow</span></div>
+        <div class="n built"><span class="t">Approve and delivery</span><span class="d">One Approve per request at the start; your test and the merge into main at the end. High radius means two independent Validator PASSes, not your Allow</span><span class="ref">§18</span></div>
       </div></div>
 
     <div class="layer"><div class="lname">UI<small>ui/ webview</small></div>
@@ -193,7 +193,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
     <div class="layer"><div class="lname">Hub<small>hub/ Bun, 127.0.0.1</small></div>
       <div class="row">
         <div class="n built"><span class="t">Ledger (SQLite)</span><span class="d">Events, durable state, replay</span></div>
-        <div class="n built"><span class="t">Kinds</span><span class="d">Handoff, interrupt, permission, ticket</span></div>
+        <div class="n built"><span class="t">Kinds</span><span class="d">Handoff, interrupt, permission, ticket, stage, decision</span></div>
         <div class="n built"><span class="t">Room lead, nutshell, summariser</span><span class="d">Briefing on connect</span></div>
         <div class="n planned"><span class="t">Review kind</span><span class="d">Structured verdicts, Warp review.json format</span><span class="ref">§2 §11 §6</span></div>
         <div class="n planned"><span class="t">Triage states, spec stage</span><span class="d">Ready / spec / needs info / wait</span><span class="ref">§6</span></div>
@@ -202,10 +202,11 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
         <div class="n planned"><span class="t">Stage trace and diagnosis</span><span class="d">JSONL trace per stage, failure record, code rules first, then a Diagnostician tier chosen by a computed score; metrics on every stage; one ticket per cause</span><span class="ref">§4 stage-diagnosis</span></div>
         <div class="n planned"><span class="t">Model routing</span><span class="d">Model × effort per Worker stage: fixed rule first, then Jev; limits and human pin</span><span class="ref">§6</span></div>
         <div class="n built"><span class="t">Requests and tasks</span><span class="d">request_id, blocked_by, draft status</span><span class="ref">§3</span></div>
-        <div class="n planned"><span class="t">Orchestrator checkpoint</span><span class="d">Clear and re-brief from a ledger summary at set points; never mid-decision; context % in the agent column</span><span class="ref">§6</span></div>
-        <div class="n planned"><span class="t">Arbiter and delivery report</span><span class="d">Human only at start (one Approve per request) and delivery (test, merge to main). An arbiter stage (opus, read-only) decides FAILs, waivers, third reviews; high radius means a second review, not a human Allow</span><span class="ref">§6 item 11</span></div>
-        <div class="n planned"><span class="t">Plan check</span><span class="d">Code checks a plan before spec review: roles on the hub, blocked_by reasons, chain length, startable vs free slots, verify lines, radius rule, strict validate</span><span class="ref">§6 item 8</span></div>
-        <div class="n planned"><span class="t">Flow report and stop rules</span><span class="d">Per role: queued, startable, live, free slots; stalls; FAIL counts; done without merge. Stop rules enforced by the hub</span><span class="ref">§6 items 9–10</span></div>
+        <div class="n defined"><span class="t">Orchestrator checkpoint</span><span class="d">State summary, lead digest and context % done; the checkpoint run (note, clear, re-brief) in build</span><span class="ref">§6</span></div>
+        <div class="n built"><span class="t">Escalation and second review</span><span class="d">Decisions to you in one format; high radius closes on two independent PASSes, no Allow; merge message names both</span><span class="ref">§6 item 11, §18</span></div>
+        <div class="n defined"><span class="t">Delivery report</span><span class="d">Per request: tickets, merges, criteria edits, high-radius changes, test counts; in build</span><span class="ref">§6 item 11</span></div>
+        <div class="n idea"><span class="t">Arbiter</span><span class="d">Decides after a second review FAIL; built only if the Part 18 measure asks for it</span><span class="ref">§19</span></div>
+                <div class="n defined"><span class="t">Flow report and stop rules</span><span class="d">Stop rules enforced by the hub (done); flow report per role: slot use, ready tickets, wait reasons, FAIL rates (in build, the data for the Part 18 measure)</span><span class="ref">§6 items 9–10</span></div>
         <div class="n idea"><span class="t">Jev decision points</span><span class="d">Narrow typed decisions, see section 05</span></div>
       </div></div>
 
@@ -251,7 +252,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
     <article class="n defined role">
       <div class="head"><h3>Orchestrator</h3><span class="model">Claude · opus</span></div>
       <span class="track">Both tracks · room lead</span>
-      <p class="job">Turns requests into tickets with checkable criteria, assigns, unblocks, decides disputes, escalates to you.</p>
+      <p class="job">Turns requests into user stories (Given/When/Then, INVEST) with agent notes for the facts, keeps every slot busy, answers the Validator's spec findings, checks each PASS, merges into staging and closes the ticket. Parks a ticket after two FAILs and asks you; the rest goes on.</p>
       <dl><dt>skills</dt><dd>planning-and-task-breakdown, context-engineering, intent-driven-development, team-agent-orchestration, project-manager-senior</dd>
       <dt>optional</dt><dd>interview-me, constraint-driven-development, architecture-decision-records</dd>
       <dt>never</dt><dd>writes code or docs, tests, reviews</dd></dl>
@@ -277,7 +278,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
     <article class="n defined role">
       <div class="head"><h3>Validator</h3><span class="model oa">OpenAI · Pi</span></div>
       <span class="track">Technical track · challenger</span>
-      <p class="job">Challenges everyone: tickets, diffs, reports, its own verdict. Applies the mutation rules. Final PASS or FAIL on code.</p>
+      <p class="job">Four eyes on the plan: checks the tickets of each request against the spec, once, and proposes the fix for each gap. Then PASS or FAIL on code against the ticket, the tests and security; the PASS goes to the Orchestrator. A high ticket gets a second, independent Validator.</p>
       <dl><dt>skills</dt><dd>code-review (merged), security-and-hardening, ai-regression-testing, intent-driven-development, silent-failure-hunter, pr-test-analyzer, reality-checker</dd>
       <dt>optional</dt><dd>constraint-driven-development, code-simplification, php/typescript-reviewer, accessibility</dd>
       <dt>never</dt><dd>edits files, runs changed code</dd></dl>
@@ -373,10 +374,10 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
       <div class="n planned"><span class="t">Orchestrator triage</span><span class="d">exactly one readiness state</span><span class="ref">§6</span></div><span class="arrow">→</span>
       <div class="n planned"><span class="t">Ready to spec</span><span class="d">spec ticket, OpenSpec</span><span class="gate">gate: you approve the spec</span></div><span class="arrow">→</span>
       <div class="n built"><span class="t">Draft tickets</span><span class="d">[code] or [doc], criteria, request_id, blocked_by, blast radius</span></div><span class="arrow">→</span>
-      <div class="n defined"><span class="t">Validator spec review</span><span class="d">coverage, checkable criteria, size, deps, spec vs code, risks</span><span class="gate">high radius: you approve the plan</span><span class="ref">§4</span></div><span class="arrow">→</span>
-      <div class="n planned"><span class="t">Queued</span><span class="d">the lead moves drafts here after spec review PASS; tracks can start</span></div>
+      <div class="n defined"><span class="t">Validator spec review</span><span class="d">four eyes, once per request: each requirement has a story, no contradiction, INVEST; not against the code</span><span class="gate">high radius: your one Approve</span><span class="ref">§18</span></div><span class="arrow">→</span>
+      <div class="n planned"><span class="t">Queued</span><span class="d">after the spec PASS (low) or your Approve (high); an edit keeps the status; blockers clear on merge into staging</span></div>
     </div>
-    <p class="loop"><b>Spec review FAIL</b> returns to the Orchestrator with findings and questions for you; the follow-up review checks only the changes. <b>Two FAILs</b> on one plan go to you. <b>Needs info</b> goes back to you with questions. <b>Wait to implement</b> tells you why. Neither creates a ticket.</p>
+    <p class="loop"><b>Spec review FAIL</b> fails only for a missed requirement, a contradiction or work outside the spec, and each finding comes with a proposed fix. The Orchestrator answers each one: accepted, changed differently, or rejected with the spec section. <b>One re-check</b> of the answers; open disagreements come to you with both views, and the other tickets go on. <b>Needs info</b> goes back to you with questions. <b>Wait to implement</b> tells you why. Neither creates a ticket.</p>
   </div>
 
   <div class="twocol">
@@ -386,10 +387,11 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
         <div class="n defined"><span class="t">Orchestrator</span><span class="d">lead: assigns, unblocks, decides</span></div><span class="arrow">→</span>
         <div class="n defined"><span class="t">Worker</span><span class="d">tests + code, in_review</span></div><span class="arrow">→</span>
         <div class="n defined"><span class="t">Testers</span><span class="d">suite, e2e, mutation</span></div><span class="arrow">→</span>
-        <div class="n defined"><span class="t">Validator</span><span class="d">criteria, mutants, diff</span></div><span class="arrow">→</span>
-        <div class="n built"><span class="t">Done</span><span class="gate">high radius: your Allow</span></div>
+        <div class="n defined"><span class="t">Validator</span><span class="d">criteria, tests, security; high: a second, independent one</span></div><span class="arrow">→</span>
+        <div class="n built"><span class="t">Orchestrator</span><span class="d">checks the PASS, merges into staging, staging suite</span></div><span class="arrow">→</span>
+        <div class="n built"><span class="t">Done</span><span class="gate">high radius: two PASSes, no Allow</span></div>
       </div>
-      <p class="loop"><b>FAIL</b> returns to the Worker with findings. <b>Two loops</b> without agreement go to the Orchestrator, then to you. Follow-up reviews check only the new changes (§6).</p>
+      <p class="loop"><b>FAIL</b> returns to the Worker with findings; a re-review checks only those findings, and a finding outside the ticket becomes a follow-up. <b>Two FAILs</b>: the Orchestrator parks the ticket and asks you; every other ticket goes on (§18).</p>
     </div>
     <div class="panel">
       <h3>Writing track</h3>
@@ -506,15 +508,17 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
 <!-- 6 BUILD ORDER -->
 <section class="sec" aria-labelledby="h-seq">
   <h2 id="h-seq"><span class="num">06</span>Build order</h2>
-  <p class="intro">The migration comes first, then the rebrand, so Cubilot runs beside the previous app without touching it. Parts 1 to 4 give a working factory with fresh sessions, and 4a gives the agent column that Part 4 needs for its tests. Part 6 comes next, before Part 5 (decision 2026-10-26): review format and model routing make the agents more reliable, and delivery and backup is a local item that can wait. Part 12 follows Part 6 (decision 2026-10-27): the desktop app approach is limiting, so the hub serves the UI to any browser and can run on Linux before the later parts are built. The token system and the mockups are done (28 Oct, design/); Part 14 builds them after Part 12, so the redesign is done once, on the browser UI. The design team step is folded into the design council (decision 2026-10-28). Parts 7 and 8 add toolchain and setup; 11 and 13 improve it. The councils (9, 16, 10, 17) come last: the right direction, but much code and testing (decision 2026-10-28).</p>
+  <p class="intro">Part 18, the lean flow, came first (decision 2026-10-29): it moved the checking from the plan to the code and removed the human gates between the Approve and the delivery. Before that, the migration came first, then the rebrand, so Cubilot runs beside the previous app without touching it. Parts 1 to 4 give a working factory with fresh sessions, and 4a gives the agent column that Part 4 needs for its tests. Part 6 comes next, before Part 5 (decision 2026-10-26): review format and model routing make the agents more reliable, and delivery and backup is a local item that can wait. Part 12 follows Part 6 (decision 2026-10-27): the desktop app approach is limiting, so the hub serves the UI to any browser and can run on Linux before the later parts are built. The token system and the mockups are done (28 Oct, design/); Part 14 builds them after Part 12, so the redesign is done once, on the browser UI. The design team step is folded into the design council (decision 2026-10-28). Parts 7 and 8 add toolchain and setup; 11 and 13 improve it. The councils (9, 16, 10, 17) come last: the right direction, but much code and testing (decision 2026-10-28). The arbiter (19) waits for the Part 18 measure.</p>
   <div class="seq">
-    <div class="n built first"><span class="step">Step 0</span><span class="t">Migrate to new repo</span><span class="d">done: mnw/Cubilot, fresh history</span></div>
+    <div class="n built first"><span class="step">18</span><span class="t">Lean flow</span><span class="d">done 29 Oct (install 30): one Approve per request, four-eyes spec review against the spec, user stories, blockers clear on merge, edits keep the status, high radius = two PASSes, PASS to the Orchestrator who merges and closes. First night: 15 merges, no stall</span><span class="ref">§18</span></div>
+    <div class="n built"><span class="step">Step 0</span><span class="t">Migrate to new repo</span><span class="d">done: mnw/Cubilot, fresh history</span></div>
     <div class="n built"><span class="step">1</span><span class="t">Rebrand to Cubilot</span><span class="d">done: own identifier and data folder, side by side with the previous app</span><span class="ref">§1</span></div>
     <div class="n built"><span class="step">2</span><span class="t">Roles</span><span class="d">done: launch with a role, role plugins, no sub-agents</span><span class="ref">§2</span></div>
     <div class="n built"><span class="step">3</span><span class="t">Ticket grouping</span><span class="d">done: request_id, blocked_by, draft status</span><span class="ref">§3</span></div>
     <div class="n built"><span class="step">4</span><span class="t">Session per ticket stage</span><span class="d">done 28 Oct: stage sessions, spec review and context pack archived; stage diagnosis proposed (after Part 6 items 11 and 7)</span><span class="ref">§4</span></div>
     <div class="n built"><span class="step">4a</span><span class="t">Agent column</span><span class="d">done: built to test Part 4; reload one agent, skill switches</span><span class="ref">§4a</span></div>
-    <div class="n planned"><span class="step">6</span><span class="t">Touchpoints, checkpoint, guards, routing</span><span class="d">in planning (human-touchpoints-checkpoint): human only at start and delivery (arbiter, delivery report) with the Orchestrator checkpoint; then plan check, flow report, stop rules; then model × effort; triage, spec stage, review.json</span><span class="ref">§6</span></div>
+    <div class="n defined"><span class="step">6</span><span class="t">Touchpoints, checkpoint, stop rules</span><span class="d">in build, to ship 30 Oct. Done: escalation, radius by rule, merge message, independent second review, lead briefing and digest, state summary, waits-for-you list, trust boundary. Left: request Kind (P6-02), delivery report, checkpoint, flow report, closing; then your live check and the merge into main. Plan check dropped; triage field, review tools and model routing in the backlog</span><span class="ref">§6</span></div>
+    <div class="n planned"><span class="step">20</span><span class="t">Test throughput</span><span class="d">first after Part 6: low tickets run the affected tests, high keep the full suite; one staging suite per batch with a bisect; no duplicate run; measure, then faster tests, maybe two suites at once</span><span class="ref">§20</span></div>
     <div class="n planned"><span class="step">12</span><span class="t">Hub-first, browser, Linux</span><span class="d">after Part 6: hub serves the UI, terminal layer into the hub, browser access, sign-in for internet access, pairing, Linux</span><span class="ref">§12</span></div>
     <div class="n planned"><span class="step">14</span><span class="t">UI redesign</span><span class="d">after Part 12, from design/mockups (done 28 Oct): top bar, section tabs, every screen on desktop and phone, dark and light; WCAG 2.2 AA</span><span class="ref">§14</span></div>
     <div class="n planned"><span class="step">5</span><span class="t">Delivery and backup</span><span class="d">after Part 14: internal remote, Deliver step, leak gate, hourly backup</span><span class="ref">§5</span></div>
@@ -525,6 +529,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
     <div class="n planned"><span class="step">9</span><span class="t">Accessibility council</span><span class="d">at the end: first council, builds the council form and the call rule</span><span class="ref">§9</span></div>
     <div class="n planned"><span class="step">16</span><span class="t">Design council</span><span class="d">after Part 9: council form, called by rules and Jev; takes over the token system and mockups</span><span class="ref">§16</span></div>
     <div class="n planned"><span class="step">10</span><span class="t">SEO council</span><span class="d">same council form</span><span class="ref">§10</span></div>
+    <div class="n idea"><span class="step">19</span><span class="t">Arbiter</span><span class="d">moved out of Part 6 (30 Oct): decides the next step after a second review FAIL. Built only if the one-week measure of Part 18 shows enough tickets waiting for you</span><span class="ref">§19</span></div>
     <div class="n idea"><span class="step">17</span><span class="t">Plan council</span><span class="d">needs work (first draft); after Part 10: Claude and OpenAI write each plan blind; code compares; one merged plan to approve</span><span class="ref">§17</span></div>
     <div class="n built"><span class="step">15</span><span class="t">Ticket card and dialog</span><span class="d">done: replaces the card tickets of Part 14</span><span class="ref">§15</span></div>
   </div>
