@@ -45,13 +45,17 @@ describe("a stage result without context.notes is refused (every role)", () => {
           return sha;
         };
         // Starts a stage by a role handoff and returns its running session and stage id.
-        const start = async (startRole: string) => {
+        // after: runs once the handoff is sent. The editor waits for the close ack of the writer session, so the
+        // close request on the stream is acked too, and the loop ends at the launch of startRole.
+        const start = async (startRole: string, after?: () => Promise<void>) => {
           const sse = openSSE(hub, "/launches/stream");
           expect((await postJson(hub, "/handoffs", { from: "Orchestrator", to_role: startRole, task: "start", context: { ticket_id: ticketId } })).status).toBe(201);
+          await after?.();
           let name = "";
           for await (const req of sse.events) {
-            name = req.session;
             expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+            if (req.kind === "close") continue;
+            name = req.session;
             break;
           }
           sse.close();
@@ -59,6 +63,7 @@ describe("a stage result without context.notes is refused (every role)", () => {
           open.push(await registerAgent(hub, name, { room: "r1" }));
           return name;
         };
+        let writerTurnEnd: (() => Promise<void>) | undefined;
         // The writing roles cannot be set as a ticket role. An editor needs a passed writer result first.
         if (role === "editor") {
           const w = await start("writer");
@@ -66,8 +71,9 @@ describe("a stage result without context.notes is refused (every role)", () => {
           const wr = await postJson(hub, "/handoffs", { from: w, to_role: "editor", task: "result", context: { stage_id: wStage, ticket_id: ticketId, notes: "Wrote X. Checked Y. Limit: none.", commit: newCommit() } });
           expect(wr.status).toBe(201);
           await sleep(200);
+          writerTurnEnd = async () => { expect((await postJson(hub, `/stages/${wStage}/turn-end`, { agent: w })).status).toBe(200); };
         }
-        const session = await start(role);
+        const session = await start(role, writerTurnEnd);
         const stageId = ((await getJson(hub, "/stages?status=running")).json as Array<{ id: string; role: string }>).find((x) => x.role === role)!.id;
 
         const send = (notes: unknown, commit?: string) => {
