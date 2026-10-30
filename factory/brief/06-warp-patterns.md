@@ -307,6 +307,8 @@ Rule for new role-file rules: when a rule protects the flow (a limit, a stop, an
 
 ### 11. Human touchpoints: start and delivery only
 
+Decision 2026-10-30 (human): Part 6 ships without the arbiter. The arbiter is now its own part: Part 19 (`19-arbiter.md`). The subsection "The arbiter" below is kept for reference only.
+
 Status: decision 2026-10-27 (human). Build it first in this part, with item 7. The interim rule below applies now.
 
 #### Goal
