@@ -582,6 +582,8 @@ const editTicketVerb: VerbDecl<TicketSnapshot, EditInput> = {
       radius = "high";
       source = "rule";
     }
+    // A radius the rule itself set follows the rule down; a raise, a human choice or an arbiter ruling stays.
+    if (source === "rule" && rule.radius === "low" && radius === "high") radius = "low";
     if (radius !== prior.blast_radius) changes.blast_radius = radius;
     if (source !== prior.radius_source) changes.radius_source = source;
     // The blocker list is replaced whole. It is not a snapshot field: it changes only when the set differs.
