@@ -296,6 +296,13 @@ describe("high radius checks", () => {
     expect(e.status(r.sid)).toBe("running");
   });
 
+  test("An affected run (full_suite false) is refused on a high ticket", () => {
+    const e = makeSuiteEnv();
+    const r = e.testerCheck(e.ticket("high"), { full_suite: false, tests_run: ["tests/unit/a.test.ts"] });
+    expect(r.errors.join(" ")).toContain("context.full_suite is required");
+    expect(e.status(r.sid)).toBe("running");
+  });
+
   test("Partial full suite names each missing field", () => {
     const e = makeSuiteEnv();
     const r = e.testerCheck(e.ticket("high"), { full_suite: { command: "./scripts/test.sh", pass: 3 } });
