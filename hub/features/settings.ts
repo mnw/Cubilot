@@ -11,6 +11,8 @@ import type { HubFeature } from "../core/types";
 import type { AgentRegistry } from "../core/agents";
 import { readConfig } from "../core/config-file";
 import { AGENT_NAME_RE } from "../core/ids";
+import { claudeModels, loginPath, piModels, PiListError } from "../core/models";
+import { discoverSlashCommands, readGlobalMcpServers } from "../core/slash-discover";
 
 export type SettingsDeps = {
   agents: AgentRegistry;
@@ -222,6 +224,14 @@ function currentVersionDir(): string | null {
   }
 }
 
+// config.yml `pi_path` (a leading ~ is the home folder), else the pnpm default.
+function resolvePiPath(): string {
+  const raw = cfg().pi_path;
+  const v = typeof raw === "string" ? raw.trim() : "";
+  if (!v) return join(homedir(), "Library/pnpm/bin/pi");
+  return v === "~" ? homedir() : v.startsWith("~/") ? join(homedir(), v.slice(2)) : v;
+}
+
 const modDirComplete = (d: string) => [".claude-plugin/plugin.json", "hooks/hooks.json", "hooks/register.js"].every((f) => existsSync(join(d, f)));
 
 export function createSettingsFeature(deps: SettingsDeps): HubFeature {
@@ -297,6 +307,41 @@ export function createSettingsFeature(deps: SettingsDeps): HubFeature {
           const known = agents.get(name) !== null || (validAgentName(name) && tmuxRun(["has-session", "-t", `=${name}`]) !== null);
           if (!known) return err(`unknown agent: ${name}`, 404);
           return Response.json({ harness: paneHarness(name) });
+        },
+      },
+      {
+        method: "GET",
+        path: "/models",
+        auth: "read",
+        handler: async (req) => {
+          const harness = (new URL(req.url).searchParams.get("harness") ?? "").trim();
+          if (harness === "claude" || harness === "") return Response.json({ models: claudeModels() });
+          if (harness !== "pi") return err(`invalid harness: ${harness}`, 400);
+          try {
+            return Response.json({ models: await piModels(resolvePiPath(), { path: await loginPath(), limitMs: Number(process.env.CUBILOT_PI_LIST_LIMIT_MS) || undefined }) });
+          } catch (e) {
+            if (!(e instanceof PiListError)) throw e;
+            return Response.json({ models: [], warning: e.message });
+          }
+        },
+      },
+      {
+        method: "GET",
+        path: /^\/agents\/([^/]+)\/slash-commands$/,
+        auth: "read",
+        handler: (_req, _cap, params) => {
+          const name = decodeURIComponent(params.id ?? "");
+          const known = agents.get(name) !== null || (validAgentName(name) && tmuxRun(["has-session", "-t", `=${name}`]) !== null);
+          if (!known) return err(`unknown agent: ${name}`, 404);
+          const cwd = tmuxRun(["display-message", "-p", "-t", tmuxPane(name), "#{pane_current_path}"])?.trim() || null;
+          return Response.json({
+            commands: discoverSlashCommands({
+              cwd,
+              home: homedir(),
+              harness: paneHarness(name),
+              mcpServers: readGlobalMcpServers(join(dataDir(), "mcp.json")),
+            }),
+          });
         },
       },
       {

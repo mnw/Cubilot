@@ -223,7 +223,7 @@ function _resolveTargets(target, roomName) {
 }
 
 // =============================================================================
-// DISCOVERY — built-ins + per-Agent filesystem scan via Tauri
+// DISCOVERY — built-ins + per-Agent filesystem scan via the hub
 // =============================================================================
 
 async function _discoverCommandsForAgent(agent) {
@@ -236,7 +236,7 @@ async function _discoverCommandsForAgent(agent) {
   }
   const map = new Map(builtinsFor(harness));
   try {
-    const items = await tauriInvoke('slash_discover_for_agent', { agent });
+    const items = (await hubGet(`/agents/${encodeURIComponent(agent)}/slash-commands`)).commands;
     if (Array.isArray(items)) {
       for (const item of items) {
         if (typeof item === 'string') {
@@ -247,7 +247,7 @@ async function _discoverCommandsForAgent(agent) {
       }
     }
   } catch {
-    // Best-effort: built-ins still returned on Tauri-call failure.
+    // Best-effort: built-ins still returned when the hub call fails.
   }
   return map;
 }
