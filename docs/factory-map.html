@@ -253,7 +253,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
       <div class="head"><h3>Orchestrator</h3><span class="model">Claude · opus</span></div>
       <span class="track">Both tracks · room lead</span>
       <p class="job">Turns requests into user stories (Given/When/Then, INVEST) with agent notes for the facts, keeps every slot busy, answers the Validator's spec findings, checks each PASS, merges into staging and closes the ticket. Parks a ticket after two FAILs and asks you; the rest goes on.</p>
-      <dl><dt>skills</dt><dd>planning-and-task-breakdown, context-engineering, intent-driven-development, team-agent-orchestration, project-manager-senior</dd>
+      <dl><dt>skills</dt><dd>user-stories (factory, new), planning-and-task-breakdown, git-workflow-and-versioning, context-engineering, intent-driven-development, team-agent-orchestration, project-manager-senior</dd>
       <dt>optional</dt><dd>interview-me, constraint-driven-development, architecture-decision-records</dd>
       <dt>never</dt><dd>writes code or docs, tests, reviews</dd></dl>
     </article>
@@ -279,7 +279,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
       <div class="head"><h3>Validator</h3><span class="model oa">OpenAI · Pi</span></div>
       <span class="track">Technical track · challenger</span>
       <p class="job">Four eyes on the plan: checks the tickets of each request against the spec, once, and proposes the fix for each gap. Then PASS or FAIL on code against the ticket, the tests and security; the PASS goes to the Orchestrator. A high ticket gets a second, independent Validator.</p>
-      <dl><dt>skills</dt><dd>code-review (merged), security-and-hardening, ai-regression-testing, intent-driven-development, silent-failure-hunter, pr-test-analyzer, reality-checker</dd>
+      <dl><dt>skills</dt><dd>spec-driven-development (spec review), code-review (merged), security-and-hardening, ai-regression-testing, intent-driven-development, silent-failure-hunter, pr-test-analyzer, reality-checker</dd>
       <dt>optional</dt><dd>constraint-driven-development, code-simplification, php/typescript-reviewer, accessibility</dd>
       <dt>never</dt><dd>edits files, runs changed code</dd></dl>
     </article>
@@ -319,6 +319,23 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
       <dt>actions</dt><dd>retry, setup-fix-and-retry, gap-ticket, ticket-change, escalate</dd>
       <dt>measured</dt><dd>share of actions that led to a PASS, per tier</dd>
       <dt>never</dt><dd>edits files, commits, launches, diagnoses a diagnosis</dd></dl>
+    </article>
+
+    <article class="n planned role">
+      <div class="head"><h3>Retrospective</h3><span class="model">Claude · opus</span></div>
+      <span class="track">All tracks · weekly · §21</span>
+      <p class="job">Once a week reads one evidence file built by the hub (flow, stage metrics, findings, your actions). Judges last week's improvements (keep or revert, with numbers), then proposes at most three changes, each with the measure it must move. You approve.</p>
+      <dl><dt>skills</dt><dd>retrospective-review (factory, new), loop-design-check, agent-architecture-audit, agent-introspection-debugging, growth-log (ECC), workflow-optimizer, test-results-analyzer (Agency), context-engineering (Osmani)</dd>
+      <dt>not used</dt><dd>continuous-learning (writes skills by itself)</dd>
+      <dt>never</dt><dd>changes files, tickets or settings; proposes to remove a human gate; proposes without numbers</dd></dl>
+    </article>
+
+    <article class="n idea role">
+      <div class="head"><h3>Arbiter</h3><span class="model">Claude · opus</span></div>
+      <span class="track">Technical track · §19 · after the measure</span>
+      <p class="job">After a second review FAIL, picks one option from a fixed list (scoped rework, waiver, third review, follow-up, cancel, human). Code applies the ruling; you can overrule it in the delivery report.</p>
+      <dl><dt>skills</dt><dd>intent-driven-development, reality-checker, code-review (decision tree), architecture-decision-records, council (ECC, to copy)</dd>
+      <dt>never</dt><dd>changes scope or features, rules on implementation details without a code reference</dd></dl>
     </article>
 
     <article class="n defined role">
@@ -519,6 +536,7 @@ footer{color:var(--muted);font-size:12.5px;display:grid;gap:4px}
     <div class="n built"><span class="step">4a</span><span class="t">Agent column</span><span class="d">done: built to test Part 4; reload one agent, skill switches</span><span class="ref">§4a</span></div>
     <div class="n defined"><span class="step">6</span><span class="t">Touchpoints, checkpoint, stop rules</span><span class="d">in build, to ship 30 Oct. Done: escalation, radius by rule, merge message, independent second review, lead briefing and digest, state summary, waits-for-you list, trust boundary. Left: request Kind (P6-02), delivery report, checkpoint, flow report, closing; then your live check and the merge into main. Plan check dropped; triage field, review tools and model routing in the backlog</span><span class="ref">§6</span></div>
     <div class="n planned"><span class="step">20</span><span class="t">Test throughput</span><span class="d">first after Part 6: low tickets run the affected tests, high keep the full suite; one staging suite per batch with a bisect; no duplicate run; measure, then faster tests, maybe two suites at once</span><span class="ref">§20</span></div>
+    <div class="n planned"><span class="step">21</span><span class="t">Weekly retrospective</span><span class="d">after Part 20: code collects a week of evidence; a read-only stage checks earlier improvements (keep or revert) and proposes at most 3 changes with a target measure; you approve</span><span class="ref">§21</span></div>
     <div class="n planned"><span class="step">12</span><span class="t">Hub-first, browser, Linux</span><span class="d">after Part 6: hub serves the UI, terminal layer into the hub, browser access, sign-in for internet access, pairing, Linux</span><span class="ref">§12</span></div>
     <div class="n planned"><span class="step">14</span><span class="t">UI redesign</span><span class="d">after Part 12, from design/mockups (done 28 Oct): top bar, section tabs, every screen on desktop and phone, dark and light; WCAG 2.2 AA</span><span class="ref">§14</span></div>
     <div class="n planned"><span class="step">5</span><span class="t">Delivery and backup</span><span class="d">after Part 14: internal remote, Deliver step, leak gate, hourly backup</span><span class="ref">§5</span></div>

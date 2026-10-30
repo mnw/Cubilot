@@ -32,11 +32,11 @@ A spec-review PASS SHALL write `stage.passed` with verdict `PASS` and one `ticke
 
 ### Requirement: The hub refuses a third spec review from a non-human sender
 
-The hub SHALL refuse a spec review handoff with 409 when the sender is not the human and the request has two or more spec FAIL verdicts since its last PASS in the room, unless an applied arbiter ruling grants that review. The error text SHALL name the count and say "the human must send this review". The hub SHALL NOT record a handoff, a stage or an event. A spec review from the human SHALL name `ticket_ids` and SHALL take the room of those tickets (see "A spec review is a stage of the request"). A PASS SHALL reset the count.
+The hub SHALL refuse a spec review handoff with 409 when the sender is not the human and the request has two or more spec FAIL verdicts since its last PASS in the room. The error text SHALL name the count and say "the human must send this review". The hub SHALL NOT record a handoff, a stage or an event. A spec review from the human SHALL name `ticket_ids` and SHALL take the room of those tickets (see "A spec review is a stage of the request"). A PASS SHALL reset the count.
 
 #### Scenario: Third review from the Orchestrator
 
-- **GIVEN** the request `r-1` has two FAIL verdicts since its last PASS and no ruling
+- **GIVEN** the request `r-1` has two FAIL verdicts since its last PASS
 - **WHEN** the Orchestrator sends a spec review of `r-1`
 - **THEN** the hub answers 409 with the count and "the human must send this review"
 - **AND** the handoff, stage and event counts do not change
@@ -49,39 +49,14 @@ The hub SHALL refuse a spec review handoff with 409 when the sender is not the h
 - **AND** the stored handoff room is `cubilot`
 - **AND** the first message says "This is spec review 3 of this request since its last PASS."
 
-#### Scenario: Arbiter ruling grants the review
-
-- **GIVEN** the request `r-1` has two FAIL verdicts and an applied ruling `rework` of the arbiter
-- **WHEN** the Orchestrator sends a spec review of `r-1`
-- **THEN** the hub creates a stage and the grant is spent
-- **AND** a second spec review from the Orchestrator gets 409
-
 #### Scenario: PASS resets the gate
 
 - **GIVEN** the request `r-1` had two FAIL verdicts and then a PASS
 - **WHEN** the Orchestrator sends a spec review of `r-1`
 - **THEN** the hub creates a stage
 
-### Requirement: The Needs-you area keeps a request with two FAILs while a newer review is open
-
-The hub SHALL list a request with two or more FAIL verdicts since its last PASS in the "Needs you" area only when its arbiter ruling is `escalated` or `human`, or its arbiter stage failed. It SHALL keep the row while a newer spec review of it is open. A PASS SHALL remove the row.
-
-#### Scenario: Human review is open
-
-- **GIVEN** the request `r-1` has two FAIL verdicts, an escalated ruling, and the human's newer review of `r-1` is `running`
-- **THEN** the "Needs you" area lists `r-1`
-
-#### Scenario: Ruling applied
-
-- **GIVEN** the request `r-1` has two FAIL verdicts and an applied ruling
-- **THEN** the "Needs you" area does not list `r-1`
-
 ## REMOVED Requirements
 
 ### Requirement: The human approves a high-radius plan
 **Reason**: Part 6 item 11: a request of the human gets one Approve at the start, whatever its radius; a factory request needs one only with a high-radius ticket or a new feature.
 **Migration**: `plan-approval` ("An Approve records the approved scope") replaces it. The approve route keeps its path and its human-only rule.
-
-### Requirement: The second FAIL goes to the human
-**Reason**: Part 6 item 11: the arbiter decides after two FAILs.
-**Migration**: `arbiter` ("The hub starts the arbiter") replaces it. The human gets a Needs-you line only through `human-escalation`.

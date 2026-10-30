@@ -64,7 +64,7 @@ const headCache = new Map<string, { at: number; head: string | null }>();
 const ancestorCache = new Map<string, boolean>();
 
 /** Runs git with a fixed argument list and no shell. Never throws. */
-function git(project: string, args: string[]): { code: number | null; out: string } {
+export function git(project: string, args: string[]): { code: number | null; out: string } {
   try {
     const r = Bun.spawnSync(["git", "-C", project, ...args], { stdout: "pipe", stderr: "pipe", timeout: GIT_TIMEOUT_MS });
     return { code: r.exitCode, out: r.stdout.toString().trim() };

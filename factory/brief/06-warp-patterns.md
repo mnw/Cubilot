@@ -510,6 +510,8 @@ The Orchestrator checks each open `blocked_by` against rule 1 and removes each l
 
 ### 12. Learning from the human's corrections
 
+Folded into Part 21 (weekly retrospective), 2026-10-30.
+
 Skill: `.agents/skills/improve-review-pr/SKILL.md`. A daily job reads how humans reacted to automated review comments. It opens a change to the review skill when it finds knowledge that the reviewer must keep.
 
 For the factory: when the human overrules a Validator or Reviewer verdict, record it with the reason. A scheduled job proposes changes to the role file or the skills. The human approves each change.
