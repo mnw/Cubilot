@@ -36,13 +36,13 @@ function seedDecision(id: string, over: Record<string, unknown>) {
   );
 }
 const seedEvent = (id: string, kind: string, at: number) => db.run("INSERT INTO events (entity_id, kind, actor, payload_json, at_ms) VALUES (?,?,?,?,?)", [id, kind, "boss", "{}", at]);
-function seedFail(ticketId: string, findings: number) {
+function seedFail(ticketId: string, findings: number, role = "validator", from = "validator-1") {
   const sid = `s_h7${++hseq}`;
-  db.run("INSERT INTO stage (id, ticket_id, role, attempt, status, verdict, created_seq, updated_seq, version) VALUES (?,?,?,?,?,?,?,?,?)", [sid, ticketId, "validator", 1, "failed", "FAIL", 900 + hseq, 900 + hseq, 1]);
+  db.run("INSERT INTO stage (id, ticket_id, role, attempt, status, verdict, session, created_seq, updated_seq, version) VALUES (?,?,?,?,?,?,?,?,?,?)", [sid, ticketId, role, 1, "failed", "FAIL", "validator-1", 900 + hseq, 900 + hseq, 1]);
   const hid = `h_h7${hseq}`;
   db.run(
     "INSERT INTO handoffs (id, from_agent, to_agent, task, context_json, status, created_at_ms, expires_at_ms) VALUES (?,?,?,?,?,?,?,?)",
-    [hid, "validator-1", "Orchestrator", "result", JSON.stringify({ stage_id: sid, ticket_id: ticketId, verdict: "FAIL", findings: Array.from({ length: findings }, (_, i) => ({ severity: "blocking", text: `f${i}` })) }), "accepted", 1, 9999999999999],
+    [hid, from, "Orchestrator", "result", JSON.stringify({ stage_id: sid, ticket_id: ticketId, verdict: "FAIL", findings: Array.from({ length: findings }, (_, i) => ({ severity: "blocking", text: `f${i}` })) }), "accepted", 1, 9999999999999],
   );
   return hid;
 }
@@ -76,6 +76,16 @@ describe("GET /rooms/<room>/decisions", () => {
     expect(c.options.filter((o: any) => o.recommended).map((o: any) => o.id)).toEqual(["A"]);
     expect(c.fail_history).toEqual([{ handoff_id: failA, findings: 2 }, { handoff_id: failB, findings: 0 }]);
     expect(typeof c.asked_at_ms).toBe("number");
+  });
+
+  test("FAIL history counts only result handoffs sent by the session of a validator stage", async () => {
+    const t = await ticket();
+    const ok = seedFail(t, 1);
+    seedFail(t, 3, "validator", "someone-else");
+    seedFail(t, 3, "worker");
+    const id = await lead({ ticket_id: t, request_id: undefined });
+    const c = (await cards()).find((x) => x.id === id)!;
+    expect(c.fail_history).toEqual([{ handoff_id: ok, findings: 1 }]);
   });
 
   test("a feature decision is an approve card", async () => {
@@ -124,6 +134,8 @@ describe("GET /rooms/<room>/decisions", () => {
 
   test("an invalid room, state or since gets 400", async () => {
     expect((await list("", "bad%20room!")).status).toBe(400);
+    expect((await list("", "%")).status).toBe(400);
+    expect((await list("", "bad%E0%A4%A")).status).toBe(400);
     expect((await list("?state=nope")).status).toBe(400);
     expect((await list("?state=applied&since=abc")).status).toBe(400);
   });

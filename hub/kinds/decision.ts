@@ -313,8 +313,10 @@ function buildCard(db: Database, d: DecisionSnapshot): DecisionCard {
   const fails = db
     .query<{ id: string; c: string | null }, [string]>(
       `SELECT h.id, h.context_json AS c FROM handoffs h
+        JOIN stage s ON s.id = json_extract(h.context_json, '$.stage_id')
         WHERE json_extract(h.context_json, '$.verdict') = 'FAIL'
-          AND json_extract(h.context_json, '$.stage_id') IN (SELECT id FROM stage WHERE ticket_id IN (SELECT value FROM json_each(?1)))
+          AND s.role = 'validator' AND s.session IS NOT NULL AND h.from_agent = s.session
+          AND s.ticket_id IN (SELECT value FROM json_each(?1))
         ORDER BY h.created_at_ms, h.rowid`,
     )
     .all(ids)
@@ -522,7 +524,8 @@ export function createDecisionKind(db: Database): DecisionKind {
       path: /^\/rooms\/([^/]+)\/decisions$/,
       auth: "read",
       handler: (req, _cap, params) => {
-        const room = decodeURIComponent(params.id);
+        let room: string;
+        try { room = decodeURIComponent(params.id); } catch { return Response.json({ error: "invalid room" }, { status: 400 }); }
         if (!validRoomLabel(room)) return Response.json({ error: "invalid room" }, { status: 400 });
         const q = new URL(req.url).searchParams;
         const state = q.get("state");
