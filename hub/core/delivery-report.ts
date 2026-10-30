@@ -15,6 +15,25 @@ const SHA_RE = /^[0-9a-f]{40}$/;
 
 type TicketRow = { id: string; title: string; status: string; blast_radius: "low" | "high"; acceptance_criteria: string; request_id: string };
 
+/** One check of a delivery (H3): a numbered line of a ticket's acceptance criteria. check_id is `<ticket_id>#<n>`; a ticket with no numbered line has one check, #1, with the whole text. */
+export type CheckRow = { check_id: string; ticket_id: string; text: string };
+
+export function checkRows(ticketId: string, criteria: string): CheckRow[] {
+  const rows: CheckRow[] = [];
+  for (const m of criteria.matchAll(/^\s*(\d+)\.\s+(.*)$/gm)) rows.push({ check_id: `${ticketId}#${m[1]}`, ticket_id: ticketId, text: m[2].trim() });
+  return rows.length ? rows : [{ check_id: `${ticketId}#1`, ticket_id: ticketId, text: criteria.trim() }];
+}
+
+export type CheckMark = {
+  check_id: string;
+  ticket_id: string;
+  text: string;
+  mark: "works" | "problem" | null;
+  note: string | null;
+  attachments: { url: string; name: string }[];
+  marked_at_ms: number | null;
+};
+
 export type DeliveryReport = {
   request_id: string;
   origin: string;
@@ -30,6 +49,8 @@ export type DeliveryReport = {
     high_radius: { ticket_id: string; pass_handoffs: string[]; merge_message_incomplete: boolean }[];
     test_counts: { commit: string; pass: number | null; fail: number | null } | typeof NO_LOG;
     live_check: { ticket_id: string; steps: string } | null;
+    /** Every check of every done ticket with its last mark (H3). */
+    marks: CheckMark[];
   };
 };
 
@@ -129,6 +150,20 @@ export function buildDeliveryReport(db: Database, room: string, requestId: strin
   const newest = merges.find((m) => own.some((t) => m.subject.startsWith(`Merge ticket/${t.id}:`)));
   const live = own.find((t) => t.title.includes("[human]"));
 
+  const markRows = db
+    .query<{ check_id: string; status: string; note: string; attachments: string; marked_at_ms: number }, [string, string]>(
+      "SELECT check_id, status, note, attachments, marked_at_ms FROM delivery_checks WHERE room = ? AND request_id = ?",
+    )
+    .all(room, requestId);
+  const markOf = new Map(markRows.map((m) => [m.check_id, m]));
+  const marks: CheckMark[] = own
+    .filter((t) => t.status === "done")
+    .flatMap((t) => checkRows(t.id, t.acceptance_criteria))
+    .map((c) => {
+      const m = markOf.get(c.check_id);
+      return { ...c, mark: (m?.status as "works" | "problem" | undefined) ?? null, note: m?.note ?? null, attachments: m ? (JSON.parse(m.attachments) as { url: string; name: string }[]) : [], marked_at_ms: m?.marked_at_ms ?? null };
+    });
+
   return {
     kind: "ok",
     report: {
@@ -143,6 +178,7 @@ export function buildDeliveryReport(db: Database, room: string, requestId: strin
         high_radius: highRadius,
         test_counts: newest ? testCounts(newest.sha) : NO_LOG,
         live_check: live ? { ticket_id: live.id, steps: live.acceptance_criteria } : null,
+        marks,
       },
     },
   };

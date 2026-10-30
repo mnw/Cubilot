@@ -494,6 +494,23 @@ export function queueDraftInTx(db: Database, cap: HubCapabilities, ticketId: str
   return { snapshot, entry: ticketEntry(db, snapshot, "ticket.promoted", actor, false, roomLead(cap, snapshot.room), { by: actor }) };
 }
 
+/**
+ * Moves a `done` ticket back to `queued` for a delivery check the human marked as a problem (H3): one `ticket.queued` event
+ * and one row update. It opens no transaction: it runs inside the transaction of the mark. Any other status is left alone
+ * (returns null). The caller emits the entry after the commit.
+ */
+export function reopenDoneInTx(db: Database, ticketId: string, actor: string): SystemQueue {
+  const row = db.query<Record<string, unknown>, [string]>("SELECT * FROM tickets WHERE id = ?").get(ticketId);
+  if (!row) throw new Error(`reopen: no such ticket ${ticketId}`);
+  const prior = ticketDecl.rowToSnapshot(row);
+  if (prior.status !== "done") return null;
+  const now = Date.now();
+  const seq = insertEvent(db, ticketId, "ticket.queued", actor, { from: "done", to: "queued", reason: "delivery check problem" }, now);
+  db.run("UPDATE tickets SET status = 'queued', updated_at_ms = ?, version = ?, approval_request_id = NULL WHERE id = ?", [now, seq, ticketId]);
+  const snapshot: TicketSnapshot = { ...prior, status: "queued", updated_at_ms: now, version: seq, approval_request_id: null };
+  return { snapshot, entry: ticketEntry(db, snapshot, "ticket.update", actor, false) };
+}
+
 export type SystemClose = { snapshot: TicketSnapshot; entry: Entry } | null;
 
 /**
