@@ -32,7 +32,7 @@ import { roleHarness } from "../core/role-harness";
 import { roleModelFor, secondReviewModel } from "../core/role-models";
 import { metricsByRole, recordStageMetrics, stagesMissingMetrics, type Launch } from "../core/stage-metrics";
 import { makeSSE } from "../core/sse";
-import { assignBySystemInTx, closeReviewedBySystemInTx, notifyHeldDrafts, queueBySystemInTx, type HeldDraft } from "./ticket";
+import { assignBySystemInTx, closeReviewedBySystemInTx, queueBySystemInTx } from "./ticket";
 import type { CancelTraceCaller, CancelTraceInput } from "./cancel-trace";
 
 export type StageStatus = "queued" | "launching" | "running" | "retrying" | "passed" | "failed" | "cancelled";
@@ -1699,7 +1699,6 @@ export function createStageRuntime(
         ).get(prior.request_id ?? "", room)!.n > 0
       : false;
     const queuedNow: Array<NonNullable<ReturnType<typeof queueBySystemInTx>>> = [];
-    const held: HeldDraft[] = [];
     const stage = api.move(
       stageId,
       { to: "passed", verdict: "PASS" },
@@ -1709,14 +1708,13 @@ export function createStageRuntime(
         // A ticket that left `draft` meanwhile is skipped. With a high ticket in the request nothing moves.
         if (high) return;
         for (const { ticket_id } of scope) {
-          const q = queueBySystemInTx(db, cap, ticket_id, prior.request_id, held);
+          const q = queueBySystemInTx(db, cap, ticket_id, prior.request_id);
           if (q) queuedNow.push(q);
         }
       },
       () => {
         for (const q of queuedNow) cap.sse.emit(q.entry, { kind: "room", room: q.snapshot.room });
         if (queuedNow.length) cap.briefing.refresh();
-        if (room) notifyHeldDrafts(cap, room, held);
       },
     );
     for (const q of queuedNow) {
@@ -2211,7 +2209,25 @@ export function createStageRuntime(
         }
         if (REVIEW_ROLES.has(stage.role)) {
           if (typeof c.verdict !== "string" || !VERDICTS.has(c.verdict)) errors.push("context.verdict must be PASS or FAIL (upper case)");
-          if (!Array.isArray(c.findings)) errors.push("context.findings must be a list of {ticket_id, text}");
+          if (stage.role === "reviewer") {
+            // The Reviewer (writing chain): findings are {severity, text}; a PASS goes to the lead, a FAIL to the Writer.
+            let blocking = false;
+            if (!Array.isArray(c.findings)) errors.push("context.findings must be a list of {severity, text}");
+            else {
+              c.findings.forEach((f, i) => {
+                const o = f && typeof f === "object" ? (f as Record<string, unknown>) : null;
+                if (!o || (o.severity !== "blocking" && o.severity !== "suggestion")) errors.push(`context.findings[${i}].severity must be blocking or suggestion`);
+                if (!o || typeof o.text !== "string" || !o.text.trim()) errors.push(`context.findings[${i}].text must be a non-empty string`);
+                if (o?.severity === "blocking") blocking = true;
+              });
+            }
+            if (c.verdict === "PASS" && blocking) errors.push("a PASS must not have a blocking finding");
+            if (to !== undefined) {
+              const lead = leadOfRoom(roomOfStage(stage.id));
+              if (c.verdict === "PASS" && to !== lead) errors.push(`to: a Reviewer PASS must be sent to ${lead}, not to ${to}`);
+              if (c.verdict === "FAIL" && to !== `${ROLE_RECIPIENT_PREFIX}writer`) errors.push(`to: a Reviewer FAIL must be sent with to_role "writer", not to ${to}`);
+            }
+          } else if (!Array.isArray(c.findings)) errors.push("context.findings must be a list of {ticket_id, text}");
           else {
             c.findings.forEach((f, i) => {
               const o = f && typeof f === "object" ? (f as Record<string, unknown>) : null;
