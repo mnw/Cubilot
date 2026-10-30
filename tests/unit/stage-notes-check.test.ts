@@ -1,7 +1,7 @@
 // context-pack 1.3: checkResult requires context.notes (non-empty, at most 400 words) on stage results, spec results included.
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { giveProject } from "../helpers/repo";
+import { giveProject, projectRepo } from "../helpers/repo";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createTicketKind } from "../../hub/kinds/ticket";
 import { createStageRuntime, notesError } from "../../hub/kinds/stage";
@@ -30,10 +30,25 @@ function makeEnv(spec = false) {
     : rt.api.create({ ticket_id: "t_0000000000000001", role: "writer" }, "system", cap);
   rt.api.move(s.id, { to: "launching", session: "s-1" }, "system", cap);
   rt.api.move(s.id, { to: "running" }, "system", cap);
+  // A writer result needs a new commit on ticket/<id>: the stage starts at the branch head and the result names a child of it.
+  let newCommit: string | undefined;
+  if (!spec) {
+    const git = (...a: string[]) => {
+      const r = Bun.spawnSync(["git", "-C", projectRepo(), ...a], { stdout: "pipe", stderr: "pipe" });
+      if (r.exitCode !== 0) throw new Error(`git ${a.join(" ")}: ${r.stderr.toString()}`);
+      return r.stdout.toString().trim();
+    };
+    const ref = "refs/heads/ticket/t_0000000000000001";
+    const head = Bun.spawnSync(["git", "-C", projectRepo(), "rev-parse", "--verify", "--quiet", ref]).exitCode === 0 ? git("rev-parse", ref) : git("rev-parse", "HEAD");
+    db.run("UPDATE stage SET start_commit = ? WHERE id = ?", [head, s.id]);
+    newCommit = git("commit-tree", `${head}^{tree}`, "-p", head, "-m", "work");
+    git("update-ref", ref, newCommit);
+  }
   const base: Record<string, unknown> = spec
     ? { stage_id: s.id, review: "spec", request_id: "req-1", verdict: "PASS", findings: [], suggestions: [], questions_for_human: [] }
-    : { stage_id: s.id, ticket_id: "t_0000000000000001" };
-  const check = (notes?: unknown) => rt.hooks.checkResult("s-1", notes === undefined ? base : { ...base, notes }, cap, spec ? "Orchestrator" : "alice");
+    : { stage_id: s.id, ticket_id: "t_0000000000000001", commit: newCommit };
+  const to = spec ? "Orchestrator" : "role:editor";
+  const check = (notes?: unknown) => rt.hooks.checkResult("s-1", notes === undefined ? base : { ...base, notes }, cap, to);
   const rejected = () => emitted.filter((x) => x.e.kind === "stage.rejected");
   return { rt, db, cap, stage: s.id, check, rejected, status: () => rt.api.load(s.id)!.status };
 }
@@ -67,7 +82,7 @@ for (const spec of [false, true]) {
     });
     test("notes do not hide other errors: a wrong stage_id and missing notes give both", () => {
       const e = makeEnv(spec);
-      const errors = e.rt.hooks.checkResult("s-1", { ...(spec ? { review: "spec", request_id: "req-1", verdict: "PASS", findings: [], suggestions: [], questions_for_human: [] } : {}), stage_id: "s_0000000000000000" }, e.cap, spec ? "Orchestrator" : "alice")!;
+      const errors = e.rt.hooks.checkResult("s-1", { ...(spec ? { review: "spec", request_id: "req-1", verdict: "PASS", findings: [], suggestions: [], questions_for_human: [] } : {}), stage_id: "s_0000000000000000" }, e.cap, spec ? "Orchestrator" : "role:editor")!;
       expect(errors.some((x) => x.includes("stage_id"))).toBe(true);
       expect(errors.some((x) => x.includes("context.notes"))).toBe(true);
     });
