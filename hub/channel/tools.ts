@@ -406,6 +406,26 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
     },
   },
   {
+    name: "checkpoint_note",
+    description:
+      "Room lead only. Answer a checkpoint note request from the hub: send the note for your restart, at most 200 words (the hub cuts a longer note). Call it once, after the hub asks. Then end your turn.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: { type: "string", minLength: 1, maxLength: 20000, description: "The note: open points that are not on the board." },
+      },
+      required: ["text"],
+    },
+    handler: async (ctx, args) => {
+      const resp = await authedPost(ctx.host, ctx.hubEnv, `/agents/${encodeURIComponent(ctx.agent)}/checkpoint-note`, {
+        by: ctx.agent,
+        text: String(args.text ?? ""),
+      });
+      if (resp.status !== 200) toolError(resp, "checkpoint_note");
+      return { content: [{ type: "text", text: "note stored" }] };
+    },
+  },
+  {
     name: "ack_permission",
     description:
       "Submit a verdict on a pending Claude Code permission request. Any agent may ack any request (the hub accepts the first verdict; later ones are idempotent or rejected with 409). Returns 'verdict_applied=<allow|deny> resolved_by=<agent> your_verdict_won=<true|false>' so delegation logic can tell whether the caller's verdict transitioned the state or arrived after peer/human resolution. In Claude Code this tool runs without a prompt in default mode; a user ask or deny rule on it refuses the call, because the mod has no approval dialog.",
@@ -452,6 +472,29 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
     },
   },
   {
+    name: "create_request",
+    description:
+      "Room lead only. Create the request that groups the tickets of one plan. Create the request before its tickets: a ticket with an unknown request_id is refused. Origin is human unless you set factory. A factory request names its source (a ticket, decision or stage id of your room) and its parent_request_id when the source belongs to a request. Only the human changes the origin later.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        request_id: { type: "string", pattern: "^[A-Za-z0-9._-]{1,64}$", description: "The label of the request." },
+        origin: { type: "string", enum: ["human", "factory"], description: "Default human." },
+        features: { type: "array", maxItems: 50, items: { type: "string", minLength: 1, maxLength: 200 }, description: "Optional list of features the request adds." },
+        source: { type: "string", description: "Required for origin factory: a ticket, decision or stage id of your room." },
+        parent_request_id: { type: "string", pattern: "^[A-Za-z0-9._-]{1,64}$", description: "The request of the source, when it has one." },
+      },
+      required: ["request_id"],
+    },
+    handler: async (ctx, args) => {
+      const body: Record<string, unknown> = { by: ctx.agent, request_id: args.request_id };
+      for (const k of ["origin", "features", "source", "parent_request_id"]) if (args[k] !== undefined) body[k] = args[k];
+      const resp = await authedPost(ctx.host, ctx.hubEnv, "/requests", body);
+      if (resp.status !== 201) toolError(resp, "create_request");
+      return { content: [{ type: "text", text: `request_id=${String(args.request_id)}` }] };
+    },
+  },
+  {
     name: "create_ticket",
     description:
       "Create a work ticket in your room. Acceptance criteria are required: state what done means. Use status draft to hold a ticket back: a draft cannot be claimed and wakes no one until it moves to queued. Use request_id to group the tickets of one request, and blocked_by to list ticket ids that must be done before this ticket can be claimed. Use role to name the stage role that works the ticket first. The radius is set by the radius rule from the title, criteria and planning note: the stored blast_radius is never below the rule radius, and the room lead can raise it. Returns ticket_id.",
@@ -469,7 +512,7 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
         external_ref: { type: "string", description: "Optional opaque key from an outside tracker." },
         assignee: { type: "string", description: "Optional agent of your room that owns the ticket; it is woken once. Omit it to leave the ticket in the queue." },
         status: { type: "string", enum: ["draft", "queued"], description: "Default queued. A draft cannot be claimed and wakes no one." },
-        request_id: { type: "string", pattern: "^[A-Za-z0-9._-]{1,64}$", description: "Optional label that groups the tickets of one request." },
+        request_id: { type: "string", pattern: "^[A-Za-z0-9._-]{1,64}$", description: "Optional label that groups the tickets of one request. The request must exist: create it with create_request first. A ticket without request_id is queued only by the human." },
         role: { type: "string", enum: TICKET_ROLES, description: "Optional stage role that works the ticket first." },
         blocked_by: { type: "array", items: TICKET_ID_SCHEMA, maxItems: 20, description: "Optional ids of tickets of your room that must be done before this ticket can be claimed." },
         planning_note: { type: "string", minLength: 1, maxLength: 4000, description: "Optional agent notes (field planning_note): the facts a new agent session of this ticket needs. The stage start message shows them under \"## Agent notes\"." },

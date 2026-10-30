@@ -116,6 +116,42 @@ describe("launch queue and ack", () => {
   });
 });
 
+describe("input requests (P6-15)", () => {
+  test("an input names one session, is sent once, is not repeated after a reconnect and its ack ends it", async () => {
+    const e = makeEnv();
+    e.connect();
+    const id = e.rt.sendInput("Orchestrator", "/clear");
+    expect(e.sent).toEqual([{ id, kind: "input", session: "Orchestrator", text: "/clear" }]);
+    expect(e.rt.queue.ack(id, { result: "spawned" }, e.cap).status).toBe("ok");
+    expect(e.rt.queue.ack(id, { result: "spawned" }, e.cap).status).toBe("idempotent");
+    e.connect(); // a new shell connection: nothing is sent again
+    expect(e.sent).toHaveLength(1);
+    e.stop();
+  });
+
+  test("an input with no shell waits, is dropped by id, and is never held by a name reservation", () => {
+    const e = makeEnv();
+    const id = e.rt.sendInput("Orchestrator", "/clear");
+    expect(e.rt.queue.undelivered(id)).not.toBeNull();
+    expect(e.rt.dropInput(id)).toBe(true);
+    e.connect();
+    expect(e.sent).toEqual([]);
+    e.stop();
+  });
+
+  test("an error ack or a missing ack ends the input and changes no stage", async () => {
+    const e = makeEnv();
+    e.connect();
+    const id = e.rt.sendInput("Orchestrator", "/clear");
+    expect(e.rt.queue.ack(id, { result: "error", error: "unknown session: Orchestrator" }, e.cap).status).toBe("ok");
+    const id2 = e.rt.sendInput("Orchestrator", "/clear");
+    await sleep(ACK_MS * 3);
+    expect(e.rt.queue.ack(id2, { result: "spawned" }, e.cap).status).toBe("conflict"); // timed out: a late ack changes nothing
+    expect(e.rt.queue.size().awaitingAck).toBe(0);
+    e.stop();
+  });
+});
+
 describe("the stage runtime releases the session from the launch record", () => {
   test("close ack releases the session", () => {
     const launchRecord = createLaunchRecord();
@@ -676,7 +712,8 @@ describe("only the stage logic queues launches", () => {
   test("inside stage.ts, a launch is queued only from enqueueLaunch (the other pushes are closes: 5.2, 5.3)", () => {
     const src = readFileSync(join(import.meta.dir, "../../hub/kinds/stage.ts"), "utf8");
     const pushes = [...src.matchAll(/queue\.push\(/g)].length;
-    expect(pushes).toBe(7);
+    expect(pushes).toBe(8);
+    expect([...src.matchAll(/queue\.push\(\{[^}]*kind: "input"/g)]).toHaveLength(1); // the checkpoint /clear (P6-15): text for one session, no launch
     expect([...src.matchAll(/queue\.push\(\{[^}]*kind: "close"/g)]).toHaveLength(6); // turn end (5.2), stop (5.3), lost turn end and start sweep (5.3b), cancel and late launch end of a cancelled stage (G4)
     const fn = src.slice(src.indexOf("function enqueueLaunch("), src.indexOf("function passSpecStage("));
     expect(fn).toContain("queue.push(req)");

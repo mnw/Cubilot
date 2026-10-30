@@ -77,7 +77,7 @@ describe("POST /requests/<room>/<request_id>/approve", () => {
     expect((await postJson(hub, "/requests/ap/rq-4/approve", { by: "system" })).status).toBe(400);
   });
 
-  test("a failure in the middle rolls every ticket back (one transaction)", async () => {
+  test("a failure in the middle rolls every ticket back (one queue transaction); the Approve itself stays (its own transaction)", async () => {
     const a = await draft("rq-5");
     const b = await draft("rq-5");
     const db = new Database(hub.ledgerPath);
@@ -87,7 +87,9 @@ describe("POST /requests/<room>/<request_id>/approve", () => {
       const res = await authedFetch(hub, "/requests/ap/rq-5/approve", { method: "POST", body: JSON.stringify({ by: hub.humanName }) });
       expect(res.status).toBeGreaterThanOrEqual(500);
       expect([status(a), status(b)]).toEqual(["draft", "draft"]);
-      expect(rows("SELECT COUNT(*) AS n FROM events")[0].n).toBe(events0);
+      // Only the request.approved event is new: it is written before the queue transaction.
+      expect(rows("SELECT COUNT(*) AS n FROM events")[0].n).toBe(events0 + 1);
+      expect(rows("SELECT kind FROM events ORDER BY seq DESC LIMIT 1")[0].kind).toBe("request.approved");
     } finally {
       db.exec("DROP TRIGGER rq5_boom");
       db.close();

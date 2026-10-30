@@ -6,10 +6,12 @@
 import type { Database } from "bun:sqlite";
 import type { KindModule } from "../core/types";
 import { createCancelTraceKind } from "./cancel-trace";
+import { createCheckpointKind } from "./checkpoint";
 import { createDecisionKind } from "./decision";
 import { createHandoffKind, createSystemHandoff } from "./handoff";
 import { createInterruptKind } from "./interrupt";
 import { createPermissionKind } from "./permission";
+import { createRequestKind } from "./request";
 import { buildPack } from "../core/context-pack";
 import type { LaunchRecord } from "../core/launch-record";
 import { createStageRuntime } from "./stage";
@@ -55,8 +57,12 @@ export function buildKinds(db: Database | null, launchRecord?: LaunchRecord): re
     createInterruptKind(db),
     createPermissionKind(db),
     createTicketKind(db, stage.hooks),
+    // After the ticket kind: its migration reads the tickets table.
+    createRequestKind(db),
     stage.module,
     cancelTrace,
     createDecisionKind(db),
+    // The checkpoint asks the shell for a `/clear` through the stage runtime, the one owner of the launch queue.
+    createCheckpointKind(db, { sendInput: stage.sendInput, dropInput: stage.dropInput }),
   ];
 }

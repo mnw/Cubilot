@@ -877,6 +877,9 @@ label[for="ticket-filter-request"] { color: var(--text); }
 .plan-text { flex: 1; min-width: 0; }
 .plan-title { font-size: var(--fs-sm); color: var(--text); font-weight: 600; }
 .plan-why { margin-top: var(--sp-2); font-size: var(--fs-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-origin, .plan-features, .plan-changes-head { margin-top: var(--sp-2); font-size: var(--fs-xs); color: var(--text-muted); }
+.plan-tickets, .plan-changes { margin: var(--sp-2) 0 0; padding-left: 1.2em; font-size: var(--fs-xs); color: var(--text-muted); }
+.plan-ticket.high { font-weight: 600; }
 .plan-approve { flex: none; background: var(--orange); color: var(--bg-inset); border: none; font-weight: 600; padding: var(--sp-4) var(--sp-12); border-radius: var(--radius-md); }
 .plan-approve:hover:not(:disabled) { background: var(--orange-hover); }
 .plan-approve:disabled { opacity: 0.5; cursor: default; }

@@ -201,7 +201,7 @@ describe("decision kind: routes through the real hub", () => {
     open.push(await registerAgent(hub, "boss", { room: "r1" }));
     open.push(await registerAgent(hub, "worker", { room: "r1" }));
     expect((await postJson(hub, "/rooms/r1/lead", { by: hub.humanName, agent: "boss" })).status).toBe(200);
-    const t = await postJson(hub, "/tickets", { by: "boss", title: "Ship", acceptance_criteria: "Tests pass.", blast_radius: "low", priority: "high" });
+    const t = await postJson(hub, "/tickets", { by: "boss", title: "Ship", acceptance_criteria: "Tests pass.", blast_radius: "low", priority: "high", status: "draft" });
     ticket = (t.json as { snapshot: { id: string } }).snapshot.id;
   });
   afterAll(async () => {
@@ -367,7 +367,7 @@ describe("decision kind: rework 3 (h_0b38ad1b593d35f4)", () => {
     try {
       const boss = await registerAgent(hub, "boss", { room: "r1" });
       expect((await postJson(hub, "/rooms/r1/lead", { by: hub.humanName, agent: "boss" })).status).toBe(200);
-      const t = await postJson(hub, "/tickets", { by: "boss", title: "Ship", acceptance_criteria: "Tests pass.", blast_radius: "low", priority: "high" });
+      const t = await postJson(hub, "/tickets", { by: "boss", title: "Ship", acceptance_criteria: "Tests pass.", blast_radius: "low", priority: "high", status: "draft" });
       const ticket = (t.json as { snapshot: { id: string } }).snapshot.id;
       const id = ((await postJson(hub, "/decisions", { by: "boss", ...escalation({ ticket_id: ticket }) })).json as { id: string }).id;
       const side = new Database(hub.ledgerPath);

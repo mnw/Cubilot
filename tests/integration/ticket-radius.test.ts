@@ -93,7 +93,7 @@ beforeEach(() => {
 });
 const lead = () => t.call("POST", "/rooms/r1/lead", { by: HUMAN, agent: "bob" });
 const create = async (over: Record<string, unknown> = {}) => {
-  const r = await t.call("POST", "/tickets", { by: "alice", title: "Fix login", acceptance_criteria: "Login works.", blast_radius: "low", ...over });
+  const r = await t.call("POST", "/tickets", { by: "alice", title: "Fix login", acceptance_criteria: "Login works.", blast_radius: "low", status: "draft", ...over });
   expect(r.status).toBe(201);
   return r.json.snapshot;
 };
