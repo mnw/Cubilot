@@ -55,6 +55,7 @@ const ROUTES: R[] = [
   { method: "POST", path: "/requests/sw/req-1/approve", body: {} },
   { method: "POST", path: "/requests", body: { request_id: "req-1" } },
   { method: "POST", path: "/requests/sw/req-1/edit", body: { features: ["x"] } },
+  { method: "POST", path: "/requests/sw/req-1/delivery/checks", body: { check_id: `${T}#1`, mark: "works" } },
   { method: "POST", path: "/stages/s_0123456789abcdef/turn-end", body: {} },
   { method: "POST", path: "/checkpoints", body: { room: "sw" } },
   { method: "POST", path: "/agents/sw-alice/turn-end", body: {} },

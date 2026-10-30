@@ -1481,7 +1481,12 @@ export function createStageRuntime(
     // The ticket's own role starts once: only while no stage of the ticket and that role exists. Its ready seq is the
     // newest ticket.queued event, else the ticket.created event of a ticket created as queued.
     if (t.role && isRole(t.role)) {
-      if (!stages.some((s) => s.role === t.role && s.status !== "cancelled")) {
+      // A delivery-check problem (H3) reopens the ticket: it needs a new stage of its role after that move, so old PASS evidence is not reused.
+      const reopened =
+        db
+          .query<{ seq: number | null }, [string]>("SELECT MAX(seq) AS seq FROM events WHERE entity_id = ? AND kind = 'ticket.queued' AND json_extract(payload_json, '$.reason') = 'delivery check problem'")
+          .get(ticketId)!.seq ?? 0;
+      if (!stages.some((s) => s.role === t.role && s.status !== "cancelled" && s.created_seq > reopened)) {
         const q = db
           .query<{ seq: number | null }, [string]>("SELECT MAX(seq) AS seq FROM events WHERE entity_id = ? AND kind = 'ticket.queued'")
           .get(ticketId)!.seq;

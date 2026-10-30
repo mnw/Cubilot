@@ -11,6 +11,7 @@ import { insertEvent } from "../../hub/core/events";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createLaunchRecord } from "../../hub/core/launch-record";
 import { buildDeliveryReport } from "../../hub/core/delivery-report";
+import { createDeliveryCheckKind } from "../../hub/kinds/delivery-check";
 import { createInterruptKind } from "../../hub/kinds/interrupt";
 import { createPermissionKind } from "../../hub/kinds/permission";
 import { createRequestKind } from "../../hub/kinds/request";
@@ -38,6 +39,7 @@ function makeEnv() {
   const interrupts = createInterruptKind(db, launchRecord);
   interrupts.migrate(db);
   createRequestKind(db).migrate(db);
+  createDeliveryCheckKind(db).migrate(db);
   const rt = createStageRuntime(db, { ackMs: 60_000, launchRecord });
   rt.module.migrate(db);
   giveProject(db, "r1");

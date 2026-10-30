@@ -159,6 +159,29 @@ describe("delivery checks", () => {
     expect((await mark(request_id, { check_id: `${ticket}#1`, mark: "problem", note: "three" })).status).toBe(409);
   });
 
+  test("a problem mark needs new work: old Worker and Validator stages do not carry over", async () => {
+    const { request_id, ticket } = await delivered();
+    const old = sql((db) => {
+      db.run("UPDATE tickets SET role = 'worker' WHERE id = ?", [ticket]);
+      const base = db.query<{ m: number }, []>("SELECT COALESCE(MAX(seq), 0) AS m FROM events").get()!.m;
+      const ins = (id: string, role: string, verdict: string | null, seq: number) =>
+        db.run(
+          "INSERT INTO stage (id, ticket_id, request_id, review, verdict, role, attempt, status, session, slot_seq, created_seq, updated_seq, version) VALUES (?, ?, NULL, NULL, ?, ?, 1, 'passed', ?, NULL, ?, ?, ?)",
+          [id, ticket, verdict, role, `${role}-old`, seq, seq, seq],
+        );
+      ins("s_00000000000000d1", "worker", null, base);
+      ins("s_00000000000000d2", "validator", "PASS", base + 1);
+      ins("s_00000000000000d3", "validator", "PASS", base + 2);
+      return base + 2;
+    });
+    const passes = async () => ((await getJson(hub, `/tickets?room=${ROOM}&status=all`)).json as any[]).find((t) => t.id === ticket).validator_passes;
+    expect(await passes()).toBe(2);
+    expect((await mark(request_id, { check_id: `${ticket}#1`, mark: "problem", note: "broken" })).status).toBe(200);
+    const fresh = sql((db) => db.query<{ role: string; status: string }, [string, number]>("SELECT role, status FROM stage WHERE ticket_id = ? AND created_seq > ?").all(ticket, old));
+    expect(fresh.filter((s) => s.role === "worker")).toHaveLength(1);
+    expect(await passes()).toBe(0);
+  });
+
   test("an old ledger without the delivery_checks table opens without loss", async () => {
     const h = await spawnHub();
     try {
