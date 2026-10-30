@@ -198,6 +198,18 @@ function criteriaEditsAfter(db: Database, room: string, requestId: string, appro
     });
 }
 
+/** The ids of the tickets whose newest staging merge commit is an ancestor of main. Read-only git. */
+export function ticketsMergedIntoMain(project: string | null | undefined, ticketIds: string[]): Set<string> {
+  const out = new Set<string>();
+  if (!project || ticketIds.length === 0) return out;
+  const merges = stagingMerges(project);
+  for (const id of ticketIds) {
+    const m = mergeOf(merges, id);
+    if (m && git(project, ["merge-base", "--is-ancestor", m.sha, "refs/heads/main"]) !== null) out.add(id);
+  }
+  return out;
+}
+
 /**
  * The delivered requests of a room with a merge commit on staging that is not on main yet: one Needs-you line each.
  * Two git reads for the whole room: the staging merges and `main..staging`.
