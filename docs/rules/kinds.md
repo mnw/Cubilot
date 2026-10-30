@@ -84,3 +84,7 @@ Hub state-machine kinds, tickets, stages, launches, rooms and ledger transaction
 - **The stable block carries no per-stage field.** `renderStable` in `hub/core/primer.ts` returns `docs/PRIMER.md` and the Nutshell only. No stage, time, session or worktree field. The ticket block follows it and nothing follows the ticket block, so two stages of one room share the same first bytes.
 - **A metrics failure never changes a stage.** `hub/core/stage-metrics.ts` writes its row after the commit of `stage.passed` or `stage.failed`. A failed read or write logs one line.
 - **Details:** `docs/PROTOCOL.md` sections "Context pack" and "Stage metrics".
+
+## The checkpoint `/clear` goes to one named session
+
+- **The checkpoint `/clear` goes to one named session.** The hub queues an `input {session, text}` request through `sendInput` of the stage runtime (the only owner of the launch queue). The shell writes one line to the PTY of that session only (`pty::write_input`, raw PTY). A change to that path needs `tests/integration/pty-plumbing.test.ts` "text reaches the named session and no other". The summary file is mode `0600` and the lead's `SessionStart` hook removes it. docs/PROTOCOL.md "Checkpoints".

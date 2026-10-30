@@ -474,6 +474,13 @@ export type StageRuntime = {
    * stop. Time counts from the first check that saw the stage running. The timer calls it; tests call it with their own clock.
    */
   sweep(cap: HubCapabilities, now?: number): void;
+  /**
+   * Queues text for the PTY of one named session (P6-15, the checkpoint `/clear`). Returns the request id. The text is
+   * written once, never sent again after a reconnect, and never to another session.
+   */
+  sendInput(session: string, text: string): string;
+  /** Removes an input the shell never received. True when it was dropped. */
+  dropInput(id: string): boolean;
 };
 
 export const NO_PROJECT_FOLDER = "room has no project folder: set it in New factory room";
@@ -2374,7 +2381,12 @@ export function createStageRuntime(
       }
     },
   };
-  return { module, api, evaluateStages, hooks, enqueueLaunch, queue, passSpecStage, sweep, pendingRoleModelLaunches: () => roleModelLaunches.size, metricsIdle: async () => void (await Promise.all([...pendingMetrics])) };
+  const sendInput = (session: string, text: string): string => {
+    const id = mintLaunchId();
+    queue.push({ id, kind: "input", session, text });
+    return id;
+  };
+  return { module, api, evaluateStages, hooks, enqueueLaunch, queue, passSpecStage, sweep, sendInput, dropInput: (id: string) => queue.drop(id), pendingRoleModelLaunches: () => roleModelLaunches.size, metricsIdle: async () => void (await Promise.all([...pendingMetrics])) };
 }
 
 export function createStageKind(db: Database): KindModule {

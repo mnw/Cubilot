@@ -36,7 +36,7 @@ Chatbridge mod, pi extension, skills, Claude Code version and hook rules.
 
 ## The mod's tool hook must ask `$.tool.check` before running a chatbridge tool
 
-- **The mod's tool hook must ask `$.tool.check` before running a chatbridge tool.** It answers the call itself, so Claude Code's permission step beneath it never runs. `deny`, or an `ask` that comes from a user settings rule, refuses the call (a mod tool has no approval dialog — failing closed honours the rule); an `ask` from the permission mode alone runs the tool — so in `default` mode all sixteen chatbridge tools (the nine bridge tools plus `create_ticket`, `claim_ticket`, `transition_ticket`, `assign_ticket`, `attach_ticket_file`, `list_tickets`, `edit_ticket`) run without a prompt. Never remove this check: without it a user's ask/deny rules on `mcp__chatbridge__*` are silently bypassed.
+- **The mod's tool hook must ask `$.tool.check` before running a chatbridge tool.** It answers the call itself, so Claude Code's permission step beneath it never runs. `deny`, or an `ask` that comes from a user settings rule, refuses the call (a mod tool has no approval dialog — failing closed honours the rule); an `ask` from the permission mode alone runs the tool — so in `default` mode all seventeen chatbridge tools (the nine bridge tools plus `checkpoint_note`, `create_ticket`, `claim_ticket`, `transition_ticket`, `assign_ticket`, `attach_ticket_file`, `list_tickets`, `edit_ticket`) run without a prompt. Never remove this check: without it a user's ask/deny rules on `mcp__chatbridge__*` are silently bypassed.
 
 ## `PreToolUse` and `PostToolUse` hooks do not run for chatbridge tools
 
