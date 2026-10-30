@@ -226,6 +226,21 @@ describe("the first message", () => {
     expect(req.prompt).toContain(readFileSync(join(dir, "retro", "A", "2026-W46.json"), "utf8").trim());
   });
 
+  test("an earlier retrospective with no proposals hides the older proposals", () => {
+    const e = env();
+    e.db.run("INSERT INTO stage (id, review, role, status, room, retro_week) VALUES ('s_00000000000000a1', 'retro', 'retrospective', 'passed', 'A', '2026-W44')");
+    e.db.run("INSERT INTO stage (id, review, role, status, room, retro_week) VALUES ('s_00000000000000a2', 'retro', 'retrospective', 'passed', 'A', '2026-W45')");
+    const ins = (id: string, stage: string, ctx: object, t: number) =>
+      e.db.run("INSERT INTO handoffs (id, from_agent, to_agent, task, context_json, status, created_at_ms, expires_at_ms) VALUES (?, 'retrospective-1', 'Orchestrator', 'result', ?, 'accepted', ?, ?)", [id, JSON.stringify({ stage_id: stage, ...ctx }), at(t), at(t + 1)]);
+    ins("h_w44", "s_00000000000000a1", { proposals: [{ title: "As the lead, I want old proposal" }] }, 1);
+    ins("h_w45", "s_00000000000000a2", { proposals: [] }, 3);
+    e.ticketEvent("A", at(5, 12));
+    e.rt.sweep(e.cap, MON());
+    const [req] = e.launches();
+    expect(req.prompt).toMatch(/## Proposals of the previous retrospective\nnone/);
+    expect(req.prompt).not.toContain("old proposal");
+  });
+
   test("with no earlier retrospective the proposals part says none", () => {
     const e = env();
     e.ticketEvent("A", at(5, 12));

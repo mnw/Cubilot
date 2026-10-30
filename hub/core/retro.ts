@@ -266,7 +266,7 @@ export function writeEvidenceFile(db: Database, ledgerDb: string, room: string, 
   return { path, text };
 }
 
-/** The proposal titles of the newest earlier retrospective of the room that has a result with proposals; [] when there is none. */
+/** The proposal titles of the newest earlier passed retrospective of the room; [] when there is none or its result has no proposals. */
 export function previousProposalTitles(db: Database, room: string, week: string): string[] {
   const prev = db
     .query<{ id: string }, [string, string]>(
@@ -274,7 +274,7 @@ export function previousProposalTitles(db: Database, room: string, week: string)
         ORDER BY s.retro_week DESC, s.created_seq DESC`,
     )
     .all(room, week);
-  for (const { id } of prev) {
+  for (const { id } of prev.slice(0, 1)) {
     const rows = db
       .query<{ context_json: string | null }, [string]>(
         "SELECT context_json FROM handoffs WHERE json_extract(context_json, '$.stage_id') = ? ORDER BY created_at_ms DESC, id DESC",
@@ -282,7 +282,7 @@ export function previousProposalTitles(db: Database, room: string, week: string)
       .all(id);
     for (const r of rows) {
       const list = json(r.context_json).proposals;
-      if (!Array.isArray(list) || !list.length) continue;
+      if (!Array.isArray(list)) continue;
       return list.map((p) => (p as { title?: unknown })?.title).filter((t): t is string => typeof t === "string");
     }
   }
