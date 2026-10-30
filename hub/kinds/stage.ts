@@ -2410,8 +2410,8 @@ export function createStageRuntime(
           const fs = c.full_suite;
           const obj = fs && typeof fs === "object" && !Array.isArray(fs) ? (fs as Record<string, unknown>) : null;
           const objOk = !!obj && ["command", "log_path"].every((k) => typeof obj[k] === "string" && (obj[k] as string).trim()) && ["exit_code", "pass", "fail"].every((k) => Number.isInteger(obj[k]));
-          const listOk = fs === false && Array.isArray(c.tests_run) && c.tests_run.length > 0 && c.tests_run.every((x) => typeof x === "string" && x.trim() !== "");
-          if (!objOk && !listOk) errors.push("a Tester PASS needs context.full_suite {command, exit_code, pass, fail, log_path} or context.full_suite false with context.tests_run, a non-empty list of test file paths");
+          const listOk = fs === false && Array.isArray(c.tests_run) && c.tests_run.length > 0 && c.tests_run.every((x) => typeof x === "string" && x.trim() !== "" && !x.startsWith("/") && !x.startsWith("~") && !/^[A-Za-z]:/.test(x) && !x.split(/[\\/]/).includes(".."));
+          if (!objOk && !listOk) errors.push("a Tester PASS needs context.full_suite {command, exit_code, pass, fail, log_path} or context.full_suite false with context.tests_run, a non-empty list of test file paths relative to the repo root");
         }
         if (stage.role === "validator" && stage.ticket_id && c.verdict === "PASS" && isHighTicket(stage.ticket_id)) {
           const last = lastFullSuite(stage.ticket_id);

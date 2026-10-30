@@ -70,6 +70,10 @@ describe("tester PASS evidence", () => {
       { full_suite: false, tests_run: [""] },
       { full_suite: false, tests_run: [1] },
       { tests_run: ["tests/a.test.ts"] },
+      { full_suite: false, tests_run: ["/tmp/x.test.ts"] },
+      { full_suite: false, tests_run: ["../x.test.ts"] },
+      { full_suite: false, tests_run: ["tests/a.test.ts", "tests/../../x.test.ts"] },
+      { full_suite: false, tests_run: ["~/x.test.ts"] },
       { full_suite: { command: "x" } },
     ]) expect((await send(s, extra)).status).toBe(400);
   });

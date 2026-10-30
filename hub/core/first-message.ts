@@ -149,7 +149,7 @@ export function renderFirstMessage(i: FirstMessageInput, template: string = load
   });
   if (!text.endsWith("\n")) text += "\n";
   if (i.role === "tester" && i.ticket.blast_radius === "high") text += "\nThis ticket has high blast radius. Run the full suite with ./scripts/test.sh. Put it in context.full_suite: command, exit_code, pass, fail, log_path.\n";
-  if (i.role === "tester" && i.ticket.blast_radius !== "high") text += "\nA PASS needs context.full_suite {command, exit_code, pass, fail, log_path}, or context.full_suite false with context.tests_run, a list of test file paths.\n";
+  if (i.role === "tester" && i.ticket.blast_radius !== "high") text += "\nA PASS needs context.full_suite {command, exit_code, pass, fail, log_path}, or context.full_suite false with context.tests_run, a list of test file paths relative to the repo root.\n";
   if (i.handoff) text += renderHandoffSection(i.handoff, i.stageId);
   if (i.reason) text += `\nNote: the earlier session of this stage stopped: ${oneLine(i.reason)}\n`;
   return (i.stable ?? "") + text;
