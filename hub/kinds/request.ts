@@ -9,7 +9,9 @@ import { insertEvent } from "../core/events";
 import { mintRequestRowId, ts, validName, validRoomLabel } from "../core/ids";
 import { pausedRefusal } from "../core/auth";
 import { roomLead } from "./ticket";
-import { buildDeliveryReport } from "../core/delivery-report";
+import { buildDeliveryReport, ticketsMergedIntoMain } from "../core/delivery-report";
+import { requestListStatus } from "../core/request-status";
+import { getRoomSettings } from "../core/ledger";
 
 // ---------- Types ----------
 
@@ -461,6 +463,49 @@ export function createRequestKind(db: Database): RequestKind {
         const requests = rows.map((r) => {
           const snap = requestDecl.rowToSnapshot(r);
           return { ...snap, scope_change: scopeChange(db, room, snap.request_id) };
+        });
+        return Response.json({ room, requests });
+      },
+    },
+
+    {
+      // One row for each request of a room: status, progress and the newest event of the request or its tickets (Part 14 H1). Read only.
+      method: "GET",
+      path: /^\/rooms\/([^/]+)\/requests$/,
+      auth: "read",
+      handler: (req) => {
+        const room = decodeURIComponent(new URL(req.url).pathname.split("/")[2] ?? "");
+        if (!validRoomLabel(room)) return Response.json({ error: "invalid room" }, { status: 400 });
+        const rows = db.query<Record<string, unknown>, [string]>("SELECT * FROM requests WHERE room = ? ORDER BY created_at_ms, id").all(room);
+        const tickets = db.query<TicketRow, [string]>("SELECT id, blast_radius, status, request_id FROM tickets WHERE room = ? AND request_id IS NOT NULL").all(room);
+        const byRequest = new Map<string, TicketRow[]>();
+        for (const t of tickets) byRequest.set(t.request_id!, [...(byRequest.get(t.request_id!) ?? []), t]);
+        const doneIds = rows.flatMap((r) => {
+          const own = byRequest.get(requestDecl.rowToSnapshot(r).request_id) ?? [];
+          return own.length > 0 && own.every((t) => t.status === "done" || t.status === "cancelled") ? own.filter((t) => t.status === "done").map((t) => t.id) : [];
+        });
+        const merged = ticketsMergedIntoMain(getRoomSettings(db, room)?.project_folder, doneIds);
+        const lastEvent = db.query<{ n: number | null }, [string, string, string]>(
+          "SELECT MAX(at_ms) AS n FROM events WHERE entity_id = ? OR entity_id IN (SELECT id FROM tickets WHERE room = ? AND request_id = ?)",
+        );
+        const requests = rows.map((r) => {
+          const snap = requestDecl.rowToSnapshot(r);
+          const own = byRequest.get(snap.request_id) ?? [];
+          const live = own.filter((t) => t.status !== "cancelled");
+          const hasHighTicket = own.some((t) => t.blast_radius === "high" && t.status !== "done" && t.status !== "cancelled");
+          return {
+            request_id: snap.request_id,
+            origin: snap.origin,
+            status: requestListStatus({
+              needsApprove: needsApprove({ origin: snap.origin, features: snap.features, hasHighTicket }),
+              approved: snap.approved !== null,
+              tickets: own.map((t) => ({ status: t.status, mergedIntoMain: merged.has(t.id) })),
+            }),
+            tickets_done: own.filter((t) => t.status === "done").length,
+            tickets_total: live.length,
+            high_radius_count: live.filter((t) => t.blast_radius === "high").length,
+            last_event_ms: lastEvent.get(snap.id, room, snap.request_id)?.n ?? snap.created_at_ms,
+          };
         });
         return Response.json({ room, requests });
       },
