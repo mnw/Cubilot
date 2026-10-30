@@ -46,10 +46,3 @@ The Needs-you area SHALL show one line for each request with a report, until eac
 #### Scenario: Merged into main
 - **WHEN** the human merges staging into main
 - **THEN** the line of the request goes away
-
-### Requirement: The human can overrule a ruling
-`POST /decisions/<id>/overrule` with a reason SHALL move an `applied` decision to `overruled`. Only the human SHALL call it. The report SHALL show the overrules, and the hub SHALL return the count of rulings and overrules for each room at `GET /rooms/<room>/arbiter-stats`.
-
-#### Scenario: Overrule
-- **WHEN** the human overrules a waiver with a reason
-- **THEN** the decision is `overruled` and the stats count one overrule

@@ -40,9 +40,8 @@ Depends: nothing that is not archived. `spec-review-stage`, `stage-sessions`, `c
 - `plan-approval`: the `request` Kind with origin and features, the Approve rule by origin, the approved scope, the code definition of a scope change, and the queue gates.
 - `ticket-radius`: the radius rule in code, raise by the Orchestrator, lower only by an arbiter ruling or the human.
 - `high-radius-checks`: full suite by the Tester, second review, done after two PASSes, merge message.
-- `arbiter`: the arbiter stage, its first message, its result, the ticket FAIL count and gate, and how code applies a ruling.
 - `human-escalation`: the `decision` Kind, the four cases that reach the human, the Needs-you line.
-- `delivery-report`: the report for each request and the overrule record.
+- `delivery-report`: the report for each request.
 - `orchestrator-checkpoint`: measure, quick fixes, context percentage, state summary, note, rule, `/clear` with the hook, record.
 
 ### Modified Capabilities
@@ -53,6 +52,7 @@ Depends: nothing that is not archived. `spec-review-stage`, `stage-sessions`, `c
 
 - Jev (item 7 step 8; item 6 step B).
 - OpenAI on Pi for the second review (Part 2 finding 6). A `config.yml` setting changes the model when it is set up.
+- The arbiter (Part 19): the arbiter stage, the ticket FAIL count gate, rulings and the overrule. See `openspec/changes/arbiter`.
 - Items 1 to 6 and 8 to 10 of Part 6. The flow report (item 9) will use the state summary of this change.
 - A checkpoint for a Pi Orchestrator (Pi has no `SessionStart` hook).
 
