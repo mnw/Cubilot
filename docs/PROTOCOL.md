@@ -961,7 +961,7 @@ A stop queues a close for the session and ends the attempt. The reason is in the
 
 ### High-radius checks
 
-A `blast_radius: high` ticket closes on the full suite and two Validator PASSes. The hub checks them in the result of a stage (L4, P6-04). There is no human Allow step.
+A `blast_radius: high` ticket needs the full suite and two Validator PASSes before the lead moves it to `done`. The hub checks them in the result of a stage (L4, P6-04). There is no human Allow step.
 
 - **Tester.** The first message names `./scripts/test.sh`. The result carries `commit` (the commit of the handoff that started the stage) and `full_suite`: `{command, exit_code, pass, fail, log_path}`. A result without `full_suite`, or with a missing field, gets 400 and a `stage.rejected` entry.
 - **First Validator PASS.** The hub refuses it when the newest Tester result since the latest worker stage has no `full_suite.exit_code` 0, or when `context.commit` differs from the commit of that run.
