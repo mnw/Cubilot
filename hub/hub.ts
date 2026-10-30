@@ -32,6 +32,7 @@ import { createUsageFeature } from "./features/usage";
 import { createSessionsFeature } from "./features/sessions";
 import { createAttachmentsFeature } from "./features/attachments";
 import { createRosterFeature } from "./features/roster";
+import { createSettingsFeature } from "./features/settings";
 import { createTranscriptFeature } from "./features/transcript";
 import { createChatFeature } from "./features/chat";
 import { createStreamHandlers } from "./features/streams";
@@ -300,7 +301,8 @@ const FEATURES: readonly HubFeature[] = [
     allowedExtensions: ALLOWED_EXTENSIONS,
     imageMaxBytes: IMAGE_MAX_BYTES,
   }),
-  createRosterFeature({ agents, removeAgent, defaultRoom: DEFAULT_ROOM, readNutshell }),
+  createRosterFeature({ agents, removeAgent, readNutshell }),
+  createSettingsFeature({ agents, defaultRoom: DEFAULT_ROOM }),
   ...(ledgerDb
     ? [createTranscriptFeature({ db: ledgerDb, chatLog, roomSummariser, onRoleLimitsChanged: (room, cap) => { for (const k of KINDS) k.onRoomLimitsChanged?.(room, cap); } })]
     : []),

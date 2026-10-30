@@ -446,6 +446,19 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="path-modal">
+  <div class="modal">
+    <h2 id="path-title"></h2>
+    <p id="path-note"></p>
+    <textarea id="path-value" readonly spellcheck="false"></textarea>
+    <div class="modal-actions">
+      <span class="status" id="path-copied-status">copied</span>
+      <button type="button" id="path-copy-btn">Copy</button>
+      <button type="button" id="path-close-btn">Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="mcp-modal">
   <div class="modal">
     <h2>Claude launch command</h2>
@@ -494,6 +507,7 @@
 <script src="features/slash-command.js"></script>
 <script src="features/composer.js"></script>
 <script src="features/mcp-modal.js"></script>
+<script src="features/native-actions.js"></script>
 <script src="features/theme.js"></script>
 
 <!-- Tier 3: orchestrator + kinds + pill + terminal -->

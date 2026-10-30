@@ -1,5 +1,5 @@
 // theme.js — applies UI settings (theme + font scale) sourced from
-// config.yml via the get_ui_settings Tauri command. No UI cycle button:
+// config.yml via the hub (GET /settings/ui). No UI cycle button:
 // edit config.yml and click Reload (titlebar) to re-apply.
 //
 // tokens.css holds the palette overrides under `[data-theme="<name>"]` and
@@ -61,19 +61,15 @@
   }
 
   async function reload() {
-    if (!window.__TAURI__) return;
     try {
-      const s = await window.__TAURI__.core.invoke('get_ui_settings');
-      apply(s);
+      apply(await hubGet('/settings/ui'));
     } catch (e) {
-      console.warn('[ui] get_ui_settings failed', e);
+      console.warn('[ui] GET /settings/ui failed', e);
     }
   }
 
   window.CUBILOT_UI = { apply, reload };
 
-  // Boot: pull settings from the shell as soon as Tauri is ready.
-  if (window.__TAURI__) {
-    reload();
-  }
+  // Boot: pull settings from the hub. BUS and AUTH_TOKEN are set by main.js bootstrap, so wait for it.
+  window.addEventListener('cubilot:hub-ready', reload);
 })();

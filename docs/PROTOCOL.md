@@ -1198,7 +1198,23 @@ routing bug would show up as a surge, not silent context pollution.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/room-default` | Returns `{ room: <CUBILOT_DEFAULT_ROOM> }`; read-auth. Used as fallback when an external-spawn channel-bin has no `CHATBRIDGE_ROOM`. |
+| GET | `/room-default` | Returns `{ room: <CUBILOT_DEFAULT_ROOM> }`; read-auth. With `?cwd=<dir>` returns `{ room }` of the git-root (else folder) basename of `dir`, the spawn form's Room default. Used as fallback when an external-spawn channel-bin has no `CHATBRIDGE_ROOM`. |
+
+### Settings read routes (hub/features/settings.ts)
+
+Read-auth. Each route reads `config.yml` at each call, so an edit shows at the next request with no reload. They replace the Tauri commands `get_ui_settings`, `get_human_name`, `get_app_version`, `get_mcp_template`, `list_roles`, `pty_roles`, `pty_harness` and `resolve_default_room`. The shell sets the env `CUBILOT_APP_VERSION`, `CUBILOT_TMUX`, `CUBILOT_FACTORY_SRC` and `CUBILOT_MOD_DIR` for these routes.
+
+| Method | Path | Returns |
+|---|---|---|
+| GET | `/settings/ui` | `{ theme, font_scale, fonts: { ui, mono } }`. An invalid theme gives `default`; `font_scale` is clamped to 0.85..1.25; an unsafe font name gives `""`. |
+| GET | `/settings/human` | `{ name }`, the hub's own human name (`CUBILOT_HUMAN_NAME`). |
+| GET | `/settings/version` | `{ version }` from `CUBILOT_APP_VERSION` (`""` when unset). |
+| GET | `/settings/mcp-template` | `{ template }`, the Claude launch line for a session outside Cubilot. 503 when the mod folder is not staged. |
+| GET | `/settings/paths` | `{ config, skills, mcp }`; with `?agent=<name>` also `agent_cwd` (live pane path or `null`). A browser shows these with a Copy button. 400 on an invalid agent name. |
+| GET | `/roles` | `{ roles, pills }`. `roles`: the single-agent roles of the staged version (`name`, `harness`, `provider`, `model`, `thinking`, `effort`), sorted. `pills`: `{ <agent>: { role, model, provider, effort, harness } }` of the running tmux sessions. |
+| GET | `/agents/<name>/harness` | `{ harness: "claude" \| "pi" }` of a roster agent or a tmux session. 404 for an unknown agent. |
+
+`reload_settings` and the native open commands stay in the shell. In a browser the Reload control shows "Restart the hub to apply these settings".
 
 ### Pause / Resume
 

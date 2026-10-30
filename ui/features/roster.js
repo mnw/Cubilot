@@ -65,7 +65,7 @@ function renderAgentColumn() {
   window.reconcileAgentColumn?.();
 }
 
-// Role, harness, model, provider and effort of each agent come from the tmux session (pty_roles); outside the
+// Role, harness, model, provider and effort of each agent come from the tmux session (GET /roles); outside the
 // desktop app there is none.
 let pillRoles = {};
 
@@ -98,7 +98,7 @@ function refreshRolePills() {
   clearTimeout(rolePillTimer);
   rolePillTimer = setTimeout(async () => {
     let roles = {};
-    try { roles = (await tauriInvoke('pty_roles')) || {}; } catch { return; }
+    try { roles = (await hubGet('/roles')).pills || {}; } catch { return; }
     pillRoles = roles;
     window.renderRowDetails?.();
     ensureOrchestratorLead(roles);

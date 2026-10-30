@@ -38,7 +38,7 @@
   }
   // Rejects when the command fails: a caller must not read an error as "no roles" (that cleared a picked role).
   async function listRoles() {
-    return _invoke()('list_roles');
+    return (await hubGet('/roles')).roles;
   }
   async function ptyWrite(agent, b64) {
     return _invoke()('pty_write', { agent, b64 });

@@ -1,5 +1,5 @@
 // orchestrator-lead.js — which agents become the lead of their room (task 6.2). Pure, so it runs in node.
-// The hub does not know roles; the role of a running agent comes from its tmux session (pty_roles), so the UI
+// The hub does not know roles; the role of a running agent comes from its tmux session (GET /roles), so the UI
 // makes the call: an ONLINE agent whose role is `orchestrator` leads its room. Found by role, not by name, because
 // the app may call it `orchestrator-<room>`.
 
