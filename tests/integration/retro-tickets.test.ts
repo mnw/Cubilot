@@ -7,7 +7,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import "../helpers/repo"; // sets CUBILOT_DATA_DIR to a temp folder
-import { migrateLedger, setRoomSettings } from "../../hub/core/ledger";
+import { getRoomSettings, migrateLedger, setRoomSettings } from "../../hub/core/ledger";
 import { insertEvent } from "../../hub/core/events";
 import { buildKinds } from "../../hub/kinds";
 import { createStageRuntime } from "../../hub/kinds/stage";
@@ -314,5 +314,30 @@ describe("two weeks end to end", () => {
     w2.send({ verdicts: [verdict(t1.id, "revert")] });
     const r = e.drafts("r-2026-11-16-retro");
     expect(r.map((t) => t.title)).toEqual([`Revert ${t1.id}: ${t1.title}`]);
+  });
+});
+
+describe("two rooms with the same window end date", () => {
+  test("each room gets its own spec review", () => {
+    const e = env();
+    e.ticket("queued", at(5, 12));
+    setRoomSettings(e.db, "B", { project_folder: getRoomSettings(e.db, "A")!.project_folder, role_limits: { retrospective: 2 } });
+    e.db.run(
+      `INSERT INTO tickets (id, room, title, acceptance_criteria, blast_radius, priority, creator, status, request_id, created_at_ms, updated_at_ms, version)
+       VALUES ('t_b000000000000001', 'B', 'T', 'c', 'low', 'medium', 'a', 'queued', NULL, ?, ?, 1)`,
+      [at(5, 12), at(5, 12)],
+    );
+    insertEvent(e.db, "t_b000000000000001", "ticket.created", "Orchestrator", {}, at(5, 12));
+    e.rt.sweep(e.cap, MON1);
+    const stages = e.db.query<{ id: string; session: string; room: string }, []>("SELECT id, session, room FROM stage WHERE review = 'retro' ORDER BY room").all();
+    expect(stages.map((x) => x.room)).toEqual(["A", "B"]);
+    for (const st of stages) {
+      e.rt.api.move(st.id, { to: "running" }, "system", e.cap);
+      const full = { stage_id: st.id, notes: "n", verdicts: [], proposals: [proposal()], lessons: [] };
+      expect(e.rt.hooks.checkResult(st.session, full, e.cap)).toEqual([]);
+      e.rt.hooks.onResult(st.session, full, e.cap);
+    }
+    const rooms = e.db.query<{ room: string }, []>("SELECT DISTINCT t.room AS room FROM stage s JOIN stage_scope sc ON sc.stage_id = s.id JOIN tickets t ON t.id = sc.ticket_id WHERE s.review = 'spec' ORDER BY t.room").all();
+    expect(rooms.map((r) => r.room)).toEqual(["A", "B"]);
   });
 });

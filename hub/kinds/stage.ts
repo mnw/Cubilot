@@ -2371,7 +2371,7 @@ export function createStageRuntime(
     }
     const have = new Set(db.query<{ title: string; acceptance_criteria: string }, [string, string]>("SELECT title, acceptance_criteria FROM tickets WHERE room = ? AND request_id = ?").all(room, requestId).map((t) => `${t.title}\n${t.acceptance_criteria}`));
     for (const d of drafts) if (!have.has(`${d.title}\n${d.acceptance_criteria}`)) createDraftBySystem(db, cap, { room, request_id: requestId, ...d });
-    if (!db.query("SELECT 1 FROM stage WHERE review = 'spec' AND request_id = ?").get(requestId)) {
+    if (!db.query(`SELECT 1 FROM stage s WHERE s.review = 'spec' AND s.request_id = ?1 AND ${STAGE_ROOM_SQL} = ?2`).get(requestId, room)) {
       const ids = db.query<{ id: string }, [string, string]>("SELECT id FROM tickets WHERE room = ? AND request_id = ? ORDER BY rowid").all(room, requestId).map((t) => t.id);
       const created = api.create({ request_id: requestId, review: "spec", role: "validator" }, "system", cap, (ctx) => {
         for (const t of ids) ctx.tx.run("INSERT INTO stage_scope (stage_id, ticket_id) VALUES (?, ?)", [ctx.next.id, t]);
