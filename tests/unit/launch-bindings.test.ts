@@ -25,14 +25,14 @@ describe("stage session bindings in the ledger", () => {
     expect([...rec.sessions()].sort()).toEqual(["worker-1", "worker-2", "worker-3"]);
   });
 
-  test("migration adds one nullable column, twice gives the same schema, old rows get a release time", () => {
+  test("migration adds the nullable columns, twice gives the same schema, old rows get a release time", () => {
     const db = new Database(":memory:");
     db.exec(`CREATE TABLE stage (id TEXT PRIMARY KEY, ticket_id TEXT, request_id TEXT, review TEXT, verdict TEXT, role TEXT NOT NULL, attempt INTEGER NOT NULL, status TEXT NOT NULL, session TEXT, slot_seq INTEGER, version INTEGER NOT NULL DEFAULT 0)`);
     db.run("INSERT INTO stage (id, role, attempt, status, session) VALUES ('s_old', 'worker', 1, 'running', 'worker-1')");
     const before = cols(db);
     migrate(db);
     const once = cols(db);
-    expect(once.filter((c) => !before.includes(c))).toEqual(["session_released_at_ms"]);
+    expect(once.filter((c) => !before.includes(c))).toEqual(["session_released_at_ms", "start_commit"]);
     const stamp = db.query<{ v: number | null }, []>("SELECT session_released_at_ms AS v FROM stage WHERE id = 's_old'").get()!.v;
     expect(stamp).not.toBeNull();
     db.run("INSERT INTO stage (id, role, attempt, status, session) VALUES ('s_new', 'worker', 1, 'running', 'worker-2')");

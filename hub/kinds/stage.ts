@@ -428,6 +428,8 @@ const FULL_SHA_RE = /^[0-9a-f]{40}$/;
 const WORKER_GIT_TIMEOUT_MS = 10_000;
 const workerRefusal = (ticketId: string) =>
   `A worker result needs to_role tester and a new commit on ticket/${ticketId}. To report a block, post to the Orchestrator without stage_id.`;
+/** Writing chain: the next role of a result, and the roles whose passed results give the base of a new-work check. */
+const CHAIN_NEXT: Record<string, string> = { worker: "tester", writer: "editor", editor: "reviewer" };
 
 export type StageRuntime = {
   module: KindModule;
@@ -503,6 +505,12 @@ const worktreeKey = (s: { ticket_id: string | null; request_id: string | null; r
   s.ticket_id ?? (s.review === "spec" && s.request_id ? `request-${s.request_id}` : null);
 
 const isRole = (r: string): r is StageRole => (STAGE_ROLES as readonly string[]).includes(r);
+
+/** `start_commit`: the ticket/<id> head when a writer stage first started (the writer base). Nullable; added here. */
+function migrateStartCommit(db: Database): void {
+  const has = db.query<{ name: string }, []>("PRAGMA table_info(stage)").all().some((c) => c.name === "start_commit");
+  if (!has) db.exec("ALTER TABLE stage ADD COLUMN start_commit TEXT");
+}
 
 /**
  * `session_released_at_ms`: set when the hub saw the session closed (close ack) or never started (final launch-error ack);
@@ -1518,6 +1526,12 @@ export function createStageRuntime(
         });
         cwd = wt.path;
         branch = wt.branch;
+        // The writer base: the ticket/<id> head when the stage first starts. A relaunch keeps it.
+        if (stage.ticket_id && stage.role === "writer") {
+          const head = Bun.spawnSync(["git", "-C", project, "rev-parse", "--verify", "--quiet", `refs/heads/ticket/${stage.ticket_id}^{commit}`], { stdout: "pipe", stderr: "pipe" });
+          const sha = head.stdout.toString().trim();
+          if (head.exitCode === 0 && FULL_SHA_RE.test(sha)) db.run("UPDATE stage SET start_commit = ? WHERE id = ? AND start_commit IS NULL", [sha, stage.id]);
+        }
       } catch (e) {
         return { ok: false, reason: `worktree: ${(e as Error).message}` };
       }
@@ -1971,6 +1985,7 @@ export function createStageRuntime(
     migrate: (d: Database) => {
       entity.migrate(d);
       migrateSessionReleased(d);
+      migrateStartCommit(d);
     },
     routes: withLedgerRequired(routes),
     // A stage is the hub's own bookkeeping: agents never get a stage replayed on reconnect.
@@ -2066,16 +2081,34 @@ export function createStageRuntime(
     }
   }
 
+  /** Newest first: result handoffs of passed stages of `roles` on a ticket. */
+  function earlierResults(ticketId: string, roles: string[]): Array<{ context_json: string }> {
+    return db
+      .query<{ context_json: string }, string[]>(
+        `SELECT h.context_json FROM handoffs h JOIN stage s ON s.id = json_extract(h.context_json, '$.stage_id')
+         WHERE json_extract(h.context_json, '$.ticket_id') = ? AND s.ticket_id = ? AND s.role IN (${roles.map(() => "?").join(",")}) AND s.status = 'passed'
+         ORDER BY (SELECT MIN(e.seq) FROM events e WHERE e.entity_id = h.id) DESC`,
+      )
+      .all(ticketId, ticketId, ...roles);
+  }
+
   /**
    * G2: a worker result is a handoff to_role tester whose context.commit is new work on ticket/<id>. Returns the refusal
    * text, or null when the result is good. The hash is checked before any git call.
    */
-  function checkWorkerResult(stage: { id: string; ticket_id: string | null }, c: Record<string, unknown>, to: string | undefined): string | null {
+  function checkWorkerResult(stage: { id: string; ticket_id: string | null; role?: string }, c: Record<string, unknown>, to: string | undefined): string | null {
     const ticketId = stage.ticket_id ?? "";
-    const refuse = (detail?: string) => `${workerRefusal(ticketId)}${detail ? ` ${detail}` : ""}`;
+    const role = stage.role ?? "worker";
+    const next = CHAIN_NEXT[role] ?? "tester";
+    // A writer or editor result: the same commit rules as a worker, with its own wording and next role.
+    const refuse = (detail?: string) =>
+      role === "worker"
+        ? `${workerRefusal(ticketId)}${detail ? ` ${detail}` : ""}`
+        : `A ${role} result needs to_role ${next} and ${role === "editor" ? "a commit on" : "a new commit on"} ticket/${ticketId}.${detail ? ` ${detail}` : ""}`;
     const commit = c.commit;
     if (c.ticket_id !== stage.ticket_id) return refuse();
-    if (to !== `${ROLE_RECIPIENT_PREFIX}tester` || typeof commit !== "string" || !FULL_SHA_RE.test(commit)) return refuse();
+    if (role !== "worker" && to !== `${ROLE_RECIPIENT_PREFIX}${next}`) return `A ${role} result must go to to_role ${next}, not to ${to ?? "no recipient"}.`;
+    if (to !== `${ROLE_RECIPIENT_PREFIX}${next}` || typeof commit !== "string" || !FULL_SHA_RE.test(commit)) return refuse(role === "worker" ? undefined : "context.commit must be the full 40-character commit sha.");
     const room = roomOfStage(stage.id);
     const project = room ? getRoomSettings(db, room)?.project_folder : null;
     if (!project) return refuse("The room has no project folder.");
@@ -2095,16 +2128,35 @@ export function createStageRuntime(
     const onBranch = runGit(project, ["merge-base", "--is-ancestor", commit, branch]);
     if (onBranch.code === 1) return refuse(`The commit is not on ticket/${ticketId}.`);
     if (onBranch.code !== 0) return refuse(`Git: ${onBranch.err || "merge-base failed"}`);
-    // Base: the newest earlier passed worker result of this ticket with a valid commit, else the fork point from staging.
-    const earlier = db
-      .query<{ context_json: string }, [string, string]>(
-        `SELECT h.context_json FROM handoffs h JOIN stage s ON s.id = json_extract(h.context_json, '$.stage_id')
-         WHERE json_extract(h.context_json, '$.ticket_id') = ? AND s.ticket_id = ? AND s.role = 'worker' AND s.status = 'passed'
-         ORDER BY (SELECT MIN(e.seq) FROM events e WHERE e.entity_id = h.id) DESC`,
-      )
-      .all(ticketId, ticketId);
+    // Editor: the commit must hold the newest passed writer commit and add to it. At most 4 git calls so far.
+    if (role === "editor") {
+      let writerCommit: string | null = null;
+      for (const row of earlierResults(ticketId, ["writer"])) {
+        const prev = (JSON.parse(row.context_json) as Record<string, unknown>).commit;
+        if (typeof prev === "string" && FULL_SHA_RE.test(prev)) {
+          writerCommit = prev;
+          break;
+        }
+      }
+      if (writerCommit === null) return refuse("The ticket has no passed writer result with a commit.");
+      if (writerCommit === commit) return refuse("The commit is not new work: it equals the writer commit.");
+      const holds = runGit(project, ["merge-base", "--is-ancestor", writerCommit, commit]);
+      if (holds.code === 1) return refuse(`The commit does not hold the writer commit ${writerCommit}.`);
+      if (holds.code !== 0) return refuse(`Git: ${holds.err || "merge-base failed"}`);
+      return null;
+    }
+    // Base: a writer's recorded start commit (the ticket/<id> head when the stage started), else the newest earlier passed result of this role with a valid commit, else the fork point from staging.
+    const earlier = earlierResults(ticketId, role === "writer" ? ["writer", "editor"] : ["worker"]);
     let base: string | null = null;
-    for (const row of earlier) {
+    const started = role === "writer" ? db.query<{ start_commit: string | null }, [string]>("SELECT start_commit FROM stage WHERE id = ?").get(stage.id)?.start_commit : null;
+    if (started) {
+      if (!FULL_SHA_RE.test(started)) return refuse("The recorded writer base is not a 40 hex commit.");
+      const r = resolve(started);
+      if (r.error) return refuse(r.error);
+      if (!r.ok) return refuse(`The recorded writer base ${started} does not resolve to a commit.`);
+      base = started;
+    }
+    for (const row of base ? [] : earlier) {
       const prev = (JSON.parse(row.context_json) as Record<string, unknown>).commit;
       if (typeof prev !== "string" || !FULL_SHA_RE.test(prev)) continue;
       const r = resolve(prev);
@@ -2224,6 +2276,9 @@ export function createStageRuntime(
         if (notes) errors.push(notes);
         if (stage.role === "worker") {
           // G2: every worker result problem, a wrong ticket included, gets the one worker refusal.
+          const refusal = checkWorkerResult(stage, c, to);
+          if (refusal) errors.push(refusal);
+        } else if (stage.role === "writer" || stage.role === "editor") {
           const refusal = checkWorkerResult(stage, c, to);
           if (refusal) errors.push(refusal);
         } else if (c.ticket_id !== stage.ticket_id) errors.push(`context.ticket_id must be ${stage.ticket_id}`);

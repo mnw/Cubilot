@@ -1,7 +1,7 @@
 // A refused result wakes the session, and the turn end that follows the refusal is not a stop (human decision 2026-10-24).
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { giveProject } from "../helpers/repo";
+import { giveProject, projectRepo } from "../helpers/repo";
 import { migrateLedger } from "../../hub/core/ledger";
 import { modeFor } from "../../hub/channel/core";
 import { createTicketKind } from "../../hub/kinds/ticket";
@@ -17,7 +17,7 @@ describe("delivery mode of stage.rejected", () => {
   });
 });
 
-// A writer stage: its result needs only stage_id and ticket_id. A worker result also needs a commit (G2, tests/integration/worker-result.test.ts).
+// A writer stage: its result needs stage_id, ticket_id, to_role editor and a new commit on ticket/<id> (tests/integration/writing-chain-commits.test.ts).
 function makeEnv() {
   const db = new Database(":memory:");
   migrateLedger(db);
@@ -34,13 +34,23 @@ function makeEnv() {
   const s = rt.api.create({ ticket_id: "t_0000000000000001", role: "writer" }, "system", cap);
   rt.api.move(s.id, { to: "launching", session: "worker-1" }, "system", cap);
   rt.api.move(s.id, { to: "running" }, "system", cap);
+  const git = (...a: string[]) => {
+    const r = Bun.spawnSync(["git", "-C", projectRepo(), ...a], { stdout: "pipe", stderr: "pipe" });
+    if (r.exitCode !== 0) throw new Error(`git ${a.join(" ")}: ${r.stderr.toString()}`);
+    return r.stdout.toString().trim();
+  };
+  const ref = "refs/heads/ticket/t_0000000000000001";
+  const head = Bun.spawnSync(["git", "-C", projectRepo(), "rev-parse", "--verify", "--quiet", ref]).exitCode === 0 ? git("rev-parse", ref) : git("rev-parse", "HEAD");
+  db.run("UPDATE stage SET start_commit = ? WHERE id = ?", [head, s.id]);
+  const commit = git("commit-tree", `${head}^{tree}`, "-p", head, "-m", "work");
+  git("update-ref", ref, commit);
   const route = rt.module.routes.find((r: RouteDef) => r.method === "POST" && String(r.path).includes("turn-end"))!;
   const turnEnd = async () => {
     const res = await route.handler(new Request("http://x/", { method: "POST", body: JSON.stringify({ agent: "worker-1" }) }), cap, { id: s.id });
     return ((await res.json()) as { action?: string }).action;
   };
   const bad = { notes: "n", stage_id: s.id }; // no ticket_id: refused
-  const good = { notes: "n", stage_id: s.id, ticket_id: "t_0000000000000001" };
+  const good = { notes: "n", stage_id: s.id, ticket_id: "t_0000000000000001", commit };
   const kinds = (k: string) => emitted.filter((x) => x.e.kind === k);
   return { rt, cap, stage: s.id, turnEnd, bad, good, kinds, load: () => rt.api.load(s.id)! };
 }
@@ -70,8 +80,8 @@ describe("the turn end after a refused result", () => {
     const e = makeEnv();
     e.rt.hooks.checkResult("worker-1", e.bad, e.cap);
     expect(await e.turnEnd()).toBe("none");
-    expect(e.rt.hooks.checkResult("worker-1", e.good, e.cap)).toEqual([]);
-    e.rt.hooks.onResult("worker-1", e.good, e.cap);
+    expect(e.rt.hooks.checkResult("worker-1", e.good, e.cap, "role:editor")).toEqual([]);
+    e.rt.hooks.onResult("worker-1", e.good, e.cap, "role:editor");
     expect(e.load().status).toBe("passed");
     expect(e.kinds("stage.reminder")).toHaveLength(0);
   });
@@ -83,7 +93,7 @@ describe("the turn end after a refused result", () => {
     expect(await e.turnEnd()).toBe("none");
     expect(await e.turnEnd()).toBe("reminder"); // not "stop": the second refusal did not count a second turn end
     const f = makeEnv();
-    expect(f.rt.hooks.checkResult("worker-1", f.good, f.cap)).toEqual([]); // valid: no refusal
+    expect(f.rt.hooks.checkResult("worker-1", f.good, f.cap, "role:editor")).toEqual([]); // valid: no refusal
     expect(await f.turnEnd()).toBe("reminder");
   });
 
