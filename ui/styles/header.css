@@ -24,7 +24,7 @@ header {
 .brand-name {
   font-family: var(--serif);
   font-weight: 500;
-  font-size: var(--fs-5xl);
+  font-size: var(--fs-lg);
   letter-spacing: -0.01em;
   color: var(--text);
 }
@@ -37,7 +37,7 @@ header {
    a thin space before. Reads as "Cubilot v0.9.9" — one product mark. */
 .brand-meta {
   font-family: var(--mono);
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-sm);
   color: var(--text-dim);
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -85,7 +85,7 @@ header {
 .nutshell.flash { background: color-mix(in oklab, var(--green) 10%, transparent); }
 .nutshell-label {
   font-family: var(--mono);
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-sm);
   letter-spacing: 0.12em;
   color: var(--orange);
   text-transform: uppercase;
@@ -97,7 +97,7 @@ header {
 }
 .nutshell-body {
   font-family: var(--serif);
-  font-size: var(--fs-3xl);
+  font-size: var(--fs-base);
   font-style: italic;
   color: var(--text);
   font-weight: 400;
@@ -108,7 +108,7 @@ header {
 .nutshell-body.empty { color: var(--text-dim); font-style: italic; }
 .nutshell-meta {
   font-family: var(--mono);
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-sm);
   color: var(--text-dim);
   white-space: nowrap;
 }
@@ -120,7 +120,7 @@ header {
   border: var(--border-1) solid var(--line);
   background: transparent;
   font-family: var(--mono);
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-sm);
   transition: color var(--motion-fast), background var(--motion-fast);
 }
 .nutshell-edit-btn:hover { color: var(--text); background: var(--bg-elev); }

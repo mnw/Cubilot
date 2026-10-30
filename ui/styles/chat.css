@@ -11,14 +11,14 @@
 .pin-strip { flex: none; display: flex; flex-direction: column; gap: var(--sp-4); padding: var(--sp-8) var(--sp-20); border-bottom: var(--border-1) solid var(--line); background: var(--bg-raised); max-height: 40%; overflow-y: auto; }
 .pin-strip[hidden] { display: none; }
 .pin { display: flex; align-items: center; gap: var(--sp-8); border: var(--border-1) solid var(--line); border-left: 2px solid var(--orange); border-radius: var(--radius-md); background: var(--bg-inset); }
-.pin-main { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--sp-8); padding: var(--sp-4) var(--sp-8); background: transparent; border: none; color: var(--text); font-size: var(--fs-base); text-align: left; cursor: pointer; }
+.pin-main { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--sp-8); padding: var(--sp-4) var(--sp-8); background: transparent; border: none; color: var(--text); font-size: var(--fs-sm); text-align: left; cursor: pointer; }
 .pin-main:hover { background: var(--bg-hover); }
 .pin-from { font-weight: 600; flex: none; }
-.pin-room, .pin-ts { font-family: var(--mono); font-size: var(--fs-2xs); color: var(--text-dim); flex: none; }
+.pin-room, .pin-ts { font-family: var(--mono); font-size: var(--fs-sm); color: var(--text-dim); flex: none; }
 .pin-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
-.pin-x { flex: none; padding: 0 var(--sp-8); background: transparent; border: none; color: var(--text-dim); font-size: var(--fs-lg, 16px); cursor: pointer; }
+.pin-x { flex: none; padding: 0 var(--sp-8); background: transparent; border: none; color: var(--text-dim); font-size: var(--fs-sm); cursor: pointer; }
 .pin-x:hover { color: var(--text); }
-.pin-more { align-self: flex-start; background: transparent; border: none; color: var(--text-dim); font-family: var(--mono); font-size: var(--fs-2xs); cursor: pointer; padding: 0; }
+.pin-more { align-self: flex-start; background: transparent; border: none; color: var(--text-dim); font-family: var(--mono); font-size: var(--fs-sm); cursor: pointer; padding: 0; }
 .pin-more:hover { color: var(--text); }
 .msg.pin-flash { animation: none; background: var(--bg-hover); outline: var(--border-1) solid var(--orange); border-radius: var(--radius-md); }
 
@@ -81,19 +81,19 @@
 }
 .msg-name {
   font-family: var(--mono);
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   font-weight: 500;
   color: var(--text);
   letter-spacing: 0;
 }
-.msg-ts { font-family: var(--mono); font-size: var(--fs-2xs); color: var(--text-dim); margin-left: auto; }
-.msg-to { font-family: var(--mono); font-size: var(--fs-2xs); color: var(--text-dim); }
+.msg-ts { font-family: var(--mono); font-size: var(--fs-sm); color: var(--text-dim); margin-left: auto; }
+.msg-to { font-family: var(--mono); font-size: var(--fs-sm); color: var(--text-dim); }
 
 .msg-body {
   display: block;
   width: fit-content;
   max-width: 100%;
-  font-size: var(--fs-2xl);
+  font-size: var(--fs-base);
   line-height: var(--lh-loose);
   color: var(--text);
   padding: var(--sp-9) var(--sp-13);
@@ -142,7 +142,7 @@
 }
 .msg-body code {
   font-family: var(--mono);
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   background: var(--bg-elev);
   padding: var(--sp-1) var(--sp-5);
   border-radius: var(--radius-sm);
@@ -173,11 +173,11 @@
   border-radius: 0;
   white-space: pre;
   display: block;
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   line-height: 1.5;
 }
 .msg-body code.md-inline {
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
 }
 
 /* Self (human) messages — right-aligned with orange-tinted bubble
@@ -250,14 +250,14 @@
   border-radius: var(--radius-lg);
   text-decoration: none;
   color: var(--text);
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   max-width: var(--size-360);
   transition: background var(--motion-fast), border-color var(--motion-fast);
 }
 .attachment-link:hover { background: var(--bg-hover); border-color: var(--line-hover); }
 .attachment-link-ext {
   font-family: var(--mono);
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-sm);
   font-weight: 700;
   letter-spacing: 0.06em;
   padding: var(--sp-2) var(--sp-6);
@@ -289,7 +289,7 @@
   justify-content: center;
   color: var(--orange);
   font-family: var(--mono);
-  font-size: var(--fs-3xl);
+  font-size: var(--fs-base);
   z-index: var(--z-toast);
   pointer-events: none;
 }
@@ -303,7 +303,7 @@
   background: var(--orange);
   color: var(--bg-inset);
   font-family: var(--mono);
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   font-weight: 600;
   letter-spacing: 0.04em;
   padding: var(--sp-7) var(--sp-16);
@@ -323,7 +323,7 @@
   gap: var(--sp-12);
   padding: var(--sp-8) var(--sp-12);
   border-bottom: var(--border-1) solid var(--line);
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   color: var(--text);
 }
 .room-persistence .rp-toggle-btn {
@@ -345,7 +345,7 @@
   height: 18px;
   background: var(--bg-elev);
   border: var(--border-1) solid var(--line);
-  border-radius: 9px;
+  border-radius: var(--radius-lg);
   transition: background var(--motion-base) ease;
 }
 .room-persistence .rp-toggle-thumb {
