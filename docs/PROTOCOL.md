@@ -228,6 +228,7 @@ All routes are under `http://127.0.0.1:<hub-port>` (dynamic; see
 | POST | `/handoffs/{id}/cancel` | Bearer header | 256 KiB | Sender (or human) cancels. |
 | GET | `/handoffs/{id}?agent=` | Bearer header OR `?token=` query | — | One full snapshot, for the `read_handoff` tool. `agent` is the caller (self-asserted). 400 for a bad id or an unknown agent, 404 for an unknown handoff, 403 when the handoff is in another room (the human reads every room). |
 | GET | `/handoffs?status=&for=&limit=` | Bearer header OR `?token=` query | — | List snapshots. Filters: `status` (default `pending`; `all` returns any), `for` (agent name; matches as sender or recipient), `limit` (1–1000, default 100). |
+| GET | `/config/default-model` | Bearer header OR `?token=` query | — | The `default_model` of `config.yml` for the launch form: `{"default_model": {"claude"?: string, "pi"?: string}}`. Read at each request, writes nothing. A missing key gives `{}`. A key that is not a harness or a value that is not a string is ignored (one log line). Stage launches use `role_models`, not this. |
 
 ### Create request body
 
