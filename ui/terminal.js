@@ -975,7 +975,7 @@
       info.className = 'terminal-external-info';
       info.innerHTML =
         '<div>' + t.tabEl.dataset.agent + ' is running outside Cubilot.</div>' +
-        '<div style="font-size:11px; color:var(--text-dim);">Quit the external ' +
+        '<div style="font-size:var(--fs-sm); color:var(--text-dim);">Quit the external ' +
         'claude session to launch it inside the pane.</div>';
       t.paneEl.appendChild(info);
     }

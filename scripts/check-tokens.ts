@@ -63,6 +63,8 @@ function scanJs(text: string, file: string, out: Finding[]) {
   text.split("\n").forEach((l, i) => {
     if (!/\.style\b|cssText|setProperty|style=/.test(l)) return;
     scanCss(l.replace(/^[^'"`]*/, ""), file, i + 1, out);
+    // HTML markup in a JS string: style="..." holds a declaration list
+    for (const m of l.matchAll(/style=\\?"([^"\\]*)/g)) scanCss(m[1], file, i + 1, out);
   });
 }
 
@@ -86,7 +88,8 @@ export function checkTokens(root = "."): Finding[] {
     else if (rel.endsWith(".html")) scanHtml(text, rel, all);
     else scanJs(text, rel, all);
   }
-  return all.filter((x) => !ALLOW.some((a) => a.file === x.file && x.text.includes(a.match)));
+  const seen = new Set<string>();
+  return all.filter((x) => { const k = `${x.file}:${x.line}:${x.value}`; return !seen.has(k) && !!seen.add(k); }).filter((x) => !ALLOW.some((a) => a.file === x.file && x.text.includes(a.match)));
 }
 
 export function format(f: Finding): string {

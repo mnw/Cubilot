@@ -321,6 +321,7 @@
 
   /* xterm — Rosé Pine alacritty mapping; pine for green so it's legible
      on cream; foam for blue; rose for cyan. Bright == normal. */
+  --xterm-fg:             var(--text);
   --xterm-bg:             var(--bg);
   --xterm-cursor:         var(--orange);
   --xterm-black:          var(--bg-elev);
@@ -386,6 +387,7 @@
   /* Moon is dark; scrim/overlays stay white-on-dark like default. Inherits
      them automatically by not overriding. */
 
+  --xterm-fg:             var(--text);
   --xterm-bg:             var(--bg);
   --xterm-cursor:         var(--orange);
   --xterm-black:          var(--bg-elev);

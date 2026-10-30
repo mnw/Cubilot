@@ -108,6 +108,14 @@ describe("contrast of the text tokens (design/system/README.md)", () => {
       }
     });
   }
+  for (const theme of THEMES) {
+    test(`${theme}: the terminal foreground is the theme text colour and reaches 4.5:1 on the terminal background`, () => {
+      // xterm-themes.js reads --xterm-* from body, so a theme block must set its own foreground.
+      if (theme !== "default") expect(blocks[theme]["xterm-fg"]).toBe("var(--text)");
+      expect(resolve(theme, "xterm-fg")).toBe(resolve(theme, "text"));
+      expect(ratio(resolve(theme, "xterm-fg"), resolve(theme, "xterm-bg"))).toBeGreaterThanOrEqual(4.5);
+    });
+  }
   test("text-meta equals text-muted in both Rosé Pine themes", () => {
     for (const th of ["rose-pine-dawn", "rose-pine-moon"]) expect(blocks[th]["text-meta"]).toBe(blocks[th]["text-muted"]);
   });
@@ -126,6 +134,13 @@ describe("check-tokens script", () => {
   test("the UI has no colour, font size, spacing or radius outside tokens.css", () => {
     const found = checkTokens(".");
     expect(found.map(format)).toEqual([]);
+  });
+
+  test("lists a font size in an HTML style attribute inside a JS string", () => {
+    const root = project({
+      "ui/x.js": "el.innerHTML = '<div style=\"font-size:11px; color:var(--text-dim);\">x</div>';\nel.innerHTML = '<b style=\"font-size:var(--fs-sm)\">y</b>';",
+    });
+    expect(checkTokens(root).map((f) => `${f.file}:${f.line}:${f.value}`)).toEqual(["ui/x.js:1:11px"]);
   });
 
   test("lists a colour, font size, spacing and radius with file and line", () => {
