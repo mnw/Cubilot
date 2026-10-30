@@ -28,6 +28,7 @@ Build Part 11 after Parts 1, 2 and 7. It only reads data that the factory makes.
 1. **Structured verdicts.** Verdicts travel as handoffs with free text (Part 2, open item 1). The dashboard cannot count FAIL and CHANGES loops from text in a reliable way. Add the `review` kind first: `ticket_id`, `reviewer`, `verdict` (`pass | fail | approve | changes`), `findings` (count of blocking and suggestion), and, for code, `mutation_score`.
 2. **Ticket groups.** A ticket has no parent. Add an optional `request_id` to tickets. The Orchestrator sets the same `request_id` on all tickets of one human request. Do not use `external_ref` for this: it holds the key of an outside tracker.
 3. **Graph freshness.** Part 7 records the commit of each graph build. Expose it through the hub, so the dashboard can show it.
+4. **Pi usage per stage.** Every Pi stage has `source: none` and no token counts in `stage_metrics` (`hub/core/stage-metrics.ts:238-239`). Part 11 needs a reader for the Pi session files: cost per stage here, and the delivery report cost (Part 14, H8). The archived backlog ticket t_aa346d8209bec505 has the file format and the pointers.
 
 ## Panels
 
