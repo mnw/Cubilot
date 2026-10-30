@@ -2,10 +2,10 @@ One group = one ticket (design decision 16). Each group names its radius and its
 
 ## 1. Human escalation: the `decision` Kind (radius high: security, R8; blocked_by: none)
 
-- [ ] 1.1 `hub/kinds/decision.ts` (`KindModule`, registered in `hub/kinds/index.ts`): table `decisions`, statuses `recorded`, `applied`, `escalated`, `open`, `answered`, `overruled`; one event and one row update for each change → verify: `bun test tests/integration/decision-kind.test.ts` (one event for each transition; an illegal transition gets 409; `bun test tests/contract/has-required-hooks.test.ts` passes with the new Kind)
-- [ ] 1.2 `POST /decisions` (room lead only, escalation format checked: block, facts, 2 or 3 options with one recommendation, human_actions with full ticket ids, next) and the `escalate` tool in `hub/channel/tools.ts` → verify: `bun test tests/integration/decision-kind.test.ts` (spec scenarios "Missing option", "Install question"; another agent gets 403); `./scripts/check-mod.sh`
-- [ ] 1.3 `POST /decisions/<id>/answer` (human only): `decision.answered`, then one entry to the lead and, only when the decision has a `ticket_id`, one ticket note, each its own transaction; a request-only decision writes no ticket note (R5) → verify: `bun test tests/integration/decision-kind.test.ts` (spec scenario "Human answers"; an agent gets 403)
-- [ ] 1.4 `ui/features/decisions.js` (in `ui/index.html`): one Needs-you line for each `open` or `escalated` decision; the line opens the full decision; the answer buttons are the options → verify: `bun test tests/unit/decisions-ui.test.ts` (one line for each `open` or `escalated` decision, none for `answered`)
+- [x] 1.1 `hub/kinds/decision.ts` (`KindModule`, registered in `hub/kinds/index.ts`): table `decisions`, statuses `recorded`, `applied`, `escalated`, `open`, `answered`, `overruled`; one event and one row update for each change → verify: `bun test tests/integration/decision-kind.test.ts` (one event for each transition; an illegal transition gets 409; `bun test tests/contract/has-required-hooks.test.ts` passes with the new Kind)
+- [x] 1.2 `POST /decisions` (room lead only, escalation format checked: block, facts, 2 or 3 options with one recommendation, human_actions with full ticket ids, next) and the `escalate` tool in `hub/channel/tools.ts` → verify: `bun test tests/integration/decision-kind.test.ts` (spec scenarios "Missing option", "Install question"; another agent gets 403); `./scripts/check-mod.sh`
+- [x] 1.3 `POST /decisions/<id>/answer` (human only): `decision.answered`, then one entry to the lead and, only when the decision has a `ticket_id`, one ticket note, each its own transaction; a request-only decision writes no ticket note (R5) → verify: `bun test tests/integration/decision-kind.test.ts` (spec scenario "Human answers"; an agent gets 403)
+- [x] 1.4 `ui/features/decisions.js` (in `ui/index.html`): one Needs-you line for each `open` or `escalated` decision; the line opens the full decision; the answer buttons are the options → verify: `bun test tests/unit/decisions-ui.test.ts` (one line for each `open` or `escalated` decision, none for `answered`)
 
 ## 2. Request Kind and the Approve rule (radius high: who may queue; blocked_by: 1, same files `hub/kinds/index.ts`, `hub/channel/tools.ts`)
 
@@ -20,20 +20,20 @@ One group = one ticket (design decision 16). Each group names its radius and its
 
 ## 3. Radius by rule (radius high: permissions; blocked_by: 2, same file `hub/kinds/ticket.ts`; 1, same file `hub/channel/tools.ts`)
 
-- [ ] 3.1 `hub/core/config-file.ts` (one parse of `config.yml` for each call, used by `role-models.ts`) → verify: `bun test tests/unit/role-models.test.ts` passes unchanged; `bun test tests/unit/config-file.test.ts` (missing file, bad YAML, missing key give `{}` and one log line)
-- [ ] 3.2 `hub/core/radius-rule.ts`: `ruleRadius(text)` with the defaults of design decision 3 and `radius_rule` of `config.yml` → verify: `bun test tests/unit/radius-rule.test.ts` (spec scenarios "Launch term", "No term", "Malformed block"; `relaunch` does not match `launch`)
-- [ ] 3.3 Ticket columns `radius_rule`, `radius_reasons`, `radius_source`; create and edit set them; the stored radius is never below the rule; the lead and the creator raise; an agent's lower edit below the rule gets 403 → verify: `bun test tests/integration/ticket-radius.test.ts` (spec scenarios "Low requested, rule high", "Lead raises", "Lead lowers", "Raised ticket lowered by its raiser"); `bun test tests/unit/ticket-migrate.test.ts` (new columns; twice gives the same schema)
-- [ ] 3.4 `create_ticket` and `edit_ticket` tool texts: the radius is set by the rule; the lead can raise it → verify: `./scripts/check-mod.sh`; `rg -n "set by the radius rule" hub/channel/tools.ts`
-- [ ] 3.5 Ticket card in `ui/kinds/ticket.js` shows the radius source → verify: `bun test tests/unit/ticket-board.test.ts` (a card with `radius_source: rule` shows it)
+- [x] 3.1 `hub/core/config-file.ts` (one parse of `config.yml` for each call, used by `role-models.ts`) → verify: `bun test tests/unit/role-models.test.ts` passes unchanged; `bun test tests/unit/config-file.test.ts` (missing file, bad YAML, missing key give `{}` and one log line)
+- [x] 3.2 `hub/core/radius-rule.ts`: `ruleRadius(text)` with the defaults of design decision 3 and `radius_rule` of `config.yml` → verify: `bun test tests/unit/radius-rule.test.ts` (spec scenarios "Launch term", "No term", "Malformed block"; `relaunch` does not match `launch`)
+- [x] 3.3 Ticket columns `radius_rule`, `radius_reasons`, `radius_source`; create and edit set them; the stored radius is never below the rule; the lead and the creator raise; an agent's lower edit below the rule gets 403 → verify: `bun test tests/integration/ticket-radius.test.ts` (spec scenarios "Low requested, rule high", "Lead raises", "Lead lowers", "Raised ticket lowered by its raiser"); `bun test tests/unit/ticket-migrate.test.ts` (new columns; twice gives the same schema)
+- [x] 3.4 `create_ticket` and `edit_ticket` tool texts: the radius is set by the rule; the lead can raise it → verify: `./scripts/check-mod.sh`; `rg -n "set by the radius rule" hub/channel/tools.ts`
+- [x] 3.5 Ticket card in `ui/kinds/ticket.js` shows the radius source → verify: `bun test tests/unit/ticket-board.test.ts` (a card with `radius_source: rule` shows it)
 
 ## 4. High radius: stricter checks, Allow gate removed (radius high: permissions, launch; blocked_by: 3, same files `ticket.ts`, `tools.ts`, `ui/kinds/ticket.js`, output `config-file.ts`)
 
-- [ ] 4.1 Tester of a high ticket: template names `./scripts/test.sh`; `checkResult` requires `full_suite` → verify: `bun test tests/integration/high-radius-checks.test.ts` (spec scenario "Missing full suite")
-- [ ] 4.2 Validator PASS on a high ticket refused without a passing full suite → verify: `bun test tests/integration/high-radius-checks.test.ts` (spec scenario "Suite failed")
-- [ ] 4.3 Second review stage (`review: 'second'`, `second_review` pair of `config.yml`, first message without the first verdict), created after the first PASS commit and by the start sweep → verify: `bun test tests/integration/high-radius-checks.test.ts` (spec scenarios "First PASS", "Restart between PASS and second review"; the launch request has opus and high; the first message has no FAIL or PASS text of the first review)
-- [ ] 4.4 Second PASS moves the ticket to `done` in the `stage.passed` transaction; the agent `done` gate checks both PASSes; the approval route, `APPROVAL_BLOCK_MESSAGE`, `retireStaleApproval` and the tool's approval path are removed; the migration dismisses pending `ticket:done` permissions → verify: `bun test tests/integration/high-radius-checks.test.ts` (spec scenarios "Both PASS", "Agent moves early"); `rg -n "approval_request_id" hub/channel/tools.ts` finds nothing; `tests/integration/ticket-approval-race.test.ts` is removed with the route; `./scripts/check-mod.sh`
-- [ ] 4.5 `GET /tickets/<id>/merge-message` → verify: `bun test tests/integration/high-radius-checks.test.ts` (spec scenario "High-radius message"; 409 when a PASS is missing; the low format)
-- [ ] 4.6 The card shows the two PASS marks of a high ticket; the approval state is removed from `ui/kinds/ticket.js` → verify: `bun test tests/unit/ticket-board.test.ts`; `rg -n "checkout main|merge main|push origin main" hub src-tauri/src` finds nothing
+- [x] 4.1 Tester of a high ticket: template names `./scripts/test.sh`; `checkResult` requires `full_suite` → verify: `bun test tests/integration/high-radius-checks.test.ts` (spec scenario "Missing full suite")
+- [x] 4.2 Validator PASS on a high ticket refused without a passing full suite → verify: `bun test tests/integration/high-radius-checks.test.ts` (spec scenario "Suite failed")
+- [x] 4.3 Second review stage (`review: 'second'`, `second_review` pair of `config.yml`, first message without the first verdict), created after the first PASS commit and by the start sweep → verify: `bun test tests/integration/high-radius-checks.test.ts` (spec scenarios "First PASS", "Restart between PASS and second review"; the launch request has opus and high; the first message has no FAIL or PASS text of the first review)
+- [x] 4.4 Second PASS hands the ticket to the room lead in the `stage.passed` transaction (L4; the lead moves it to `done`); the agent `done` gate checks both PASSes; the approval route, `APPROVAL_BLOCK_MESSAGE`, `retireStaleApproval` and the tool's approval path are removed; the migration dismisses pending `ticket:done` permissions → verify: `bun test tests/integration/high-radius-checks.test.ts` (spec scenarios "Both PASS", "Agent moves early"); `rg -n "approval_request_id" hub/channel/tools.ts` finds nothing; `tests/integration/ticket-approval-race.test.ts` is removed with the route; `./scripts/check-mod.sh`
+- [x] 4.5 `GET /tickets/<id>/merge-message` → verify: `bun test tests/integration/high-radius-checks.test.ts` (spec scenario "High-radius message"; 409 when a PASS is missing; the low format)
+- [x] 4.6 The card shows the two PASS marks of a high ticket; the approval state is removed from `ui/kinds/ticket.js` → verify: `bun test tests/unit/ticket-board.test.ts`; `rg -n "checkout main|merge main|push origin main" hub src-tauri/src` finds nothing
 
 ## 5. Ticket FAIL count and third-review gate (radius high: permissions; blocked_by: 4, same file `hub/kinds/stage.ts`)
 
@@ -64,29 +64,29 @@ One group = one ticket (design decision 16). Each group names its radius and its
 
 ## 9. Measure what reaches the lead (radius low; blocked_by: none)
 
-- [ ] 9.1 `hub/core/lead-inbound.ts`: counter in `agents.enqueueFor` for room leads, by kind and bytes; one JSONL line for each lead each hour; a write error is logged only → verify: `bun test tests/unit/lead-inbound.test.ts` (spec scenario "Hourly line"; a read-only folder does not throw)
+- [x] 9.1 `hub/core/lead-inbound.ts`: counter in `agents.enqueueFor` for room leads, by kind and bytes; one JSONL line for each lead each hour; a write error is logged only → verify: `bun test tests/unit/lead-inbound.test.ts` (spec scenario "Hourly line"; a read-only folder does not throw)
 - [ ] 9.2 Baseline (own ticket 9b, radius high, blocked_by: 9 and 4; owner: the Orchestrator; after an install of ticket 9): the baseline window is the 24 full UTC hours after the install, with 24 hourly lines for each lead. No other Part 6 install happens inside the window; if one is necessary, the window ends at that install and the check runs again after it (R7). The Orchestrator collects the evidence (baseline lines, `jq` output, hub start time) and moves the ticket to `in_review` with the note. A Tester stage runs the full suite on the installed commit and sends its result `to_role: validator`; a Validator PASS and the second review (P6-04) close it. The human does not move it (R10) → verify: after H24, with H0 and H24 as UTC hours (2026-10-29T13:00:00Z): `jq -s --arg s "$H0" --arg e "$H24" '[.[] | select(.hour >= $s and .hour < $e)] | group_by(.room + "/" + .lead) | map({lead: (.[0].room + "/" + .[0].lead), hours: (map(.hour) | unique | length)})' "$HOME/Library/Application Support/Cubilot/metrics/lead-inbound.jsonl"` shows hours = 24 for each lead of room cubilot
 
 ## 10. Lead briefing ignores stage sessions (radius low; blocked_by: 9, output: the baseline measure)
 
-- [ ] 10.1 The lead's briefing signature in `hub/core/briefing.ts` drops stage sessions → verify: `bun test tests/unit/briefing-signature.test.ts` (spec scenario "Stage session joins"; a non-stage agent joining still re-briefs)
+- [x] 10.1 The lead's briefing signature in `hub/core/briefing.ts` drops stage sessions → verify: `bun test tests/unit/briefing-signature.test.ts` (spec scenario "Stage session joins"; a non-stage agent joining still re-briefs)
 
 ## 11. Context percentage in the agent column (radius low; blocked_by: none)
 
-- [ ] 11.1 `factory/shared/scripts/statusline.sh` (atomic write of stdin to `<app data>/context/$CHATBRIDGE_AGENT.json`, one short output line); `factory.rs` adds `statusLine` to each Claude role's settings → verify: `cargo test --manifest-path src-tauri/Cargo.toml role_settings` (the settings JSON has the command); `bun test tests/unit/statusline-script.test.ts` (the file has the input JSON; mode `0600`)
-- [ ] 11.2 `hub/core/context-usage.ts`; `context_pct` in `hub/features/roster.ts`; the agent column in `ui/features/roster.js` → verify: `bun test tests/integration/roster-context.test.ts` (a file with 42.5 gives 42.5; spec scenario "Empty value" gives null and `–`)
+- [x] 11.1 `factory/shared/scripts/statusline.sh` (atomic write of stdin to `<app data>/context/$CHATBRIDGE_AGENT.json`, one short output line); `factory.rs` adds `statusLine` to each Claude role's settings → verify: `cargo test --manifest-path src-tauri/Cargo.toml role_settings` (the settings JSON has the command); `bun test tests/unit/statusline-script.test.ts` (the file has the input JSON; mode `0600`)
+- [x] 11.2 `hub/core/context-usage.ts`; `context_pct` in `hub/features/roster.ts`; the agent column in `ui/features/roster.js` → verify: `bun test tests/integration/roster-context.test.ts` (a file with 42.5 gives 42.5; spec scenario "Empty value" gives null and `–`)
 
 ## 12. Ticket-event digest for the lead (radius low; blocked_by: 9, output: the baseline measure)
 
-- [ ] 12.1 Bridge core: for a room lead, hold `ticket.*` entries with no decision; one digest every 10 minutes or with the next waking entry; decision, FAIL count 2+ and waiting-approval entries come at once → verify: `bun test tests/unit/channel-digest.test.ts` (spec scenarios "Three ticket events", "Escalation"); `./scripts/check-mod.sh`
+- [x] 12.1 Bridge core: for a room lead, hold `ticket.*` entries with no decision; one digest every 10 minutes or with the next waking entry; decision, FAIL count 2+ and waiting-approval entries come at once → verify: `bun test tests/unit/channel-digest.test.ts` (spec scenarios "Three ticket events", "Escalation"); `./scripts/check-mod.sh`
 
 ## 13. Result summary for the lead and `read_handoff` (radius high: security, R8; blocked_by: 12, same file `hub/channel/core.ts`; 7, same file `hub/kinds/handoff.ts`; 4, same file `hub/channel/tools.ts`)
 
-- [ ] 13.1 Bridge core shows a result handoff to the lead as a summary; `GET /handoffs/<id>` (room-scoped) and the `read_handoff` tool → verify: `bun test tests/unit/channel-digest.test.ts` (spec scenario "FAIL result"); `bun test tests/integration/handoff-read.test.ts` (another room gets 403); `./scripts/check-mod.sh`
+- [x] 13.1 Bridge core shows a result handoff to the lead as a summary; `GET /handoffs/<id>` (room-scoped) and the `read_handoff` tool → verify: `bun test tests/unit/channel-digest.test.ts` (spec scenario "FAIL result"); `bun test tests/integration/handoff-read.test.ts` (another room gets 403); `./scripts/check-mod.sh`
 
 ## 14. State summary (radius low; blocked_by: 1, output: the `decision` table)
 
-- [ ] 14.1 `hub/core/state-summary.ts`: the five parts in order, cut from the end of each list with "+N more: <command>", at most 8,000 characters → verify: `bun test tests/unit/state-summary.test.ts` (spec scenario "Large room"; the part order; the same ledger gives the same text)
+- [x] 14.1 `hub/core/state-summary.ts`: the five parts in order, cut from the end of each list with "+N more: <command>", at most 8,000 characters → verify: `bun test tests/unit/state-summary.test.ts` (spec scenario "Large room"; the part order; the same ledger gives the same text)
 
 ## 15. Checkpoint run (radius high: writes into a live session; blocked_by: 2, same file `index.ts`; 3, output `config-file.ts`; 11, output context reader; 14, output summary)
 
