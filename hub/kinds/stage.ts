@@ -586,8 +586,10 @@ export function specFailState(db: Database, room: string, requestId: string): { 
   // The human's Approve of the request in this room starts the count again, like a PASS: the later of the two ends the old run.
   const lastApprove =
     db
-      .query<{ n: number | null }, [string]>("SELECT MAX(e.seq) AS n FROM events e WHERE e.entity_id = ?1 AND e.kind = 'request.approved'")
-      .get(`request:${room}:${requestId}`)?.n ?? 0;
+      .query<{ n: number | null }, [string, string]>(
+        "SELECT MAX(e.seq) AS n FROM events e JOIN requests r ON r.id = e.entity_id WHERE r.room = ?1 AND r.request_id = ?2 AND e.kind = 'request.approved'",
+      )
+      .get(room, requestId)?.n ?? 0;
   const since = Math.max(lastPass, lastApprove);
   const fails = db
     .query<{ id: string }, [string, string, number]>(
