@@ -23,7 +23,7 @@ import { insertEvent } from "../core/events";
 import { ts, validRoomLabel } from "../core/ids";
 import { validateBlockedBy, openBlockerIds } from "./ticket-blockers";
 import { STAGE_ROLES, getRoomSettings, type StageRole } from "../core/ledger";
-import { ruleRadius } from "../core/radius-rule";
+import { ticketRadius } from "../core/radius-rule";
 import { dismissPendingPermission } from "./permission";
 import type { StageHooks } from "./stage";
 import { approveRequest, currentScope, ensureRequestsTable, needsApprove, needsFirstApprove, requestExists, requestFacts } from "./request";
@@ -126,8 +126,8 @@ function parseReasons(v: unknown): string[] {
   }
 }
 
-/** The radius rule over the text an agent reads: title, criteria and planning note. */
-const ruleOf = (title: string, criteria: string, note: string | null) => ruleRadius([title, criteria, note ?? ""].join("\n"));
+/** The radius rule over the text an agent reads: title, criteria and planning note. A [doc] title ignores terms. */
+const ruleOf = ticketRadius;
 
 const ticketDecl: StateMachineDecl<TicketSnapshot> = {
   kind: "ticket",

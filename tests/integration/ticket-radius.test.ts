@@ -119,6 +119,29 @@ describe("radius by rule", () => {
     expect(t.events(s.id).map((e) => e.kind)).toEqual(["ticket.created", "ticket.edited"]);
   });
 
+  test("doc ticket with a term is created low (blast_radius, radius_rule, radius_source rule)", async () => {
+    const s = await create({ title: "[doc] State the launch rule", acceptance_criteria: "Describe the permission term." });
+    expect(s).toMatchObject({ blast_radius: "low", radius_rule: "low", radius_source: "rule", radius_reasons: [] });
+    expect(t.row(s.id)).toMatchObject({ blast_radius: "low", radius_rule: "low", radius_source: "rule" });
+  });
+
+  test("edit of a doc ticket that adds a term keeps it low", async () => {
+    const s = await create({ title: "[doc] State the rule" });
+    const r = await edit(s.id, "alice", { acceptance_criteria: "The launch queue refuses a stage." });
+    expect(r.status).toBe(200);
+    expect(r.json.snapshot).toMatchObject({ blast_radius: "low", radius_rule: "low", radius_source: "rule" });
+    const p = await edit(s.id, "alice", { acceptance_criteria: "Edit hub/core/auth.ts." });
+    expect(p.json.snapshot).toMatchObject({ blast_radius: "high", radius_rule: "high", radius_source: "rule" });
+  });
+
+  test("lead raises a doc ticket to high", async () => {
+    await lead();
+    const s = await create({ title: "[doc] State the launch rule" });
+    const r = await edit(s.id, "bob", { blast_radius: "high" });
+    expect(r.status).toBe(200);
+    expect(r.json.snapshot).toMatchObject({ blast_radius: "high", radius_rule: "low", radius_source: "raised" });
+  });
+
   test("Lead raises", async () => {
     await lead();
     const s = await create();
