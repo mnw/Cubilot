@@ -46,4 +46,13 @@ describe("role files: test-run split", () => {
     expect(text).toContain("~/Library/Logs/Cubilot/staging-suite/");
     expect(text).toContain("Worker: targeted tests");
   });
+
+  test("(e) orchestrator.md: tree compare skips the staging suite, differing trees stay in the batch", () => {
+    const text = read("orchestrator");
+    expect(text).toContain("git rev-parse <merge commit>^{tree}");
+    expect(text).toContain("git rev-parse <tested commit>^{tree}");
+    expect(text).toContain("tree equal to <tested commit>");
+    expect(text).toMatch(/run no staging suite/);
+    expect(text).toMatch(/differ, the merge stays in the batch/);
+  });
 });
