@@ -1,4 +1,4 @@
-// Roster feature — read endpoints for agents/presence + manual remove + nutshell GET + room-default.
+// Roster feature — read endpoints for agents/presence + manual remove + nutshell GET.
 // Carved out of hub.ts inline routes in architecture-cycle-2a §4.
 
 import type { HubFeature } from "../core/types";
@@ -10,12 +10,11 @@ import { readContextPct } from "../core/context-usage";
 export type RosterDeps = {
   agents: AgentRegistry;
   removeAgent: (name: string, reason: "manual" | "stale (no connection)") => boolean;
-  defaultRoom: string;
   readNutshell: (room: string) => NutshellSnapshot;
 };
 
 export function createRosterFeature(deps: RosterDeps): HubFeature {
-  const { agents, removeAgent, defaultRoom, readNutshell } = deps;
+  const { agents, removeAgent, readNutshell } = deps;
 
   return {
     routes: [
@@ -56,12 +55,6 @@ export function createRosterFeature(deps: RosterDeps): HubFeature {
           if (!validRoomLabel(room)) return Response.json({ error: "invalid room" }, { status: 400 });
           return Response.json(readNutshell(room));
         },
-      },
-      {
-        method: "GET",
-        path: "/room-default",
-        auth: "read",
-        handler: () => Response.json({ room: defaultRoom }),
       },
     ],
   };

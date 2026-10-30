@@ -230,7 +230,7 @@ async function _discoverCommandsForAgent(agent) {
   // Harness is read from tmux, so it stays correct across app restarts.
   let harness = 'claude';
   try {
-    harness = (await tauriInvoke('pty_harness', { agent })) || 'claude';
+    harness = (await hubGet(`/agents/${encodeURIComponent(agent)}/harness`)).harness || 'claude';
   } catch {
     // Best-effort: fall back to the claude built-ins.
   }

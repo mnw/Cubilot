@@ -115,13 +115,6 @@ struct UiFonts {
     mono: String,
 }
 
-#[derive(Serialize, Clone)]
-struct UiSettings {
-    theme: String,
-    font_scale: f32,
-    fonts: UiFonts,
-}
-
 const VALID_THEMES: &[&str] = &["default", "rose-pine-dawn", "rose-pine-moon"];
 const FONT_SCALE_MIN: f32 = 0.85;
 const FONT_SCALE_MAX: f32 = 1.25;
@@ -395,32 +388,6 @@ fn load_legacy_json_config() -> Option<AppConfig> {
     }
 }
 
-fn resolve_theme() -> String {
-    let cfg = load_config();
-    let raw = cfg
-        .theme
-        .map(|s| s.trim().to_ascii_lowercase())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "default".to_string());
-    if VALID_THEMES.iter().any(|t| *t == raw) {
-        raw
-    } else {
-        eprintln!(
-            "[setup] theme '{raw}' not in {VALID_THEMES:?}; falling back to default"
-        );
-        "default".to_string()
-    }
-}
-
-fn resolve_font_scale() -> f32 {
-    let cfg = load_config();
-    let raw = cfg.font_scale.unwrap_or(1.0);
-    if !raw.is_finite() {
-        return 1.0;
-    }
-    raw.clamp(FONT_SCALE_MIN, FONT_SCALE_MAX)
-}
-
 // Whitelist prevents breaking out of the webview's CSS string composer.
 fn sanitize_font_name(raw: Option<String>) -> String {
     let Some(s) = raw else { return String::new() };
@@ -442,15 +409,6 @@ fn sanitize_font_name(raw: Option<String>) -> String {
         return String::new();
     }
     trimmed.to_string()
-}
-
-fn resolve_fonts() -> UiFonts {
-    let cfg = load_config();
-    let f = cfg.fonts.unwrap_or_default();
-    UiFonts {
-        ui:   sanitize_font_name(f.ui),
-        mono: sanitize_font_name(f.mono),
-    }
 }
 
 fn resolve_human_name() -> Result<String, String> {
@@ -945,6 +903,28 @@ fn ensure_staged(
     stage().map_err(|e| format!("chatbridge mod is not staged and retrying failed: {e}"))
 }
 
+fn staged_mod_dir_for_env(staged: &std::sync::atomic::AtomicBool, dir: PathBuf) -> Option<PathBuf> {
+    (staged.load(std::sync::atomic::Ordering::SeqCst) && mod_dir_is_complete(&dir)).then_some(dir)
+}
+
+// Env the hub reads for the settings routes: what only the shell knows (app version, bundled tmux, bundled factory
+// source, staged mod folder). The hub serves them to the UI (hub/features/settings.ts).
+fn hub_settings_env() -> Vec<(&'static str, String)> {
+    let mut env = vec![("CUBILOT_APP_VERSION", env!("CARGO_PKG_VERSION").to_string())];
+    // Only a folder this process staged and that is still complete: a stale folder from an older build
+    // is not exported, so the hub answers 503 for the mcp template (what get_mcp_template did).
+    if let Some(dir) = staged_mod_dir_for_env(&CHATBRIDGE_MOD_STAGED, chatbridge_mod_dir()) {
+        env.push(("CUBILOT_MOD_DIR", dir.to_string_lossy().into_owned()));
+    }
+    if let Ok(tmux) = pty::resolve_tmux_bin() {
+        env.push(("CUBILOT_TMUX", tmux.to_string_lossy().into_owned()));
+    }
+    if let Ok(src) = factory::resolve_factory_src() {
+        env.push(("CUBILOT_FACTORY_SRC", src.to_string_lossy().into_owned()));
+    }
+    env
+}
+
 fn pick_free_port() -> Result<u16, String> {
     let listener = TcpListener::bind("127.0.0.1:0")
         .map_err(|e| format!("bind 127.0.0.1:0 failed: {e}"))?;
@@ -1087,14 +1067,6 @@ fn get_hub_url(state: State<HubState>) -> Result<HubInfo, String> {
 }
 
 #[tauri::command]
-fn get_human_name(state: State<HubState>) -> Result<String, String> {
-    let guard = state.human_name.lock().unwrap_or_else(|e| e.into_inner());
-    guard
-        .clone()
-        .ok_or_else(|| "human name not yet initialized".to_string())
-}
-
-#[tauri::command]
 fn open_config_file() -> Result<(), String> {
     let path = config_file();
     if !path.exists() {
@@ -1110,11 +1082,6 @@ fn open_config_file() -> Result<(), String> {
 // Opens the user skill layer folder (task 8.2). Created here when missing so a click before the first staging
 // still lands in Finder; the staging creates the per-role skills/ folders below it.
 // The roles the spawn modal offers: single-agent roles of the staged version `current` names.
-#[tauri::command]
-fn list_roles() -> Result<Vec<factory::RoleInfo>, String> {
-    factory::list_roles()
-}
-
 #[tauri::command]
 fn open_skills_folder() -> Result<(), String> {
     let path = app_data_dir().join("factory-user");
@@ -1201,6 +1168,9 @@ fn reload_settings(
     for (k, v) in factory::hub_factory_env(&factory::factory_dir(), &factory_version) {
         cmd = cmd.env(k, v);
     }
+    for (k, v) in hub_settings_env() {
+        cmd = cmd.env(k, v);
+    }
     cmd = apply_summariser_env(cmd);
     let (rx, mut child) = cmd.spawn().map_err(|e| format!("spawn cubilot-bin: {e}"))?;
     give_human_token(&mut child, &tokens.human)?;
@@ -1222,21 +1192,6 @@ fn reload_settings(
 
     println!("[settings] hub restarted on port {port}");
     Ok(new_info)
-}
-
-#[tauri::command]
-fn get_app_version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
-}
-
-// tokens.css multiplies every --fs-* by var(--ui-font-scale).
-#[tauri::command]
-fn get_ui_settings() -> UiSettings {
-    UiSettings {
-        theme: resolve_theme(),
-        font_scale: resolve_font_scale(),
-        fonts: resolve_fonts(),
-    }
 }
 
 // Editor cmd from config.yml; cwd is the agent's live pane path (tracks `cd`), appended as last arg.
@@ -1405,17 +1360,6 @@ fn read_frontmatter_description(path: &Path) -> Option<String> {
     None
 }
 
-// Launch line for sessions started outside Cubilot. No hub URL or token: the mod
-// reads the discovery files itself.
-#[tauri::command]
-fn get_mcp_template() -> Result<String, String> {
-    // Same guard as a spawn: never hand out a launch line for a stale or missing mod.
-    let dir = ensure_chatbridge_mod_staged()?.to_string_lossy().replace('\'', r"'\''");
-    Ok(format!(
-        "CHATBRIDGE_AGENT='agent' CHATBRIDGE_ROOM='default' claude --plugin-dir '{dir}'"
-    ))
-}
-
 pub fn run() {
     // Wipe WKWebView disk cache before webview creation; otherwise stale assets persist.
     if let Some(cache_root) = dirs::cache_dir() {
@@ -1435,14 +1379,9 @@ pub fn run() {
         .manage(pty::PtyRegistry::default())
         .invoke_handler(tauri::generate_handler![
             get_hub_url,
-            get_app_version,
-            get_mcp_template,
             slash_discover_for_agent,
-            get_human_name,
-            get_ui_settings,
             open_config_file,
             open_skills_folder,
-            list_roles,
             models::list_models,
             skills::agent_skills,
             skills::agent_skills_set,
@@ -1455,9 +1394,6 @@ pub fn run() {
             pty::pty_resize,
             pty::pty_kill,
             pty::pty_list,
-            pty::pty_harness,
-            pty::pty_roles,
-            pty::resolve_default_room,
             pty::pty_spawn_shell,
             pty::pty_shell_exists,
             pty::pty_capture_turn,
@@ -1529,6 +1465,9 @@ pub fn run() {
                 .env("CUBILOT_ALLOWED_EXTENSIONS", extensions.join(","))
                 .env("CUBILOT_CHAT_HISTORY_LIMIT", chat_history_limit.to_string());
             for (k, v) in factory::hub_factory_env(&factory::factory_dir(), &factory_version) {
+                cmd = cmd.env(k, v);
+            }
+            for (k, v) in hub_settings_env() {
                 cmd = cmd.env(k, v);
             }
             cmd = apply_summariser_env(cmd);
@@ -1620,7 +1559,7 @@ mod attachment_default_tests {
 
 #[cfg(test)]
 mod chatbridge_mod_tests {
-    use super::{ensure_staged, install_mod_dir_with, mod_dir_is_complete, pid_is_running, stage_chatbridge_mod, sweep_stale_staging};
+    use super::{ensure_staged, install_mod_dir_with, mod_dir_is_complete, pid_is_running, stage_chatbridge_mod, staged_mod_dir_for_env, sweep_stale_staging};
     use std::fs;
     use std::sync::atomic::AtomicBool;
 
@@ -1713,6 +1652,22 @@ mod chatbridge_mod_tests {
         }).unwrap_err();
         assert_eq!(calls, 1);
         assert!(err.contains("register.js") && err.contains("not staged"), "{err}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn hub_env_exports_the_mod_dir_only_when_this_process_staged_it_and_it_is_complete() {
+        let root = scratch("hubenv");
+        let dir = root.join("data/chatbridge-mod");
+        stage_into(&dir);
+        // A complete folder this process did not stage (older build) is not exported.
+        assert_eq!(staged_mod_dir_for_env(&AtomicBool::new(false), dir.clone()), None);
+        // Staged this process and complete: exported.
+        let staged = AtomicBool::new(true);
+        assert_eq!(staged_mod_dir_for_env(&staged, dir.clone()), Some(dir.clone()));
+        // Staged this process but a file was lost afterwards: not exported.
+        fs::remove_file(dir.join("hooks/register.js")).unwrap();
+        assert_eq!(staged_mod_dir_for_env(&staged, dir), None);
         let _ = fs::remove_dir_all(&root);
     }
 
