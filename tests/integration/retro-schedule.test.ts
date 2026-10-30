@@ -11,7 +11,7 @@ import { migrateLedger, setRoomSettings } from "../../hub/core/ledger";
 import { insertEvent } from "../../hub/core/events";
 import { buildKinds } from "../../hub/kinds";
 import { createStageRuntime } from "../../hub/kinds/stage";
-import { retroWeekAt, retroWeekWindow } from "../../hub/core/retro";
+import { evidencePath, retroWeekAt, retroWeekWindow } from "../../hub/core/retro";
 import type { LaunchRequest } from "../../hub/core/launch-queue";
 import type { Entry, HubCapabilities, Scope } from "../../hub/core/types";
 
@@ -103,7 +103,7 @@ describe("the weekly schedule", () => {
     e.rt.sweep(e.cap, MON(6, 0));
     const [s] = e.retroStages();
     expect(s).toMatchObject({ room: "A", retro_week: "2026-W46" });
-    const file = join(dir, "retro", "A", "2026-W46.json");
+    const file = evidencePath(join(dir, "ledger.db"), "A", "2026-W46");
     expect(existsSync(file)).toBe(true);
     expect(Object.keys(JSON.parse(readFileSync(file, "utf8")))).toEqual(["room", "since", "until", "flow", "stages", "findings", "human", "causes", "reports", "improvements"]);
     e.rt.sweep(e.cap, MON(6, 0));
@@ -168,9 +168,24 @@ describe("the weekly schedule", () => {
     e.rt.sweep(e.cap, MON());
     expect(e.retroStages().map((s) => s.room).sort()).toEqual(["A B", "A_B"]);
     for (const room of ["A B", "A_B"]) {
-      const file = join(dir, "retro", room, "2026-W46.json");
+      const file = evidencePath(join(dir, "ledger.db"), room, "2026-W46");
       expect(JSON.parse(readFileSync(file, "utf8")).room).toBe(room);
     }
+  });
+
+  test("rooms `A` and `a` get two evidence files on a case-insensitive filesystem", () => {
+    const e = env();
+    for (const room of ["A", "a"]) {
+      setRoomSettings(e.db, room, { project_folder: e.project });
+      e.ticketEvent(room, at(5, 12));
+    }
+    e.rt.sweep(e.cap, MON());
+    expect(e.retroStages().map((s) => s.room).sort()).toEqual(["A", "a"]);
+    for (const room of ["A", "a"]) {
+      const file = evidencePath(join(dir, "ledger.db"), room, "2026-W46");
+      expect(JSON.parse(readFileSync(file, "utf8")).room).toBe(room);
+    }
+    expect(evidencePath("/x/l.db", "A", "w").toLowerCase()).not.toBe(evidencePath("/x/l.db", "a", "w").toLowerCase());
   });
 
   test("each room with activity gets its own stage and file", () => {
@@ -179,7 +194,7 @@ describe("the weekly schedule", () => {
     e.ticketEvent("B", at(4, 12), "ticket.done");
     e.rt.sweep(e.cap, MON());
     expect(e.retroStages().map((s) => s.room)).toEqual(["A", "B"]);
-    expect(readdirSync(join(dir, "retro")).sort()).toEqual(["A", "B"]);
+    expect(readdirSync(join(dir, "retro")).sort()).toEqual(["%a", "%b"]);
   });
 
   test("the schedule uses no model: no network call, and the only launch is the retrospective stage", () => {
@@ -237,7 +252,7 @@ describe("the first message", () => {
     expect(req.prompt).toContain(e.retroStages().find((x) => x.retro_week === "2026-W46")!.id);
     expect(req.prompt).not.toContain("{{");
     // The text is the file of the sweep.
-    expect(req.prompt).toContain(readFileSync(join(dir, "retro", "A", "2026-W46.json"), "utf8").trim());
+    expect(req.prompt).toContain(readFileSync(evidencePath(join(dir, "ledger.db"), "A", "2026-W46"), "utf8").trim());
   });
 
   test("an earlier retrospective with no proposals hides the older proposals", () => {

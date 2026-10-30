@@ -252,9 +252,9 @@ export function roomsWithTicketEvents(db: Database, since: number, until: number
     .map((r) => r.room);
 }
 
-/** `<dir of the ledger>/retro/<room>/<iso-week>.json`. A valid room label has no path separator, so it is the segment itself; only `.` and `..` become `%2E` forms (`%` is not a valid label character, so no two rooms collide). */
+/** `<dir of the ledger>/retro/<room>/<iso-week>.json`. A valid room label has no path separator. Each uppercase letter becomes `%` plus the lowercase letter, and `.` and `..` become `%2E` forms. `%` is not a valid label character, so no two rooms collide, also on a case-insensitive filesystem. */
 export function evidencePath(ledgerDb: string, room: string, week: string): string {
-  return join(dirname(ledgerDb), "retro", room.replace(/^\.{1,2}$/, (d) => d.replace(/\./g, "%2E")), `${week}.json`);
+  return join(dirname(ledgerDb), "retro", room.replace(/^\.{1,2}$/, (d) => d.replace(/\./g, "%2E")).replace(/[A-Z]/g, (c) => `%${c.toLowerCase()}`), `${week}.json`);
 }
 
 /** Writes the evidence file of a room and week (replacing an older one) and returns its text. */
