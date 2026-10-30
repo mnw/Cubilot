@@ -143,4 +143,31 @@ describe("GET /search", () => {
     await search("zelda"); await search(alphaTicket); await search("req-alpha");
     expect(counts()).toEqual(before);
   });
+  test("ranking happens before the limit: an old exact request and an old open ticket survive 61 newer rows", async () => {
+    const db = new Database(hub.ledgerPath);
+    const reqRow = db.query<Record<string, unknown>, []>("SELECT * FROM requests WHERE request_id = 'req-alpha-one'").get()!;
+    const cols = Object.keys(reqRow);
+    const ins = db.query(`INSERT INTO requests (${cols.join(",")}) VALUES (${cols.map(() => "?").join(",")})`);
+    const mkReq = (id: string, at: number) => ins.run(...cols.map((c) => (c === "request_id" || c === "id" ? id : c === "created_at_ms" ? at : reqRow[c])) as never[]);
+    mkReq("zq-old", 1);
+    for (let i = 0; i < 61; i++) mkReq(`zq-old-${i}`, 1000 + i);
+    db.close();
+    expect(((await search("zq-old")).json as Hit[])[0]).toMatchObject({ kind: "request", id: "zq-old" });
+    const openOld = await mk("zelda-1", "rankword open old", "req-alpha-one");
+    for (let i = 0; i < 61; i++) {
+      const id = await mk("zelda-1", `rankword closed ${i}`, "req-alpha-one");
+      await postJson(hub, `/tickets/${id}/transition`, { by: "zelda-1", to: "cancelled" });
+    }
+    const r = ids((await search("rankword")).json);
+    expect(r[0]).toBe(openOld);
+  });
+
+  test("a title needs every query word, with nine words", async () => {
+    const nine = "w1 w2 w3 w4 w5 w6 w7 w8 w9";
+    const id = await mk("zelda-1", "w1 w2 w3 w4 w5 w6 w7 w8", "req-alpha-one");
+    expect(ids((await search(nine)).json)).toEqual([]);
+    const id9 = await mk("zelda-1", nine, "req-alpha-one");
+    expect(ids((await search(nine)).json)).toEqual([id9]);
+    expect(id).not.toBe(id9);
+  });
 });

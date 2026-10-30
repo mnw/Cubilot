@@ -8,7 +8,6 @@ import { validName } from "../core/ids";
 export const SEARCH_LIMIT = 20;
 export const SEARCH_MIN_CHARS = 2;
 const SEARCH_Q_MAX_CHARS = 200;
-const SEARCH_MAX_WORDS = 8;
 
 export type SearchResult = {
   kind: "ticket" | "request" | "agent";
@@ -39,14 +38,16 @@ export function createSearchFeature(deps: SearchDeps): HubFeature {
     const wordSql = words.map(() => "instr(lower(title), ?) > 0").join(" AND ");
     clauses.push(`(${wordSql})`);
     params.push(...words);
+    const exactId = q.startsWith("t_") ? q : `t_${q}`;
     const roomSql = room === null ? "" : " AND room = ?";
     if (room !== null) params.push(room);
-    params.push(SEARCH_LIMIT * 3);
+    params.push(exactId, SEARCH_LIMIT);
+    // Rank in SQL before the limit: exact id, then open, then newest. The top 20 of each kind hold the final top 20.
     return db
       .query<Record<string, unknown>, (string | number)[]>(
         `SELECT id, title, room, status, created_at_ms FROM tickets
           WHERE archived_at_ms IS NULL AND (${clauses.join(" OR ")})${roomSql}
-          ORDER BY created_at_ms DESC LIMIT ?`,
+          ORDER BY lower(id) = ? DESC, status NOT IN ('done', 'cancelled') DESC, created_at_ms DESC LIMIT ?`,
       )
       .all(...params)
       .map((r) => {
@@ -69,12 +70,12 @@ export function createSearchFeature(deps: SearchDeps): HubFeature {
     if (!db) return [];
     const params: (string | number)[] = [q.length, q];
     if (room !== null) params.push(room);
-    params.push(SEARCH_LIMIT * 3);
+    params.push(q, SEARCH_LIMIT);
     return db
       .query<Record<string, unknown>, (string | number)[]>(
         `SELECT request_id, room, status, created_at_ms FROM requests
           WHERE substr(lower(request_id), 1, ?) = ?${room === null ? "" : " AND room = ?"}
-          ORDER BY created_at_ms DESC LIMIT ?`,
+          ORDER BY lower(request_id) = ? DESC, created_at_ms DESC LIMIT ?`,
       )
       .all(...params)
       .map((r) => {
@@ -134,7 +135,7 @@ export function createSearchFeature(deps: SearchDeps): HubFeature {
           }
           const q = (url.searchParams.get("q") ?? "").trim().toLowerCase().slice(0, SEARCH_Q_MAX_CHARS);
           if (q.length < SEARCH_MIN_CHARS) return Response.json([]);
-          const words = q.split(/\s+/).filter(Boolean).slice(0, SEARCH_MAX_WORDS);
+          const words = q.split(/\s+/).filter(Boolean);
           const all = [...tickets(q, words, room), ...requests(q, room), ...agentHits(q, room)];
           all.sort((a, b) => Number(b.exact) - Number(a.exact) || Number(b.open) - Number(a.open) || b.at - a.at);
           const results: SearchResult[] = all
