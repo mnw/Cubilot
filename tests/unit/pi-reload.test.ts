@@ -24,7 +24,7 @@ test('session_shutdown is not successful reload completion', async () => {
   const oldAgent = process.env.CHATBRIDGE_AGENT;
   process.env.CHATBRIDGE_AGENT = 'validator-throwaway';
   try {
-    const { default: extension } = await import('../../hub/channel/pi-extension');
+    const { default: extension } = await import('../../hub/channel/pi-extension?pi-reload');
     const events: Record<string, Function> = {};
     const commands: Record<string, any> = {};
     extension({
@@ -66,7 +66,7 @@ test('host.reload() resolves only after ctx.reload() resolves', async () => {
   const oldAgent = process.env.CHATBRIDGE_AGENT;
   process.env.CHATBRIDGE_AGENT = 'validator-throwaway';
   try {
-    const { default: extension } = await import('../../hub/channel/pi-extension');
+    const { default: extension } = await import('../../hub/channel/pi-extension?pi-reload');
     const events: Record<string, Function> = {};
     const commands: Record<string, any> = {};
     const sent: unknown[] = [];
@@ -115,7 +115,7 @@ test('a refused applied record makes host.reload() reject', async () => {
   const oldAgent = process.env.CHATBRIDGE_AGENT;
   process.env.CHATBRIDGE_AGENT = 'validator-throwaway';
   try {
-    const { default: extension } = await import('../../hub/channel/pi-extension');
+    const { default: extension } = await import('../../hub/channel/pi-extension?pi-reload');
     const commands: Record<string, any> = {};
     extension({ registerTool: () => {}, registerCommand: (n: string, d: any) => { commands[n] = d; }, on: () => {}, sendUserMessage: () => {} });
     const result = reload();
@@ -147,7 +147,7 @@ test('a reload that does not end in 30 s rejects with ReloadTimeout; a late succ
   const realSetTimeout = globalThis.setTimeout;
   let fire: (() => void) | null = null;
   try {
-    const { default: extension } = await import('../../hub/channel/pi-extension');
+    const { default: extension } = await import('../../hub/channel/pi-extension?pi-reload');
     const { ReloadTimeout, RELOAD_MS } = await import('../../hub/channel/core');
     const commands: Record<string, any> = {};
     extension({ registerTool: () => {}, registerCommand: (n: string, d: any) => { commands[n] = d; }, on: () => {}, sendUserMessage: () => {} });
@@ -202,7 +202,7 @@ test.each([['fails', true], ['succeeds', false]])('a reload that %s after sessio
   const oldAgent = process.env.CHATBRIDGE_AGENT;
   process.env.CHATBRIDGE_AGENT = 'validator-throwaway';
   try {
-    const { default: extension } = await import('../../hub/channel/pi-extension');
+    const { default: extension } = await import('../../hub/channel/pi-extension?pi-reload');
     const events: Record<string, Function> = {};
     const commands: Record<string, any> = {};
     const piCalls: string[] = [];
