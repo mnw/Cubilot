@@ -21,7 +21,20 @@ export type ChatDeps = {
   // `by` = the human name.
   isPaused: (agent: string) => boolean;
   clearPause: (agent: string) => void;
+  // The in-memory chat log: a reply_to must name a chat message in it (hydrated transcript entries included).
+  chatLog: readonly Entry[];
 };
+
+// reply_to is optional. When present it must be the id of a chat message of the sender's room.
+// A null room (human super-user view) matches any room. Returns an error text, or null when valid.
+function replyToError(replyTo: unknown, room: string | null, chatLog: readonly Entry[]): string | null {
+  if (replyTo === undefined || replyTo === null) return null;
+  if (typeof replyTo !== "number" || !Number.isInteger(replyTo) || replyTo < 1) return "invalid reply_to";
+  const target = chatLog.find((e) => e.id === replyTo && !e.kind);
+  if (!target) return `unknown reply_to: ${replyTo}`;
+  if (room !== null && target.room !== room) return `reply_to ${replyTo} is in another room`;
+  return null;
+}
 
 export async function handleSend(req: Request, deps: ChatDeps): Promise<Response> {
   const body = (await req.json().catch(() => ({}))) as {
@@ -33,6 +46,7 @@ export async function handleSend(req: Request, deps: ChatDeps): Promise<Response
     // (otherwise "all" is ambiguous — every room, or the current view?). For
     // explicit peer targets the field is ignored.
     room?: string;
+    reply_to?: number;
   };
   const text = (body.text ?? "").trim();
   const image = body.image || null;
@@ -106,6 +120,9 @@ export async function handleSend(req: Request, deps: ChatDeps): Promise<Response
     if (rooms.size === 1) entryRoom = [...rooms][0] ?? null;
   }
 
+  const replyErr = replyToError(body.reply_to, entryRoom, deps.chatLog);
+  if (replyErr) return json({ error: replyErr }, { status: 400 });
+
   const entry: Entry = {
     from: "you",
     to: toLabel,
@@ -113,6 +130,7 @@ export async function handleSend(req: Request, deps: ChatDeps): Promise<Response
     image,
     ts: ts(),
     room: entryRoom,
+    ...(typeof body.reply_to === "number" ? { reply_to: body.reply_to } : {}),
   };
   deps.broadcastUI(entry);
   const view = deps.agentEntry(entry);
@@ -126,6 +144,7 @@ export async function handlePost(req: Request, deps: ChatDeps): Promise<Response
     to?: string;
     text?: string;
     image?: string | null;
+    reply_to?: number;
   };
   const frm = body.from;
   const rawTo = body.to ?? "you";
@@ -169,6 +188,9 @@ export async function handlePost(req: Request, deps: ChatDeps): Promise<Response
     return json({ error: `unknown to: ${rawTo}` }, { status: 400 });
   }
 
+  const replyErr = replyToError(body.reply_to, senderRoom, deps.chatLog);
+  if (replyErr) return json({ error: replyErr }, { status: 400 });
+
   const entry: Entry = {
     from: frm,
     to: rawTo,
@@ -176,6 +198,7 @@ export async function handlePost(req: Request, deps: ChatDeps): Promise<Response
     image,
     ts: ts(),
     room: senderRoom,
+    ...(typeof body.reply_to === "number" ? { reply_to: body.reply_to } : {}),
   };
   deps.broadcastUI(entry);
   const view = deps.agentEntry(entry);

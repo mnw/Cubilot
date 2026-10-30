@@ -308,6 +308,7 @@ const FEATURES: readonly HubFeature[] = [
     agents,
     broadcastUI: (entry, scope) => fanout.send(entry, scope ?? { kind: "ui-only" }),
     attachmentsDir: ATTACHMENTS_DIR,
+    chatLog,
   }),
 ];
 

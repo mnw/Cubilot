@@ -85,13 +85,18 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
           description:
             'Recipient: "you" (human), "<agent-name>" to address a specific peer, or "all" to broadcast.',
         },
+        reply_to: {
+          type: "integer",
+          description: "Optional id of the earlier chat message in your room that this message answers.",
+        },
       },
       required: ["text", "to"],
     },
     handler: async (ctx, args) => {
       const text = String(args.text ?? "");
       const to = String(args.to ?? "");
-      const resp = await authedPost(ctx.host, ctx.hubEnv, "/post", { from: ctx.agent, to, text });
+      const replyTo = typeof args.reply_to === "number" ? { reply_to: args.reply_to } : {};
+      const resp = await authedPost(ctx.host, ctx.hubEnv, "/post", { from: ctx.agent, to, text, ...replyTo });
       if (resp.status < 200 || resp.status >= 300) toolError(resp, "post");
       return { content: [{ type: "text", text: "posted" }] };
     },
