@@ -52,7 +52,7 @@ describe("grid model", () => {
       if (fm(t, "council") !== null) return [];
       return [{ name, harness: fm(t, "harness") || "claude", model: fm(t, "model"), provider: fm(t, "provider"), thinking: fm(t, "thinking"), effort: fm(t, "effort") }];
     });
-    expect(staged.map((r) => r.name).sort()).toEqual(["editor", "orchestrator", "reviewer", "tester", "validator", "worker", "writer"]);
+    expect(staged.map((r) => r.name).sort()).toEqual(["editor", "orchestrator", "retrospective", "reviewer", "tester", "validator", "worker", "writer"]);
     expect(staged.filter((r) => r.harness === "pi").map((r) => r.name).sort()).toEqual(["reviewer", "validator"]);
     for (const role of staged) {
       const grid = g.gridModel({ harness: role.harness, models: role.harness === "pi" ? pi : claude, role });
