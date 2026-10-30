@@ -2,7 +2,7 @@
 // Never <app data>/tmux.sock.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTerminal, attachArgv } from "../../hub/core/terminal";
@@ -45,13 +45,21 @@ describe("hub tmux", () => {
   });
 
   test("a new session is 80x24, has remain-on-exit off and the command is one argv element", async () => {
-    const tmux = createTmux({ bin, socket });
+    const tmux = createTmux({ bin, socket, env: { ...process.env, SHELL: "/bin/sh" } });
     const cmd = "sleep 30 # '/path with spaces'";
     const argv = tmux.newSessionArgv({ name: "w1", cwd: "/tmp", command: cmd });
-    expect(argv.slice(-7)).toEqual(["-x", "80", "-y", "24", "-c", "/tmp", cmd]);
+    expect(argv.slice(-7)).toEqual(["-x", "80", "-y", "24", "-c", "/tmp", `'/bin/sh' -ic 'sleep 30 # '\\''/path with spaces'\\'''`]);
     await tmux.newSession({ name: "w1", cwd: "/tmp", command: cmd });
     expect((await tmux.run(["display-message", "-p", "-t", "=w1:", "#{window_width}x#{window_height}"])).trim()).toBe("80x24");
     expect((await tmux.run(["show-options", "-wv", "-t", "=w1:", "remain-on-exit"])).trim()).not.toBe("on");
+  });
+
+  test("the wrapped command runs under $SHELL -ic with quotes and spaces intact", async () => {
+    const tmux = createTmux({ bin, socket });
+    const out = join(dir, "out with 'quote'.txt");
+    await tmux.newSession({ name: "w1", cwd: "/tmp", command: `printf '%s' "$-" > '${out.replace(/'/g, `'\\''`)}'; sleep 30` });
+    for (let i = 0; i < 50 && !existsSync(out); i++) await Bun.sleep(100);
+    expect(readFileSync(out, "utf8")).toContain("i");
   });
 
   test("the tmux path comes from CUBILOT_TMUX and the socket from CUBILOT_DATA_DIR", () => {

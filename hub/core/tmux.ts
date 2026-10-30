@@ -63,12 +63,18 @@ export function createTmux({ bin, socket, env = process.env }: TmuxOpts) {
     await run(["set-option", "-sa", "terminal-features", RGB_FEATURE]);
   }
 
-  /** The argv of `new-session`. `command` stays ONE argv element (quoted-path safety). -x 80 -y 24 is load-bearing: no controlling TTY. */
+  /** `$SHELL -ic '<command>'` so `.zshrc` aliases resolve (the `claude` alias). Single-quote escaped; the result is ONE argv element. */
+  function shellWrap(command: string): string {
+    const sh = (env.SHELL?.trim() || "/bin/zsh").replace(/'/g, `'\\''`);
+    return `'${sh}' -ic '${command.replace(/'/g, `'\\''`)}'`;
+  }
+
+  /** The argv of `new-session`. The wrapped command stays ONE argv element (quoted-path safety). -x 80 -y 24 is load-bearing: no controlling TTY. */
   function newSessionArgv({ name, cwd, command, env: extra = [] }: NewSession): string[] {
     const l = lang();
     const argv = ["new-session", "-d", "-s", name];
     for (const e of ["TERM=xterm-256color", "COLORTERM=truecolor", `LANG=${l}`, `LC_ALL=${l}`, ...extra]) argv.push("-e", e);
-    argv.push("-x", "80", "-y", "24", "-c", cwd, command);
+    argv.push("-x", "80", "-y", "24", "-c", cwd, shellWrap(command));
     return argv;
   }
 
