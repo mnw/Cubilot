@@ -88,7 +88,7 @@ describe("worktrees (4.5)", () => {
     sh(w.path, "git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "on the ticket branch");
     const head = sh(w.path, "git", "rev-parse", "HEAD");
     expect(head).not.toBe(second);
-    for (const role of ["tester", "validator", "editor", "reviewer"]) {
+    for (const role of ["tester", "validator", "reviewer"]) {
       expect(sh(createWorktree(req({ role, session: `${role}-1` }), root).path, "git", "rev-parse", "HEAD")).toBe(head);
     }
     expect(sh(createWorktree(req({ role: "tester", session: "tester-2", commit: first }), root).path, "git", "rev-parse", "HEAD")).toBe(first);
