@@ -119,7 +119,7 @@ describe("plan waits for your approval (spec-review 4.4)", () => {
     await flush();
     const post = e.calls.find((c) => c.init?.method === "POST")!;
     expect(post.path).toBe("/requests/r1/req-1/approve");
-    expect(JSON.parse(post.init.body)).toEqual({ by: "human" });
+    expect(JSON.parse(post.init.body)).toMatchObject({ by: "human", scope: { features: [], tickets: [] } });
     expect(e.root.hidden).toBe(true);
     expect(e.messages).toHaveLength(0);
   });
@@ -143,7 +143,7 @@ describe("plan waits for your approval (spec-review 4.4)", () => {
   test("ticket and stage events reload the list", async () => {
     const e = setup([]);
     await flush();
-    expect(Object.keys(e.observers).sort()).toEqual(["cancel_trace", "stage", "ticket"]);
+    expect(Object.keys(e.observers).sort()).toEqual(["cancel_trace", "request", "stage", "ticket"]);
     e.setWaiting([plan("req-2", ["t_a"], ["x"])]);
     e.observers.ticket();
     await new Promise((r) => setTimeout(r, 300));
@@ -451,5 +451,55 @@ describe("cancel traces in the Needs-you region (cancel-failure-trace 3, 4)", ()
     await flush();
     expect(e.root.hidden).toBe(true);
     expect(e.heading.focused).toBe(true);
+  });
+});
+
+describe("the Approve card shows the scope (plan-approval)", () => {
+  const card = (over: Record<string, unknown>) => ({
+    ...plan("r-1", ["t_c"], []),
+    origin: "human",
+    features: ["Export to CSV"],
+    tickets: [
+      { id: "t_a", title: "Low one", status: "queued", radius: "low", source: null, reasons: [] },
+      { id: "t_c", title: "Launch change", status: "draft", radius: "high", source: "rule", reasons: ["launch"] },
+    ],
+    scope_change: { changed: false, approved: false, added: [], removed: [], raised: [], features: { added: [], removed: [] } },
+    ...over,
+  });
+
+  test("the first Approve shows origin, features and each ticket with radius, source and reasons", async () => {
+    const e = setup([card({})]);
+    await flush();
+    const t = e.root.text();
+    expect(t).toContain("Origin: human");
+    expect(t).toContain("Features: Export to CSV");
+    expect(t).toContain("Low one: radius low");
+    expect(t).toContain("Launch change: radius high; source rule; reasons launch");
+    expect(t).not.toContain("Changes since the last Approve");
+  });
+
+  test("Second Approve", async () => {
+    const e = setup([
+      card({
+        scope_change: { changed: true, approved: true, added: ["t_c"], removed: ["t_x"], raised: ["t_a"], features: { added: ["Dark mode"], removed: ["Old"] } },
+      }),
+    ]);
+    await flush();
+    const t = e.root.text();
+    expect(t).toContain("Changes since the last Approve");
+    expect(t).toContain("Added ticket: Launch change (radius high)");
+    expect(t).toContain("Removed ticket: t_x");
+    expect(t).toContain("Radius raised: Low one");
+    expect(t).toContain("Added feature: Dark mode");
+    expect(t).toContain("Removed feature: Old");
+    // Text labels, a real button, no markup from hub text.
+    expect(e.root.all().filter((x) => x.tag === "button" && x.textContent === "Approve")).toHaveLength(1);
+  });
+
+  test("a hostile ticket title shows as text", async () => {
+    const e = setup([card({ tickets: [{ id: "t_a", title: "<img src=x onerror=alert(1)>", status: "draft", radius: "low", source: null, reasons: [] }] })]);
+    await flush();
+    expect(e.root.text()).toContain("<img src=x onerror=alert(1)>");
+    expect(e.root.all().some((x) => x.tag === "img")).toBe(false);
   });
 });

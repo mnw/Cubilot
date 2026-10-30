@@ -76,8 +76,9 @@ describe("draft tickets and wakes", () => {
   });
 
   test("an unassigned draft wakes the lead when the human promotes it, not when the lead does", async () => {
-    const byHuman = await create("dw-carol", { status: "draft" });
-    const byLead = await create("dw-carol", { status: "draft" });
+    // The lead queues only a ticket of a request (plan-approval); the helper makes a factory request for the label.
+    const byHuman = await create("dw-carol", { status: "draft", request_id: "dw-1" });
+    const byLead = await create("dw-carol", { status: "draft", request_id: "dw-1" });
     await sleep(300);
     expect(lee.wakes(byHuman)).toEqual([]);
     expect(lee.wakes(byLead)).toEqual([]);                 // a draft wakes not even the lead
