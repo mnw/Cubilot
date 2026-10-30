@@ -38,7 +38,8 @@ const json = (text: string | null): Record<string, unknown> => {
 };
 
 const ROOM_ENTITIES_SQL = `SELECT id FROM tickets WHERE room = ?1 UNION SELECT id FROM requests WHERE room = ?1
-  UNION SELECT id FROM decisions WHERE room = ?1 UNION SELECT id FROM checkpoints WHERE room = ?1`;
+  UNION SELECT id FROM decisions WHERE room = ?1 UNION SELECT id FROM checkpoints WHERE room = ?1
+  UNION SELECT id FROM permissions WHERE room = ?1`;
 
 function stagesSection(db: Database, room: string, since: number, until: number) {
   const rows = db
@@ -48,8 +49,8 @@ function stagesSection(db: Database, room: string, since: number, until: number)
     >(
       `SELECT s.id, s.role, s.review, s.ticket_id, s.verdict, s.attempt,
               (SELECT MIN(e.at_ms) FROM events e WHERE e.entity_id = s.id) AS first_at,
-              (SELECT MIN(e.at_ms) FROM events e WHERE e.entity_id = s.id AND e.kind = 'stage.launching') AS start_at,
-              (SELECT MAX(e.at_ms) FROM events e WHERE e.entity_id = s.id AND e.kind IN ('stage.passed', 'stage.failed', 'stage.cancelled')) AS end_at,
+              (SELECT MIN(e.at_ms) FROM events e WHERE e.entity_id = s.id AND e.kind = 'stage.launching' AND e.at_ms < ?3) AS start_at,
+              (SELECT MAX(e.at_ms) FROM events e WHERE e.entity_id = s.id AND e.kind IN ('stage.passed', 'stage.failed', 'stage.cancelled') AND e.at_ms < ?3) AS end_at,
               (SELECT SUM(m.prompt_tokens_first) FROM stage_metrics m WHERE m.stage_id = s.id) AS tokens
          FROM stage s WHERE ${STAGE_ROOM_SQL} = ?1
           AND (SELECT MIN(e.at_ms) FROM events e WHERE e.entity_id = s.id) >= ?2
@@ -67,7 +68,8 @@ function stagesSection(db: Database, room: string, since: number, until: number)
     turns: null as number | null,
     tokens: r.tokens,
     attempts: r.attempt,
-    verdict: r.verdict ?? "no result",
+    // A result after the window is not part of the window.
+    verdict: r.end_at !== null ? (r.verdict ?? "no result") : "no result",
   }));
 }
 
@@ -94,6 +96,7 @@ function findingsSection(db: Database, room: string, since: number, until: numbe
     .query<{ ticket_id: string; title: string; fails: number }, [string, number, number]>(
       `SELECT s.ticket_id, t.title, COUNT(*) AS fails FROM stage s JOIN tickets t ON t.id = s.ticket_id
         WHERE s.verdict = 'FAIL' AND s.ticket_id IS NOT NULL AND t.room = ?1
+          AND EXISTS (SELECT 1 FROM events x WHERE x.entity_id = s.id AND x.kind = 'stage.passed' AND x.at_ms < ?3)
         GROUP BY s.ticket_id HAVING COUNT(*) >= 2
            AND EXISTS (SELECT 1 FROM stage f JOIN events e ON e.entity_id = f.id AND e.kind = 'stage.passed'
                         WHERE f.ticket_id = s.ticket_id AND f.verdict = 'FAIL' AND e.at_ms >= ?2 AND e.at_ms < ?3)
@@ -117,7 +120,6 @@ function humanSection(db: Database, room: string, since: number, until: number, 
       return {
         record_id: e.record_id,
         kind: e.kind,
-        at_ms: e.at_ms,
         wait_ms: e.prev_at === null ? null : e.at_ms - e.prev_at,
         reason: typeof reason === "string" ? reason : null,
       };
@@ -138,12 +140,12 @@ function causesSection(db: Database, room: string, since: number, until: number)
 function reportsSection(db: Database, room: string, since: number, until: number) {
   const lead = db.query<{ agent: string }, [string]>("SELECT agent FROM ticket_room_lead WHERE room = ?").get(room)?.agent ?? "Orchestrator";
   return db
-    .query<{ id: string; started_at_ms: number; trigger: string; note: string }, [string, string, number, number]>(
-      `SELECT id, started_at_ms, trigger, note FROM checkpoints WHERE room = ?1 AND agent = ?2 AND note IS NOT NULL
+    .query<{ id: string; trigger: string; note: string }, [string, string, number, number]>(
+      `SELECT id, trigger, note FROM checkpoints WHERE room = ?1 AND agent = ?2 AND note IS NOT NULL
           AND started_at_ms >= ?3 AND started_at_ms < ?4 ORDER BY started_at_ms, id`,
     )
     .all(room, lead, since, until)
-    .map((c) => ({ checkpoint_id: c.id, agent: lead, trigger: c.trigger, at_ms: c.started_at_ms, note: c.note }));
+    .map((c) => ({ checkpoint_id: c.id, agent: lead, trigger: c.trigger, note: c.note }));
 }
 
 function improvementsSection(db: Database, room: string, since: number, until: number) {
@@ -178,10 +180,10 @@ function improvementsSection(db: Database, room: string, since: number, until: n
 }
 
 /**
- * The evidence of `room` for [since, until) in ms. `human` is the actor name of the human. The result is plain data in a fixed
+ * The evidence of `room` for [since, until) in ms. `human` is the actor name of the human (default: the hub's CUBILOT_HUMAN_NAME, else "human"). The result is plain data in a fixed
  * order; JSON.stringify gives the same bytes for the same ledger.
  */
-export function buildEvidence(db: Database, room: string, since: number, until: number, human = "human") {
+export function buildEvidence(db: Database, room: string, since: number, until: number, human = process.env.CUBILOT_HUMAN_NAME?.trim() || "human") {
   return {
     room,
     since,

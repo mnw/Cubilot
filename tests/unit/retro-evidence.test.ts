@@ -99,12 +99,47 @@ describe("buildEvidence", () => {
     });
     expect(ev.findings.second_fail_tickets).toEqual([{ ticket_id: t1, title: "Plan A", fails: 2 }]);
     expect(ev.human).toEqual([
-      { record_id: t1, kind: "ticket.edited", at_ms: SINCE + 3000, wait_ms: 1000, reason: "wrong radius" },
-      { record_id: t1, kind: "ticket.cancelled", at_ms: SINCE + 3500, wait_ms: 500, reason: null },
+      { record_id: t1, kind: "ticket.edited", wait_ms: 1000, reason: "wrong radius" },
+      { record_id: t1, kind: "ticket.cancelled", wait_ms: 500, reason: null },
     ]);
     expect(ev.causes).toEqual([{ ticket_id: cause, title: "Remove lock wait", status: "queued", request_id: "r-2026-11-04-cause-lock-wait" }]);
-    expect(ev.reports).toEqual([{ checkpoint_id: "c_1", agent: "Orchestrator", trigger: "manual", at_ms: SINCE + 50, note: "week note" }]);
+    expect(ev.reports).toEqual([{ checkpoint_id: "c_1", agent: "Orchestrator", trigger: "manual", note: "week note" }]);
     expect(ev.improvements).toEqual([]);
+  });
+
+  test("no section holds a wall-clock time other than the window", () => {
+    const e = env();
+    const t = e.ticket(1, { request: "req-a" });
+    insertEvent(e.db, t, "ticket.edited", "human", {}, SINCE + 3000);
+    e.db.run("INSERT INTO checkpoints (id, room, agent, trigger, status, note, note_asked, created_by, started_at_ms, version) VALUES ('c_1', 'r1', 'Orchestrator', 'manual', 'done', 'n', 1, 'human', ?, 1)", [SINCE + 50]);
+    const ev = buildEvidence(e.db, "r1", SINCE, UNTIL);
+    expect(ev.human).toHaveLength(1);
+    expect(ev.reports).toHaveLength(1);
+    expect(JSON.stringify([ev.human, ev.reports])).not.toContain("at_ms");
+  });
+
+  test("a human Allow of a permission of the room is listed; a custom human name is used", () => {
+    const e = env();
+    for (const [id, room] of [["p_1", "r1"], ["p_2", "r2"]] as const) {
+      e.db.run("INSERT INTO permissions (id, agent, tool_name, description, input_preview, status, created_at_ms, room) VALUES (?, 'worker-1', 'Bash', 'd', 'i', 'allowed', ?, ?)", [id, SINCE + 10, room]);
+      insertEvent(e.db, id, "permission.new", "worker-1", {}, SINCE + 10);
+      insertEvent(e.db, id, "permission.resolved", "Michel", { behavior: "allow" }, SINCE + 40);
+    }
+    insertEvent(e.db, "p_1", "permission.resolved", "human", {}, SINCE + 90);
+    expect(buildEvidence(e.db, "r1", SINCE, UNTIL, "Michel").human).toEqual([{ record_id: "p_1", kind: "permission.resolved", wait_ms: 30, reason: null }]);
+    expect(buildEvidence(e.db, "r1", SINCE, UNTIL, "human").human).toEqual([{ record_id: "p_1", kind: "permission.resolved", wait_ms: 50, reason: null }]);
+  });
+
+  test("a stage that ends after the window has no verdict and no duration in the file", () => {
+    const e = env();
+    const t = e.ticket(1, { request: "req-a" });
+    const s = e.stage(1, { ticket: t, verdict: "PASS", start: UNTIL - 100, end: UNTIL + 500 });
+    const f1 = e.stage(2, { ticket: t, verdict: "FAIL", start: SINCE + 10, end: SINCE + 20 });
+    e.stage(3, { ticket: t, verdict: "FAIL", start: UNTIL - 50, end: UNTIL + 50 });
+    const ev = buildEvidence(e.db, "r1", SINCE, UNTIL);
+    expect(ev.stages.find((x) => x.stage_id === s)).toMatchObject({ verdict: "no result", duration_ms: null });
+    expect(ev.stages.find((x) => x.stage_id === f1)).toMatchObject({ verdict: "FAIL", duration_ms: 10 });
+    expect(ev.findings.second_fail_tickets).toEqual([]);
   });
 
   test("an empty room gives empty lists", () => {
