@@ -123,5 +123,11 @@ export function toolError(resp: HubResponse, action: string): never {
     typeof (resp.json as { error: unknown }).error === "string"
       ? (resp.json as { error: string }).error
       : resp.body || `HTTP ${resp.status}`;
-  throw new Error(`${action} failed: ${resp.status} ${msg}`);
+  // The hub lists each refused field in `errors` (string[]); show them so the agent can fix them.
+  const errors = (resp.json as { errors?: unknown } | null)?.errors;
+  const detail =
+    Array.isArray(errors) && errors.length > 0 && errors.every((e) => typeof e === "string")
+      ? `: ${errors.join("; ")}`
+      : "";
+  throw new Error(`${action} failed: ${resp.status} ${msg}${detail}`);
 }

@@ -33,8 +33,12 @@ export function roleModelFor(role: string, roles: readonly string[]): RoleModelL
     if (!roles.includes(key)) console.log(`[role-models] role_models.${key} is not a role, ignored`);
   }
   if (!Object.hasOwn(map, role)) return { entry: null };
-  const raw = map[role];
-  const bad = (what: string) => ({ error: `role_models.${role}: ${what}` });
+  return parseEntry(`role_models.${role}`, map[role]);
+}
+
+/** One entry of a role-model pair (also `second_review`). `label` names the config key in a shape error. */
+export function parseEntry(label: string, raw: unknown): RoleModelLookup {
+  const bad = (what: string) => ({ error: `${label}: ${what}` });
   if (!isMap(raw)) return bad("the entry is not a map");
   const entry: RoleModel = {};
   for (const k of Object.keys(raw)) {
@@ -54,4 +58,22 @@ export function roleModelFor(role: string, roles: readonly string[]): RoleModelL
     }
   }
   return { entry: Object.keys(entry).length ? entry : null };
+}
+
+/** The pair of the second Validator review when config.yml has no usable `second_review`. */
+export const DEFAULT_SECOND_REVIEW: RoleModel = { harness: "claude", model: "opus", effort: "high" };
+
+/**
+ * `second_review` in config.yml, read at each use. A missing key or a bad value gives the default (a bad value is logged).
+ * It replaces role_models.validator for the second review of a high ticket.
+ */
+export function secondReviewModel(): RoleModel {
+  const doc = readConfig("second-review");
+  if (!("second_review" in doc)) return DEFAULT_SECOND_REVIEW;
+  const r = parseEntry("second_review", doc.second_review);
+  if ("error" in r) {
+    console.log(`[second-review] ${r.error}, default used`);
+    return DEFAULT_SECOND_REVIEW;
+  }
+  return r.entry ?? DEFAULT_SECOND_REVIEW;
 }
