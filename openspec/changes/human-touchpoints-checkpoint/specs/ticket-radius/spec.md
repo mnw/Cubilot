@@ -30,15 +30,11 @@ The human, the room lead and the creator SHALL set `blast_radius: high`. The sou
 - **THEN** the ticket is `high` with `radius_source: raised`
 
 ### Requirement: A radius below the rule needs a ruling
-An agent's edit to `blast_radius: low` SHALL get 403 when `radius_rule` is `high`, with the text "a radius below the rule needs an arbiter ruling". An applied arbiter waiver for the radius SHALL set `low` with `radius_source: arbiter`. The human SHALL set any radius, with `radius_source: human`.
+An agent's edit to `blast_radius: low` SHALL get 403 when `radius_rule` is `high`, with the text "a radius below the rule needs an arbiter ruling". The human SHALL set any radius, with `radius_source: human`.
 
 #### Scenario: Lead lowers
 - **WHEN** the room lead edits a ticket with `radius_rule: high` to `low`
 - **THEN** the hub returns 403 and the ticket stays `high`
-
-#### Scenario: Arbiter waiver
-- **WHEN** an arbiter waiver for the radius of that ticket is applied
-- **THEN** the ticket is `low` with `radius_source: arbiter`
 
 #### Scenario: Raised ticket lowered by its raiser
 - **GIVEN** a ticket with `radius_rule: low` that the lead raised to `high`
