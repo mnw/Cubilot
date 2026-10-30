@@ -16,7 +16,7 @@ The hub SHALL keep a `request` Kind with room, request id, `origin` (`human` or 
 - **THEN** the hub returns 403
 
 ### Requirement: A factory request names its source
-An agent's request with origin `factory` SHALL name in `source` a ticket, a decision or a stage of the same room, and SHALL name `parent_request_id` when the source belongs to a request. Else the hub SHALL return 400. Hub code SHALL create factory requests for arbiter follow-ups.
+An agent's request with origin `factory` SHALL name in `source` a ticket, a decision or a stage of the same room, and SHALL name `parent_request_id` when the source belongs to a request. Else the hub SHALL return 400.
 
 #### Scenario: No source
 - **WHEN** the lead creates a request with origin `factory` and no `source`
