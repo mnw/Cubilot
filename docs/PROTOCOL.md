@@ -228,6 +228,7 @@ All routes are under `http://127.0.0.1:<hub-port>` (dynamic; see
 | POST | `/handoffs/{id}/cancel` | Bearer header | 256 KiB | Sender (or human) cancels. |
 | GET | `/handoffs/{id}?agent=` | Bearer header OR `?token=` query | — | One full snapshot, for the `read_handoff` tool. `agent` is the caller (self-asserted). 400 for a bad id or an unknown agent, 404 for an unknown handoff, 403 when the handoff is in another room (the human reads every room). |
 | GET | `/handoffs?status=&for=&limit=` | Bearer header OR `?token=` query | — | List snapshots. Filters: `status` (default `pending`; `all` returns any), `for` (agent name; matches as sender or recipient), `limit` (1–1000, default 100). |
+| GET | `/config/default-model` | Bearer header OR `?token=` query | — | The `default_model` of `config.yml` for the launch form: `{"default_model": {"claude"?: string, "pi"?: string}}`. Read at each request, writes nothing. A missing key gives `{}`. A key that is not a harness or a value that is not a string is ignored (one log line). Stage launches use `role_models`, not this. |
 
 ### Create request body
 
@@ -1075,6 +1076,7 @@ The spec-review PASS queues the scope tickets in the same way, whatever their ro
 | POST | `/requests` | Bearer header | Create a request (see "The `request` kind"). |
 | POST | `/requests/{room}/{request_id}/edit` | Bearer header | Change the features or the origin of a request. |
 | GET | `/requests?room=` | Bearer header OR `?token=` | The requests of the room with `scope_change`. |
+| GET | `/rooms/{room}/requests` | Bearer header OR `?token=` | One row for each request of the room: `{room, requests: [{request_id, origin, status, tickets_done, tickets_total, high_radius_count, last_event_ms}]}`. `status` is `draft` (no ticket, or a draft ticket with no Approve), `waiting_for_approve`, `building`, `ready_for_test`, `merged` (each done ticket's staging merge commit is an ancestor of `main`) or `cancelled` (tickets, all cancelled). `tickets_total` and `high_radius_count` skip cancelled tickets. `last_event_ms` is the newest event of the request or of one of its tickets. 400 for a bad room, 200 with an empty list for a room with no request. Read only: no event. |
 
 No endpoint directly accepts a stage-create or arbitrary-transition command. A `to_role` handoff (`POST /handoffs`) can create a stage through the evaluator. Some routes cause fixed moves as a result of their input. `POST /launches/{id}/ack` moves `launching` to `running` (or to `retrying` or `failed` on an error). `POST /stages/{id}/turn-end` can move `running` to `retrying` or `failed` (a stop). A valid result handoff moves `running` to `passed`.
 
