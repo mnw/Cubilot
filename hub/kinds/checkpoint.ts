@@ -4,8 +4,8 @@
 // `rule` (the safe-point start, t_e948) later; both go through `api.start`.
 //
 // Flow: the lead's Stop hook posts its turn end. The first turn end after the start asks for a note (`note_asked`). The
-// lead answers with the note as its final message. The Stop hook sends that message with the next turn end (`noted`, at
-// most 200 words). That turn end - with a note or without one (empty message) - writes the summary file and asks the shell for `/clear` (`clearing`). The lead's SessionStart hook (matcher
+// lead answers with the chatbridge tool `checkpoint_note(text)` (`noted`, at most 200 words). The next turn end - with a
+// note or without one - writes the summary file and asks the shell for `/clear` (`clearing`). The lead's SessionStart hook (matcher
 // clear) returns the file as context and removes it. The sweep sees the file gone and moves the checkpoint to `done`;
 // no removal in 2 minutes moves it to `failed`.
 
@@ -318,7 +318,7 @@ export function createCheckpointKind(db: Database, deps: CheckpointDeps): Checkp
   };
 
   const askForNote = (cap: HubCapabilities, cp: CheckpointSnapshot) => {
-    // The note is the lead's final message of the next turn: no tool, no shell, no model text in a command.
+    // The note comes back through the chatbridge tool checkpoint_note: no shell, no model text in a command.
     return cap.sse.emit(
       {
         from: "system",
@@ -328,7 +328,7 @@ export function createCheckpointKind(db: Database, deps: CheckpointDeps): Checkp
         image: null,
         text:
           `Checkpoint ${cp.id}: write a note of at most ${NOTE_MAX_WORDS} words with the open points that are not on the board.\n` +
-          `Reply with the note as your whole final message. Use no tool. Write plain text only.\n` +
+          `Call the tool checkpoint_note once with the note as its text argument. Then end your turn.\n` +
           `The hub clears your context after that turn and gives you the note and the state summary.`,
       },
       { kind: "to-agents", agents: [cp.agent] },
@@ -405,10 +405,8 @@ export function createCheckpointKind(db: Database, deps: CheckpointDeps): Checkp
             askForNote(cap, r.snapshot);
             return Response.json({ action: "note_asked", checkpoint_id: cp.id });
           }
-          // The lead ended the turn that followed the request: its final message is the note. Empty: no note, the checkpoint goes on.
-          const text = typeof call.body.text === "string" ? call.body.text.slice(0, NOTE_TEXT_MAX) : "";
-          const cur = text.trim() ? step(cap, cp.id, { op: "noted", patch: { note: capNote(text) } }, name).snapshot : cp;
-          const r = clear(cap, cur);
+          // The lead ended the turn that followed the request. It may have sent a note (checkpoint_note); if not, the checkpoint goes on with none.
+          const r = clear(cap, cp);
           return Response.json({ action: r.status === "clearing" ? "clearing" : "failed", checkpoint_id: cp.id, snapshot: r });
         } catch (e) {
           if (e instanceof LedgerConflict) return ledgerConflictResponse(e);
@@ -417,7 +415,7 @@ export function createCheckpointKind(db: Database, deps: CheckpointDeps): Checkp
       },
     },
     {
-      // checkpoint-note.sh of the lead. Only after the request; a longer note is cut at 200 words.
+      // The chatbridge tool checkpoint_note of the lead. Only after the request; a longer note is cut at 200 words.
       method: "POST",
       path: /^\/agents\/([^/]+)\/checkpoint-note$/,
       auth: "mutating",
@@ -454,7 +452,7 @@ export function createCheckpointKind(db: Database, deps: CheckpointDeps): Checkp
     },
     routes: withLedgerRequired(routes),
     pendingFor: () => [],
-    toolNames: [],
+    toolNames: ["checkpoint_note"],
     // A restart keeps a clearing checkpoint: the sweep finishes it from the file and the clock in the row.
     start(cap) {
       const every = Number(process.env.CUBILOT_CHECKPOINT_SWEEP_MS) || DEFAULT_SWEEP_MS;

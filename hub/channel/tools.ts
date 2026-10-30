@@ -406,6 +406,26 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
     },
   },
   {
+    name: "checkpoint_note",
+    description:
+      "Room lead only. Answer a checkpoint note request from the hub: send the note for your restart, at most 200 words (the hub cuts a longer note). Call it once, after the hub asks. Then end your turn.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: { type: "string", minLength: 1, maxLength: 20000, description: "The note: open points that are not on the board." },
+      },
+      required: ["text"],
+    },
+    handler: async (ctx, args) => {
+      const resp = await authedPost(ctx.host, ctx.hubEnv, `/agents/${encodeURIComponent(ctx.agent)}/checkpoint-note`, {
+        by: ctx.agent,
+        text: String(args.text ?? ""),
+      });
+      if (resp.status !== 200) toolError(resp, "checkpoint_note");
+      return { content: [{ type: "text", text: "note stored" }] };
+    },
+  },
+  {
     name: "ack_permission",
     description:
       "Submit a verdict on a pending Claude Code permission request. Any agent may ack any request (the hub accepts the first verdict; later ones are idempotent or rejected with 409). Returns 'verdict_applied=<allow|deny> resolved_by=<agent> your_verdict_won=<true|false>' so delegation logic can tell whether the caller's verdict transitioned the state or arrived after peer/human resolution. In Claude Code this tool runs without a prompt in default mode; a user ask or deny rule on it refuses the call, because the mod has no approval dialog.",

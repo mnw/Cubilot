@@ -4,6 +4,8 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { findTool } from "../../hub/channel/tools";
+import type { Host } from "../../hub/channel/host";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
 
@@ -54,7 +56,7 @@ async function boot(env: Record<string, string> = {}) {
   })();
   await sleep(150);
   const start = () => postJson(hub, "/checkpoints", { by: hub.humanName, room: "r1" });
-  const turnEnd = (agent = LEAD, text?: string) => postJson(hub, `/agents/${encodeURIComponent(agent)}/turn-end`, text === undefined ? { by: agent } : { by: agent, text });
+  const turnEnd = (agent = LEAD) => postJson(hub, `/agents/${encodeURIComponent(agent)}/turn-end`, { by: agent });
   const note = (text: string, agent = LEAD) => postJson(hub, `/agents/${encodeURIComponent(agent)}/checkpoint-note`, { by: agent, text });
   const list = async () => ((await getJson(hub, "/checkpoints?room=r1")).json as { checkpoints: Cp[] }).checkpoints;
   const close = async () => { leadSse.close(); shellSse.close(); lead.close(); await hub.kill(); };
@@ -78,12 +80,12 @@ describe("checkpoint", () => {
     const before = t.leadGot.length;
     expect(((await t.turnEnd()).json as any).action).toBe("note_asked");
     await waitFor(() => t.leadGot.length > before);
-    // The request needs no tool and no command: the note is the final message of the next turn.
+    // The request names the chatbridge tool only: no Write, no Bash.
     const asked = JSON.stringify(t.leadGot.slice(before));
-    expect(asked).toContain("final message");
-    expect(asked).not.toContain("Write tool");
-    expect(asked).not.toContain("bash ");
-    expect(((await t.turnEnd(LEAD, "Open: the install of P6-15. Ask the human about the Pi lead.")).json as any).action).toBe("clearing");
+    expect(asked).toContain("checkpoint_note");
+    expect(asked).not.toMatch(/Write|Bash|bash /);
+    expect((await t.note("Open: the install of P6-15. Ask the human about the Pi lead.")).status).toBe(200);
+    expect(((await t.turnEnd()).json as any).action).toBe("clearing");
     expect((await t.list()).find((c) => c.id === id)!.note).toBe("Open: the install of P6-15. Ask the human about the Pi lead.");
     const input = await waitFor(() => t.shellGot.find((r) => r.kind === "input"));
     expect(input).toMatchObject({ kind: "input", session: LEAD, text: "/clear" });
@@ -191,30 +193,32 @@ describe("checkpoint failures", () => {
     }
   });
 
-  test("the Stop hook sends the final message as the note and no shell reads it", async () => {
+  test("the lead sends the note with the checkpoint_note tool and uses no blocked tool", async () => {
     const t = await boot();
     try {
-      writeContext(t.hub, 10);
       await t.start();
-      const before = t.leadGot.length;
       await t.turnEnd();
-      await waitFor(() => t.leadGot.length > before);
-      const dir = mkdtempSync(join(tmpdir(), "cubilot-note-"));
-      const marker = join(dir, "marker");
-      const note = `a $(touch ${marker})\n\`touch ${marker}\` "$HOME" 'q' \\ !x\nEOF\nCKPT\ntouch ${marker}\n`;
-      writeFileSync(join(dataDir(t.hub), "hub.url"), t.hub.url);
-      writeFileSync(join(dataDir(t.hub), "hub.token"), t.hub.token);
-      const run = Bun.spawnSync(["bash", join(HOOKS, "checkpoint-turn-end.sh")], {
-        env: { ...process.env, CHATBRIDGE_AGENT: LEAD, CUBILOT_DATA_DIR: dataDir(t.hub) },
-        stdin: new TextEncoder().encode(JSON.stringify({ hook_event_name: "Stop", last_assistant_message: note })),
-      });
-      expect(run.exitCode).toBe(0);
-      expect(existsSync(marker)).toBe(false);
-      await waitFor(async () => (await t.list())[0].status === "clearing");
-      const cp = (await t.list())[0];
-      expect(cp.note).toContain("$(touch");
-      expect(cp.note).toContain("EOF");
-      expect(cp.note).toContain("CKPT");
+      // The tool of the bridge posts to the hub route; a hostile note is stored as text.
+      const host = {
+        readText: async (p: string) => (p.endsWith("hub.url") ? t.hub.url : t.hub.token),
+        handoffGate: async () => null,
+        request: async (url: string, init: { method: string; body?: string; headers?: Record<string, string> }) => {
+          const r = await fetch(url, init as RequestInit);
+          return { status: r.status, text: await r.text() };
+        },
+      } as unknown as Host;
+      const note = "a $(touch /tmp/never)\n`id` EOF CKPT";
+      const out = await findTool("checkpoint_note")!.handler({ agent: LEAD, hubEnv: "", host, room: "r1" }, { text: note });
+      expect(out.content[0].text).toBe("note stored");
+      expect((await t.list())[0].note).toBe(note);
+      // The lead role blocks Edit and Write, not this tool; the tool is advertised in the briefing list of the kind.
+      const role = readFileSync(join(import.meta.dir, "../../factory/orchestrator/orchestrator.md"), "utf8");
+      const blocked = /^disallowedTools:\s*(.*)$/m.exec(role)![1].split(",").map((x) => x.trim());
+      expect(blocked).not.toContain("mcp__chatbridge__checkpoint_note");
+      expect(blocked).not.toContain("mcp__chatbridge__*");
+      expect(((await t.turnEnd()).json as any).action).toBe("clearing");
+      // A turn end holds no note text: the hook sends only `by`.
+      expect(readFileSync(join(HOOKS, "checkpoint-turn-end.sh"), "utf8")).not.toMatch(/last_assistant_message|\bjq\b/);
     } finally {
       await t.close();
     }
