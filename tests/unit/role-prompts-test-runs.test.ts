@@ -26,6 +26,14 @@ describe("role files: test-run split", () => {
     expect(text).toMatch(/Do not run `\.\/scripts\/test\.sh`/);
   });
 
+  test("(e) tester.md: test-affected.sh for low tickets, ./scripts/test.sh for high, the result names the run", () => {
+    const text = read("tester");
+    expect(text).toMatch(/Ticket radius `low`: run `\.\/scripts\/test-affected\.sh <base>`/);
+    expect(text).toMatch(/Ticket radius `high`: run `\.\/scripts\/test\.sh`/);
+    expect(text).toContain("`full_suite: false`");
+    expect(text).toContain("`tests_run:");
+  });
+
   test("(c) validator.md: never reruns the full suite, a doubted rerun names its reason", () => {
     const text = read("validator");
     expect(text).toMatch(/Never rerun the full suite/);
