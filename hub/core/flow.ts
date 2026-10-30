@@ -88,6 +88,28 @@ function segments(evs: Ev[], end: number): Segment[] {
   return out;
 }
 
+const asRole = (r: unknown): StageRole => ((STAGE_ROLES as readonly string[]).includes(r as string) ? (r as StageRole) : "worker");
+
+/** The stage role of a ticket over time, from its ticket.edited events. A ticket with no role counts as a worker. */
+function roleSpans(evs: Ev[], current: string | null, end: number): Array<{ role: StageRole; from: number; to: number }> {
+  const edits: Array<{ at: number; from: unknown; to: unknown }> = [];
+  for (const e of evs) {
+    if (e.kind !== "ticket.edited") continue;
+    const r = (JSON.parse(e.payload_json) as { role?: { from: unknown; to: unknown } }).role;
+    if (r) edits.push({ at: e.at_ms, from: r.from, to: r.to });
+  }
+  const out: Array<{ role: StageRole; from: number; to: number }> = [];
+  let role = asRole(edits.length > 0 ? edits[0].from : current);
+  let from = 0;
+  for (const ed of edits) {
+    out.push({ role, from, to: ed.at });
+    role = asRole(ed.to);
+    from = ed.at;
+  }
+  out.push({ role, from, to: Math.max(end, from) });
+  return out;
+}
+
 export type FlowReport = ReturnType<typeof flowReport>;
 
 export function flowReport(db: Database, room: string, since: number, until: number, now: number = Date.now()) {
@@ -188,10 +210,13 @@ export function flowReport(db: Database, room: string, since: number, until: num
       } else if (s.status === "queued") {
         const cut = Math.min(Math.max(s.from, clearedAt), s.to);
         wait.blocked += overlap(s.from, cut, since, until);
-        // A ticket with no uncleared blocker waits for a slot only while every slot of its own stage role is in use.
-        // A ticket with no role waits for a worker.
-        const role = (STAGE_ROLES as readonly string[]).includes(t.role ?? "") ? (t.role as StageRole) : "worker";
-        wait.no_slot += fullMs(runs, role, limits[role], Math.max(cut, since), Math.min(s.to, until));
+        // A ticket with no uncleared blocker waits for a slot only while every slot of its stage role is in use.
+        // The role follows the ticket.edited events, so a role edit while queued splits the segment.
+        for (const rs of roleSpans(ticketEvents.get(t.id) ?? [], t.role, end)) {
+          const a = Math.max(cut, since, rs.from);
+          const b = Math.min(s.to, until, rs.to);
+          wait.no_slot += fullMs(runs, rs.role, limits[rs.role], a, b);
+        }
       }
     }
   }

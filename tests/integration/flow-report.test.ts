@@ -208,6 +208,22 @@ describe("GET /rooms/<room>/flow", () => {
     expect(f.wait_hours.no_slot).toBe(2);
   });
 
+  test("no slot follows a role edit while queued", async () => {
+    const r = await room();
+    const w = await mk(r, { status: "queued" });
+    db((d) => d.run("UPDATE tickets SET role = 'tester' WHERE id = ?", [w]));
+    // worker role 0-2, tester role 2-4
+    timeline(w, "claimed", [["ticket.created", 0, { status: "queued" }], ["ticket.edited", 2, { fields: ["role"], role: { from: "worker", to: "tester" } }], ["ticket.claimed", 4]]);
+    const o = await mk(r);
+    // both worker slots busy 0-4: only 0-2 counts. both tester slots busy 1-4: only 2-4 counts.
+    stage({ ticket: o, role: "worker", status: "running", launch: 0 });
+    stage({ ticket: o, role: "worker", status: "running", launch: 0 });
+    stage({ ticket: o, role: "tester", verdict: "PASS", launch: 1, end: 4 });
+    stage({ ticket: o, role: "tester", verdict: "PASS", launch: 1, end: 4 });
+    const f = await flow(r);
+    expect(f.wait_hours.no_slot).toBe(4);
+  });
+
   test("terminal high ticket does not hold approval", async () => {
     const r = await room();
     const high = await mk(r, { status: "draft", request_id: "rq-term", blast_radius: "high" });
