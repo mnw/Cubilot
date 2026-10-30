@@ -92,7 +92,7 @@ describe("a blocker clears when its code is merged into staging", () => {
     if (commit) {
       const res = await postJson(hub, "/handoffs", {
         from: stage.session, to_role: "validator", task: "validate",
-        context: { notes: "n", stage_id: stage.id, ticket_id: id, verdict: "PASS", report: "r", commit },
+        context: { notes: "n", stage_id: stage.id, ticket_id: id, verdict: "PASS", report: "r", commit, full_suite: false, tests_run: ["tests/integration/ticket-blockers-merge.test.ts"] },
       });
       expect(res.status).toBe(201);
     }
