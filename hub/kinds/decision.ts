@@ -255,6 +255,94 @@ export function parseEscalation(b: Record<string, unknown>): Escalation | { erro
   return { reason: reason as DecisionReason, body: { block, facts: facts as string[], options, human_actions, next } };
 }
 
+
+// ---------- Decision cards (Part 14 H7) ----------
+
+export type CardKind = "choose" | "approve" | "review";
+
+/**
+ * What a decision card asks of the human. An arbiter ruling is reviewed. A human decision about a feature, or about a
+ * request that has no Approve yet, asks for an Approve. Any other human decision is a choice between options.
+ */
+export function cardKind(input: { decider: "arbiter" | "human"; reason: DecisionReason | null; requestApproved: boolean | null }): CardKind {
+  if (input.decider === "arbiter") return "review";
+  if (input.requestApproved === false) return "approve";
+  if (input.reason === "feature" && input.requestApproved !== true) return "approve";
+  return "choose";
+}
+
+export type DecisionCard = {
+  id: string;
+  card_kind: CardKind;
+  ticket_id: string | null;
+  request_id: string | null;
+  radius: "low" | "high" | null;
+  asked_at_ms: number;
+  waiting_tickets: string[];
+  block: string | null;
+  summary: string | null;
+  options: EscalationOption[];
+  facts: string[];
+  fail_history: { handoff_id: string; findings: number }[];
+  decider: "arbiter" | "human";
+  state: DecisionStatus;
+};
+
+const CARD_STATES: ReadonlySet<string> = new Set(["recorded", "applied", "escalated", "open", "answered", "overruled"]);
+
+function buildCard(db: Database, d: DecisionSnapshot): DecisionCard {
+  const req = d.request_id
+    ? db.query<{ status: string }, [string, string]>("SELECT status FROM requests WHERE room = ? AND request_id = ?").get(d.room, d.request_id)
+    : null;
+  // The tickets the decision is about: its ticket, else every ticket of its request.
+  const ticketIds = d.ticket_id
+    ? [d.ticket_id]
+    : d.request_id
+      ? db.query<{ id: string }, [string, string]>("SELECT id FROM tickets WHERE room = ? AND request_id = ? ORDER BY id").all(d.room, d.request_id).map((t) => t.id)
+      : [];
+  const ids = JSON.stringify(ticketIds);
+  const radius = ticketIds.length === 0
+    ? null
+    : db.query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM tickets WHERE blast_radius = 'high' AND id IN (SELECT value FROM json_each(?))").get(ids)!.n > 0 ? "high" : "low";
+  const waiting = db
+    .query<{ ticket_id: string }, [string, string]>(
+      "SELECT DISTINCT b.ticket_id FROM ticket_blockers b JOIN tickets t ON t.id = b.ticket_id WHERE t.room = ?1 AND b.blocker_id IN (SELECT value FROM json_each(?2)) ORDER BY b.ticket_id",
+    )
+    .all(d.room, ids)
+    .map((r) => r.ticket_id);
+  const fails = db
+    .query<{ id: string; c: string | null }, [string]>(
+      `SELECT h.id, h.context_json AS c FROM handoffs h
+        JOIN stage s ON s.id = json_extract(h.context_json, '$.stage_id')
+        WHERE json_extract(h.context_json, '$.verdict') = 'FAIL'
+          AND s.role = 'validator' AND s.session IS NOT NULL AND h.from_agent = s.session
+          AND s.ticket_id IN (SELECT value FROM json_each(?1))
+        ORDER BY h.created_at_ms, h.rowid`,
+    )
+    .all(ids)
+    .map((h) => {
+      let list: unknown = [];
+      try { list = (JSON.parse(h.c ?? "{}") as { findings?: unknown }).findings ?? []; } catch { /* no readable result: no findings */ }
+      return { handoff_id: h.id, findings: Array.isArray(list) ? list.length : 0 };
+    });
+  return {
+    id: d.id,
+    card_kind: cardKind({ decider: d.decider, reason: d.reason, requestApproved: req ? req.status === "approved" : null }),
+    ticket_id: d.ticket_id,
+    request_id: d.request_id,
+    radius,
+    asked_at_ms: d.created_at_ms,
+    waiting_tickets: waiting,
+    block: d.body?.block ?? null,
+    summary: d.decider === "human" ? (d.body?.block ?? d.text) : d.text,
+    options: d.body?.options ?? [],
+    facts: d.body?.facts ?? [],
+    fail_history: fails,
+    decider: d.decider,
+    state: d.status,
+  };
+}
+
 // ---------- Factory ----------
 
 export type DecisionApi = {
@@ -427,6 +515,39 @@ export function createDecisionKind(db: Database): DecisionKind {
           .flatMap((status) => entity.listByStatus({ status, room, limit: 200 }))
           .sort((a, b) => b.created_at_ms - a.created_at_ms);
         return Response.json({ room, decisions });
+      },
+    },
+    {
+      // Part 14 H7: the decisions of a room with the facts a card needs. No state: open and escalated, newest first.
+      // state=applied&since=<ms>: the decisions applied since then (decided without the human).
+      method: "GET",
+      path: /^\/rooms\/([^/]+)\/decisions$/,
+      auth: "read",
+      handler: (req, _cap, params) => {
+        let room: string;
+        try { room = decodeURIComponent(params.id); } catch { return Response.json({ error: "invalid room" }, { status: 400 }); }
+        if (!validRoomLabel(room)) return Response.json({ error: "invalid room" }, { status: 400 });
+        const q = new URL(req.url).searchParams;
+        const state = q.get("state");
+        if (state !== null && state !== "" && !CARD_STATES.has(state)) return Response.json({ error: "invalid state" }, { status: 400 });
+        const sinceRaw = q.get("since");
+        const since = sinceRaw === null || sinceRaw === "" ? 0 : Number(sinceRaw);
+        if (!Number.isFinite(since) || since < 0) return Response.json({ error: "invalid since" }, { status: 400 });
+        let rows: DecisionSnapshot[];
+        if (state === "applied") {
+          const at = new Map(
+            db
+              .query<{ id: string; at: number }, [number]>("SELECT entity_id AS id, MAX(at_ms) AS at FROM events WHERE kind = 'decision.applied' AND at_ms >= ? GROUP BY entity_id")
+              .all(since)
+              .map((r) => [r.id, r.at]),
+          );
+          rows = entity.listByStatus({ status: "applied", room, limit: 1000 }).filter((d) => at.has(d.id)).sort((a, b) => at.get(b.id)! - at.get(a.id)!);
+        } else if (state) {
+          rows = entity.listByStatus({ status: state, room, limit: 200 }).sort((a, b) => b.created_at_ms - a.created_at_ms);
+        } else {
+          rows = ["open", "escalated"].flatMap((status) => entity.listByStatus({ status, room, limit: 200 })).sort((a, b) => b.created_at_ms - a.created_at_ms);
+        }
+        return Response.json({ room, decisions: rows.map((d) => buildCard(db, d)) });
       },
     },
   ];
