@@ -8,7 +8,7 @@ tmux, PTY, harness spawn, slash commands and TUI capture rules.
 
 ## Terminal pane uses a raw PTY, not `tmux -C` control mode
 
-- **Terminal pane uses a raw PTY, not `tmux -C` control mode.** xterm.js consumes tmux's ANSI directly; keystrokes go to the PTY master as raw bytes. Never re-introduce `tmux -C` or `send-keys` for interactive input forwarding — that's what v0.6 broke on. `send-keys` is only allowed for one-shot commands the user invoked explicitly (none in v0.7). The v0.9.8 regression guard at `tests/integration/pty-plumbing.test.ts` asserts raw-PTY mode (no `%output` / `%begin` / `%end` control-mode framing on the attach stream).
+- **Terminal pane uses a raw PTY, not `tmux -C` control mode.** xterm.js consumes tmux's ANSI directly; keystrokes go to the PTY master as raw bytes. Never re-introduce `tmux -C` or `send-keys` for interactive input forwarding — that's what v0.6 broke on. `send-keys` is only allowed for one-shot commands the user invoked explicitly (none in v0.7). The v0.9.8 regression guard at `tests/integration/pty-plumbing.test.ts` asserts raw-PTY mode (no `%output` / `%begin` / `%end` control-mode framing on the attach stream). Evidence for the choice: [docs/spikes/terminal-transport.md](../spikes/terminal-transport.md) (both transports pass the same cases; truecolour needs the tmux `terminal-features` RGB option, which `pty.rs` does not set).
 
 ## Any change to `pty.rs`'s `resolve_utf8_locale`, `configure_existing_session`, or `attach_and_stream` helpers SHALL have an integration test scenario covering the affected plumbing before the change ships
 
