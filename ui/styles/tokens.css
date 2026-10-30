@@ -38,6 +38,7 @@
   --orange:       #d97757;
   --orange-soft:  #b85f40;
   --orange-hover: #e08265;
+  --orange-text:  var(--orange);   /* accent words and links; Dawn overrides it */
   --amber:        #e8a857;
   --green:        #7fb069;
   --red:          #d4604a;
@@ -52,6 +53,19 @@
   --green-strong: #9dc285;
   --red-strong:   #e38f7a;
   --error-text:   #e38f7a;  /* error text on --bg-raised (the modal): 6.74:1 */
+
+  /* Role colours (Part 14): alias accents, so themes need no new values. */
+  --role-lead:    var(--orange);
+  --role-worker:  var(--amber);
+  --role-tester:  var(--teal);
+  --role-review:  var(--purple);
+  --role-other:   var(--blue);
+
+  /* Ticket traffic light (kinds.css .ticket-light): the same in every theme. */
+  --light-red:    #ff5f57;
+  --light-amber:  #febc2e;
+  --light-green:  #28c840;
+  --light-off:    #8a8a8e;
 
   /* Theme-aware overlays. Light themes flip these to black-on-light in their
      override blocks; full white-on-dark looks wrong on a light background. */
@@ -97,30 +111,21 @@
            -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial,
            sans-serif;
 
-  /* Typography — font-size scale. Each step multiplies its base px value by
-     --ui-font-scale (set from config.yml `font_scale`, default 1). Bumping
-     the scale uniformly resizes every text element without touching rules. */
+  /* Typography — font-size scale. Six sizes (design/system/README.md), each multiplied by
+     --ui-font-scale (set from config.yml `font_scale`, default 1). Bumping the scale uniformly
+     resizes every text element without touching rules. The old 13 half-pixel steps map onto
+     these through ui/features/font-size-map.js. */
   --ui-font-scale: 1;
-  --fs-3xs:  calc(9px    * var(--ui-font-scale));
-  --fs-2xs:  calc(10px   * var(--ui-font-scale));
-  --fs-xs:   calc(10.5px * var(--ui-font-scale));
-  --fs-sm:   calc(11px   * var(--ui-font-scale));
-  --fs-md:   calc(11.5px * var(--ui-font-scale));
-  --fs-base: calc(12px   * var(--ui-font-scale));
-  --fs-lg:   calc(12.5px * var(--ui-font-scale));
-  --fs-xl:   calc(13px   * var(--ui-font-scale));
-  --fs-2xl:  calc(13.5px * var(--ui-font-scale));
-  --fs-3xl:  calc(14px   * var(--ui-font-scale));
-  --fs-4xl:  calc(16px   * var(--ui-font-scale));
-  --fs-5xl:  calc(17px   * var(--ui-font-scale));
-  --fs-6xl:  calc(18px   * var(--ui-font-scale));
+  --fs-sm:   calc(12px * var(--ui-font-scale));   /* metadata, badges, section labels: the minimum */
+  --fs-base: calc(14px * var(--ui-font-scale));   /* desktop body, tables, buttons, chat messages */
+  --fs-md:   calc(16px * var(--ui-font-scale));   /* phone body, every input */
+  --fs-lg:   calc(18px * var(--ui-font-scale));   /* card titles, phone page titles, brand mark */
+  --fs-xl:   calc(22px * var(--ui-font-scale));   /* desktop page titles */
+  --fs-2xl:  calc(28px * var(--ui-font-scale));   /* rare: empty states, delivery summary */
 
-  /* Terminal baseline. Aliased to --fs-xl (13px) by default — mono fonts
-     typically have a smaller x-height than proportional UI fonts, so a
-     slight bump above --fs-base keeps xterm cells visually balanced with
-     chat bubbles. Override here if you want xterm to track a different
-     step in the scale. */
-  --fs-terminal: var(--fs-xl);
+  /* Terminal font size. Outside the six sizes and outside --ui-font-scale: 13 px on desktop,
+     12 px on a phone. xterm-themes.js reads it. */
+  --fs-terminal: 13px;
 
   /* Typography — line-height. Dimensionless ratios. */
   --lh-tight:    1.4;
@@ -182,7 +187,9 @@
   --size-40:   40px;    /* splitter active drag height */
   --size-44:   44px;    /* composer popover bottom offset (above composer) */
   --size-48:   48px;    /* terminal-loading icon */
+  --size-56:   56px;
   --size-60:   60px;    /* drop-overlay top offset (clears titlebar) */
+  --size-80:   80px;    /* titlebar left inset: clears the macOS window buttons */
   --size-130:  130px;   /* room-display min-width */
   --size-140:  140px;   /* target-display min-width */
   --size-150:  150px;   /* terminal tab rail width */
@@ -190,6 +197,7 @@
   --size-180:  180px;   /* msg-input max-height, spawn-room-menu min-width */
   --size-200:  200px;   /* mention popover, target-menu, spawn-room-menu */
   --size-240:  240px;   /* terminal-col min-width, popover height caps */
+  --size-248:  248px;
   --size-260:  260px;   /* room-menu max-width */
   --size-280:  280px;   /* target-menu max-width */
   --size-300:  300px;   /* agent column width */
@@ -254,6 +262,10 @@
 
 }
 
+@media (max-width: 640px) {
+  :root { --fs-terminal: 12px; }
+}
+
 
 /* ═════════ THEME OVERRIDES ═════════════════════════════════════════════════
    Each block overrides ONLY the SKIN LAYER tokens above. Structural tokens
@@ -275,11 +287,12 @@
   --agent-name-l: 23%;   /* dark names on the light column: 4.5:1 for any hue */
   --amber-mark:   #a8691a;   /* darker gold: the plain --amber is 1.7:1 on the light column */
   --text-dim:     #9893a5;  /* muted */
-  --text-meta:    #6c6789;  /* 4.5:1+ on bg, raised and inset */
+  --text-meta:    #6a6587;  /* equals --text-muted: 4.5:1+ on every surface */
 
   --orange:       #d7827e;  /* rose */
   --orange-soft:  #b4637a;  /* love (darker) */
   --orange-hover: #c97165;
+  --orange-text:  #b83f39;  /* accent words and links: plain --orange is too light for text on cream */
   --amber:        #ea9d34;  /* gold */
   --green:        #286983;  /* pine */
   --red:          #b4637a;  /* love */
@@ -289,10 +302,17 @@
   --pink:         #d7827e;  /* rose */
   --teal:         #286983;  /* pine */
 
-  --code-text:    #d7827e;  /* rose */
+  --code-text:    #b83f39;  /* 4.5:1+ on a tinted ground */
   --green-strong: #286983;  /* pine — dark teal stays legible on light tint */
-  --red-strong:   #b4637a;  /* love */
+  --red-strong:   #a14d65;  /* love, darkened: 4.5:1+ on a tinted ground */
   --error-text:   #8f3f5a;  /* error text on --bg-raised (the modal): 6.68:1; plain love is 4.04:1 */
+
+  /* Role colours alias accents. data-theme sits on <body>, so each theme block repeats the aliases to re-resolve them. */
+  --role-lead:    var(--orange);
+  --role-worker:  var(--amber);
+  --role-tester:  var(--teal);
+  --role-review:  var(--purple);
+  --role-other:   var(--blue);
 
   /* Light-theme scrim/overlays — black-on-light, lighter alpha. */
   --scrim:              rgba(0, 0, 0, 0.35);
@@ -301,6 +321,7 @@
 
   /* xterm — Rosé Pine alacritty mapping; pine for green so it's legible
      on cream; foam for blue; rose for cyan. Bright == normal. */
+  --xterm-fg:             var(--text);
   --xterm-bg:             var(--bg);
   --xterm-cursor:         var(--orange);
   --xterm-black:          var(--bg-elev);
@@ -336,7 +357,7 @@
   --agent-name-l: 80%;   /* 4.5:1 for any hue on the moon column */
   --amber-mark:   #f6c177;   /* gold, 3:1 or more on the moon column */
   --text-dim:     #6e6a86;
-  --text-meta:    #938fad;  /* 4.5:1+ on bg, raised and inset */
+  --text-meta:    #a29fbb;  /* equals --text-muted: 4.5:1+ on every surface */
 
   --orange:       #ea9a97;  /* rose */
   --orange-soft:  #eb6f92;  /* love */
@@ -350,14 +371,23 @@
   --pink:         #ea9a97;
   --teal:         #3e8fb0;
 
+  --orange-text:  var(--orange);
   --code-text:    #ea9a97;
   --green-strong: #9ccfd8;  /* foam — brighter for legibility on dark tint */
-  --red-strong:   #eb6f92;
+  --red-strong:   #ee83a1;  /* love, lightened: 4.5:1+ on a tinted ground */
   --error-text:   #f29ab1;  /* error text on --bg-raised (the modal): 6.87:1 */
+
+  /* Role colours alias accents. data-theme sits on <body>, so each theme block repeats the aliases to re-resolve them. */
+  --role-lead:    var(--orange);
+  --role-worker:  var(--amber);
+  --role-tester:  var(--teal);
+  --role-review:  var(--purple);
+  --role-other:   var(--blue);
 
   /* Moon is dark; scrim/overlays stay white-on-dark like default. Inherits
      them automatically by not overriding. */
 
+  --xterm-fg:             var(--text);
   --xterm-bg:             var(--bg);
   --xterm-cursor:         var(--orange);
   --xterm-black:          var(--bg-elev);

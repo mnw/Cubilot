@@ -33,6 +33,7 @@ import { createConfigFeature } from "./features/config";
 import { createSessionsFeature } from "./features/sessions";
 import { createAttachmentsFeature } from "./features/attachments";
 import { createRosterFeature } from "./features/roster";
+import { createSearchFeature } from "./features/search";
 import { createSettingsFeature } from "./features/settings";
 import { createTranscriptFeature } from "./features/transcript";
 import { createChatFeature } from "./features/chat";
@@ -305,6 +306,7 @@ const FEATURES: readonly HubFeature[] = [
   }),
   createRosterFeature({ agents, removeAgent, readNutshell }),
   createSettingsFeature({ agents, defaultRoom: DEFAULT_ROOM }),
+  createSearchFeature({ db: ledgerDb, agents, humanName: HUMAN_NAME }),
   ...(ledgerDb
     ? [createTranscriptFeature({ db: ledgerDb, chatLog, roomSummariser, onRoleLimitsChanged: (room, cap) => { for (const k of KINDS) k.onRoomLimitsChanged?.(room, cap); } })]
     : []),
