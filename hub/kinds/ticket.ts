@@ -497,6 +497,26 @@ export function queueDraftInTx(db: Database, cap: HubCapabilities, ticketId: str
 
 export type SystemClose = { snapshot: TicketSnapshot; entry: Entry } | null;
 
+const BEHIND_REVIEW = new Set<string>(["queued", "claimed", "in_progress"]);
+
+/**
+ * The hub's move to `in_review` with actor `system`, for a ticket whose stages ran past its status (a worker that never claimed
+ * it leaves it `queued`). It runs after a worker result and before the lead takes over after the final PASS. Other statuses
+ * write nothing (null). Like assignBySystemInTx it opens no transaction: it runs inside the transaction of `stage.passed`.
+ * The caller emits the entry after the commit.
+ */
+export function reviewBySystemInTx(db: Database, ticketId: string): SystemClose {
+  const row = db.query<Record<string, unknown>, [string]>("SELECT * FROM tickets WHERE id = ?").get(ticketId);
+  if (!row) throw new Error(`stage result: no such ticket ${ticketId}`);
+  const prior = ticketDecl.rowToSnapshot(row);
+  if (!BEHIND_REVIEW.has(prior.status)) return null;
+  const now = Date.now();
+  const seq = insertEvent(db, ticketId, "ticket.in_review", SYSTEM_ACTOR, { from: prior.status, to: "in_review", note: "the hub moved the ticket: a stage result came while it was " + prior.status }, now);
+  db.run("UPDATE tickets SET status = 'in_review', updated_at_ms = ?, version = ? WHERE id = ?", [now, seq, ticketId]);
+  const snapshot: TicketSnapshot = { ...prior, status: "in_review", updated_at_ms: now, version: seq };
+  return { snapshot, entry: ticketEntry(db, snapshot, "ticket.update", SYSTEM_ACTOR, false, undefined) };
+}
+
 /**
  * The hub's move after the final PASS of a validator or reviewer stage, with actor `system` (L4). A PASS never closes a ticket:
  * an `in_review` ticket goes to the room lead, who moves it to done after the merge. No lead means no change. Like
@@ -506,15 +526,18 @@ export type SystemClose = { snapshot: TicketSnapshot; entry: Entry } | null;
 export function closeReviewedBySystemInTx(db: Database, cap: HubCapabilities, ticketId: string): SystemClose {
   const row = db.query<Record<string, unknown>, [string]>("SELECT * FROM tickets WHERE id = ?").get(ticketId);
   if (!row) throw new Error(`final pass: no such ticket ${ticketId}`);
-  const prior = ticketDecl.rowToSnapshot(row);
-  if (prior.status !== "in_review") return null;
+  let prior = ticketDecl.rowToSnapshot(row);
+  // A ticket that stayed behind (queued, claimed, in_progress) moves to in_review first, so the lead's move to done is legal.
+  const moved = reviewBySystemInTx(db, ticketId);
+  if (!moved && prior.status !== "in_review") return null;
+  if (moved) prior = moved.snapshot;
   const now = Date.now();
   const lead = roomLead(cap, prior.room);
   if (!lead) {
     console.error(`[ticket] room ${prior.room} has no lead: ${ticketId} stays with ${prior.assignee} after the final PASS`);
-    return null;
+    return moved;
   }
-  if (prior.assignee === lead) return null;
+  if (prior.assignee === lead) return moved;
   const seq = insertEvent(db, ticketId, "ticket.assigned", SYSTEM_ACTOR, { from: prior.assignee, to: lead }, now);
   db.run("UPDATE tickets SET assignee = ?, updated_at_ms = ?, version = ?, approval_request_id = NULL WHERE id = ?", [lead, now, seq, ticketId]);
   const snapshot: TicketSnapshot = { ...prior, assignee: lead, updated_at_ms: now, approval_request_id: null, version: seq };

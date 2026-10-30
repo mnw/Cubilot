@@ -36,7 +36,7 @@ import { roleHarness } from "../core/role-harness";
 import { roleModelFor, secondReviewModel, type RoleModel } from "../core/role-models";
 import { metricsByRole, recordStageMetrics, stagesMissingMetrics, type Launch } from "../core/stage-metrics";
 import { makeSSE } from "../core/sse";
-import { assignBySystemInTx, closeReviewedBySystemInTx, queueBySystemInTx } from "./ticket";
+import { assignBySystemInTx, closeReviewedBySystemInTx, queueBySystemInTx, reviewBySystemInTx } from "./ticket";
 import type { CancelTraceCaller, CancelTraceInput } from "./cancel-trace";
 
 export type StageStatus = "queued" | "launching" | "running" | "retrying" | "passed" | "failed" | "cancelled";
@@ -2527,13 +2527,15 @@ export function createStageRuntime(
           const highValidator = !!ticketId && c.verdict === "PASS" && stage.role === "validator" && isHighTicket(ticketId);
           const secondPass = highValidator && validatorPasses(ticketId!) >= 1;
           const closes = !!ticketId && c.verdict === "PASS" && (stage.role === "validator" || stage.role === "reviewer");
+          // A worker result puts a ticket that stayed queued, claimed or in_progress into in_review, in the transaction of stage.passed.
+          const reviews = !!ticketId && stage.role === "worker" && c.verdict !== "FAIL";
           let closed: ReturnType<typeof closeReviewedBySystemInTx> = null;
           api.move(
             stage.id,
             { to: "passed", verdict: typeof c.verdict === "string" ? c.verdict : undefined },
             "system",
             cap,
-            closes ? () => void (closed = closeReviewedBySystemInTx(db, cap, ticketId!)) : undefined,
+            closes ? () => void (closed = closeReviewedBySystemInTx(db, cap, ticketId!)) : reviews ? () => void (closed = reviewBySystemInTx(db, ticketId!)) : undefined,
             () => {
               if (!closed) return;
               cap.sse.emit(closed.entry, { kind: "room", room: closed.snapshot.room });

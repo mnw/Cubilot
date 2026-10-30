@@ -145,12 +145,22 @@ describe("a final PASS hands the ticket to the lead and never closes it (L4)", (
     }
   });
 
-  test("a ticket that is not in_review is unchanged", () => {
-    for (const status of ["in_progress", "queued"]) {
+  test("a ticket that stayed queued, claimed or in_progress moves to in_review and goes to the lead", () => {
+    for (const status of ["in_progress", "queued", "claimed"]) {
       const e = makeEnv();
       const t = e.running({ status });
       e.rt.hooks.onResult(t.session, { stage_id: t.stage, verdict: "PASS" }, e.cap);
       expect(e.rt.api.load(t.stage)!.status).toBe("passed");
+      expect(e.ticket(t.id)).toEqual({ status: "in_review", assignee: "lead-1" });
+      expect(e.events(t.id).slice(-2)).toEqual([{ kind: "ticket.in_review", actor: "system" }, { kind: "ticket.assigned", actor: "system" }]);
+    }
+  });
+
+  test("a draft or cancelled ticket is unchanged", () => {
+    for (const status of ["draft", "cancelled"]) {
+      const e = makeEnv();
+      const t = e.running({ status });
+      e.rt.hooks.onResult(t.session, { stage_id: t.stage, verdict: "PASS" }, e.cap);
       expect(e.ticket(t.id).status).toBe(status);
     }
   });
