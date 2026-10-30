@@ -326,9 +326,6 @@ const createTicketVerb: VerbDecl<TicketSnapshot, CreateInput> = {
     if (prior) return conflict("ticket id collision");
     // A ticket created as done skips the whole workflow, so only the human may do it.
     if (payload.status === "done" && !isHuman(actor, cap)) return forbidden("only the human may create a done ticket");
-    if (payload.status === "queued" && payload.role !== null && hasNoChain(payload.role)) {
-      return conflict(`role ${payload.role} has no hub stage chain: create the ticket as draft`);
-    }
     const blockers = validateBlockedBy(cap.db, payload.room, null, payload.blocked_by);
     if (blockers.error !== undefined) return { kind: "conflict", httpStatus: 400, message: blockers.error };
     const now = Date.now();
@@ -450,35 +447,6 @@ const assignTicketVerb: VerbDecl<TicketSnapshot, AssignInput> = {
 /** The actor the hub uses for its own writes. validName() refuses it (reserved), so no HTTP route can claim it. */
 export const SYSTEM_ACTOR = "system";
 
-/**
- * Stage roles with no hub stage chain: a queued ticket of one of them would never start and nothing would say so.
- * Temporary: the writing chain (t_922581db0beb6fe4) removes this gate.
- */
-export const NO_CHAIN_ROLES: readonly StageRole[] = ["writer", "editor", "reviewer"];
-const hasNoChain = (role: StageRole | null): boolean => role !== null && NO_CHAIN_ROLES.includes(role);
-
-/** A draft that queueDraftInTx left alone because its role has no chain. */
-export type HeldDraft = { id: string; role: StageRole; reason: string };
-
-/** One message from system to the room lead, after the commit, that names each draft that stayed draft. No lead, no message. */
-export function notifyHeldDrafts(cap: HubCapabilities, room: string, held: HeldDraft[]): void {
-  const lead = roomLead(cap, room);
-  if (!lead || held.length === 0) return;
-  const lines = held.map((h) => `- ${h.id} (role ${h.role})`);
-  cap.sse.emit(
-    {
-      from: "system",
-      to: lead,
-      text: `These tickets stayed draft because their role has no hub stage chain:\n${lines.join("\n")}`,
-      ts: ts(),
-      image: null,
-      room,
-      kind: "ticket.held",
-    } as Entry,
-    { kind: "to-agents", agents: [lead] },
-  );
-}
-
 export type SystemAssign = { snapshot: TicketSnapshot; entry: Entry } | null;
 
 /**
@@ -514,23 +482,18 @@ export type SystemQueue = { snapshot: TicketSnapshot; entry: Entry } | null;
  * (`stage.passed` + one `ticket.queued` per scope ticket commit together). A ticket that is not `draft` is left alone
  * (returns null), and so is one whose request is not `requestId` (when given); a ticket that does not exist throws and rolls the PASS back. The caller emits the entry after the commit.
  */
-export function queueBySystemInTx(db: Database, cap: HubCapabilities, ticketId: string, requestId?: string | null, held?: HeldDraft[]): SystemQueue {
-  return queueDraftInTx(db, cap, ticketId, SYSTEM_ACTOR, requestId, held);
+export function queueBySystemInTx(db: Database, cap: HubCapabilities, ticketId: string, requestId?: string | null): SystemQueue {
+  return queueDraftInTx(db, cap, ticketId, SYSTEM_ACTOR, requestId);
 }
 
 /** The body of queueBySystemInTx for any actor (the human's request approval uses it with the human name). Same rules. */
-export function queueDraftInTx(db: Database, cap: HubCapabilities, ticketId: string, actor: string, requestId?: string | null, held?: HeldDraft[]): SystemQueue {
+export function queueDraftInTx(db: Database, cap: HubCapabilities, ticketId: string, actor: string, requestId?: string | null): SystemQueue {
   const row = db.query<Record<string, unknown>, [string]>("SELECT * FROM tickets WHERE id = ?").get(ticketId);
   if (!row) throw new Error(`queue: no such ticket ${ticketId}`);
   const prior = ticketDecl.rowToSnapshot(row);
   if (prior.status !== "draft") return null;
   // A ticket that left the request after the scope was set was not reviewed with it: leave it alone.
   if (requestId !== undefined && prior.request_id !== requestId) return null;
-  // A role with no chain stays draft; the caller reports it. The rest of the batch still queues.
-  if (prior.role !== null && hasNoChain(prior.role)) {
-    held?.push({ id: ticketId, role: prior.role, reason: `role ${prior.role} has no hub stage chain` });
-    return null;
-  }
   const now = Date.now();
   const seq = insertEvent(db, ticketId, "ticket.queued", actor, { from: "draft", to: "queued" }, now);
   db.run("UPDATE tickets SET status = 'queued', updated_at_ms = ?, version = ? WHERE id = ?", [now, seq, ticketId]);
@@ -793,10 +756,6 @@ const transitionTicketVerb: VerbDecl<TicketSnapshot, TransitionInput> = {
         prior.request_id !== null &&
         cap.db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM request_approvals WHERE room = ? AND request_id = ?").get(prior.room, prior.request_id)!.n > 0;
       if (high && !approved) return forbidden("the request holds a high blast_radius ticket: only the human may queue it");
-    }
-    // A state check after every authorization check: it refuses the human and the lead alike.
-    if (to === "queued" && prior.role !== null && hasNoChain(prior.role)) {
-      return conflict(`role ${prior.role} has no hub stage chain: ticket ${prior.id} cannot enter queued`);
     }
     if (to !== "cancelled" && !human && !intake && !LEGAL_FROM[to]?.has(prior.status)) {
       return conflict(`cannot move ${prior.status} → ${to}`);
@@ -1077,7 +1036,6 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
         const known = db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM tickets WHERE request_id = ? AND room = ?").get(requestId, room)!.n;
         if (known === 0) return Response.json({ error: `no ticket in request ${requestId} in room ${room}` }, { status: 404 });
         const queuedNow: Array<NonNullable<SystemQueue>> = [];
-        const held: HeldDraft[] = [];
         // One transaction: every draft ticket of the request gets its ticket.queued event and its row update, or none does.
         db.transaction(() => {
           // Store the Approve once: one event and one row. A repeat changes nothing.
@@ -1090,16 +1048,15 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
             .query<{ id: string }, [string, string]>("SELECT id FROM tickets WHERE request_id = ? AND room = ? AND status = 'draft' ORDER BY created_at_ms, id")
             .all(requestId, room);
           for (const { id } of drafts) {
-            const q = queueDraftInTx(db, cap, id, a.name, requestId, held);
+            const q = queueDraftInTx(db, cap, id, a.name, requestId);
             if (q) queuedNow.push(q);
           }
         })();
         for (const q of queuedNow) cap.sse.emit(q.entry, { kind: "room", room });
         if (queuedNow.length) cap.briefing.refresh();
-        notifyHeldDrafts(cap, room, held);
         // The evaluator runs after the commit, as for a draft the human queues by hand.
         for (const q of queuedNow) stage?.onTicketChanged(q.snapshot.id, cap);
-        return Response.json({ room, request_id: requestId, queued: queuedNow.map((q) => q.snapshot.id), not_queued: held, ...(queuedNow.length === 0 && held.length === 0 ? { idempotent: true } : {}) });
+        return Response.json({ room, request_id: requestId, queued: queuedNow.map((q) => q.snapshot.id), ...(queuedNow.length === 0 ? { idempotent: true } : {}) });
       },
     },
 
