@@ -3,6 +3,7 @@
 
 import type { Database } from "bun:sqlite";
 import { readConfig, isMap } from "./config-file";
+import { heldForApprove } from "../kinds/request";
 
 export const DEFAULT_CONTEXT_PCT = 60;
 
@@ -53,7 +54,7 @@ export function newestRequestDoneAt(db: Database, room: string): number | null {
 }
 
 /**
- * Not a safe point: a request waits for approval (a spec stage with a PASS and a draft scope ticket), a decision is
+ * Not a safe point: a request with an open ticket is held for approval (`heldForApprove`: no Approve yet, or its scope changed after it), a decision is
  * `open` or `escalated` (waits for the human), or a spec or arbiter stage is live.
  */
 export function unsafePoint(db: Database, room: string): string | null {
@@ -68,16 +69,12 @@ export function unsafePoint(db: Database, room: string): string | null {
   if (live) return "a spec or arbiter stage is live";
   const decision = db.query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM decisions WHERE room = ? AND status IN ('open', 'escalated')").get(room)!.n;
   if (decision) return "a decision is open";
-  const waiting = db
-    .query<{ n: number }, [string]>(
-      `SELECT COUNT(*) AS n FROM stage s
-        WHERE s.review = 'spec' AND s.verdict = 'PASS' AND s.request_id IS NOT NULL
-          AND EXISTS (SELECT 1 FROM stage_scope sc JOIN tickets t ON t.id = sc.ticket_id
-                       WHERE sc.stage_id = s.id AND t.status = 'draft' AND t.request_id = s.request_id AND t.room = ?1)
-          AND EXISTS (SELECT 1 FROM tickets h WHERE h.request_id = s.request_id AND h.room = ?1 AND h.blast_radius = 'high'
-                       AND h.status NOT IN ('done', 'cancelled'))`,
+  const open = db
+    .query<{ request_id: string }, [string]>(
+      "SELECT DISTINCT request_id FROM tickets WHERE room = ? AND request_id IS NOT NULL AND status NOT IN ('done', 'cancelled')",
     )
-    .get(room)!.n;
+    .all(room);
+  const waiting = open.some(({ request_id }) => heldForApprove(db, room, request_id));
   if (waiting) return "a request waits for approval";
   return null;
 }

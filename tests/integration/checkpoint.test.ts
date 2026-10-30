@@ -381,6 +381,28 @@ describe("checkpoint at a safe point", () => {
     expect(await t.list()).toHaveLength(0);
   });
 
+  const humanRequest = async (id: string) => expect((await postJson(t.hub, "/requests", { by: t.hub.humanName, room: "r1", request_id: id, origin: "human" })).status).toBe(201);
+
+  test("Approval open: human request with only low draft tickets", async () => {
+    writeContext(t.hub, 90);
+    await humanRequest("q1");
+    await ticket("q1");
+    expect(await action()).toBe("none");
+    expect(await t.list()).toHaveLength(0);
+  });
+
+  test("Approval open: scope changed after the Approve", async () => {
+    writeContext(t.hub, 90);
+    await humanRequest("q1");
+    await ticket("q1");
+    expect((await postJson(t.hub, "/requests/r1/q1/approve", { by: t.hub.humanName })).status).toBe(200);
+    await ticket("q1");
+    expect(await action()).toBe("none");
+    expect(await t.list()).toHaveLength(0);
+    expect((await postJson(t.hub, "/requests/r1/q1/approve", { by: t.hub.humanName })).status).toBe(200);
+    expect(await action()).toBe("note_asked");
+  });
+
   test("Decision open", async () => {
     writeContext(t.hub, 90);
     seed("INSERT INTO decisions (id, room, decider, fail_count, status, created_by, created_at_ms) VALUES ('d_a', 'r1', 'human', 0, 'open', 'boss', 1)");
