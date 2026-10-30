@@ -153,6 +153,50 @@ kill_group() {
   return 0
 }
 
+# One summary: the sums of all parts, and the files of each failed part. $1 is the stop code of a stopped run: a part
+# that printed no "Ran" line then counts as failed with that code (the bash wait status of a stopped job is not used).
+print_summary() {
+  local stop=${1:-} k part_code log kc
+  code=0
+  total_pass=0
+  total_fail=0
+  total_tests=0
+  total_files=0
+  failed_parts=""
+  set -- $PART_PIDS
+  for k in $PART_NOS; do
+    log="$RUNDIR/p$k.log"
+    if [ -n "$stop" ]; then
+      if grep -q '^Ran [0-9]* tests\? across' "$log" 2> /dev/null; then part_code=0; else part_code=$stop; fi
+    else
+      wait "$1"
+      part_code=$?
+    fi
+    shift
+    total_pass=$((total_pass + $(awk '/^ *[0-9]+ pass$/ { s += $1 } END { print s + 0 }' "$log" 2> /dev/null)))
+    total_fail=$((total_fail + $(awk '/^ *[0-9]+ fail$/ { s += $1 } END { print s + 0 }' "$log" 2> /dev/null)))
+    total_tests=$((total_tests + $(sed -nE 's/^Ran ([0-9]+) tests? across .*/\1/p' "$log" 2> /dev/null | awk '{ s += $1 } END { print s + 0 }')))
+    total_files=$((total_files + $(sed -nE 's/^Ran [0-9]+ tests? across ([0-9]+) files?.*/\1/p' "$log" 2> /dev/null | awk '{ s += $1 } END { print s + 0 }')))
+    if [ "$part_code" -ne 0 ]; then
+      [ "$code" -eq 0 ] && code=$part_code
+      failed_parts="$failed_parts $k:$part_code"
+    fi
+  done
+  echo " $total_pass pass"
+  echo " $total_fail fail"
+  echo "Ran $total_tests tests across $total_files files in $PARTS parts. [$(($(date +%s) - RUN_START))s]"
+  for kc in $failed_parts; do
+    k=${kc%%:*}
+    echo "part $k failed with exit ${kc#*:}; test files of part $k:"
+    sed 's/^/  /' "$RUNDIR/p$k.files"
+    grep -h '^(fail)' "$RUNDIR/p$k.log" 2> /dev/null | sed 's/^/  /'
+  done
+  if [ -n "$failed_parts" ]; then
+    KEEP_RUNDIR=1
+    echo "logs of the parts: $RUNDIR"
+  fi
+}
+
 stop_run() {
   case "$PGIDS" in
     "") echo "scripts/test.sh: $1; stopping test process$CHILDREN" >&2 ;;
@@ -276,50 +320,6 @@ for pid in $CHILDREN; do
 done
 
 watch_jobs
-
-# One summary: the sums of all parts, and the files of each failed part. $1 is the stop code of a stopped run: a part
-# that printed no "Ran" line then counts as failed with that code (the bash wait status of a stopped job is not used).
-print_summary() {
-  local stop=${1:-} k part_code log kc
-  code=0
-  total_pass=0
-  total_fail=0
-  total_tests=0
-  total_files=0
-  failed_parts=""
-  set -- $PART_PIDS
-  for k in $PART_NOS; do
-    log="$RUNDIR/p$k.log"
-    if [ -n "$stop" ]; then
-      if grep -q '^Ran [0-9]* tests\? across' "$log" 2> /dev/null; then part_code=0; else part_code=$stop; fi
-    else
-      wait "$1"
-      part_code=$?
-    fi
-    shift
-    total_pass=$((total_pass + $(awk '/^ *[0-9]+ pass$/ { s += $1 } END { print s + 0 }' "$log" 2> /dev/null)))
-    total_fail=$((total_fail + $(awk '/^ *[0-9]+ fail$/ { s += $1 } END { print s + 0 }' "$log" 2> /dev/null)))
-    total_tests=$((total_tests + $(sed -nE 's/^Ran ([0-9]+) tests? across .*/\1/p' "$log" 2> /dev/null | awk '{ s += $1 } END { print s + 0 }')))
-    total_files=$((total_files + $(sed -nE 's/^Ran [0-9]+ tests? across ([0-9]+) files?.*/\1/p' "$log" 2> /dev/null | awk '{ s += $1 } END { print s + 0 }')))
-    if [ "$part_code" -ne 0 ]; then
-      [ "$code" -eq 0 ] && code=$part_code
-      failed_parts="$failed_parts $k:$part_code"
-    fi
-  done
-  echo " $total_pass pass"
-  echo " $total_fail fail"
-  echo "Ran $total_tests tests across $total_files files in $PARTS parts. [$(($(date +%s) - RUN_START))s]"
-  for kc in $failed_parts; do
-    k=${kc%%:*}
-    echo "part $k failed with exit ${kc#*:}; test files of part $k:"
-    sed 's/^/  /' "$RUNDIR/p$k.files"
-    grep -h '^(fail)' "$RUNDIR/p$k.log" 2> /dev/null | sed 's/^/  /'
-  done
-  if [ -n "$failed_parts" ]; then
-    KEEP_RUNDIR=1
-    echo "logs of the parts: $RUNDIR"
-  fi
-}
 
 print_summary
 print_peak

@@ -506,6 +506,11 @@ describe("scripts/test.sh split run", () => {
     expect(r.code).toBe(125);
     expect(r.out).toContain("memory limit reached");
     expect(r.out).toMatch(/stopping process groups \d+ \d+/);
+    expect(r.out).not.toContain("command not found");
+    expect(r.out).toMatch(/^ \d+ pass$/m);
+    expect(r.out).toMatch(/^ \d+ fail$/m);
+    expect(r.out).toMatch(/^Ran \d+ tests? across \d+ files? in 2 parts/m);
+    expect(r.out).toMatch(/part \d failed with exit 125; test files of part \d:/);
   }, 90000);
 
   test("the time limit covers the whole run and stops all parts", async () => {
@@ -514,6 +519,11 @@ describe("scripts/test.sh split run", () => {
     const r = await split({ CUBILOT_TEST_PARTS: "2", CUBILOT_TEST_TIMEOUT_S: "3" });
     expect(r.code).toBe(124);
     expect(r.out).toContain("time limit of 3s reached");
+    expect(r.out).not.toContain("command not found");
+    expect(r.out).toMatch(/^ \d+ pass$/m);
+    expect(r.out).toMatch(/^ \d+ fail$/m);
+    expect(r.out).toMatch(/^Ran \d+ tests? across \d+ files? in 2 parts/m);
+    expect(r.out).toMatch(/part \d failed with exit 124; test files of part \d:/);
     expect(await noProcessWith("sleep 301")).toBe(true);
   }, 60000);
 
