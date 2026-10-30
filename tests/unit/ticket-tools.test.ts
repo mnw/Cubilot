@@ -374,6 +374,16 @@ describe("attach_ticket_file", () => {
   });
 });
 
+describe("post tool reply_to", () => {
+  test("passes reply_to to /post and omits it when absent", async () => {
+    const f = fake({ "POST /post": { status: 200, body: { ok: true } } });
+    await run("post", f.host, { to: "all", text: "hi", reply_to: 5 });
+    await run("post", f.host, { to: "all", text: "hi" });
+    expect(f.calls[0].body).toEqual({ from: "alice", to: "all", text: "hi", reply_to: 5 });
+    expect(f.calls[1].body).toEqual({ from: "alice", to: "all", text: "hi" });
+  });
+});
+
 describe("a paused agent (hub answers 423)", () => {
   const LINE = "You are paused by the human; wait until the human resumes you";
   const paused = { status: 423, body: { error: "agent is paused" } };

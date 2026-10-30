@@ -1158,7 +1158,7 @@ project.
 
 | Kind | Same-room only? | Notes |
 |---|---|---|
-| `chat` (`/post`, `/send`) | Yes for `target: "all"`; No for named target | Sender's room tagged on entry. |
+| `chat` (`/post`, `/send`) | Yes for `target: "all"`; No for named target | Sender's room tagged on entry. An optional `reply_to` (integer message id) must name a chat message of the sender's room in the hub chat log, else 400. |
 | `handoff` | Yes (from non-human) | 403 `cross-room handoff not permitted` otherwise. Human is super-user. |
 | `interrupt` (single) | Yes (from non-human) | 403 `cross-room interrupt not permitted`. |
 | `interrupt` (bulk) | Human-only | `{ from: <human>, rooms: [<labels>], text }`. Fans out one interrupt per non-human agent in each listed room. |
