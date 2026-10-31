@@ -19,6 +19,18 @@ const CAPTURE_TURN_RE = /^\/terminal\/([^/]+)\/capture-turn$/;
 const TAP_RE = /^\/terminal\/([^/]+)\/tap$/;
 const CAPTURE_RE = /^\/terminal\/([^/]+)\/capture$/;
 const HEAL_RE = /^\/terminal\/([^/]+)\/heal$/;
+const READY_TIMEOUT_MS = 3000;
+const READY_SETTLE_MS = 300;
+/** Wait until the attach client is listed by tmux, then let it set raw mode. Input sent earlier is lost. */
+async function clientReady(tmux: Tmux, agent: string): Promise<void> {
+  const t0 = Date.now();
+  while (Date.now() - t0 < READY_TIMEOUT_MS) {
+    const out = await tmux.run(["list-clients", "-F", "#{client_session}"]).catch(() => "");
+    if (out.split("\n").includes(agent)) break;
+    await Bun.sleep(25);
+  }
+  await Bun.sleep(READY_SETTLE_MS);
+}
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 
 export function createTerminalFeature({ tmux, capturesRoot }: TerminalDeps): HubFeature {
@@ -53,6 +65,7 @@ export function createTerminalFeature({ tmux, capturesRoot }: TerminalDeps): Hub
               timeoutMs: num(body.timeout_ms),
               write: async (input) => {
                 viewer = await term.attach(t.agent, { onData: () => {} });
+                await clientReady(t.tmux, t.agent);
                 viewer.write(input);
               },
             });

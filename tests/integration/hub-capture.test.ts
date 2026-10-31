@@ -65,6 +65,16 @@ describe("Turn capture", () => {
     expect((await tmux.run(["show-options", "-wv", "-t", "=w1:", "window-size"])).trim()).toBe("latest");
   });
 
+  test("the input waits for the attach client: three captures in a row each hold the reply", async () => {
+    for (const n of ["r1", "r2", "r3"]) {
+      await fakeTui(n);
+      const r = await post(`/terminal/${n}/capture-turn`, { input: "/cost\r", timeout_ms: 8000 });
+      const res = (await r.json()) as { name: string; status: string };
+      expect(res.status).toBe("idle-prompt");
+      expect(await (await get(`/terminal/${n}/capture?name=${encodeURIComponent(res.name)}`)).text()).toContain("reply to /cost");
+    }
+  }, 40000);
+
   test("a pane with no output ends with timeout and keeps its log", async () => {
     await tmux.newSession({ name: "w2", cwd: work, command: "sleep 60" });
     const r = await post("/terminal/w2/capture-turn", { input: "", timeout_ms: 400 });
