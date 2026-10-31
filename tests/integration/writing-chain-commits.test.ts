@@ -1,12 +1,14 @@
 // Writing chain: a writer or editor hand-over needs new work on ticket/<id>. checkResult against a temp git repo and an in-memory ledger.
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrateLedger, setRoomSettings } from "../../hub/core/ledger";
 import { createTicketKind } from "../../hub/kinds/ticket";
-import { createStageRuntime } from "../../hub/kinds/stage";
+import { trackedRuntime, disposeRuntimes } from "../helpers/stage-runtimes";
+
+afterEach(disposeRuntimes);
 import type { Entry, HubCapabilities, Scope } from "../../hub/core/types";
 
 const TID = "t_0000000000000002";
@@ -45,7 +47,7 @@ function makeEnv(project?: string) {
      VALUES (?, 'r1', 'T', 'c', 'low', 'medium', 'a', 'in_progress', 'req-1', 1, 1, 1)`,
     [TID],
   );
-  const rt = createStageRuntime(db, { ackMs: 60_000 });
+  const rt = trackedRuntime(db, { ackMs: 60_000 });
   rt.module.migrate(db);
   let sn = 0;
   const running = (role: string) => {

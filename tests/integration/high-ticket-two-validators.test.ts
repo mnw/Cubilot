@@ -2,7 +2,7 @@
 // after the merge into staging, with no human Allow.
 // In-process hub kinds, like tests/unit/stage-final-pass.test.ts.
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { giveProject, giveProjectHttp, projectRepo } from "../helpers/repo";
 import { spawnHub, type HubHandle } from "../helpers/hub";
@@ -11,7 +11,9 @@ import { insertEvent } from "../../hub/core/events";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createPermissionKind } from "../../hub/kinds/permission";
 import { createTicketKind } from "../../hub/kinds/ticket";
-import { createStageRuntime } from "../../hub/kinds/stage";
+import { trackedRuntime, disposeRuntimes } from "../helpers/stage-runtimes";
+
+afterEach(disposeRuntimes);
 import type { LaunchRequest } from "../../hub/core/launch-queue";
 import type { Entry, HubCapabilities, Scope } from "../../hub/core/types";
 import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
@@ -31,7 +33,7 @@ function makeEnv() {
   migrateLedger(db);
   createPermissionKind(db).migrate(db);
   createTicketKind(db).migrate(db);
-  const rt = createStageRuntime(db, { ackMs: 60_000 });
+  const rt = trackedRuntime(db, { ackMs: 60_000 });
   rt.module.migrate(db);
   giveProject(db, "r1");
   const emitted: { entry: Entry; scope: Scope }[] = [];

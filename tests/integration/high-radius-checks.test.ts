@@ -5,7 +5,7 @@
 // Second Validator review of a high ticket: model pair from config.yml and a first message with no verdict of the first review.
 // In-process hub kinds, like tests/integration/high-ticket-two-validators.test.ts.
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,7 +18,9 @@ import { insertEvent } from "../../hub/core/events";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createPermissionKind, createPermissionWithSideEffect } from "../../hub/kinds/permission";
 import { createTicketKind } from "../../hub/kinds/ticket";
-import { createStageRuntime } from "../../hub/kinds/stage";
+import { trackedRuntime, disposeRuntimes } from "../helpers/stage-runtimes";
+
+afterEach(disposeRuntimes);
 import { nodeHost } from "../../hub/channel/node-host";
 import { findTool } from "../../hub/channel/tools";
 import type { LaunchRequest } from "../../hub/core/launch-queue";
@@ -140,7 +142,7 @@ async function secondLaunch(firstNotes: string): Promise<Launch> {
   migrateLedger(db);
   createPermissionKind(db).migrate(db);
   createTicketKind(db).migrate(db);
-  const rt = createStageRuntime(db, { ackMs: 60_000 });
+  const rt = trackedRuntime(db, { ackMs: 60_000 });
   rt.module.migrate(db);
   giveProject(db, "r1");
   const cap = {
@@ -224,7 +226,7 @@ function makeSuiteEnv() {
   migrateLedger(db);
   createPermissionKind(db).migrate(db);
   createTicketKind(db).migrate(db);
-  const rt = createStageRuntime(db, { ackMs: 60_000 });
+  const rt = trackedRuntime(db, { ackMs: 60_000 });
   rt.module.migrate(db);
   giveProject(db, "r1");
   const cap = {
@@ -374,7 +376,7 @@ function makeMergeEnv() {
   createPermissionKind(db).migrate(db);
   const tk = createTicketKind(db);
   tk.migrate(db);
-  createStageRuntime(db, { ackMs: 60_000 }).module.migrate(db);
+  trackedRuntime(db, { ackMs: 60_000 }).module.migrate(db);
   const cap = { db, config: { humanName: "human" } } as unknown as HubCapabilities;
   const route = tk.routes.find((r) => r.method === "GET" && String(r.path).includes("merge-message"))!;
   let n = 0;
