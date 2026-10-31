@@ -194,6 +194,19 @@ fn resolve_summariser_config() -> SummariserConfig {
     out
 }
 
+// The hub owns the tmux sessions (hub-first-browser group 5): it reads the tmux binary from env CUBILOT_TMUX. A missing
+// bundled tmux leaves the variable unset; the hub then refuses tmux work with a clear error and the rest of the hub runs.
+fn tmux_env_value() -> Option<String> {
+    resolve_tmux_bin().ok().map(|p| p.to_string_lossy().to_string())
+}
+
+fn apply_tmux_env(cmd: Command) -> Command {
+    match tmux_env_value() {
+        Some(bin) => cmd.env("CUBILOT_TMUX", bin),
+        None => cmd,
+    }
+}
+
 // Translates the SummariserConfig from config.yml into env vars that the hub
 // sidecar's `readSummariserConfigFromEnv()` (hub/core/summariser/index.ts)
 // reads at startup. Each field is conditional — unset fields stay unset so
@@ -1171,6 +1184,7 @@ fn reload_settings(
         cmd = cmd.env(k, v);
     }
     cmd = apply_summariser_env(cmd);
+    cmd = apply_tmux_env(cmd);
     let (rx, mut child) = cmd.spawn().map_err(|e| format!("spawn cubilot-bin: {e}"))?;
     give_human_token(&mut child, &tokens.human)?;
 
@@ -1338,6 +1352,7 @@ pub fn run() {
                 cmd = cmd.env(k, v);
             }
             cmd = apply_summariser_env(cmd);
+            cmd = apply_tmux_env(cmd);
 
             let (rx, mut child) = cmd.spawn().map_err(|e| format!("spawn cubilot-bin: {e}"))?;
             give_human_token(&mut child, &tokens.human)?;
@@ -1825,5 +1840,15 @@ mod hub_tokens {
             assert!(!(has_human && (l.contains("write_token_file") || l.contains("atomic_write") || l.contains("fs::write"))), "line {}: {line}", i + 1);
         }
         assert!(prod.contains("give_human_token(&mut child, &tokens.human)"));
+    }
+}
+
+#[cfg(test)]
+mod tmux_env_tests {
+    // The hub reads CUBILOT_TMUX; the value is the bundled tmux the shell already uses for its own calls.
+    #[test]
+    fn the_hub_gets_the_path_the_shell_resolves() {
+        let want = super::resolve_tmux_bin().ok().map(|p| p.to_string_lossy().to_string());
+        assert_eq!(super::tmux_env_value(), want);
     }
 }

@@ -28,6 +28,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Briefings re-send on roster or presence change, not once per process.** docs/rules/bridge.md
 - **Raw PTY only.** Never tmux -C; no send-keys for interactive input (only for one-shot commands the user starts). docs/rules/terminal.md
 - **pty.rs plumbing helper changes need an integration test.** docs/rules/terminal.md
+- **The hub owns the tmux plumbing.** `hub/core/tmux.ts` and `hub/core/terminal.ts` change only with a test in `tests/integration/pty-plumbing.test.ts` or `hub-tmux.test.ts`. docs/rules/terminal.md
 - **tmux needs UTF-8 locale env.** LANG and LC_ALL on new-session and attach. docs/rules/terminal.md
 - **tmux uses tmux.sock; new-session -d -x 80 -y 24.** Wrap in $SHELL -ic as ONE argv element. docs/rules/terminal.md
 - **tmux sessions survive Cubilot restart.** Never kill on exit; remain-on-exit off. docs/rules/terminal.md
