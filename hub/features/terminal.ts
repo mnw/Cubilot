@@ -22,6 +22,7 @@ const CAPTURE_TURN_RE = /^\/terminal\/([^/]+)\/capture-turn$/;
 const TAP_RE = /^\/terminal\/([^/]+)\/tap$/;
 const CAPTURE_RE = /^\/terminal\/([^/]+)\/capture$/;
 const HEAL_RE = /^\/terminal\/([^/]+)\/heal$/;
+const SHELL_SESSION = "shell";
 const INPUT_RE = /^\/terminal\/([^/]+)\/input$/;
 const WS_RE = /^\/terminal\/([^/]+)$/;
 const INPUT_MAX_CHARS = 65_536;
@@ -86,6 +87,18 @@ export function createTerminalFeature({ tmux, capturesRoot }: TerminalDeps): Hub
           } finally {
             (viewer as { close: () => void } | null)?.close();
           }
+        },
+      },
+      {
+        // One tab per live tmux session (the pane's tab list). The shell session is not an agent.
+        method: "GET",
+        path: "/terminal-sessions",
+        auth: "read",
+        caller: "human",
+        handler: async () => {
+          if (!tmux) return bad("terminal is not configured", 503);
+          const names = (await tmux.listSessions()).filter((n) => n !== SHELL_SESSION && validName(n));
+          return Response.json({ sessions: names.sort((a, b) => a.localeCompare(b)) });
         },
       },
       {

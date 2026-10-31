@@ -225,3 +225,14 @@ describe("composer", () => {
     expect(received(out)).toBe("");
   });
 });
+
+describe("session list", () => {
+  test("lists the live sessions by name, without the shell, for the human only", async () => {
+    await sink("zed");
+    await sink("alpha");
+    await sink("shell");
+    const get = (token: string) => fetch(`${hub.url}/terminal-sessions`, { headers: { Authorization: `Bearer ${token}` } });
+    expect(((await (await get(hub.humanToken)).json()) as any).sessions).toEqual(["alpha", "zed"]);
+    expect((await get(hub.token)).status).toBe(403);
+  });
+});
