@@ -1,7 +1,7 @@
 // The retrospective stage role (Part 21 group 1): a stage role that only the hub starts. Agent refusals go through a real hub;
 // the launch goes through the stage runtime in process (no route creates a retro stage: group 4 does it from the sweep).
 
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll, afterEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,7 +13,7 @@ import { postJson, registerAgent } from "../helpers/fetch";
 import { DEFAULT_ROLE_LIMITS, STAGE_ROLES, migrateLedger, setRoomSettings } from "../../hub/core/ledger";
 import { READ_ONLY_ROLES } from "../../hub/core/worktrees";
 import { createTicketKind } from "../../hub/kinds/ticket";
-import { createStageRuntime } from "../../hub/kinds/stage";
+import { disposeRuntimes, trackedRuntime } from "../helpers/stage-runtimes";
 import type { LaunchRequest } from "../../hub/core/launch-queue";
 import type { Entry, HubCapabilities, Scope } from "../../hub/core/types";
 
@@ -57,6 +57,7 @@ describe("retrospective is a stage role only", () => {
 });
 
 describe("a retrospective stage launches read-only on Claude", () => {
+  afterEach(disposeRuntimes);
   const sh = (cwd: string, ...a: string[]) => {
     const r = Bun.spawnSync(a, { cwd, stdout: "pipe", stderr: "pipe" });
     if (r.exitCode !== 0) throw new Error(`${a.join(" ")}: ${r.stderr.toString()}`);
@@ -78,7 +79,7 @@ describe("a retrospective stage launches read-only on Claude", () => {
     const db = new Database(":memory:");
     migrateLedger(db);
     createTicketKind(db).migrate(db);
-    const rt = createStageRuntime(db, { ackMs: 60_000 });
+    const rt = trackedRuntime(db, { ackMs: 60_000 });
     rt.module.migrate(db);
     setRoomSettings(db, "A", { project_folder: project });
     const cap = { db, sse: { emit: (_e: Entry, _s: Scope) => {} }, briefing: { refresh: () => {} } } as unknown as HubCapabilities;

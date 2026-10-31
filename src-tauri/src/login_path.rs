@@ -197,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_output_is_an_error() {
+    fn no_output_is_an_error() {
         let d = tmp("err-empty");
         let empty = script(&d, "sh-empty", "exit 0");
         let e = resolve_with(&empty, Duration::from_secs(5)).unwrap_err();

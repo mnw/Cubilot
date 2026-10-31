@@ -12,7 +12,7 @@
   border: var(--border-1) solid var(--line);
   border-radius: var(--radius-round);
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   color: var(--text-muted);
   cursor: default;
 }

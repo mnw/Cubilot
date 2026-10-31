@@ -1,9 +1,8 @@
+pub mod cli;
 mod factory;
-mod launches;
+mod keychain;
 mod login_path;
 mod skills;
-mod models;
-mod pty;
 
 use std::{
     fs::{self, File, OpenOptions},
@@ -115,13 +114,6 @@ struct UiFonts {
     mono: String,
 }
 
-#[derive(Serialize, Clone)]
-struct UiSettings {
-    theme: String,
-    font_scale: f32,
-    fonts: UiFonts,
-}
-
 const VALID_THEMES: &[&str] = &["default", "rose-pine-dawn", "rose-pine-moon"];
 const FONT_SCALE_MIN: f32 = 0.85;
 const FONT_SCALE_MAX: f32 = 1.25;
@@ -200,6 +192,19 @@ fn resolve_summariser_config() -> SummariserConfig {
         }
     }
     out
+}
+
+// The hub owns the tmux sessions (hub-first-browser group 5): it reads the tmux binary from env CUBILOT_TMUX. A missing
+// bundled tmux leaves the variable unset; the hub then refuses tmux work with a clear error and the rest of the hub runs.
+fn tmux_env_value() -> Option<String> {
+    resolve_tmux_bin().ok().map(|p| p.to_string_lossy().to_string())
+}
+
+fn apply_tmux_env(cmd: Command) -> Command {
+    match tmux_env_value() {
+        Some(bin) => cmd.env("CUBILOT_TMUX", bin),
+        None => cmd,
+    }
 }
 
 // Translates the SummariserConfig from config.yml into env vars that the hub
@@ -395,32 +400,6 @@ fn load_legacy_json_config() -> Option<AppConfig> {
     }
 }
 
-fn resolve_theme() -> String {
-    let cfg = load_config();
-    let raw = cfg
-        .theme
-        .map(|s| s.trim().to_ascii_lowercase())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "default".to_string());
-    if VALID_THEMES.iter().any(|t| *t == raw) {
-        raw
-    } else {
-        eprintln!(
-            "[setup] theme '{raw}' not in {VALID_THEMES:?}; falling back to default"
-        );
-        "default".to_string()
-    }
-}
-
-fn resolve_font_scale() -> f32 {
-    let cfg = load_config();
-    let raw = cfg.font_scale.unwrap_or(1.0);
-    if !raw.is_finite() {
-        return 1.0;
-    }
-    raw.clamp(FONT_SCALE_MIN, FONT_SCALE_MAX)
-}
-
 // Whitelist prevents breaking out of the webview's CSS string composer.
 fn sanitize_font_name(raw: Option<String>) -> String {
     let Some(s) = raw else { return String::new() };
@@ -442,15 +421,6 @@ fn sanitize_font_name(raw: Option<String>) -> String {
         return String::new();
     }
     trimmed.to_string()
-}
-
-fn resolve_fonts() -> UiFonts {
-    let cfg = load_config();
-    let f = cfg.fonts.unwrap_or_default();
-    UiFonts {
-        ui:   sanitize_font_name(f.ui),
-        mono: sanitize_font_name(f.mono),
-    }
 }
 
 fn resolve_human_name() -> Result<String, String> {
@@ -945,6 +915,35 @@ fn ensure_staged(
     stage().map_err(|e| format!("chatbridge mod is not staged and retrying failed: {e}"))
 }
 
+fn staged_mod_dir_for_env(staged: &std::sync::atomic::AtomicBool, dir: PathBuf) -> Option<PathBuf> {
+    (staged.load(std::sync::atomic::Ordering::SeqCst) && mod_dir_is_complete(&dir)).then_some(dir)
+}
+
+// Env the hub reads for the settings routes: what only the shell knows (app version, bundled tmux, bundled factory
+// source, staged mod folder). The hub serves them to the UI (hub/features/settings.ts).
+fn hub_settings_env() -> Vec<(&'static str, String)> {
+    let mut env = vec![("CUBILOT_APP_VERSION", env!("CARGO_PKG_VERSION").to_string())];
+    // Only a folder this process staged and that is still complete: a stale folder from an older build
+    // is not exported, so the hub answers 503 for the mcp template (what get_mcp_template did).
+    if let Some(dir) = staged_mod_dir_for_env(&CHATBRIDGE_MOD_STAGED, chatbridge_mod_dir()) {
+        env.push(("CUBILOT_MOD_DIR", dir.to_string_lossy().into_owned()));
+    }
+    if let Ok(tmux) = resolve_tmux_bin() {
+        env.push(("CUBILOT_TMUX", tmux.to_string_lossy().into_owned()));
+    }
+    if let Ok(src) = factory::resolve_factory_src() {
+        env.push(("CUBILOT_FACTORY_SRC", src.to_string_lossy().into_owned()));
+    }
+    // The hub starts, closes and feeds the stage sessions itself (hub/core/launch-executor.ts): it reads the staged
+    // Pi extension and the claude and pi binaries from env. CUBILOT_MOD_DIR is set above, only for a staged mod.
+    if let Ok(ext) = resolve_pi_extension() {
+        env.push(("CUBILOT_PI_EXTENSION", ext.to_string_lossy().into_owned()));
+    }
+    env.push(("CUBILOT_CLAUDE_BIN", resolve_claude_path().to_string_lossy().into_owned()));
+    env.push(("CUBILOT_PI_BIN", resolve_pi_path().to_string_lossy().into_owned()));
+    env
+}
+
 fn pick_free_port() -> Result<u16, String> {
     let listener = TcpListener::bind("127.0.0.1:0")
         .map_err(|e| format!("bind 127.0.0.1:0 failed: {e}"))?;
@@ -956,17 +955,45 @@ fn pick_free_port() -> Result<u16, String> {
     Ok(port)
 }
 
+// 32 random bytes from the OS, URL-safe base64 without padding: 43 characters.
 fn mint_token() -> Result<String, String> {
+    use base64::Engine as _;
     let mut buf = [0u8; TOKEN_BYTES];
     File::open("/dev/urandom")
         .map_err(|e| format!("open /dev/urandom: {e}"))?
         .read_exact(&mut buf)
         .map_err(|e| format!("read urandom: {e}"))?;
-    let mut out = String::with_capacity(TOKEN_BYTES * 2);
-    for b in &buf {
-        out.push_str(&format!("{:02x}", b));
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf))
+}
+
+// The two credentials of one app start. The agent token goes to hub.token and to the hub env (the bridge and the mod read
+// it). The human token goes to the hub on stdin and to the window through get_hub_url; no file and no env holds it.
+struct HubTokens {
+    agent: String,
+    human: String,
+}
+
+fn mint_hub_tokens() -> Result<HubTokens, String> {
+    let agent = mint_token()?;
+    let human = mint_token()?;
+    if agent == human {
+        return Err("minted two equal tokens".to_string());
     }
-    Ok(out)
+    Ok(HubTokens { agent, human })
+}
+
+// The Keychain item with a password prompt on each read, for `cubilot hub`. A failure is logged (no token in the line) and does not stop the app.
+fn store_human_token_in_keychain(human: &str) {
+    if let Err(e) = keychain::store_human_token(human) {
+        eprintln!("[setup] Keychain item for the human token not stored: {}", e.describe());
+    }
+}
+
+// First line of the hub's stdin. The hub reads one line, within 5 s.
+fn give_human_token(child: &mut CommandChild, human: &str) -> Result<(), String> {
+    child
+        .write(format!("{human}\n").as_bytes())
+        .map_err(|e| format!("write the human token to the hub stdin: {e}"))
 }
 
 fn chmod_0600(path: &Path) -> Result<(), String> {
@@ -1066,14 +1093,6 @@ fn get_hub_url(state: State<HubState>) -> Result<HubInfo, String> {
 }
 
 #[tauri::command]
-fn get_human_name(state: State<HubState>) -> Result<String, String> {
-    let guard = state.human_name.lock().unwrap_or_else(|e| e.into_inner());
-    guard
-        .clone()
-        .ok_or_else(|| "human name not yet initialized".to_string())
-}
-
-#[tauri::command]
 fn open_config_file() -> Result<(), String> {
     let path = config_file();
     if !path.exists() {
@@ -1090,11 +1109,6 @@ fn open_config_file() -> Result<(), String> {
 // still lands in Finder; the staging creates the per-role skills/ folders below it.
 // The roles the spawn modal offers: single-agent roles of the staged version `current` names.
 #[tauri::command]
-fn list_roles() -> Result<Vec<factory::RoleInfo>, String> {
-    factory::list_roles()
-}
-
-#[tauri::command]
 fn open_skills_folder() -> Result<(), String> {
     let path = app_data_dir().join("factory-user");
     fs::create_dir_all(&path).map_err(|e| format!("create {}: {e}", path.display()))?;
@@ -1108,7 +1122,7 @@ fn open_skills_folder() -> Result<(), String> {
 // chatbridge omitted from template intentionally; it's force-injected per-agent and stripped from user configs.
 #[tauri::command]
 fn open_global_mcp_config() -> Result<(), String> {
-    let path = pty::global_mcp_config_path();
+    let path = app_data_dir().join("mcp.json");
     if !path.exists() {
         let template = serde_json::to_string_pretty(&json!({
             "_comment": "Global MCP servers shared by all Claude agents (pi agents have no MCP support). Standard .mcp.json schema. \
@@ -1147,7 +1161,7 @@ fn reload_settings(
 
     let port = pick_free_port()?;
     let url = format!("http://127.0.0.1:{port}");
-    let token = mint_token()?;
+    let tokens = mint_hub_tokens()?;
 
     // Kill first so two hub-bin processes never race for the same port.
     {
@@ -1160,7 +1174,7 @@ fn reload_settings(
     if let Err(e) = write_discovery_file(&url) {
         return Err(format!("write discovery file: {e}"));
     }
-    if let Err(e) = write_token_file(&token) {
+    if let Err(e) = write_token_file(&tokens.agent) {
         return Err(format!("write token file: {e}"));
     }
 
@@ -1171,7 +1185,7 @@ fn reload_settings(
         .env("PORT", port.to_string())
         .env("CUBILOT_MODE", "hub")
         .env("CUBILOT_DATA_DIR", app_data_dir().to_string_lossy().to_string())
-        .env("CUBILOT_TOKEN", &token)
+        .env("CUBILOT_TOKEN", &tokens.agent)
         .env("CUBILOT_ATTACHMENTS_DIR", attachments_dir.to_string_lossy().to_string())
         .env("CUBILOT_LEDGER_DB", ledger_path.to_string_lossy().to_string())
         .env("CUBILOT_HUMAN_NAME", &human_name)
@@ -1180,12 +1194,18 @@ fn reload_settings(
     for (k, v) in factory::hub_factory_env(&factory::factory_dir(), &factory_version) {
         cmd = cmd.env(k, v);
     }
+    for (k, v) in hub_settings_env() {
+        cmd = cmd.env(k, v);
+    }
     cmd = apply_summariser_env(cmd);
-    let (rx, child) = cmd.spawn().map_err(|e| format!("spawn cubilot-bin: {e}"))?;
+    cmd = apply_tmux_env(cmd);
+    let (rx, mut child) = cmd.spawn().map_err(|e| format!("spawn cubilot-bin: {e}"))?;
+    give_human_token(&mut child, &tokens.human)?;
+    store_human_token_in_keychain(&tokens.human);
 
     let new_info = HubInfo {
         url: url.clone(),
-        token: token.clone(),
+        token: tokens.human.clone(),
     };
     {
         *state.child.lock().unwrap_or_else(|e| e.into_inner()) = Some(child);
@@ -1202,24 +1222,9 @@ fn reload_settings(
     Ok(new_info)
 }
 
+// Editor cmd from config.yml; cwd is the agent's live pane path (the UI reads it from the hub), appended as last arg.
 #[tauri::command]
-fn get_app_version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
-}
-
-// tokens.css multiplies every --fs-* by var(--ui-font-scale).
-#[tauri::command]
-fn get_ui_settings() -> UiSettings {
-    UiSettings {
-        theme: resolve_theme(),
-        font_scale: resolve_font_scale(),
-        fonts: resolve_fonts(),
-    }
-}
-
-// Editor cmd from config.yml; cwd is the agent's live pane path (tracks `cd`), appended as last arg.
-#[tauri::command]
-fn open_in_editor(agent: String) -> Result<String, String> {
+fn open_in_editor(cwd: String) -> Result<String, String> {
     let cfg = load_config();
     let raw_editor = cfg
         .editor
@@ -1229,7 +1234,7 @@ fn open_in_editor(agent: String) -> Result<String, String> {
             "editor not configured — set `editor:` in config.yml".to_string()
         })?;
 
-    let cwd = pty::pane_current_path(&agent)?;
+    let cwd = std::path::PathBuf::from(cwd);
     if !cwd.exists() {
         return Err(format!("cwd does not exist: {}", cwd.display()));
     }
@@ -1253,147 +1258,6 @@ fn open_in_editor(agent: String) -> Result<String, String> {
     Ok(cwd.to_string_lossy().to_string())
 }
 
-#[derive(Serialize, Clone)]
-struct SlashCommandEntry {
-    name: String,
-    description: String,
-}
-
-// Scans cwd + ~/.claude commands/skills + global MCP `prompts: []` annotations. Built-ins not included.
-#[tauri::command]
-fn slash_discover_for_agent(agent: String) -> Vec<SlashCommandEntry> {
-    let mut out: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
-    let cwd = pty::pane_current_path(&agent).ok();
-    let home = dirs::home_dir();
-
-    // pi addresses skills as `/skill:<name>` and has no MCP prompts; its prompt
-    // templates are the same `~/.claude/commands` files the spawn passes through.
-    if matches!(pty::pane_harness(&agent), pty::Harness::Pi) {
-        let cwd_str = cwd.as_deref().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-        let mut skills: std::collections::BTreeMap<String, String> = Default::default();
-        for root in pty::pi_skill_roots(&cwd_str) {
-            scan_skills_dir(&root, &mut skills);
-        }
-        for (name, desc) in skills {
-            out.insert(format!("skill:{name}"), desc);
-        }
-        for root in [cwd.as_deref(), home.as_deref()].into_iter().flatten() {
-            scan_commands_dir(&root.join(".claude/commands"), &mut out);
-        }
-        return out
-            .into_iter()
-            .map(|(name, description)| SlashCommandEntry { name, description })
-            .collect();
-    }
-
-    let roots: Vec<PathBuf> = [cwd.as_deref(), home.as_deref()]
-        .into_iter()
-        .flatten()
-        .map(|p| p.join(".claude"))
-        .collect();
-    for root in &roots {
-        scan_commands_dir(&root.join("commands"), &mut out);
-        scan_skills_dir(&root.join("skills"), &mut out);
-    }
-    let global_servers = pty::read_global_mcp_servers();
-    for (server_name, server_cfg) in global_servers.iter() {
-        let prompts = server_cfg.get("prompts").and_then(|v| v.as_array());
-        let description = server_cfg
-            .get("description")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        if let Some(arr) = prompts {
-            for p in arr {
-                if let Some(prompt_name) = p.as_str() {
-                    let full = format!("mcp__{server_name}__{prompt_name}");
-                    out.entry(full).or_insert_with(|| description.clone());
-                }
-            }
-        }
-    }
-    out.into_iter()
-        .map(|(name, description)| SlashCommandEntry { name, description })
-        .collect()
-}
-
-fn scan_commands_dir(dir: &Path, out: &mut std::collections::BTreeMap<String, String>) {
-    let entries = match fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("md") {
-            continue;
-        }
-        let stem = match path.file_stem().and_then(|s| s.to_str()) {
-            Some(s) => s.to_string(),
-            None => continue,
-        };
-        let desc = read_frontmatter_description(&path).unwrap_or_default();
-        out.entry(stem).or_insert(desc);
-    }
-}
-
-fn scan_skills_dir(dir: &Path, out: &mut std::collections::BTreeMap<String, String>) {
-    let entries = match fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let skill_md = path.join("SKILL.md");
-        if !skill_md.is_file() {
-            continue;
-        }
-        let name = match path.file_name().and_then(|s| s.to_str()) {
-            Some(s) => s.to_string(),
-            None => continue,
-        };
-        let desc = read_frontmatter_description(&skill_md).unwrap_or_default();
-        out.entry(name).or_insert(desc);
-    }
-}
-
-// Tolerant: handles Claude Code's single-line, optionally-quoted value shape only.
-fn read_frontmatter_description(path: &Path) -> Option<String> {
-    let raw = fs::read_to_string(path).ok()?;
-    let mut lines = raw.lines();
-    if lines.next()?.trim() != "---" {
-        return None;
-    }
-    for line in lines {
-        let trimmed = line.trim();
-        if trimmed == "---" {
-            break;
-        }
-        if let Some(rest) = trimmed.strip_prefix("description:") {
-            let v = rest.trim().trim_matches(|c: char| c == '"' || c == '\'');
-            if !v.is_empty() {
-                // ~120 char cap keeps the picker compact.
-                let truncated: String = v.chars().take(120).collect();
-                return Some(truncated);
-            }
-        }
-    }
-    None
-}
-
-// Launch line for sessions started outside Cubilot. No hub URL or token: the mod
-// reads the discovery files itself.
-#[tauri::command]
-fn get_mcp_template() -> Result<String, String> {
-    // Same guard as a spawn: never hand out a launch line for a stale or missing mod.
-    let dir = ensure_chatbridge_mod_staged()?.to_string_lossy().replace('\'', r"'\''");
-    Ok(format!(
-        "CHATBRIDGE_AGENT='agent' CHATBRIDGE_ROOM='default' claude --plugin-dir '{dir}'"
-    ))
-}
-
 pub fn run() {
     // Wipe WKWebView disk cache before webview creation; otherwise stale assets persist.
     if let Some(cache_root) = dirs::cache_dir() {
@@ -1410,38 +1274,13 @@ pub fn run() {
             info: Mutex::new(None),
             human_name: Mutex::new(None),
         })
-        .manage(pty::PtyRegistry::default())
         .invoke_handler(tauri::generate_handler![
             get_hub_url,
-            get_app_version,
-            get_mcp_template,
-            slash_discover_for_agent,
-            get_human_name,
-            get_ui_settings,
             open_config_file,
             open_skills_folder,
-            list_roles,
-            models::list_models,
-            skills::agent_skills,
-            skills::agent_skills_set,
-            skills::agent_skills_apply,
             open_global_mcp_config,
             open_in_editor,
-            reload_settings,
-            pty::pty_spawn,
-            pty::pty_write,
-            pty::pty_resize,
-            pty::pty_kill,
-            pty::pty_list,
-            pty::pty_harness,
-            pty::pty_roles,
-            pty::resolve_default_room,
-            pty::pty_spawn_shell,
-            pty::pty_shell_exists,
-            pty::pty_capture_turn,
-            pty::pty_read_capture,
-            pty::pty_heal_geometry,
-            pty::pty_tap_read
+            reload_settings
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -1462,13 +1301,13 @@ pub fn run() {
 
             let port = pick_free_port()?;
             let url = format!("http://127.0.0.1:{port}");
-            let token = mint_token()?;
+            let tokens = mint_hub_tokens()?;
             println!("[setup] hub port: {port}");
 
             if let Err(e) = write_discovery_file(&url) {
                 eprintln!("[setup] discovery file write failed: {e}");
             }
-            if let Err(e) = write_token_file(&token) {
+            if let Err(e) = write_token_file(&tokens.agent) {
                 eprintln!("[setup] token file write failed: {e}");
             }
 
@@ -1500,7 +1339,7 @@ pub fn run() {
                 .env("PORT", port.to_string())
                 .env("CUBILOT_MODE", "hub")
                 .env("CUBILOT_DATA_DIR", app_data_dir().to_string_lossy().to_string())
-                .env("CUBILOT_TOKEN", &token)
+                .env("CUBILOT_TOKEN", &tokens.agent)
                 .env("CUBILOT_ATTACHMENTS_DIR", attachments_dir.to_string_lossy().to_string())
                 .env("CUBILOT_LEDGER_DB", ledger_path.to_string_lossy().to_string())
                 .env("CUBILOT_HUMAN_NAME", &human_name)
@@ -1509,9 +1348,15 @@ pub fn run() {
             for (k, v) in factory::hub_factory_env(&factory::factory_dir(), &factory_version) {
                 cmd = cmd.env(k, v);
             }
+            for (k, v) in hub_settings_env() {
+                cmd = cmd.env(k, v);
+            }
             cmd = apply_summariser_env(cmd);
+            cmd = apply_tmux_env(cmd);
 
-            let (rx, child) = cmd.spawn().map_err(|e| format!("spawn cubilot-bin: {e}"))?;
+            let (rx, mut child) = cmd.spawn().map_err(|e| format!("spawn cubilot-bin: {e}"))?;
+            give_human_token(&mut child, &tokens.human)?;
+            store_human_token_in_keychain(&tokens.human);
 
             {
                 let state = handle.state::<HubState>();
@@ -1522,15 +1367,12 @@ pub fn run() {
                 *state
                     .info
                     .lock()
-                    .unwrap_or_else(|e| e.into_inner()) = Some(HubInfo { url, token });
+                    .unwrap_or_else(|e| e.into_inner()) = Some(HubInfo { url, token: tokens.human });
                 *state
                     .human_name
                     .lock()
                     .unwrap_or_else(|e| e.into_inner()) = Some(human_name);
             }
-            // The hub queues session launches and closes; the shell carries them out (stage-sessions 4.2).
-            launches::start(handle.clone());
-
             tauri::async_runtime::spawn(async move {
                 stream_to_log(rx, log_path).await;
             });
@@ -1597,7 +1439,7 @@ mod attachment_default_tests {
 
 #[cfg(test)]
 mod chatbridge_mod_tests {
-    use super::{ensure_staged, install_mod_dir_with, mod_dir_is_complete, pid_is_running, stage_chatbridge_mod, sweep_stale_staging};
+    use super::{ensure_staged, install_mod_dir_with, mod_dir_is_complete, pid_is_running, stage_chatbridge_mod, staged_mod_dir_for_env, sweep_stale_staging};
     use std::fs;
     use std::sync::atomic::AtomicBool;
 
@@ -1690,6 +1532,22 @@ mod chatbridge_mod_tests {
         }).unwrap_err();
         assert_eq!(calls, 1);
         assert!(err.contains("register.js") && err.contains("not staged"), "{err}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn hub_env_exports_the_mod_dir_only_when_this_process_staged_it_and_it_is_complete() {
+        let root = scratch("hubenv");
+        let dir = root.join("data/chatbridge-mod");
+        stage_into(&dir);
+        // A complete folder this process did not stage (older build) is not exported.
+        assert_eq!(staged_mod_dir_for_env(&AtomicBool::new(false), dir.clone()), None);
+        // Staged this process and complete: exported.
+        let staged = AtomicBool::new(true);
+        assert_eq!(staged_mod_dir_for_env(&staged, dir.clone()), Some(dir.clone()));
+        // Staged this process but a file was lost afterwards: not exported.
+        fs::remove_file(dir.join("hooks/register.js")).unwrap();
+        assert_eq!(staged_mod_dir_for_env(&staged, dir), None);
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1914,5 +1772,92 @@ mod chatbridge_mod_tests {
         assert!(leftovers.is_empty(), "left temp dirs: {leftovers:?}");
         assert!(mod_dir_is_complete(&dest));
         let _ = fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod hub_tokens {
+    use super::*;
+
+    fn scratch(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("cubilot-hub-tokens-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        d
+    }
+
+    fn url_safe(t: &str) -> bool {
+        t.len() >= 40 && t.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    }
+
+    #[test]
+    fn the_two_tokens_differ_and_are_url_safe_base64_of_at_least_40_characters() {
+        let t = mint_hub_tokens().unwrap();
+        assert_ne!(t.agent, t.human);
+        assert!(url_safe(&t.agent), "{}", t.agent);
+        assert!(url_safe(&t.human), "{}", t.human);
+    }
+
+    #[test]
+    fn a_second_mint_gives_new_tokens() {
+        let a = mint_hub_tokens().unwrap();
+        let b = mint_hub_tokens().unwrap();
+        assert_ne!(a.agent, b.agent);
+        assert_ne!(a.human, b.human);
+    }
+
+    #[test]
+    fn the_token_file_holds_the_token_with_mode_0600_and_leaves_no_temp_file() {
+        let dir = scratch("file");
+        let t = mint_hub_tokens().unwrap();
+        atomic_write(&dir, "hub.token", &t.agent).unwrap();
+        let path = dir.join("hub.token");
+        assert_eq!(fs::read_to_string(&path).unwrap(), t.agent);
+        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert!(!dir.join("hub.token.tmp").exists());
+        // A second write replaces the file as a whole.
+        let u = mint_hub_tokens().unwrap();
+        atomic_write(&dir, "hub.token", &u.agent).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), u.agent);
+        let names: Vec<_> = fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names.len(), 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // The human token reaches the hub on stdin only: no env value and no file holds it.
+    #[test]
+    fn the_human_token_is_in_no_env_call_and_no_file_write() {
+        let src = include_str!("lib.rs");
+        let prod = &src[..src.find("#[cfg(test)]\nmod hub_tokens").unwrap()];
+        for (i, line) in prod.lines().enumerate() {
+            let l = line.trim_start();
+            if l.starts_with("//") {
+                continue;
+            }
+            let has_human = l.contains("tokens.human") || l.contains("human_token");
+            assert!(!(has_human && l.contains(".env(")), "line {}: {line}", i + 1);
+            assert!(!(has_human && (l.contains("write_token_file") || l.contains("atomic_write") || l.contains("fs::write"))), "line {}: {line}", i + 1);
+        }
+        assert!(prod.contains("give_human_token(&mut child, &tokens.human)"));
+    }
+
+    // Regression (spec review h_f8ae): one launch token goes to hub stdin, the Keychain item and get_hub_url.
+    #[test]
+    fn stdin_keychain_and_get_hub_url_get_the_same_launch_token() {
+        let src = include_str!("lib.rs");
+        let prod = &src[..src.find("#[cfg(test)]\nmod hub_tokens").unwrap()];
+        assert_eq!(prod.matches("give_human_token(&mut child, &tokens.human)?;").count(), 2);
+        assert_eq!(prod.matches("store_human_token_in_keychain(&tokens.human);").count(), 2);
+        assert!(prod.contains("token: tokens.human.clone(),"));
+        assert!(prod.contains("HubInfo { url, token: tokens.human }"));
+    }
+}
+
+#[cfg(test)]
+mod tmux_env_tests {
+    // The hub reads CUBILOT_TMUX; the value is the bundled tmux the shell already uses for its own calls.
+    #[test]
+    fn the_hub_gets_the_path_the_shell_resolves() {
+        let want = super::resolve_tmux_bin().ok().map(|p| p.to_string_lossy().to_string());
+        assert_eq!(super::tmux_env_value(), want);
     }
 }

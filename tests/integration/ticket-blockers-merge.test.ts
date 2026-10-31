@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import "../helpers/repo"; // points CUBILOT_DATA_DIR at a temp folder
 import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const sh = (cwd: string, ...a: string[]) => {
@@ -43,14 +44,14 @@ describe("a blocker clears when its code is merged into staging", () => {
   let n = 0;
 
   beforeAll(async () => {
-    hub = await spawnHub();
-    stream = openSSE(hub, "/launches/stream");
+    hub = await spawnHub({ env: { CUBILOT_STAGE_SWEEP_MS: "500" } }); // the "staging moves" test waits for the stage sweep
+    stream = openLaunchStream(hub);
     // Every launch request is acked and its session joins the room, as the shell and the bridge do.
     void (async () => {
       try {
         for await (const req of stream.events) {
           if (req.kind !== "launch") continue;
-          await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" });
+          await ackLaunch(hub, req.id, { result: "spawned" });
           open.push(await registerAgent(hub, req.session, { room: req.room }));
         }
       } catch { /* closed */ }
@@ -92,7 +93,7 @@ describe("a blocker clears when its code is merged into staging", () => {
     if (commit) {
       const res = await postJson(hub, "/handoffs", {
         from: stage.session, to_role: "validator", task: "validate",
-        context: { notes: "n", stage_id: stage.id, ticket_id: id, verdict: "PASS", report: "r", commit },
+        context: { notes: "n", stage_id: stage.id, ticket_id: id, verdict: "PASS", report: "r", commit, full_suite: false, tests_run: ["tests/integration/ticket-blockers-merge.test.ts"] },
       });
       expect(res.status).toBe(201);
     }

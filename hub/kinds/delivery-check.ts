@@ -131,6 +131,7 @@ export function createDeliveryCheckKind(db: Database, stage?: Pick<StageHooks, "
       method: "POST",
       path: /^\/requests\/([^/]+)\/([^/]+)\/delivery\/checks$/,
       auth: "mutating",
+      caller: "human",
       bodyMax: BODY_MAX,
       handler: async (req, cap) => {
         const parts = new URL(req.url).pathname.split("/");

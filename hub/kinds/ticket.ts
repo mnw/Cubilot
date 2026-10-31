@@ -24,6 +24,7 @@ import { ts, validRoomLabel } from "../core/ids";
 import { validateBlockedBy, openBlockerIds } from "./ticket-blockers";
 import { STAGE_ROLES, getRoomSettings, type StageRole } from "../core/ledger";
 import { ticketRadius } from "../core/radius-rule";
+import { ticketCodeState } from "../core/ticket-code";
 import { dismissPendingPermission } from "./permission";
 import type { StageHooks } from "./stage";
 import { approveRequest, currentScope, ensureRequestsTable, needsApprove, needsFirstApprove, requestExists, requestFacts } from "./request";
@@ -466,6 +467,27 @@ export function assignBySystemInTx(db: Database, ticketId: string, assignee: str
   return { snapshot, entry: ticketEntry(db, snapshot, "ticket.assigned", SYSTEM_ACTOR, false, null) };
 }
 
+/**
+ * Creates a `draft` ticket with actor `system` (Part 21 group 6): one `ticket.created` event and one row insert, through the
+ * create verb, so the radius rule applies. It queues nothing. The caller checks that the request exists.
+ */
+export function createDraftBySystem(
+  db: Database,
+  cap: HubCapabilities,
+  t: { room: string; title: string; acceptance_criteria: string; request_id: string },
+): TicketSnapshot {
+  const id = mintTicketId();
+  const entity = createLedgerEntity({ decl: ticketDecl, db });
+  const r = entity.apply(
+    id,
+    createTicketVerb,
+    { id, room: t.room, title: t.title, acceptance_criteria: t.acceptance_criteria, blast_radius: "low", priority: "medium", external_ref: null, planning_note: null, request_id: t.request_id, role: null, assignee: null, status: "draft" },
+    SYSTEM_ACTOR,
+    cap,
+  );
+  return r.snapshot;
+}
+
 export type SystemQueue = { snapshot: TicketSnapshot; entry: Entry } | null;
 
 /**
@@ -513,6 +535,30 @@ export function reopenDoneInTx(db: Database, ticketId: string, actor: string): S
 
 export type SystemClose = { snapshot: TicketSnapshot; entry: Entry } | null;
 
+const BEHIND_REVIEW = new Set<string>(["queued", "claimed", "in_progress"]);
+
+/**
+ * The hub's move to `in_review` with actor `system`, for a ticket whose stages ran past its status (a worker that never claimed
+ * it leaves it `queued`). It runs after a worker result and before the final PASS. Other statuses write nothing (null).
+ * It is a ticket-only transaction (one `ticket.in_review` event and one row update), never part of `stage.passed`, so it adds no
+ * cross-kind transaction. The caller emits the entry after the commit.
+ */
+export function reviewBySystem(db: Database, ticketId: string): SystemClose {
+  return db.transaction(() => reviewBySystemInTx(db, ticketId))();
+}
+
+function reviewBySystemInTx(db: Database, ticketId: string): SystemClose {
+  const row = db.query<Record<string, unknown>, [string]>("SELECT * FROM tickets WHERE id = ?").get(ticketId);
+  if (!row) throw new Error(`stage result: no such ticket ${ticketId}`);
+  const prior = ticketDecl.rowToSnapshot(row);
+  if (!BEHIND_REVIEW.has(prior.status)) return null;
+  const now = Date.now();
+  const seq = insertEvent(db, ticketId, "ticket.in_review", SYSTEM_ACTOR, { from: prior.status, to: "in_review", note: "the hub moved the ticket: a stage result came while it was " + prior.status }, now);
+  db.run("UPDATE tickets SET status = 'in_review', updated_at_ms = ?, version = ? WHERE id = ?", [now, seq, ticketId]);
+  const snapshot: TicketSnapshot = { ...prior, status: "in_review", updated_at_ms: now, version: seq };
+  return { snapshot, entry: ticketEntry(db, snapshot, "ticket.update", SYSTEM_ACTOR, false, undefined) };
+}
+
 /**
  * The hub's move after the final PASS of a validator or reviewer stage, with actor `system` (L4). A PASS never closes a ticket:
  * an `in_review` ticket goes to the room lead, who moves it to done after the merge. No lead means no change. Like
@@ -523,6 +569,7 @@ export function closeReviewedBySystemInTx(db: Database, cap: HubCapabilities, ti
   const row = db.query<Record<string, unknown>, [string]>("SELECT * FROM tickets WHERE id = ?").get(ticketId);
   if (!row) throw new Error(`final pass: no such ticket ${ticketId}`);
   const prior = ticketDecl.rowToSnapshot(row);
+  // A ticket that stayed behind is moved to in_review by reviewBySystem before the PASS transaction; any other status is left alone.
   if (prior.status !== "in_review") return null;
   const now = Date.now();
   const lead = roomLead(cap, prior.room);
@@ -1076,6 +1123,7 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
       method: "POST",
       path: /^\/requests\/([^/]+)\/([^/]+)\/approve$/,
       auth: "mutating",
+      caller: "human",
       bodyMax: TICKET_BODY_MAX,
       handler: async (req, cap, params) => {
         // The dispatcher passes only the first capture group (the room); the request id comes from the path.
@@ -1237,6 +1285,22 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
           { kind: "ui-only-ambient" },
         );
         return Response.json({ attachments_count: total });
+      },
+    },
+
+    {
+      method: "GET",
+      path: /^\/tickets\/([^/]+)\/code$/,
+      auth: "read",
+      handler: (_req, cap, params) => {
+        if (!TICKET_ID_RE.test(params.id)) return Response.json({ error: "invalid ticket id" }, { status: 400 });
+        const t = entity.load(params.id);
+        if (!t) return Response.json({ error: "not found" }, { status: 404 });
+        const doneNotes = cap.db
+          .query<{ text: string }, [string]>("SELECT n.text FROM ticket_notes n JOIN events e ON e.seq = n.id WHERE n.ticket_id = ? AND e.kind = 'ticket.done' ORDER BY n.id DESC")
+          .all(t.id)
+          .map((r) => r.text);
+        return Response.json(ticketCodeState(getRoomSettings(cap.db, t.room)?.project_folder, t.id, doneNotes));
       },
     },
 
@@ -1493,8 +1557,9 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
             cap.briefing.refresh();
             if (stage) {
               // Run the stage evaluator after the commit: a draft that became queued, and every ticket that was
-              // waiting for this one when it became done. A cancelled ticket does not unblock anything.
-              if (before?.status === "draft" && r.snapshot.status === "queued") stage.onTicketChanged(params.id, cap);
+              // waiting for this one when it became done. Any move to queued is evaluated: a failed stage of the role may
+              // start again (see evaluateStages). A cancelled ticket does not unblock anything.
+              if (r.snapshot.status === "queued") stage.onTicketChanged(params.id, cap);
               if (r.snapshot.status === "cancelled") stage.onTicketCancelled?.(params.id, cap);
               if (r.snapshot.status === "draft" || r.snapshot.status === "done") stage.onTicketParked?.(params.id, r.snapshot.status, cap);
               if (r.snapshot.status === "done") {

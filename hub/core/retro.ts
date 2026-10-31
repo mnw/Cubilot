@@ -3,7 +3,7 @@
 // the same bytes (JSON.stringify of the result).
 
 import type { Database } from "bun:sqlite";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { flowReport } from "./flow";
 import { STAGE_ROOM_SQL } from "../kinds/stage";
@@ -266,6 +266,17 @@ export function writeEvidenceFile(db: Database, ledgerDb: string, room: string, 
   return { path, text };
 }
 
+/** Ids of the `done` items of the `improvements` section of the saved evidence file; [] when the file is missing or does not parse. */
+export function savedDoneImprovements(ledgerDb: string, room: string, week: string): string[] {
+  try {
+    const list = JSON.parse(readFileSync(evidencePath(ledgerDb, room, week), "utf8"))?.improvements;
+    if (!Array.isArray(list)) return [];
+    return list.filter((i) => i?.status === "done" && typeof i.ticket_id === "string").map((i) => i.ticket_id);
+  } catch {
+    return [];
+  }
+}
+
 /** The proposal titles of the newest earlier passed retrospective of the room; [] when there is none or its result has no proposals. */
 export function previousProposalTitles(db: Database, room: string, week: string): string[] {
   const prev = db
@@ -287,4 +298,129 @@ export function previousProposalTitles(db: Database, room: string, week: string)
     }
   }
   return [];
+}
+
+// The result check (Part 21 group 5). Pure: the caller gives the done improvements and a reader for a file line at the stage commit.
+
+const EVIDENCE_SECTIONS = ["flow", "stages", "findings", "human", "causes", "reports", "improvements"];
+const PROPOSAL_KINDS = ["code-check", "script", "role-file", "setting"];
+const MAX_PROPOSALS = 3;
+const REMOVAL_RE = /\b(remove|removes|removed|removing|drop|drops|dropped|dropping|skip|skips|skipped|skipping|bypass|bypasses|bypassed|bypassing|disable|disables|disabled|disabling|auto-approve|without)\b/i;
+const GATE_RE = /\b(approve|allow|human|main|security|delivery|undone|irreversible)\b/i;
+const ROLE_FILE_RE = /^(factory\/(?:[^/:]+\/)*[^/:]+\.md):([1-9]\d*)$/;
+
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+const str = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
+
+/** True when one sentence of `text` holds a removal word and a gate word (design decision 2). */
+export function removesHumanGate(text: string): boolean {
+  return text.split(/(?<=[.!?])\s+|\n+/).some((s) => REMOVAL_RE.test(s) && GATE_RE.test(s));
+}
+
+export type RetroResultEnv = {
+  /** Ids of the `done` items of the `improvements` section of the evidence file of the stage. */
+  doneImprovements: string[];
+  /** The text of line `line` (1-based) of `path` at the commit of the stage worktree; null when it does not exist. */
+  readLine: (path: string, line: number) => string | null;
+};
+
+/** The errors of a retrospective result context; [] when it is valid. */
+export function checkRetroResult(c: Record<string, unknown>, env: RetroResultEnv): string[] {
+  const errors: string[] = [];
+  const proposals = c.proposals;
+  if (!Array.isArray(proposals)) errors.push("context.proposals must be a list (may be empty)");
+  else {
+    if (proposals.length > MAX_PROPOSALS) errors.push("at most 3 proposals");
+    proposals.forEach((p, i) => {
+      const at = `context.proposals[${i}]`;
+      if (!isObj(p)) return void errors.push(`${at} must be an object`);
+      for (const k of ["title", "problem", "change", "risk"]) if (!str(p[k])) errors.push(`${at}.${k} must be a non-empty string`);
+      if (typeof p.kind !== "string" || !PROPOSAL_KINDS.includes(p.kind)) errors.push(`${at}.kind must be one of ${PROPOSAL_KINDS.join(", ")}`);
+      if (!Array.isArray(p.files) || !p.files.every(str)) errors.push(`${at}.files must be a list of strings`);
+      const m = p.measure;
+      if (!isObj(m) || !str(m.name) || typeof m.now !== "number" || !Number.isFinite(m.now) || typeof m.target !== "number" || !Number.isFinite(m.target)) {
+        errors.push(`${at}.measure must be {name, now, target} with numbers`);
+      }
+      if (!Array.isArray(p.evidence) || p.evidence.length === 0) errors.push(`${at}.evidence needs at least one item`);
+      else {
+        p.evidence.forEach((e, j) => {
+          const ok = typeof e === "string" && EVIDENCE_SECTIONS.some((s) => e.startsWith(`${s}:`)) && /\d/.test(e);
+          if (!ok) errors.push(`${at}.evidence[${j}] must start with a section name of the evidence file (${EVIDENCE_SECTIONS.join(", ")}) plus ":" and hold a number`);
+        });
+      }
+      if ([p.title, p.change].some((t) => typeof t === "string" && removesHumanGate(t))) errors.push("a proposal cannot remove a human gate");
+      if (p.kind === "role-file") {
+        const file = Array.isArray(p.files) && p.files.length === 1 ? ROLE_FILE_RE.exec(String(p.files[0])) : null;
+        if (!file || file[1].split("/").includes("..")) errors.push(`${at}.files must hold one factory/**/*.md:<line>`);
+        else if (typeof p.replaces !== "string") errors.push(`${at}.replaces is required for a role-file proposal`);
+        else {
+          const line = env.readLine(file[1], Number(file[2]));
+          if (line === null) errors.push(`${at}.files names a line that does not exist at the stage commit`);
+          else if (line.trim() !== p.replaces.trim()) errors.push(`${at}.replaces must equal the text of ${String((p.files as unknown[])[0])} at the stage commit`);
+        }
+      }
+    });
+  }
+  if (!Array.isArray(c.lessons) || !c.lessons.every(str)) errors.push("context.lessons must be a list of non-empty strings (may be empty)");
+  const verdicts = c.verdicts;
+  const judged = new Set<string>();
+  if (!Array.isArray(verdicts)) errors.push("context.verdicts must be a list (may be empty)");
+  else {
+    verdicts.forEach((v, i) => {
+      const at = `context.verdicts[${i}]`;
+      if (!isObj(v)) return void errors.push(`${at} must be an object`);
+      if (!str(v.improvement)) errors.push(`${at}.improvement must be a ticket id`);
+      else judged.add(v.improvement);
+      if (!str(v.measure)) errors.push(`${at}.measure must be a non-empty string`);
+      for (const k of ["before", "after"]) if (typeof v[k] !== "number" || !Number.isFinite(v[k] as number)) errors.push(`${at}.${k} must be a number`);
+      if (v.verdict !== "keep" && v.verdict !== "revert") errors.push(`${at}.verdict must be keep or revert`);
+      if (!str(v.note)) errors.push(`${at}.note must be a non-empty string`);
+    });
+    for (const id of env.doneImprovements) if (!judged.has(id)) errors.push(`context.verdicts has no verdict for improvement ${id}`);
+  }
+  return errors;
+}
+
+// The draft tickets of an accepted result (Part 21 group 6). Pure: the caller gives the titles of the judged tickets.
+
+export type RetroDraft = { title: string; acceptance_criteria: string };
+
+const TITLE_MAX = 200;
+const clip = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, max - 1)}…`);
+const oneWord = (text: string) => text.trim().replace(/\s+/g, "_");
+
+/** `YYYY-MM-DD` of a time in the hub's local time zone. */
+export function localDate(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** One draft for each proposal, then one for each `revert` verdict. A `keep` verdict gives none. The context is already valid (checkRetroResult). */
+export function retroDrafts(c: Record<string, unknown>, stageId: string, titleOf: (ticketId: string) => string | null): RetroDraft[] {
+  const drafts: RetroDraft[] = [];
+  for (const p of (Array.isArray(c.proposals) ? c.proposals : []) as Record<string, any>[]) {
+    const m = p.measure;
+    drafts.push({
+      title: clip(`As the human, I want ${p.title}, so that ${m.name} moves from ${m.now} to ${m.target}`, TITLE_MAX),
+      acceptance_criteria: [
+        `Problem: ${p.problem}`,
+        `Change: ${p.change}`,
+        `Files: ${(p.files as string[]).join(", ")}`,
+        `Target measure: ${oneWord(m.name)} from ${m.now} to ${m.target} (retrospective ${stageId})`,
+      ].join("\n"),
+    });
+  }
+  for (const v of (Array.isArray(c.verdicts) ? c.verdicts : []) as Record<string, any>[]) {
+    if (v.verdict !== "revert") continue;
+    const title = titleOf(v.improvement) ?? "";
+    drafts.push({
+      title: clip(`Revert ${v.improvement}: ${title}`, TITLE_MAX),
+      acceptance_criteria: [
+        `Undo the change of ticket ${v.improvement}${title ? ` (${title})` : ""}. Restore the state before it.`,
+        `Reason: ${v.note}`,
+        `Target measure: ${oneWord(v.measure)} from ${v.after} to ${v.before} (retrospective ${stageId})`,
+      ].join("\n"),
+    });
+  }
+  return drafts;
 }

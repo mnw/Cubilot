@@ -25,10 +25,10 @@ beforeAll(async () => {
 });
 afterAll(async () => { await hub.kill(); });
 
-test("a file with 42.5 gives 42.5", async () => {
+test("a file with 42.5 gives 43", async () => {
   writeFileSync(join(ctx, "ctx-a.json"), '{"context_window":{"used_percentage":42.5}}');
   const ac = await register("ctx-a");
-  expect((await roster()).find((a) => a.name === "ctx-a").context_pct).toBe(42.5);
+  expect((await roster()).find((a) => a.name === "ctx-a").context_pct).toBe(43);
   ac.abort();
 });
 
@@ -42,7 +42,7 @@ test("Empty value: no used_percentage gives null; so do a missing file and a bad
 });
 
 async function sseRosters(ac: AbortController): Promise<AsyncGenerator<any>> {
-  const r = await fetch(`${hub.url}/stream`, { headers: H(), signal: ac.signal });
+  const r = await fetch(`${hub.url}/stream`, { headers: { Authorization: `Bearer ${hub.humanToken}` }, signal: ac.signal });
   const reader = r.body!.getReader();
   const dec = new TextDecoder();
   async function* gen() {
@@ -63,14 +63,14 @@ async function sseRosters(ac: AbortController): Promise<AsyncGenerator<any>> {
   return gen();
 }
 
-test("the SSE roster snapshot after GET /agents keeps context_pct 42.5, and a changed file reaches the next roster broadcast", async () => {
+test("the SSE roster snapshot after GET /agents keeps context_pct 43, and a changed file reaches the next roster broadcast", async () => {
   writeFileSync(join(ctx, "ctx-e.json"), '{"context_window":{"used_percentage":42.5}}');
   const agent = await register("ctx-e");
   await roster();
   const ac = new AbortController();
   const it = await sseRosters(ac);
   const first = (await it.next()).value;
-  expect(first.agents.find((a: any) => a.name === "ctx-e").context_pct).toBe(42.5);
+  expect(first.agents.find((a: any) => a.name === "ctx-e").context_pct).toBe(43);
   writeFileSync(join(ctx, "ctx-e.json"), '{"context_window":{"used_percentage":77}}');
   let seen: number | null = null;
   for (let i = 0; i < 5 && seen !== 77; i++) {

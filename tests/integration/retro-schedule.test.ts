@@ -10,7 +10,7 @@ import "../helpers/repo"; // sets CUBILOT_DATA_DIR to a temp folder
 import { migrateLedger, setRoomSettings } from "../../hub/core/ledger";
 import { insertEvent } from "../../hub/core/events";
 import { buildKinds } from "../../hub/kinds";
-import { createStageRuntime } from "../../hub/kinds/stage";
+import { disposeRuntimes, trackedRuntime } from "../helpers/stage-runtimes";
 import { evidencePath, retroWeekAt, retroWeekWindow } from "../../hub/core/retro";
 import type { LaunchRequest } from "../../hub/core/launch-queue";
 import type { Entry, HubCapabilities, Scope } from "../../hub/core/types";
@@ -32,6 +32,7 @@ beforeEach(() => {
   process.env.CUBILOT_LEDGER_DB = join(dir, "ledger.db");
 });
 afterEach(() => {
+  disposeRuntimes();
   for (const [k, v] of [["CUBILOT_LEDGER_DB", saved.db], ["CUBILOT_FACTORY_DIR", saved.fd], ["CUBILOT_FACTORY_VERSION", saved.fv]] as const) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
@@ -51,7 +52,7 @@ function env() {
   const db = new Database(":memory:");
   migrateLedger(db);
   for (const k of buildKinds(db)) k.migrate?.(db);
-  const rt = createStageRuntime(db, { ackMs: 60_000 });
+  const rt = trackedRuntime(db, { ackMs: 60_000 });
   rt.module.migrate(db);
   for (const room of ["A", "B"]) setRoomSettings(db, room, { project_folder: project });
   const cap = { db, sse: { emit: (_e: Entry, _s: Scope) => {} }, briefing: { refresh: () => {} } } as unknown as HubCapabilities;
@@ -118,7 +119,7 @@ describe("the weekly schedule", () => {
     e.rt.sweep(e.cap, MON());
     e.rt.api.move(e.retroStages()[0].id, { to: "cancelled", reason: "x" }, "system", e.cap);
     // The sweep of this week was done in memory; a new runtime (a hub restart) looks again.
-    const rt2 = createStageRuntime(e.db, { ackMs: 60_000 });
+    const rt2 = trackedRuntime(e.db, { ackMs: 60_000 });
     rt2.module.migrate(e.db);
     rt2.sweep(e.cap, at(11, 8));
     expect(e.retroStages().filter((s) => s.status !== "cancelled")).toHaveLength(1);
@@ -128,7 +129,7 @@ describe("the weekly schedule", () => {
     const e = env();
     e.ticketEvent("A", at(5, 12));
     e.rt.sweep(e.cap, MON());
-    const rt2 = createStageRuntime(e.db, { ackMs: 60_000 });
+    const rt2 = trackedRuntime(e.db, { ackMs: 60_000 });
     rt2.module.migrate(e.db);
     rt2.sweep(e.cap, at(11, 8));
     expect(e.retroStages()).toHaveLength(1);

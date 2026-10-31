@@ -12,6 +12,14 @@ The hub SHALL serve, to a human caller, the values that the Tauri commands `get_
 - **WHEN** the UI requests the human name, the app version, the roles and the harness of agent `w1`
 - **THEN** each value equals what the removed Tauri command returned for the same config
 
+### Requirement: The hub does not restage the Claude mod
+The hub SHALL NOT restage the Claude mod. When the mod folder is stale, missing or incomplete, the mcp template answers 503. The next Claude spawn in the shell stages the mod again.
+
+#### Scenario: Stale mod folder
+- **GIVEN** the mod folder is missing
+- **WHEN** the UI requests the mcp template
+- **THEN** the answer is 503 and the hub stages no files
+
 ### Requirement: The hub serves models, slash commands and skills
 The hub SHALL serve the model list of a harness (`claude` at once, `pi` from `pi --list-models` with a time limit), the slash commands of an agent, and the skill switches of an agent (read, set, apply). Only the hub SHALL write `<app data>/factory/agents/<agent>/.skills-off`.
 

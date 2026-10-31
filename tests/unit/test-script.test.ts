@@ -83,10 +83,10 @@ function psShim(name: string, body: string) {
 }
 
 let n = 0;
-async function run(args: string[], env: Record<string, string> = {}, lock = join(dir, `lock-${n++}`)) {
+async function run(args: string[], env: Record<string, string> = {}, lock = join(dir, `lock-${n++}`), cwd = dir) {
   const started = Date.now();
   const proc = Bun.spawn(["bash", SCRIPT, ...args], {
-    cwd: dir,
+    cwd,
     env: { ...process.env, PATH: `${stubCargo}:${dirname(process.execPath)}:${process.env.PATH}`, CUBILOT_HEAVY_LOCK: lock, ...env },
     stdout: "pipe",
     stderr: "pipe",
@@ -199,10 +199,10 @@ describe("scripts/test.sh", () => {
     const sentinel = Bun.spawn(["sleep", "300"]);
     sentinels.push(sentinel);
     const pidfile = join(dir, "hang.pid");
-    const r = await run([join(dir, "hang.test.ts")], { CUBILOT_TEST_TIMEOUT_S: "5", PIDFILE: pidfile });
+    const r = await run([join(dir, "hang.test.ts")], { CUBILOT_TEST_TIMEOUT_S: "2", PIDFILE: pidfile });
     expect(r.code).toBe(124);
     expect(r.ms).toBeLessThan(12000);
-    expect(r.out).toContain("time limit of 5s");
+    expect(r.out).toContain("time limit of 2s");
     const child = Number(readFileSync(pidfile, "utf8"));
     expect(await gone(child)).toBe(true);
     expect(alive(sentinel.pid)).toBe(true);
@@ -266,7 +266,7 @@ describe("scripts/test.sh", () => {
     // The wait starts at the TERM, not at the start of the run: scripts/test.sh counts the time limit in whole seconds
     // (date +%s), so TERM comes between 1 and 2 s after the start for a 2 s limit. The test times the wait from the
     // moment the descendant sees the TERM, and the run from there to its end. The poll is 20 ms, the trap is up to 50 ms.
-    const running = run([join(dir, "ignore-term.test.ts")], { CUBILOT_TEST_TIMEOUT_S: "2", PIDFILE: pidfile, TERMFILE: termfile });
+    const running = run([join(dir, "ignore-term.test.ts")], { CUBILOT_TEST_TIMEOUT_S: "1", PIDFILE: pidfile, TERMFILE: termfile });
     let termAt = 0;
     let ended = false;
     const end = running.then((r) => ((ended = true), { r, endAt: Date.now() }));
@@ -290,9 +290,9 @@ describe("scripts/test.sh", () => {
     const lock = join(dir, "lock-held");
     mkdirSync(lock);
     writeFileSync(join(lock, "owner"), "other 1 1\n");
-    const r = await run([join(dir, "ok.test.ts")], { CUBILOT_LOCK_RETRY_S: "1", CUBILOT_LOCK_WAIT_S: "2" }, lock);
+    const r = await run([join(dir, "ok.test.ts")], { CUBILOT_LOCK_RETRY_S: "1", CUBILOT_LOCK_WAIT_S: "1" }, lock);
     expect(r.code).toBe(3);
-    expect(r.ms).toBeGreaterThanOrEqual(2000);
+    expect(r.ms).toBeGreaterThanOrEqual(1000);
     expect(r.out).toContain("other 1 1");
     expect(readFileSync(join(lock, "owner"), "utf8")).toBe("other 1 1\n");
   }, 30000);
@@ -324,7 +324,7 @@ describe("scripts/test.sh", () => {
     const live = Bun.spawn(["sleep", "300"]);
     try {
       const lock = seedLock("live", `other ${live.pid} 1\n`);
-      const r = await run([join(dir, "ok.test.ts")], { CUBILOT_LOCK_RETRY_S: "1", CUBILOT_LOCK_WAIT_S: "2" }, lock);
+      const r = await run([join(dir, "ok.test.ts")], { CUBILOT_LOCK_RETRY_S: "1", CUBILOT_LOCK_WAIT_S: "1" }, lock);
       expect(r.code).toBe(3);
       expect(takeovers(r.out)).toHaveLength(0);
       expect(readFileSync(join(lock, "owner"), "utf8")).toBe(`other ${live.pid} 1\n`);
@@ -407,4 +407,147 @@ describe("scripts/test.sh", () => {
   test("a nested run never touches /tmp/cubilot-heavy.lock", () => {
     expect(lockState()).toBe(realLockBefore);
   });
+});
+
+// A split run (t_b6e1f135d7a727a1): the files of a fake root, split into parts that run at the same time.
+describe("scripts/test.sh split run", () => {
+  const { fileSeconds, splitFiles } = require("../../scripts/split-tests") as typeof import("../../scripts/split-tests");
+  const files = (names: string[]) => names.map((f) => `tests/${f}.test.ts`);
+
+  test("the split balances the parts by the seconds of the report", () => {
+    const xml = [["a", 10], ["b", 9], ["c", 1], ["d", 1]]
+      .map(([f, t]) => `<testcase name="x" time="${Number(t) / 2}" file="tests/${f}.test.ts" /><testcase name="y" time="${Number(t) / 2}" file="tests/${f}.test.ts" />`)
+      .join("\n");
+    const secs = fileSeconds(xml);
+    expect(secs.get("tests/a.test.ts")).toBe(10);
+    const parts = splitFiles(files(["a", "b", "c", "d"]), secs, 2);
+    const sum = (p: string[]) => p.reduce((s, f) => s + (secs.get(f) ?? 0), 0);
+    expect(parts.map(sum).sort()).toEqual([10, 11]);
+    expect(parts.flat().sort()).toEqual(files(["a", "b", "c", "d"]));
+  });
+
+  test("a file that is not in the report goes to the part with the lowest sum", () => {
+    const secs = new Map([["tests/a.test.ts", 10], ["tests/b.test.ts", 2]]);
+    const parts = splitFiles(files(["a", "b", "new"]), secs, 2);
+    expect(parts.find((p) => p.includes("tests/new.test.ts"))).toEqual(["tests/b.test.ts", "tests/new.test.ts"]);
+    expect(parts.find((p) => p.includes("tests/a.test.ts"))).toEqual(["tests/a.test.ts"]);
+  });
+
+  let root: string;
+  const mkRoot = (name: string, tests: Record<string, string>) => {
+    root = join(dir, `root-${name}-${n++}`);
+    mkdirSync(join(root, "tests"), { recursive: true });
+    for (const [f, body] of Object.entries(tests)) writeFileSync(join(root, "tests", `${f}.test.ts`), `import { test } from "bun:test";\nimport { appendFileSync, writeFileSync } from "node:fs";\n${body}\n`);
+    return root;
+  };
+  const split = (env: Record<string, string> = {}) => run([], { CUBILOT_TEST_ROOT: root, CUBILOT_TEST_REPORT: join(root, "none.xml"), CUBILOT_TEST_PARTS: "3", ...env });
+  const envFile = (root: string) => join(root, "env.log");
+  const probe = `test("probe", () => { appendFileSync(process.env.ENVLOG!, [process.env.CUBILOT_TEST_RUN_ID, process.env.TMPDIR, process.env.CUBILOT_TEST_TMUX_DIR].join("|") + "\\n"); });`;
+
+  test("the summary adds the parts, each part has its own run id, TMPDIR and tmux folder, the exit code is 0", async () => {
+    mkRoot("sum", { a: probe, b: probe, c: probe, d: `test("d", () => {});` });
+    const r = await split({ ENVLOG: envFile(root), CUBILOT_TEST_PEAK: "1" });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(" 4 pass\n");
+    expect(r.out).toContain(" 0 fail\n");
+    expect(r.out).toContain("Ran 4 tests across 4 files in 3 parts.");
+    expect(r.out).toMatch(/peak RSS \d+ MB/);
+    const rows = readFileSync(envFile(root), "utf8").trim().split("\n").map((l) => l.split("|"));
+    expect(rows).toHaveLength(3);
+    for (const col of [0, 1, 2]) expect(new Set(rows.map((x) => x[col])).size).toBe(3);
+    for (const [, tmp, sock] of rows) {
+      expect(existsSync(tmp)).toBe(false);
+      expect(existsSync(sock)).toBe(false);
+    }
+  }, 60000);
+
+  test("a failed part gives a non-zero exit, the sum of the fails and the test files of that part", async () => {
+    mkRoot("fail", { a: `test("a", () => {});`, b: `test("b", () => { throw new Error("boom"); });`, c: `test("c", () => {});` });
+    const r = await split({ CUBILOT_TEST_PARTS: "2" });
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain(" 1 fail\n");
+    expect(r.out).toContain(" 2 pass\n");
+    expect(r.out).toMatch(/part \d failed with exit \d+; test files of part \d:\n(  .*\n)*  \.\/tests\/b\.test\.ts/);
+    expect(r.out).toContain("(fail) b");
+    const logs = r.out.match(/logs of the parts: (\S+)/)?.[1];
+    expect(logs).toBeTruthy();
+    rmSync(logs!, { recursive: true, force: true });
+  }, 60000);
+
+  test("the memory limit defaults to 2048 MB times the parts, and an environment value replaces it", async () => {
+    mkRoot("mem", { a: `test("a", () => {});`, b: `test("b", () => {});` });
+    const env: Record<string, string> = { ...process.env } as Record<string, string>;
+    delete env.CUBILOT_TEST_MAX_RSS_MB;
+    const one = await split({ CUBILOT_TEST_MAX_RSS_MB: "" }).catch(() => null);
+    expect(one?.code).toBe(2);
+    const r3 = await run([], { CUBILOT_TEST_ROOT: root, CUBILOT_TEST_REPORT: join(root, "none.xml"), CUBILOT_TEST_PARTS: "3", CUBILOT_TEST_MAX_RSS_MB: "1500" });
+    expect(r3.out).toContain("memory limit 1500 MB");
+    const p = Bun.spawn(["bash", SCRIPT], {
+      cwd: dir,
+      env: { ...env, PATH: `${stubCargo}:${dirname(process.execPath)}:${process.env.PATH}`, CUBILOT_HEAVY_LOCK: join(dir, `lock-${n++}`), CUBILOT_TEST_ROOT: root, CUBILOT_TEST_REPORT: join(root, "none.xml"), CUBILOT_TEST_PARTS: "3" },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const out = (await new Response(p.stdout).text()) + (await new Response(p.stderr).text());
+    await p.exited;
+    expect(out).toContain("memory limit 6144 MB");
+  }, 60000);
+
+  test("one limit on the summed RSS of all parts stops the run with exit 125", async () => {
+    const hold = `test("hold", async () => {
+  const b = Buffer.allocUnsafe(120 * 1024 * 1024);
+  for (let o = 0; o < b.length; o += 4096) b[o] = 1;
+  for (let i = 0; i < 400; i++) { for (let o = 0; o < b.length; o += 4096) b[o] ^= 1; await Bun.sleep(50); }
+}, 60000);`;
+    mkRoot("sumrss", { a: hold, b: hold });
+    const alone = await split({ CUBILOT_TEST_PARTS: "1", CUBILOT_TEST_MAX_RSS_MB: "300", CUBILOT_TEST_TIMEOUT_S: "3" });
+    expect(alone.code).toBe(124); // one part under the limit: only the time limit ends it
+    const r = await split({ CUBILOT_TEST_PARTS: "2", CUBILOT_TEST_MAX_RSS_MB: "300" });
+    expect(r.code).toBe(125);
+    expect(r.out).toContain("memory limit reached");
+    expect(r.out).toMatch(/stopping process groups \d+ \d+/);
+    expect(r.out).not.toContain("command not found");
+    expect(r.out).toMatch(/^ \d+ pass$/m);
+    expect(r.out).toMatch(/^ \d+ fail$/m);
+    expect(r.out).toMatch(/^Ran \d+ tests? across \d+ files? in 2 parts/m);
+    expect(r.out).toMatch(/part \d failed with exit 125; test files of part \d:/);
+  }, 90000);
+
+  test("the time limit covers the whole run and stops all parts", async () => {
+    const hang = `test("hang", () => { const p = Bun.spawn(["sleep", "301"]); for (;;) {} });`;
+    mkRoot("time", { a: hang, b: hang });
+    const r = await split({ CUBILOT_TEST_PARTS: "2", CUBILOT_TEST_TIMEOUT_S: "2" });
+    expect(r.code).toBe(124);
+    expect(r.out).toContain("time limit of 2s reached");
+    expect(r.out).not.toContain("command not found");
+    expect(r.out).toMatch(/^ \d+ pass$/m);
+    expect(r.out).toMatch(/^ \d+ fail$/m);
+    expect(r.out).toMatch(/^Ran \d+ tests? across \d+ files? in 2 parts/m);
+    expect(r.out).toMatch(/part \d failed with exit 124; test files of part \d:/);
+    expect(await noProcessWith("sleep 301")).toBe(true);
+  }, 60000);
+
+  test("a run with arguments is one part, whatever CUBILOT_TEST_PARTS says", async () => {
+    mkRoot("args", { a: `test("a", () => {});` });
+    const r = await run([join(root, "tests/a.test.ts")], { CUBILOT_TEST_PARTS: "3" });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("memory limit 2048 MB");
+    expect(r.out).not.toContain("in 3 parts");
+    expect(r.out).toContain(" 1 pass\n");
+  }, 60000);
+
+  test("CUBILOT_TEST_PARTS=1 with no argument is one bun test process in the folder of the caller", async () => {
+    mkRoot("one", { a: `test("a", () => {});`, b: `test("b", () => {});` });
+    const r = await run([], { CUBILOT_TEST_PARTS: "1" }, undefined, root);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("memory limit 2048 MB");
+    expect(r.out).toContain(" 2 pass\n");
+    expect(r.out).not.toContain("in 1 parts");
+  }, 60000);
+
+  test("a bad CUBILOT_TEST_PARTS exits 2", async () => {
+    const r = await run([], { CUBILOT_TEST_PARTS: "0" });
+    expect(r.code).toBe(2);
+    expect(r.out).toContain("PARTS");
+  }, 30000);
 });

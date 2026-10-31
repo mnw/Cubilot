@@ -86,6 +86,20 @@ The 20 slowest files:
 - Each run gets its own temp folder, ports and tmux socket, from a run id in the environment.
 - The heavy lock becomes two slots. The tester limit stays at 2.
 
+Built as parts of one run (human msg 436): `./scripts/test.sh` with no argument splits the test files into `CUBILOT_TEST_PARTS` parts (balanced by `test-reports/part20-measure/junit.xml`). One heavy lock covers all parts. A run with arguments is one part.
+
+Measure, 2026-10-30, branch commit 4689496 (staging 9e26e91 merged), 2791 pass and 0 fail in every run, `CUBILOT_TEST_PEAK=1`:
+
+| Parts | Wall seconds | Peak summed RSS (MB) |
+|-------|--------------|----------------------|
+| 1 | 432 | 799 |
+| 2 | 228 | 916 |
+| 3 (run 1) | 156 | 1142 |
+| 3 (run 2) | 155 | 1115 |
+| 3 (run 3) | 154 | 1025 |
+
+The default of `CUBILOT_TEST_PARTS` is 3, the faster of 2 and 3. The default memory limit is 2048 MB times the number of parts (6144 MB for 3 parts).
+
 ## Tests
 
 1. A low ticket that changes one hub file runs only the tests that import it and the contract tests; the result has `full_suite: false` and the list.

@@ -1,13 +1,9 @@
 // Terminal pane: tab states external | launching | live; reuses main.js globals (ROSTER, HUMAN_NAME).
 
 (function terminalPane() {
+  // Tauri is needed only to launch and kill sessions and to pick a folder. The terminal itself is the hub's WebSocket,
+  // so the pane also works in a browser (hub-first-browser, group 9).
   const invoke = window.__TAURI__?.core?.invoke;
-  const listen = window.__TAURI__?.event?.listen;
-
-  if (!invoke || !listen) {
-    console.warn('[terminal] Tauri unavailable; pane disabled');
-    return;
-  }
 
   async function pickDirectory() {
     try {
@@ -94,9 +90,10 @@
 
   const SPLIT_KEY = 'cubilot_terminal_split';
 
-  localStorage.removeItem('cubilot_terminal_enabled');
+  // The pane is opt-in: off until the human turns it on; the choice is kept in localStorage.
+  const PANE_KEY = 'cubilot_terminal_enabled';
   localStorage.removeItem('cubilot_ui_version');
-  let _paneEnabled = false;
+  let _paneEnabled = localStorage.getItem(PANE_KEY) === 'true';
 
   function paneEnabled() {
     return _paneEnabled;
@@ -106,8 +103,9 @@
     toggleBtn?.setAttribute('aria-pressed', String(paneEnabled()));
   }
   // Every enable path (click, handleLaunch, startup restore) goes through here, so the board hears of it.
-  function setPaneEnabled(on) {
+  function setPaneEnabled(on, keep = true) {
     _paneEnabled = on;
+    if (keep) localStorage.setItem(PANE_KEY, String(on));
     applyPaneClass();
     document.dispatchEvent(new CustomEvent('cubilot:right-pane', { detail: { pane: on ? 'terminal' : null } }));
   }
@@ -183,8 +181,8 @@
   const { roleMemory, factoryRoom, modelGrid, spawnForm, gridView } = window.__CUBILOT_TERM__;
 
   const {
-    ptySpawn, listRoles, listModels, ptyWrite, ptyResize, ptyKill, ptyList, ptyEventName,
-    strToB64, b64ToBytes,
+    ptySpawn, ptySpawnShell, ptyShellExists, listRoles, listModels, ptyKill, ptyList,
+    ptyHealGeometry, ptyInput, openTerminalSocket,
   } = window.__CUBILOT_TERM__.pty;
 
   const currentXtermTheme = window.__CUBILOT_TERM__.xtermThemes.current;
@@ -241,7 +239,7 @@
     bodyEl.appendChild(paneEl);
 
     t = { state: 'external', tabEl, paneEl, term: null, fitAddon: null,
-          outputUnlisten: null, exitUnlisten: null, cwd: null, external: true };
+          socket: null, cwd: null, external: true };
     tabs.set(SHELL_NAME, t);
     return t;
   }
@@ -251,7 +249,7 @@
     if (t.state === 'live' || t.state === 'launching') return;
     setTabState(SHELL_NAME, 'launching');
     try {
-      await invoke('pty_spawn_shell');
+      await ptySpawnShell();
       setTabState(SHELL_NAME, 'live');
       await attachOutputListener(SHELL_NAME);
       const tt = tabs.get(SHELL_NAME);
@@ -412,6 +410,7 @@
       '<span class="state-dot"></span>' +
       '<button type="button" class="tab-label"></button>' +
       '<span class="row-ctx" title="Context used"></span>' +
+      '<span class="row-held" title="Entries waiting while a viewer controls this session" hidden></span>' +
       '<span class="row-state lbl-offline">offline</span><span class="row-state lbl-paused">paused</span><span class="row-state lbl-needs">needs you</span>' +
       '<span class="row-actions">' +
         '<button type="button" class="pause-toggle"></button>' +
@@ -470,6 +469,7 @@
       removeAgentFromHub(agent, e.currentTarget);
     });
     tabsEl.appendChild(tabEl);
+    sortTabs();
     if (readOpenRows()[agent]) {
       chevron.setAttribute('aria-expanded', 'true');
       tabEl.querySelector('.row-details').hidden = false;
@@ -481,7 +481,7 @@
     bodyEl.appendChild(paneEl);
 
     t = { state: 'external', tabEl, paneEl, term: null, fitAddon: null,
-          outputUnlisten: null, exitUnlisten: null, cwd: cwdCache[agent] || null, external: true };
+          socket: null, cwd: cwdCache[agent] || null, external: true };
     tabs.set(agent, t);
     setReloadState(agent, 'ready');
     renderRowDetails(agent);
@@ -490,11 +490,34 @@
     return t;
   }
 
+  // The agent rows are ordered by agent name; the Shell row stays first.
+  function sortedAgents(names) {
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }
+  function sortTabs() {
+    const names = sortedAgents([...tabs.keys(), ...Array.from(tabsEl.children, (el) => el.dataset.agent)]
+      .filter((n, i, all) => n && !isShell(n) && all.indexOf(n) === i));
+    for (const name of names) {
+      const el = tabs.get(name)?.tabEl ?? Array.from(tabsEl.children).find((c) => c.dataset.agent === name);
+      if (el) tabsEl.appendChild(el);
+    }
+  }
+
+  // Called from main.js on every presence event: `held` maps an agent to the entries waiting for it.
+  window.noteHeld = function noteHeld(held) {
+    for (const [agent, t] of tabs) {
+      const el = t.tabEl.querySelector('.row-held');
+      if (!el) continue;
+      const n = Number(held?.[agent]) || 0;
+      el.hidden = n === 0;
+      el.textContent = n ? `held: ${n}` : '';
+    }
+  };
+
   function removeTab(agent) {
     const t = tabs.get(agent);
     if (!t) return;
-    try { t.outputUnlisten?.(); } catch {}
-    try { t.exitUnlisten?.(); } catch {}
+    closeSocket(t);
     try { t.term?.dispose(); } catch {}
     t.tabEl.remove();
     t.paneEl.remove();
@@ -516,7 +539,7 @@
     } catch {}
   }
 
-  // The details of an open row: the same recorded values the old pill card showed (pillCardFields over pty_roles).
+  // The details of an open row: the same recorded values the old pill card showed (pillCardFields over GET /roles).
   const HARNESS_LABEL = { claude: 'claude \u00b7 Claude Code', pi: 'pi \u00b7 pi.dev' };
   function renderRowDetails(agent) {
     const el = tabs.get(agent)?.tabEl?.querySelector('.row-details');
@@ -552,11 +575,19 @@
   }
 
   // ---- C6c: skill switches of the open row. The backend (skills.rs) owns the choice and the states; the row only shows
-  // them (design note factory/brief/04a-c6-design.md, section 2a point 8) and saves a change at once: agent_skills_set
-  // (the intent), then agent_skills_apply (prepares the build; "Relaunch <agent> to apply" when the agent has no view).
+  // them (design note factory/brief/04a-c6-design.md, section 2a point 8) and saves a change at once: PUT /agents/<name>/skills
+  // (the intent), then POST /agents/<name>/skills/apply (prepares the build; "Relaunch <agent> to apply" when the agent has no view).
   // A reload is a separate click: the strip button calls reloadAgent. The box always shows the SAVED value (t.skills.data),
   // except while its own save runs (t.skillsPending).
   const errText = (e) => (typeof e === 'string' ? e : e?.message || String(e));
+  // The hub's skill routes as JSON; rejects with the hub's error text.
+  async function hubSkills(agent, method, suffix = '', body) {
+    const r = await authedFetch(`/agents/${encodeURIComponent(agent)}/skills${suffix}`, body === undefined ? { method } : {
+      method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(await parseErrorBody(r));
+    return r.json();
+  }
   const skillName = (id) => id.slice(id.indexOf('/') + 1);
   const skillChanged = (s) => s.on !== (s.state === 'loaded');   // the box differs from what the agent loaded
   // The label of one skill: loaded and off-and-loaded show none; "not loaded" only after a reload applied it.
@@ -574,12 +605,12 @@
     const seq = (t.skillsSeq = (t.skillsSeq || 0) + 1);   // a save started later makes this answer stale
     t.skillsLoading = true;
     try {
-      const data = await invoke('agent_skills', { agent });
+      const data = await hubSkills(agent, 'GET');
       if (tabs.get(agent) !== t || t.skillsSeq !== seq) return;
       t.skills = { data, error: t.skills?.error || '', readError: '' };   // a good read clears an old read error, never a save error
     } catch (e) {
       if (tabs.get(agent) !== t || t.skillsSeq !== seq) return;
-      console.warn('[terminal] agent_skills', agent, e);
+      console.warn('[terminal] skills', agent, e);
       t.skills = { data: t.skills?.data || null, error: t.skills?.error || '', readError: `Skills not available: ${errText(e)}` };
     } finally {
       if (tabs.get(agent) === t) t.skillsLoading = false;
@@ -616,7 +647,7 @@
     t.skillsSeq = (t.skillsSeq || 0) + 1;
     const done = () => { for (const [id] of touched) t.skillsPending?.delete(id); };
     try {
-      await invoke('agent_skills_set', { agent, off: [...off].sort() });
+      await hubSkills(agent, 'PUT', '', { off: [...off].sort() });
     } catch (e) {
       done();
       t.skills.error = `Could not save the skill choice: ${errText(e)}`;
@@ -627,10 +658,10 @@
     for (const s of skillsOf(d)) s.on = !off.has(s.id);
     done();
     try {
-      await invoke('agent_skills_apply', { agent });
+      await hubSkills(agent, 'POST', '/apply');
     } catch (e) {
       const m = errText(e);
-      // "Relaunch <agent> to apply" is not a failure: the strip says it (relaunch_needed comes back from agent_skills).
+      // "Relaunch <agent> to apply" is not a failure: the strip says it (relaunch_needed comes back from the GET).
       if (!/^Relaunch /.test(m)) t.skills.error = `The choice is saved, but it could not be prepared: ${m}`;
     }
     await refreshSkills(agent);   // states, relaunch_needed and the count as the backend sees them
@@ -805,7 +836,7 @@
     t.factory = s.factory || null;
     renderRowDetails(agent);
     if (!t.tabEl.querySelector('.row-details')?.hidden) refreshSkills(agent);   // a reload may have loaded or dropped skills
-    if (typeof refreshRolePills === 'function') refreshRolePills();   // pty_roles: role, model and effort again
+    if (typeof refreshRolePills === 'function') refreshRolePills();   // GET /roles: role, model and effort again
   }
 
   // The result of THIS click: factory.last (written by the hub when the agent reports) with the reload_id that the
@@ -975,7 +1006,7 @@
       info.className = 'terminal-external-info';
       info.innerHTML =
         '<div>' + t.tabEl.dataset.agent + ' is running outside Cubilot.</div>' +
-        '<div style="font-size:11px; color:var(--text-dim);">Quit the external ' +
+        '<div style="font-size:var(--fs-sm); color:var(--text-dim);">Quit the external ' +
         'claude session to launch it inside the pane.</div>';
       t.paneEl.appendChild(info);
     }
@@ -1029,16 +1060,12 @@
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && e.key === 'Enter' && e.shiftKey
           && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        ptyWrite(t.tabEl.dataset.agent, strToB64('\n')).catch((err) =>
-          console.error('[terminal] shift-enter write', err));
+        sendKeys(t, '\n');
         return false;
       }
       return true;
     });
-    term.onData((data) => {
-      ptyWrite(t.tabEl.dataset.agent, strToB64(data)).catch((e) =>
-        console.error('[terminal] write', e));
-    });
+    term.onData((data) => sendKeys(t, data));
     t.term = term;
     t.fitAddon = fitAddon;
     const ro = new ResizeObserver(() => sendResize(t));
@@ -1051,9 +1078,8 @@
     if (!t.term || !t.fitAddon) return;
     t.fitAddon.fit();
     const { cols, rows } = t.term;
-    if (cols > 0 && rows > 0) {
-      ptyResize(t.tabEl.dataset.agent, cols, rows).catch(() => {});
-    }
+    // Only the controller sets the size; a read-only viewer never resizes the session.
+    if (cols > 0 && rows > 0 && t.socket?.isControl) t.socket.resize(cols, rows);
   }
 
   function focusTab(agent) {
@@ -1094,36 +1120,124 @@
     }
   }
 
+  function closeSocket(t) {
+    t.socketGen = (t.socketGen || 0) + 1;   // a close after this point is ours: no reconnect
+    clearTimeout(t.reconnectTimer);
+    try { t.socket?.close(); } catch {}
+    t.socket = null;
+  }
+
+  // Keys typed in the pane: only the controller sends them. A read-only pane shows why nothing happened.
+  function sendKeys(t, data) {
+    if (t.socket?.isControl) { t.socket.input(data); return; }
+    flashReadOnly(t);
+  }
+
+  // The bar over a pane: who controls the session, Take control, Hand back.
+  function ensureControlBar(t) {
+    if (t.controlBar) return t.controlBar;
+    const bar = document.createElement('div');
+    bar.className = 'terminal-control-bar';
+    bar.style.cssText =
+      'position:absolute; top:0; right:0; z-index:4; display:flex; gap:var(--sp-4); align-items:center;' +
+      'padding:var(--sp-4) var(--sp-8); font-size:var(--fs-sm); background:var(--bg-elev); color:var(--text-dim);';
+    const label = document.createElement('span');
+    label.className = 'control-label';
+    const take = document.createElement('button');
+    take.type = 'button';
+    take.className = 'control-take';
+    take.textContent = 'Take control';
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'control-back';
+    back.textContent = 'Hand back';
+    take.addEventListener('click', () => {
+      const { cols, rows } = t.term || {};
+      t.fitAddon?.fit();
+      t.socket?.take(t.term?.cols || cols, t.term?.rows || rows);
+    });
+    back.addEventListener('click', () => t.socket?.handBack());
+    bar.append(label, take, back);
+    t.paneEl.appendChild(bar);
+    t.controlBar = bar;
+    renderControlBar(t, 'none');
+    return bar;
+  }
+
+  function renderControlBar(t, by) {
+    const bar = ensureControlBar(t);
+    const mine = by === 'you';
+    bar.dataset.control = mine ? 'you' : by;
+    bar.querySelector('.control-label').textContent =
+      mine ? 'You control this session' : by === 'other' ? 'Read-only: another viewer has control' : 'Read-only';
+    bar.querySelector('.control-take').hidden = mine;
+    bar.querySelector('.control-back').hidden = !mine;
+    t.paneEl.dataset.control = mine ? 'you' : 'none';
+    if (mine) sendResize(t);
+  }
+
+  function flashReadOnly(t) {
+    const bar = ensureControlBar(t);
+    const label = bar.querySelector('.control-label');
+    label.textContent = 'Read-only: use Take control to type';
+    label.style.color = 'var(--red)';
+    clearTimeout(t.flashTimer);
+    t.flashTimer = setTimeout(() => {
+      label.style.color = '';
+      renderControlBar(t, t.socket?.isControl ? 'you' : 'none');
+    }, 2500);
+  }
+
+  const RECONNECT_MS = 1500;
+  const RECONNECT_MAX = 5;
+
   async function attachOutputListener(agent) {
     const t = tabs.get(agent);
     if (!t) return;
-    try { t.outputUnlisten?.(); } catch {}
-    try { t.exitUnlisten?.(); } catch {}
-    t.outputUnlisten = await listen(ptyEventName('output', agent), async (e) => {
-      const bytes = b64ToBytes(e.payload.b64);
-      if (!t._firstByteLogged && t._launchStage) {
-        t._firstByteLogged = true;
-        t._launchStage(`first PTY byte (${bytes.length}B)`);
-      }
-      if (!t.term) {
-        await mountXterm(t);
-        t._launchStage?.('xterm mounted');
-      }
-      // U+23FA ⏺ → U+25CF ●; Caskaydia lacks ⏺, avoids emoji-font fallback.
-      for (let i = 0; i + 2 < bytes.length; i++) {
-        if (bytes[i] === 0xE2 && bytes[i+1] === 0x8F && bytes[i+2] === 0xBA) {
-          bytes[i+1] = 0x97;
-          bytes[i+2] = 0x8F;
-        }
-      }
-      t.term?.write(bytes);
-      maybeFlagAttention(t, agent, bytes);
-      window.CUBILOT_USAGE?.captureBanner(t, agent, bytes);
-    });
-    t.exitUnlisten = await listen(ptyEventName('exit', agent), () => {
-      removeTab(agent);
-      reconcile();
-    });
+    closeSocket(t);
+    const gen = t.socketGen;
+    const open = (attempt) => {
+      const socket = openTerminalSocket(agent, {
+        cols: t.term?.cols, rows: t.term?.rows,
+        onOutput: async (bytes) => {
+          if (t.socket !== socket) return;
+          if (!t._firstByteLogged && t._launchStage) {
+            t._firstByteLogged = true;
+            t._launchStage(`first PTY byte (${bytes.length}B)`);
+          }
+          if (!t.term) {
+            await mountXterm(t);
+            t._launchStage?.('xterm mounted');
+          }
+          // U+23FA ⏺ → U+25CF ●; Caskaydia lacks ⏺, avoids emoji-font fallback.
+          for (let i = 0; i + 2 < bytes.length; i++) {
+            if (bytes[i] === 0xE2 && bytes[i+1] === 0x8F && bytes[i+2] === 0xBA) {
+              bytes[i+1] = 0x97;
+              bytes[i+2] = 0x8F;
+            }
+          }
+          t.term?.write(bytes);
+          maybeFlagAttention(t, agent, bytes);
+          window.CUBILOT_USAGE?.captureBanner(t, agent, bytes);
+        },
+        onControl: (by) => renderControlBar(t, by),
+        onReadOnly: () => flashReadOnly(t),
+        onClose: (e) => {
+          if (t.socketGen !== gen || t.socket !== socket) return;   // closed by us, or replaced
+          t.socket = null;
+          // 1000: the session ended (the hub closes with "session ended"). Else retry a few times.
+          if (e?.code === 1000 || attempt >= RECONNECT_MAX) {
+            removeTab(agent);
+            reconcile();
+            return;
+          }
+          t.reconnectTimer = setTimeout(() => { if (tabs.get(agent) === t && t.socketGen === gen) open(attempt + 1); }, RECONNECT_MS);
+        },
+      });
+      t.socket = socket;
+      ensureControlBar(t);
+    };
+    open(0);
   }
 
   // Indivisible post-spawn sequence: tab marked live → output listener registered
@@ -1138,7 +1252,7 @@
   async function _connectLiveTab(agent) {
     setTabState(agent, 'live');
     await attachOutputListener(agent);
-    try { await invoke('pty_heal_geometry', { agent }); } catch {}
+    try { await ptyHealGeometry(agent); } catch {}
     const tt = tabs.get(agent);
     if (tt) sendResize(tt);
   }
@@ -1165,7 +1279,7 @@
       const bar = document.createElement('div');
       bar.style.cssText =
         'position:absolute; top:0; left:0; right:0; z-index:5; display:flex; gap:var(--sp-4);' +
-        'align-items:flex-start; padding:8px 12px; font-size:12px; color:var(--text);' +
+        'align-items:flex-start; padding:var(--sp-8) var(--sp-12); font-size:var(--fs-sm); color:var(--text);' +
         'background:var(--bg-elev); border-left:3px solid var(--red);';
       const msg = document.createElement('div');
       msg.style.flex = '1';
@@ -1177,7 +1291,7 @@
       close.type = 'button';
       close.textContent = '\u00d7';
       close.setAttribute('aria-label', 'Dismiss');
-      close.style.cssText = 'background:none; border:0; color:var(--text-muted); cursor:pointer; font-size:16px; line-height:1;';
+      close.style.cssText = 'background:none; border:0; color:var(--text-muted); cursor:pointer; font-size:var(--fs-md); line-height:1;';
       close.addEventListener('click', () => { bar.remove(); if (t.joinWarnBar === bar) t.joinWarnBar = null; });
       bar.append(msg, close);
       t.paneEl.appendChild(bar);
@@ -1191,7 +1305,7 @@
   };
 
   async function handleLaunch(agent, cwd, sessionMode = null, room = null, harness = null, role = null, model = null, effort = null, provider = null) {
-    if (!_paneEnabled) setPaneEnabled(true);
+    if (!_paneEnabled) setPaneEnabled(true, false);
     const t0 = performance.now();
     const stage = (label) =>
       console.log(`[launch-timing] +${Math.round(performance.now() - t0)}ms — ${agent} — ${label}`);
@@ -1204,10 +1318,10 @@
     t._launchT0 = t0;
     t._launchStage = stage;
     try {
-      stage('invoke pty_spawn');
-      console.info('[terminal] pty_spawn', { agent, role, harness, model, effort, provider, sessionMode, room });
+      stage('POST /sessions');
+      console.info('[terminal] POST /sessions', { agent, role, harness, model, effort, provider, sessionMode, room });
       await ptySpawn(agent, cwd, sessionMode, room, harness, role, model, effort, provider);
-      stage('pty_spawn returned');
+      stage('session created and attached');
       rememberCwd(agent, cwd);
       roleMemory.remember(localStorage, agent, role, { model, provider, effort, harness });
       t.cwd = cwd;
@@ -1226,7 +1340,9 @@
   async function handleOpenEditor(agent) {
     if (!invoke) return;
     try {
-      const cwd = await invoke('open_in_editor', { agent });
+      const paths = await hubGet(`/settings/paths?agent=${encodeURIComponent(agent)}`);
+      if (!paths.agent_cwd) throw new Error(`no working folder for agent '${agent}'`);
+      const cwd = await invoke('open_in_editor', { cwd: paths.agent_cwd });
       if (typeof window.showCopyToast === 'function') {
         window.showCopyToast(`Editor opened: ${cwd}`);
       }
@@ -1250,7 +1366,7 @@
 
     // No leading Esc: claude swallows `\x1b/` as a key-combo and eats `/e`.
     try {
-      await ptyWrite(agent, strToB64('/exit\r'));
+      await ptyInput(agent, '/exit\r');
     } catch (e) {
       console.error('[terminal] /exit write failed:', e);
     }
@@ -1346,7 +1462,7 @@
   }
 
   // ---- The model x effort grid (task 5.5): it replaces the model field of 5.2. ----
-  let gridModels = {};      // harness -> rows from list_models, for this opening of the modal
+  let gridModels = {};      // harness -> rows from GET /models, for this opening of the modal
   let gridSelected = null;  // { rowKey, effort }
   const spawnRole = () => spawnRoles.get(spawnRoleEl?.value || '') || null;
   // The radios decide the launch harness; a role only preselects it (task 9.5).
@@ -1357,7 +1473,7 @@
     return modelGrid.gridModel({ harness, models: gridModels[harness] || [], filter: spawnGridFilterEl?.value || '', role: spawnRole() });
   }
 
-  const gridLoads = {};   // harness -> pending list_models request, so one opening asks once
+  const gridLoads = {};   // harness -> pending GET /models request, so one opening asks once
   function loadGridModels(harness) {
     if (gridModels[harness]) return Promise.resolve();
     return (gridLoads[harness] ||= fetchGridModels(harness).finally(() => { delete gridLoads[harness]; }));
@@ -1367,7 +1483,7 @@
     try {
       gridModels[harness] = await listModels(harness);
     } catch (e) {
-      console.warn('[terminal] list_models failed:', e);
+      console.warn('[terminal] listing models failed:', e);
       gridModels[harness] = [];
       if (spawnGridNoteEl) spawnGridNoteEl.textContent = `Could not list ${harness} models: ${e?.message ?? e}`;
       return;
@@ -1590,12 +1706,12 @@
     // Pre-fill Room with git-root basename for one-click common case.
     if (spawnRoomEl && !spawnRoomEl.value.trim()) {
       try {
-        const suggested = await invoke('resolve_default_room', { cwd: dir });
+        const suggested = (await hubGet(`/room-default?cwd=${encodeURIComponent(dir)}`)).room;
         if (typeof suggested === 'string' && suggested) {
           spawnRoomEl.value = suggested;
         }
       } catch (e) {
-        console.warn('[terminal] resolve_default_room failed:', e);
+        console.warn('[terminal] GET /room-default failed:', e);
       }
       updateSpawnForm();
     }
@@ -1779,7 +1895,7 @@
     const t = tabs.get(agent);
     if (!t) return;
     if (t.state === 'live' || t.state === 'launching') return;
-    // pty_spawn creates a missing session, and without a role. List right before it and re-attach only a session
+    // ptySpawn creates a missing session, and without a role. List right before it and re-attach only a session
     // that exists now. The state stays as it is until then, so a launch that starts during the listing is not touched.
     if (!(await ptyList()).includes(agent)) return;
     if (tabs.get(agent) !== t || t.state === 'live' || t.state === 'launching') return;
@@ -1794,7 +1910,7 @@
         // The shell already attached this session (a hub stage launch). Mark it live AND listen: without the exit and
         // output listeners the tab never learns that the session ended, and reconcile() keeps live tabs for ever.
         // A tab that already listens (a normal agent after a window reload, say) must not get a second listener pair.
-        if (t.outputUnlisten && t.exitUnlisten) {
+        if (t.socket) {
           setTabState(agent, 'live');
         } else {
           try {
@@ -1814,22 +1930,13 @@
   }
 
   setInterval(() => { if (paneEnabled()) reconcile(); }, 5000);
-  setTimeout(reconcile, 500);
+  setTimeout(() => { if (paneEnabled()) reconcile(); }, 500);
 
-  (async () => {
-    try {
-      const names = await ptyList();
-      // pty_list filters out shell, so check separately.
-      let shellLive = false;
-      try { shellLive = await invoke('pty_shell_exists'); } catch {}
-      if ((names.length || shellLive) && !_paneEnabled) {
-        setPaneEnabled(true);
-        reconcile();
-        for (const t of tabs.values()) if (t.term) t.fitAddon?.fit();
-      }
-      if (_paneEnabled) ensureShellAttached();
-    } catch (e) {}
-  })();
+  // Startup restore: only when the human turned the pane on before (localStorage); it is never opened for them.
+  if (_paneEnabled) {
+    reconcile();
+    ensureShellAttached();
+  }
 
   // Read-only accessor for slash-send's response capture: returns Terminal or null.
   window.__CUBILOT_TERM__.getTerm = (agent) => {

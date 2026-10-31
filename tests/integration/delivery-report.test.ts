@@ -86,7 +86,7 @@ describe("delivery report", () => {
     expect((await postJson(hub, `/rooms/${ROOM}/lead`, { by: hub.humanName, agent: "dr-lead" })).status).toBe(200);
     const put = await fetch(`${hub.url}/rooms/${ROOM}/settings`, {
       method: "PUT",
-      headers: { Authorization: `Bearer ${hub.token}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${hub.humanToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({ project_folder: repo }),
     });
     expect(put.ok).toBe(true);
@@ -268,5 +268,106 @@ describe("delivery report", () => {
     git("merge", "--ff-only", "-q", "staging");
     git("checkout", "-q", "staging");
     expect((await lines()).map((l) => l.request_id)).not.toContain("dr-mm");
+  });
+
+  // H8: fails with fix commit, build time, cost, merge command.
+  const seedStage = (ticket: string, id: string, role: string, verdict: string | null, seq: number, session: string) =>
+    sql((db) =>
+      void db.run(
+        `INSERT INTO stage (id, ticket_id, request_id, review, verdict, role, attempt, status, session, slot_seq, created_seq, updated_seq, version)
+         VALUES (?, ?, NULL, NULL, ?, ?, 1, ?, ?, NULL, ?, ?, ?)`,
+        [id, ticket, verdict, role, verdict === "FAIL" ? "failed" : "passed", session, seq, seq, seq],
+      ),
+    );
+  const seedHandoff = (id: string, from: string, to: string, ctx: unknown) =>
+    sql((db) => void db.run("INSERT INTO handoffs (id, from_agent, to_agent, task, context_json, status, created_at_ms, expires_at_ms) VALUES (?, ?, ?, 'x', ?, 'accepted', 1, 2)", [id, from, to, JSON.stringify(ctx)]));
+  const seedMetric = (stage: string, source: string, tokens: number | null) =>
+    sql((db) => void db.run("INSERT INTO stage_metrics (stage_id, attempt, role, first_message_bytes, first_message_tokens_est, tokens_before_action, source, created_seq) VALUES (?, 1, 'worker', 1, 1, ?, ?, 1)", [stage, tokens, source]));
+  const seedEvent = (ticket: string, kind: string, at: number) =>
+    sql((db) => void db.run("INSERT INTO events (entity_id, kind, actor, payload_json, at_ms) VALUES (?, ?, 'x', '{}', ?)", [ticket, kind, at]));
+
+  test("H8: a ticket with one FAIL lists its findings and the fix commit of the next tester hand-over", async () => {
+    await mkRequest("dr-h8");
+    const t = await mkTicket("dr-h8");
+    const quiet = await mkTicket("dr-h8");
+    seedHandoff("h_t_before", "worker-1", "role:tester", { ticket_id: t, commit: "a".repeat(40) });
+    seedStage(t, "s_fail00000000001", "validator", "FAIL", 3000, "validator-f1");
+    seedHandoff("h_fail_1", "validator-f1", "x", { stage_id: "s_fail00000000001", verdict: "FAIL", findings: [{ severity: "blocking", text: "no test" }, { severity: "minor", text: "typo" }, { bad: 1 }] });
+    seedHandoff("h_t_fix", "worker-1", "role:tester", { ticket_id: t, commit: "b".repeat(40) });
+    seedHandoff("h_t_other", "worker-1", "role:tester", { ticket_id: quiet, commit: "c".repeat(40) });
+    validatorPass(t);
+    setStatus(t, "done");
+    setStatus(quiet, "done");
+    const j = (await report("dr-h8")).json as any;
+    const by = Object.fromEntries(j.tickets.map((x: any) => [x.id, x]));
+    expect(by[t].fails).toEqual([{ handoff_id: "h_fail_1", findings: [{ severity: "blocking", text: "no test" }, { severity: "minor", text: "typo" }], fix_commit: "b".repeat(40) }]);
+    expect(by[quiet].fails).toEqual([]);
+  });
+
+  test("H8: a FAIL without a later tester hand-over has fix_commit null", async () => {
+    await mkRequest("dr-h8n");
+    const t = await mkTicket("dr-h8n");
+    seedStage(t, "s_fail00000000002", "validator", "FAIL", 3001, "validator-f2");
+    seedHandoff("h_fail_2", "validator-f2", "x", { stage_id: "s_fail00000000002", verdict: "FAIL" });
+    setStatus(t, "done");
+    const j = (await report("dr-h8n")).json as any;
+    expect(j.tickets[0].fails).toEqual([{ handoff_id: "h_fail_2", findings: [], fix_commit: null }]);
+  });
+
+  test("H8: build_ms runs from the first claim to the last done, cost sums Claude tokens and a Pi stage reads no data", async () => {
+    await mkRequest("dr-h8c");
+    const a = await mkTicket("dr-h8c");
+    const b = await mkTicket("dr-h8c");
+    const c = await mkTicket("dr-h8c");
+    seedEvent(a, "ticket.claimed", 1000);
+    seedEvent(b, "ticket.claimed", 5000);
+    seedEvent(a, "ticket.done", 9000);
+    seedEvent(b, "ticket.done", 61000);
+    seedStage(a, "s_cost0000000001", "worker", "PASS", 3010, "worker-a1");
+    seedStage(a, "s_cost0000000002", "tester", "PASS", 3011, "tester-a1");
+    seedMetric("s_cost0000000001", "claude", 100);
+    seedMetric("s_cost0000000002", "claude", 50);
+    seedStage(b, "s_cost0000000003", "worker", "PASS", 3012, "worker-b1");
+    seedMetric("s_cost0000000003", "none", null);
+    seedStage(c, "s_cost0000000004", "worker", "PASS", 3013, "worker-c1");
+    seedStage(c, "s_cost0000000005", "tester", "PASS", 3014, "tester-c1");
+    seedMetric("s_cost0000000004", "claude", 7);
+    seedMetric("s_cost0000000005", "pi", null);
+    for (const x of [a, b, c]) setStatus(x, "done");
+    const j = (await report("dr-h8c")).json as any;
+    expect(j.build_ms).toBe(60000);
+    const by = Object.fromEntries(j.cost.tickets.map((x: any) => [x.ticket_id, x]));
+    expect(by[a]).toEqual({ ticket_id: a, tokens: 150, no_data_stages: [] });
+    expect(by[b]).toEqual({ ticket_id: b, tokens: "no data", no_data_stages: ["s_cost0000000003"] });
+    expect(by[c]).toEqual({ ticket_id: c, tokens: 7, no_data_stages: ["s_cost0000000005"] });
+    expect(j.cost.tokens).toBe(157);
+  });
+
+  test("H8: build_ms is null without a claim event", async () => {
+    await mkRequest("dr-h8z");
+    setStatus(await mkTicket("dr-h8z"), "done");
+    expect(((await report("dr-h8z")).json as any).build_ms).toBeNull();
+  });
+
+  test("H8: merge_command names the staging head and the existing fields stay", async () => {
+    await mkRequest("dr-h8m");
+    const t = await mkTicket("dr-h8m");
+    mergeToStaging(`Merge ticket/${t}: T`);
+    const head = git("rev-parse", "refs/heads/staging");
+    setStatus(t, "done");
+    const j = (await report("dr-h8m")).json as any;
+    expect(j.merge_command).toBe(`git checkout main && git merge --ff-only ${head}`);
+    expect(j.tickets[0]).toMatchObject({ id: t, status: "done", merge_commit: head });
+    expect(Object.keys(j)).toEqual(expect.arrayContaining(["request_id", "origin", "features", "tickets", "criteria_edits", "factory_requests", "known_limits", "checks"]));
+  });
+
+  test("H8: a withdrawn PASS stays out of the PASS lists", async () => {
+    await mkRequest("dr-h8w");
+    const t = await mkTicket("dr-h8w");
+    const h = validatorPass(t);
+    sql((db) => void db.run("UPDATE handoffs SET status = 'cancelled', cancelled_by = from_agent WHERE id = ?", [h]));
+    setStatus(t, "done");
+    const j = (await report("dr-h8w")).json as any;
+    expect(j.known_limits.open_suggestions).toEqual([]);
   });
 });

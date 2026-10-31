@@ -20,7 +20,7 @@ Data flow: agent, then bridge, then hub `/post`, then chat log, then SSE to the 
 - `hub/core/`: shared plumbing. `agents.ts` is the agent registry. `sse.ts` has the queues. `dispatcher.ts` rejects the actor `system` in request bodies. `briefing.ts` builds briefings. `worktrees.ts` creates stage worktrees. (docs/rules/core.md, docs/rules/kinds.md, docs/rules/bridge.md)
 - `hub/kinds/`: one file for each kind. Do not add kind branches to `hub.ts`. (CLAUDE.md, docs/rules/kinds.md)
 - `hub/channel/`: the Bridge. It has the core (`core.ts`), the Claude mod (`claude-mod/`) and the Pi extension (`pi-extension.ts`). (docs/rules/core.md, docs/rules/bridge.md)
-- `src-tauri/src/`: Rust shell. `lib.rs` starts the hub. `pty.rs` builds the agent command. `launches.rs` reads the launch stream. (docs/rules/core.md, docs/rules/terminal.md, docs/rules/kinds.md)
+- `src-tauri/src/`: Rust shell. `lib.rs` starts the hub. `pty.rs` builds the agent command. The hub runs its own launch queue in `hub/core/launch-executor.ts`. (docs/rules/core.md, docs/rules/terminal.md, docs/rules/kinds.md)
 - `ui/index.html`: the webview. It has no framework. (CLAUDE.md, docs/rules/core.md)
 - `scripts/`: `install.sh`, `build-sidecars.sh`, `check-mod.sh`, `test.sh`. (CLAUDE.md)
 - `tests/`: unit tests in `tests/unit/`, integration tests in `tests/integration/`, helpers in `tests/helpers/`. (CLAUDE.md, docs/rules/terminal.md)

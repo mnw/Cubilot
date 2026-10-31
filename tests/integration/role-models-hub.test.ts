@@ -1,4 +1,4 @@
-// role_models in config.yml through a real hub: the launch request on GET /launches/stream, the stage in the ledger.
+// role_models in config.yml through a real hub: the launch request on the fake executor stream, the stage in the ledger.
 // The hub reads $CUBILOT_DATA_DIR/config.yml at each launch, so each test rewrites the file of the one hub.
 
 import { describe, test, expect, beforeAll, beforeEach, afterAll } from "bun:test";
@@ -8,8 +8,19 @@ import { dirname, join } from "node:path";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Polls `fn` every 10 ms until it returns a value; throws when `ms` pass without one. */
+const until = async <T>(what: string, fn: () => T | undefined | Promise<T | undefined>, ms = 5000): Promise<T> => {
+  const end = Date.now() + ms;
+  for (;;) {
+    const v = await fn();
+    if (v) return v;
+    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+    await sleep(10);
+  }
+};
 
 describe("role_models through the hub", () => {
   let hub: HubHandle;
@@ -23,7 +34,7 @@ describe("role_models through the hub", () => {
     const data = join(dirname(hub.ledgerPath), "data");
     mkdirSync(data, { recursive: true });
     configFile = join(data, "config.yml");
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) launches.push(e); } catch { /* closed */ } })();
     await sleep(200);
   });
@@ -52,8 +63,12 @@ describe("role_models through the hub", () => {
     const r = await postJson(hub, "/tickets", { by: `rm-alice${n}`, title: "t", acceptance_criteria: "c", blast_radius: "low", role });
     expect(r.status).toBe(201);
     const ticket = (r.json as { snapshot: { id: string } }).snapshot.id;
-    await sleep(400);
-    const stage = ((await getJson(hub, "/stages?status=all")).json as any[]).find((s) => s.ticket_id === ticket);
+    // Settled: the stage exists and either its launch request arrived or the hub failed it before any request.
+    const stage = await until("the stage to launch or fail", async () => {
+      const st = ((await getJson(hub, "/stages?status=all")).json as any[]).find((s) => s.ticket_id === ticket);
+      const got = launches.slice(seen).some((x) => x.kind === "launch" && x.stage_id === st?.id);
+      return st && (got || st.status === "failed") ? st : undefined;
+    });
     return { ticket, stage, reqs: launches.slice(seen).filter((x) => x.kind === "launch" && x.stage_id === stage?.id) };
   };
   const reasons = (stageId: string): string[] => {
@@ -62,7 +77,7 @@ describe("role_models through the hub", () => {
       return db.query<{ payload_json: string }, [string]>("SELECT payload_json FROM events WHERE entity_id = ? AND kind = 'stage.retrying'").all(stageId).map((r) => JSON.parse(r.payload_json).reason);
     } finally { db.close(); }
   };
-  const ack = (id: string, body: Record<string, unknown>) => postJson(hub, `/launches/${id}/ack`, body);
+  const ack = (id: string, body: Record<string, unknown>) => ackLaunch(hub, id, body);
 
   test("an entry sets harness, model, provider and effort", async () => {
     config("role_models:\n  worker:\n    harness: pi\n    model: m1\n    provider: p1\n    effort: high\n");
@@ -138,17 +153,17 @@ describe("role_models through the hub", () => {
     config("role_models:\n  worker:\n    model: nope\n");
     const a = await start("worker");
     expect((await ack(a.reqs[0].id, { result: "error", error: 'invalid model: "nope"' })).status).toBe(200);
-    await sleep(200);
+    await until("the retry reason", () => reasons(a.stage.id).length > 0);
     expect(reasons(a.stage.id)[0]).toBe('the launch did not start: role_models.worker: invalid model: "nope"');
 
     const b = await start("worker");
     expect((await ack(b.reqs[0].id, { result: "error", error: "tmux new-session failed" })).status).toBe(200);
-    await sleep(200);
+    await until("the retry reason", () => reasons(b.stage.id).length > 0);
     expect(reasons(b.stage.id)[0]).toBe("the launch did not start: tmux new-session failed");
 
     const c = await start("tester"); // no entry for tester
     expect((await ack(c.reqs[0].id, { result: "error", error: 'invalid model: "x"' })).status).toBe(200);
-    await sleep(200);
+    await until("the retry reason", () => reasons(c.stage.id).length > 0);
     expect(reasons(c.stage.id)[0]).toBe('the launch did not start: invalid model: "x"');
   });
 });

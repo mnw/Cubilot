@@ -34,6 +34,7 @@ The brief has eighteen parts. The numbers follow the build order (decision 2026-
 19. [19-arbiter.md](19-arbiter.md): Arbiter (moved out of Part 6, decision 2026-10-30). A stage that decides the next step after a second review FAIL. Built only if the 1-week measure of Part 18 shows enough second FAILs waiting for the human.
 20. [20-test-throughput.md](20-test-throughput.md): Test throughput (decision 2026-10-30). Low tickets run the affected tests, high tickets keep the full suite; one staging suite per batch with a bisect; no duplicate staging run; measure, then faster tests and maybe two suites at once. First after Part 6.
 21. [21-retrospective.md](21-retrospective.md): Weekly retrospective, the self-improvement loop (decision 2026-10-30). Code collects a week of evidence; one read-only stage checks earlier improvements (keep or revert) and proposes at most 3 changes with a target measure; the human approves. After Part 20.
+22. [22-machinist-ideas.md](22-machinist-ideas.md): Ideas from Machinist (backlog, decision 2026-10-31): leases for stage sessions (now, with the orphan-session ticket), an audit agent, shared workflow vs local authority, an evaluation suite. Ideas only, not code.
 
 ## How to use these files
 

@@ -11,6 +11,7 @@ export type ChatFeatureDeps = {
   agents: AgentRegistry;
   broadcastUI: (entry: Entry, scope?: Scope) => void;
   attachmentsDir: string;
+  chatLog: readonly Entry[];
 };
 
 const AGENT_PAUSE_RE = /^\/agents\/([^/]+)\/pause$/;
@@ -66,6 +67,7 @@ export function createChatFeature(deps: ChatFeatureDeps): HubFeature {
     enqueueTo,
     isPaused,
     clearPause,
+    chatLog: deps.chatLog,
   };
 
   return {
@@ -95,6 +97,7 @@ export function createChatFeature(deps: ChatFeatureDeps): HubFeature {
         method: "POST",
         path: AGENT_PAUSE_RE,
         auth: "mutating",
+        caller: "human",
         handler: async (req, cap, params) => {
           const agent = decodeURIComponent(params.id);
           const a = deps.agents.get(agent);

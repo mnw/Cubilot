@@ -1,0 +1,33 @@
+Cubilot
+Copyright (c) 2026 Michel Wakim
+
+The Business Source License 1.1 (file LICENSE) covers only the own code of
+Michel Wakim. Each third-party part keeps its own license. The license text of
+each part is in factory/licenses/. Cubilot does not change these licenses.
+
+Third-party parts
+
+1. ECC
+   License: MIT
+   File: factory/licenses/ECC-LICENSE
+
+2. Agency (agency-agents)
+   License: MIT
+   File: factory/licenses/AGENCY-AGENTS-LICENSE
+
+3. Addy Osmani agent skills
+   License: MIT
+   File: factory/licenses/ADDY-OSMANI-AGENT-SKILLS-LICENSE
+
+4. Accessibility Agents
+   License: MIT
+   File: factory/licenses/ACCESSIBILITY-AGENTS-LICENSE
+
+5. Usability skills (mastepanoski)
+   License: MIT
+   File: factory/licenses/USABILITY-SKILLS-MASTEPANOSKI-LICENSE
+
+6. SEO-AEO-GEO Ultimate suite
+   License: Apache License, Version 2.0
+   License file: factory/licenses/SEO-AEO-GEO-ULTIMATE-LICENSE
+   NOTICE file of the suite: factory/licenses/SEO-AEO-GEO-ULTIMATE-NOTICE

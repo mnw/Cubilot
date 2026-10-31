@@ -4,6 +4,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream } from "../helpers/fake-executor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -26,7 +27,7 @@ describe("to_role handoff and the launch gate", () => {
     hub = await spawnHub();
     await giveProjectHttp(hub, "r1");
     open.push(await registerAgent(hub, "alice", { room: "r1" }));
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) frames.push(e); } catch { /* closed */ } })();
     await sleep(200);
   });

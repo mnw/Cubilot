@@ -6,9 +6,10 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnHub, type HubHandle } from "../helpers/hub";
+import { spawnHub, type HubHandle, fakeExecutorEnv } from "../helpers/hub";
 import { giveProjectHttp, projectRepo } from "../helpers/repo";
 import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const ROOM = "ols";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -26,12 +27,14 @@ async function bootOn(ledgerPath: string, token: string): Promise<HubHandle> {
   mkdirSync(join(base, "att"), { recursive: true });
   const proc = Bun.spawn(["bun", "run", "hub/hub.ts"], {
     env: {
-      ...process.env, PORT: "0", CUBILOT_TOKEN: token, CUBILOT_LEDGER_DB: ledgerPath,
+      ...process.env, PORT: "0", CUBILOT_TOKEN: token, CUBILOT_LEDGER_DB: ledgerPath, ...fakeExecutorEnv(ledgerPath),
       CUBILOT_ATTACHMENTS_DIR: join(base, "att"), CUBILOT_HUMAN_NAME: "human", CUBILOT_DEFAULT_ROOM: "default",
       CUBILOT_DATA_DIR: join(base, "data"),
     },
-    stdout: "pipe", stderr: "pipe",
+    stdin: "pipe", stdout: "pipe", stderr: "pipe",
   });
+  proc.stdin.write("hum-restart-token-0123456789\n");
+  proc.stdin.end();
   const reader = proc.stdout!.getReader();
   const dec = new TextDecoder();
   let buf = "";
@@ -46,7 +49,7 @@ async function bootOn(ledgerPath: string, token: string): Promise<HubHandle> {
   }
   if (!url) { proc.kill(); throw new Error(`hub did not boot:\n${buf}`); }
   void (async () => { try { while (!(await reader.read()).done) {} } catch {} })();
-  return { url, token, ledgerPath, attachmentsDir: join(base, "att"), humanName: "human", kill: async () => { proc.kill(); await proc.exited; } } as HubHandle;
+  return { url, token, humanToken: "hum-restart-token-0123456789", pid: proc.pid, ledgerPath, attachmentsDir: join(base, "att"), humanName: "human", kill: async () => { proc.kill(); await proc.exited; } } as HubHandle;
 }
 
 describe("one live stage per ticket", () => {
@@ -57,7 +60,7 @@ describe("one live stage per ticket", () => {
   const extraHubs: HubHandle[] = [];
 
   const watch = (h: HubHandle, into: any[]) => {
-    const s = openSSE(h, "/launches/stream");
+    const s = openLaunchStream(h);
     void (async () => { try { for await (const e of s.events) into.push(e); } catch { /* closed */ } })();
     return s;
   };
@@ -96,14 +99,24 @@ describe("one live stage per ticket", () => {
   const roleHandoff = (ticket: string, role: string, extra: Record<string, unknown> = {}, h: HubHandle = hub) =>
     postJson(h, "/handoffs", { from: "ols-alice", to_role: role, task: "do it", context: { ticket_id: ticket }, ...extra });
   const touch = async (ticket: string, h: HubHandle = hub) => expect((await postJson(h, `/tickets/${ticket}/edit`, { by: h === hub ? "ols-alice" : h.humanName, title: `t${Math.random()}` })).status).toBe(200);
-  const settle = () => sleep(400);
+  /** Waits until the check holds; fails the test when it does not hold in time. */
+  const until = async <T>(what: string, f: () => Promise<T | false | undefined> | T | false | undefined, ms = 5000): Promise<T> => {
+    const end = Date.now() + ms;
+    for (;;) {
+      const v = await f();
+      if (v) return v;
+      if (Date.now() > end) throw new Error(`timed out waiting for: ${what}`);
+      await sleep(10);
+    }
+  };
+  /** A hub round trip: the hub has handled every request sent before it (the hooks run inside the request). */
+  const settle = (h: HubHandle = hub) => getJson(h, "/stages?status=all");
 
   /** Acks the launch of a stage as spawned and connects its session: the stage is running. */
   const run = async (stageId: string, h: HubHandle = hub, reqs: any[] = launches) => {
-    let req: any;
-    for (let i = 0; i < 100 && !(req = reqs.find((r) => r.stage_id === stageId)); i++) await sleep(50);
+    const req = await until(`launch of ${stageId}`, () => reqs.find((r) => r.stage_id === stageId));
     expect(req).toBeDefined();
-    expect((await postJson(h, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(h, req.id, { result: "spawned" })).status).toBe(200);
     open.push(await registerAgent(h, req.session, { room: ROOM }));
     return req.session as string;
   };
@@ -166,10 +179,9 @@ describe("one live stage per ticket", () => {
         expect((await roleHandoff(t, "tester")).status).toBe(201); // recorded while the worker stage is live
         // two launch errors fail the stage
         for (let i = 1; i <= 2; i++) {
-          let req: any;
-          for (let k = 0; k < 100 && !(req = launches.filter((r) => r.stage_id === worker.id)[i - 1]); k++) await sleep(50);
+          const req = await until(`launch ${i} of ${worker.id}`, () => launches.filter((r) => r.stage_id === worker.id)[i - 1]);
           expect(req).toBeDefined();
-          await postJson(hub, `/launches/${req.id}/ack`, { result: "error", error: "tmux failed" });
+          await ackLaunch(hub, req.id, { result: "error", error: "tmux failed" });
         }
       }
       await settle();
@@ -274,26 +286,27 @@ describe("one live stage per ticket", () => {
     const a = await mk2();
     const t = await mk2();
     expect((await roleHandoff(a, "tester", { from: "ols2-bob" }, h2)).status).toBe(201);
-    await settle();
+    await settle(h2);
     const [aStage] = await stagesOf(a, h2);
     expect(aStage.status).toBe("launching"); // holds the one tester slot
     expect((await roleHandoff(t, "tester", { from: "ols2-bob" }, h2)).status).toBe(201);
     expect((await roleHandoff(t, "worker", { from: "ols2-bob" }, h2)).status).toBe(201);
-    await settle();
+    await settle(h2);
     expect((await stagesOf(t, h2)).map((s) => [s.role, s.status])).toEqual([["tester", "queued"]]);
     expect((await put({ project_folder: null })).status).toBe(200);
     // the slot frees: the queued tester stage of t fails (no project folder); the evaluator then starts the worker stage
-    const req = l2.find((r) => r.stage_id === aStage.id);
-    expect((await postJson(h2, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+    const req = await until(`launch of ${aStage.id}`, () => l2.find((r) => r.stage_id === aStage.id));
+    expect(req).toBeDefined();
+    expect((await ackLaunch(h2, req.id, { result: "spawned" })).status).toBe(200);
     const sess = await registerAgent(h2, req.session, { room: R2 });
     await finish(aStage, req.session, h2, "ols2-bob");
-    await settle();
+    await settle(h2);
     // the passed stage holds its slot until its session close is acked; then the queued tester stage tries to launch
     expect((await postJson(h2, `/stages/${aStage.id}/turn-end`, { agent: req.session })).json).toEqual({ action: "close" });
-    for (let i = 0; i < 60 && !l2.some((r) => r.kind === "close" && r.session === req.session); i++) await sleep(50);
-    const close = l2.find((r) => r.kind === "close" && r.session === req.session);
-    expect((await postJson(h2, `/launches/${close.id}/ack`, { result: "spawned" })).status).toBe(200);
-    await settle();
+    const close = await until("close launch of the passed stage", () => l2.find((r) => r.kind === "close" && r.session === req.session));
+    expect(close).toBeDefined();
+    expect((await ackLaunch(h2, close.id, { result: "spawned" })).status).toBe(200);
+    await settle(h2);
     expect((await stagesOf(t, h2)).map((s) => [s.role, s.status])).toEqual([["tester", "failed"], ["worker", "failed"]]);
     sess.close();
     w2.close();
@@ -310,26 +323,25 @@ describe("one live stage per ticket", () => {
     const d = await mk({ status: "draft" });
     expect((await roleHandoff(d, "tester", { ttl_seconds: 1 })).status).toBe(201);
     // the sweep runs every 5 s: wait for the real expiry, then prove it
-    let status = "";
-    for (let i = 0; i < 160 && status !== "expired"; i++) {
+    const status = await until("the handoff expires", async () => {
       const all = (await getJson(hub, `/handoffs?status=expired`)).json as Array<{ status: string; context: { ticket_id: string } }>;
-      status = all.find((x) => x.context?.ticket_id === d)?.status ?? "";
-      if (status !== "expired") await sleep(100);
-    }
+      return all.find((x) => x.context?.ticket_id === d)?.status;
+    }, 8000);
     expect(status).toBe("expired");
 
     stream.close();
+    for (const c of open.splice(0)) c.close(); // an open agent stream would reconnect to the dead hub
     await hub.kill();
     const second = await bootOn(hub.ledgerPath, hub.token);
     extraHubs.push(second);
     const reqs2: any[] = [];
     const s2 = watch(second, reqs2);
-    await sleep(300);
+    await settle(second);
     await touch(t, second);
-    await settle();
+    await settle(second);
     expect(await stagesOf(t, second)).toHaveLength(1); // the old pending handoff is spent
     expect((await postJson(second, `/tickets/${d}/transition`, { by: second.humanName, to: "queued" })).status).toBe(200);
-    await settle();
+    await settle(second);
     expect((await stagesOf(d, second)).map((s) => s.role)).toEqual(["tester"]);
     s2.close();
   }, 30_000);

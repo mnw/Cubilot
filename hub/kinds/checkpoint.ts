@@ -295,7 +295,7 @@ export function createCheckpointKind(db: Database, deps: CheckpointDeps): Checkp
           // The SessionStart hook returned the file and removed it. The context percentage now is the "after" value.
           inputs.delete(cp.id);
           const pct = readContextPct(cp.agent);
-          step(cap, cp.id, { op: "done", patch: { context_pct_after: pct === null ? null : Math.round(pct) } });
+          step(cap, cp.id, { op: "done", patch: { context_pct_after: pct } });
         } else if (now - (cp.clearing_at_ms ?? cp.started_at_ms) >= clearTimeoutMs()) {
           fail(cap, cp, "no hook removal of the summary file in 2 minutes");
         }
@@ -313,7 +313,7 @@ export function createCheckpointKind(db: Database, deps: CheckpointDeps): Checkp
       if (active(agent)) throw new LedgerConflict(409, `${agent} has a checkpoint that is not finished`, active(agent));
       const pct = readContextPct(agent);
       const id = mintCheckpointId();
-      return entity.apply(id, startVerb, { id, room, agent, trigger, context_pct_before: pct === null ? null : Math.round(pct) }, actor, cap).snapshot;
+      return entity.apply(id, startVerb, { id, room, agent, trigger, context_pct_before: pct }, actor, cap).snapshot;
     },
     sweep,
   };
@@ -370,6 +370,7 @@ export function createCheckpointKind(db: Database, deps: CheckpointDeps): Checkp
       method: "POST",
       path: "/checkpoints",
       auth: "mutating",
+      caller: "human",
       handler: async (req, cap) => {
         const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
         const by = typeof b.by === "string" ? b.by.trim() : "";

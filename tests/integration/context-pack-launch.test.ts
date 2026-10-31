@@ -1,11 +1,12 @@
 // context-pack 3.5 through the real hub: while a pack command sleeps, the hub still answers.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { authedFetch, openSSE, postJson, registerAgent } from "../helpers/fetch";
 import { sh } from "../helpers/pack-fixture";
+import { openLaunchStream } from "../helpers/fake-executor";
 
 const ROOM = "cpl";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -14,6 +15,8 @@ describe("the hub answers while the pack builds", () => {
   let hub: HubHandle;
   const open: Array<{ close: () => void }> = [];
   const oldPath = process.env.PATH;
+  let started = "";
+  let release = "";
 
   beforeAll(async () => {
     // A project folder that holds graphify-out/graph.json, so graphify runs there.
@@ -26,7 +29,10 @@ describe("the hub answers while the pack builds", () => {
     sh(project, "git", "add", "-f", ".");
     sh(project, "git", "commit", "-qm", "graph");
     const bin = mkdtempSync(join(tmpdir(), "cpl-bin-"));
-    writeFileSync(join(bin, "graphify"), "#!/bin/sh\nsleep 15\necho STUB-GRAPH-TEXT\n");
+    // The stub blocks until the test creates the release file (15 s safety cap), then prints its text.
+    started = join(bin, "started");
+    release = join(bin, "release");
+    writeFileSync(join(bin, "graphify"), `#!/bin/sh\ntouch "${started}"\ni=0\nwhile [ ! -e "${release}" ] && [ $i -lt 150 ]; do sleep 0.1; i=$((i+1)); done\necho STUB-GRAPH-TEXT\n`);
     chmodSync(join(bin, "graphify"), 0o755);
     process.env.PATH = `${bin}:${oldPath}`;
     hub = await spawnHub();
@@ -43,13 +49,14 @@ describe("the hub answers while the pack builds", () => {
 
   test("GET /agents and POST /post answer within 1 s while graphify sleeps 15 s; the launch follows with the pack", async () => {
     const launches: any[] = [];
-    const stream = openSSE(hub, "/launches/stream");
+    const stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) launches.push(e); } catch { /* closed */ } })();
     await sleep(200);
     const t = await postJson(hub, "/tickets", { by: "Orchestrator", title: "pack ticket", acceptance_criteria: "c", blast_radius: "low", role: null });
     const ticket = (t.json as { snapshot: { id: string } }).snapshot.id;
     expect((await postJson(hub, "/handoffs", { from: "Orchestrator", to_role: "worker", task: "go", context: { ticket_id: ticket } })).status).toBe(201);
-    await sleep(1500); // the stage is launching; graphify is sleeping
+    for (let i = 0; i < 100 && !existsSync(started); i++) await sleep(50); // the stage is launching; graphify is blocked
+    expect(existsSync(started)).toBe(true);
     expect(launches).toHaveLength(0);
 
     for (const call of [
@@ -62,6 +69,7 @@ describe("the hub answers while the pack builds", () => {
       expect((r as Response).status ?? (r as { status: number }).status).toBe(200);
     }
     expect(launches).toHaveLength(0); // still building
+    writeFileSync(release, "");
 
     for (let i = 0; i < 300 && launches.length === 0; i++) await sleep(100);
     stream.close();

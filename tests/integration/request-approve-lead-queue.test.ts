@@ -5,9 +5,11 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fakeExecutorEnv } from "../helpers/hub";
 import type { HubHandle } from "../helpers/hub";
 import { postJson, registerAgent } from "../helpers/fetch";
 
+const HUMAN_TOKEN = "hum-lead-queue-token-0123456789";
 const TOKEN = `l1-${Math.random().toString(36).slice(2, 10)}`;
 const base = mkdtempSync(join(tmpdir(), "cubilot-l1-"));
 const ledgerPath = join(base, "ledger.db");
@@ -20,7 +22,7 @@ async function spawn(): Promise<HubHandle> {
       ...process.env,
       PORT: "0",
       CUBILOT_TOKEN: TOKEN,
-      CUBILOT_LEDGER_DB: ledgerPath,
+      CUBILOT_LEDGER_DB: ledgerPath, ...fakeExecutorEnv(ledgerPath),
       CUBILOT_ATTACHMENTS_DIR: attachmentsDir,
       CUBILOT_TRANSCRIPTS_DIR: join(base, "transcripts"),
       CUBILOT_DATA_DIR: join(base, "data"),
@@ -28,9 +30,12 @@ async function spawn(): Promise<HubHandle> {
       CUBILOT_DEFAULT_ROOM: "default",
       CUBILOT_ALLOWED_EXTENSIONS: "jpg,jpeg,png,pdf,md,txt,json",
     },
+    stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
   });
+  proc.stdin.write(`${HUMAN_TOKEN}\n`);
+  proc.stdin.end();
   const decoder = new TextDecoder();
   const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
   let buf = "";
@@ -46,7 +51,7 @@ async function spawn(): Promise<HubHandle> {
   reader.releaseLock();
   if (!url) { proc.kill(); throw new Error("hub did not announce a port"); }
   return {
-    url, token: TOKEN, ledgerPath, attachmentsDir, transcriptsDir: join(base, "transcripts"), humanName: "human",
+    url, token: TOKEN, humanToken: HUMAN_TOKEN, pid: proc.pid, ledgerPath, attachmentsDir, transcriptsDir: join(base, "transcripts"), humanName: "human",
     kill: async () => { proc.kill(); await proc.exited; },
   };
 }

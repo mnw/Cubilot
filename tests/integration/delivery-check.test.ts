@@ -110,6 +110,22 @@ describe("delivery checks", () => {
     expect(sql((db) => db.query("SELECT COUNT(*) AS n FROM delivery_checks WHERE request_id = ?").get(request_id))).toEqual({ n: 0 });
   });
 
+  test("an agent token gets 403, also when the body names the human or has no sender", async () => {
+    const { request_id, ticket } = await delivered();
+    const path = `/requests/${ROOM}/${request_id}/delivery/checks`;
+    for (const body of [{ by: hub.humanName }, {}, { by: "dc-lead" }]) {
+      const r = await authedFetch(hub, path, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${hub.token}` },
+        body: JSON.stringify({ ...body, check_id: `${ticket}#1`, mark: "problem", note: "n" }),
+      });
+      expect(r.status).toBe(403);
+    }
+    expect(ticketRow(ticket).status).toBe("done");
+    expect(sql((db) => db.query("SELECT COUNT(*) AS n FROM delivery_checks WHERE request_id = ?").get(request_id))).toEqual({ n: 0 });
+    expect((await mark(request_id, { check_id: `${ticket}#1`, mark: "works" })).status).toBe(200);
+  });
+
   test("a problem mark with an empty note gets 400, a bad mark, check or file gets 400, an unknown check gets 404", async () => {
     const { request_id, ticket } = await delivered();
     expect((await mark(request_id, { check_id: `${ticket}#1`, mark: "problem", note: "" })).status).toBe(400);

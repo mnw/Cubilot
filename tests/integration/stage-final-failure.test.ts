@@ -4,6 +4,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -25,14 +26,14 @@ describe("a stage that fails twice", () => {
     const t = await postJson(hub, "/tickets", { by: "Orchestrator", title: "T", acceptance_criteria: "c", blast_radius: "low", role: "tester" });
     expect(t.status).toBe(201);
     const ticket = (t.json as { snapshot: { id: string } }).snapshot.id;
-    const sse = openSSE(hub, "/launches/stream");
+    const sse = openLaunchStream(hub);
     let acked = 0;
     void (async () => {
       try {
         for await (const req of sse.events) {
           if (req.kind !== "launch") continue;
           acked++;
-          await postJson(hub, `/launches/${req.id}/ack`, { result: "error", error: "tmux failed" });
+          await ackLaunch(hub, req.id, { result: "error", error: "tmux failed" });
         }
       } catch { /* closed */ }
     })();

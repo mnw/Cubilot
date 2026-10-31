@@ -27,13 +27,20 @@ import { createDispatcher } from "./core/dispatcher";
 import { createFanout } from "./core/fanout";
 import { createBriefingDispatcher } from "./core/briefing-dispatcher";
 import { createCapBuilder } from "./core/capabilities";
+import { readHumanToken } from "./core/human-token";
 import { createFactoryFeature } from "./features/factory";
 import { createUsageFeature } from "./features/usage";
+import { createConfigFeature } from "./features/config";
 import { createSessionsFeature } from "./features/sessions";
 import { createAttachmentsFeature } from "./features/attachments";
 import { createRosterFeature } from "./features/roster";
+import { createSearchFeature } from "./features/search";
+import { createSettingsFeature } from "./features/settings";
 import { createTranscriptFeature } from "./features/transcript";
 import { createChatFeature } from "./features/chat";
+import { createTerminalFeature, createTerminalSocket, defaultCapturesRoot } from "./features/terminal";
+import { createTmux, tmuxFromEnv } from "./core/tmux";
+import { runFactoryCleanup } from "./core/factory-cleanup";
 import { createStreamHandlers } from "./features/streams";
 import {
   openLedger as openLedgerCore,
@@ -89,6 +96,14 @@ process.umask(0o077);
 
 const PORT = Number(process.env.PORT ?? 8011);
 const AUTH_TOKEN = (process.env.CUBILOT_TOKEN ?? "").trim();
+const HUMAN_TOKEN = await (async () => {
+  const t = await readHumanToken(Bun.stdin.stream());
+  if (t && t === AUTH_TOKEN) {
+    console.error("[hub] the human token equals the agent token — ignored, no caller is the human");
+    return "";
+  }
+  return t;
+})();
 const ATTACHMENTS_DIR = (process.env.CUBILOT_ATTACHMENTS_DIR ?? "").trim();
 const LEDGER_DB = (process.env.CUBILOT_LEDGER_DB ?? "").trim();
 const HUMAN_NAME = (process.env.CUBILOT_HUMAN_NAME ?? "human").trim();
@@ -261,7 +276,7 @@ const briefingDispatcher = createBriefingDispatcher({
   agents, buildBriefing, briefingSignature: computeBriefingSignature,
 });
 
-const { requireAuth, requireReadAuth, requireJsonBody } = makeAuthHelpers(AUTH_TOKEN);
+const { requireAuth, requireReadAuth, requireJsonBody } = makeAuthHelpers(AUTH_TOKEN, HUMAN_TOKEN);
 
 function ledgerGuard(): Response | null {
   return ledgerEnabled ? null : json({ error: "ledger disabled" }, { status: 503 });
@@ -286,21 +301,32 @@ if (ledgerDb) {
   for (const k of KINDS) k.start?.(buildCap());
 }
 
+const terminalTmux = (() => { try { return createTmux(tmuxFromEnv()); } catch { return null; } })();
+try { for (const line of runFactoryCleanup()) console.error(line); } catch (e) { console.error(`[factory] cleanup failed: ${(e as Error).message}`); }
+const terminalSocket = createTerminalSocket({ tmux: terminalTmux, agents, requireReadAuth });
+
 const FEATURES: readonly HubFeature[] = [
   ...KINDS,
   createUsageFeature(),
+  createConfigFeature(),
   createFactoryFeature({
     dir: (process.env.CUBILOT_FACTORY_DIR ?? "").trim(),
     version: (process.env.CUBILOT_FACTORY_VERSION ?? "").trim(),
     online: (name) => (agents.presenceSnapshot().agents as Record<string, boolean> | undefined)?.[name] === true,
   }),
-  ...(ledgerDb ? [createSessionsFeature(ledgerDb)] : []),
+  createSessionsFeature({ tmux: terminalTmux }),
   createAttachmentsFeature({
     attachmentsDir: ATTACHMENTS_DIR,
     allowedExtensions: ALLOWED_EXTENSIONS,
     imageMaxBytes: IMAGE_MAX_BYTES,
   }),
-  createRosterFeature({ agents, removeAgent, defaultRoom: DEFAULT_ROOM, readNutshell }),
+  createRosterFeature({ agents, removeAgent, readNutshell }),
+  createSettingsFeature({ agents, defaultRoom: DEFAULT_ROOM }),
+  createTerminalFeature({
+    tmux: terminalTmux,
+    capturesRoot: defaultCapturesRoot(),
+  }),
+  createSearchFeature({ db: ledgerDb, agents, humanName: HUMAN_NAME }),
   ...(ledgerDb
     ? [createTranscriptFeature({ db: ledgerDb, chatLog, roomSummariser, onRoleLimitsChanged: (room, cap) => { for (const k of KINDS) k.onRoomLimitsChanged?.(room, cap); } })]
     : []),
@@ -308,6 +334,7 @@ const FEATURES: readonly HubFeature[] = [
     agents,
     broadcastUI: (entry, scope) => fanout.send(entry, scope ?? { kind: "ui-only" }),
     attachmentsDir: ATTACHMENTS_DIR,
+    chatLog,
   }),
 ];
 
@@ -316,6 +343,7 @@ const { dispatch } = createDispatcher({
   auth: { requireAuth, requireReadAuth, requireJsonBody },
   ledgerGuard,
   buildCap,
+  humanName: HUMAN_NAME,
 });
 
 const { handleStream, handleAgentStream } = createStreamHandlers({
@@ -343,7 +371,8 @@ const server = Bun.serve({
   hostname: "127.0.0.1",
   port: PORT,
   idleTimeout: 0,
-  async fetch(req) {
+  websocket: terminalSocket.websocket,
+  async fetch(req, srv) {
     const url = new URL(req.url);
     const { pathname } = url;
 
@@ -354,16 +383,25 @@ const server = Bun.serve({
     try {
       // SSE long-lived routes are wired directly (own per-connection state).
       if (req.method === "GET" && pathname === "/stream") {
-        const authFail = requireReadAuth(req, url);
-        return authFail ?? handleStream(req);
+        const who = requireReadAuth(req, url);
+        if (who instanceof Response) return who;
+        // The UI stream is for the human: an agent token never opens it.
+        if (who !== "human") return json({ error: "only the human may open the UI stream" }, { status: 403 });
+        return handleStream(req);
       }
       if (req.method === "GET" && pathname === "/agent-stream") {
-        const authFail = requireReadAuth(req, url);
-        if (authFail) return authFail;
+        const who = requireReadAuth(req, url);
+        if (who instanceof Response) return who;
+        // A human caller never gets the agent tools.
+        if (who === "human") return json({ error: "the agent stream is for agents" }, { status: 403 });
         const agent = url.searchParams.get("agent") ?? "";
         const room = url.searchParams.get("room");
         return handleAgentStream(agent, room);
       }
+
+      const ws = await terminalSocket.upgrade(req, url, srv as never);
+      if (ws === "upgraded") return undefined;
+      if (ws) return ws;
 
       const featResp = await dispatch(req, url);
       if (featResp) return featResp;

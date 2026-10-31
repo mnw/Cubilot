@@ -29,7 +29,7 @@
   border: var(--border-1) solid var(--line);
   border-radius: var(--radius-lg);
   padding: var(--sp-11) var(--sp-12);
-  font-size: var(--fs-lg);
+  font-size: var(--fs-sm);
   display: grid;
   grid-template-columns: 1fr auto;
   gap: var(--sp-6) var(--sp-12);
@@ -53,7 +53,7 @@
 .handoff-header .status-badge,
 .interrupt-header .status-badge,
 .permission-header .status-badge {
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-sm);
   padding: var(--sp-2) var(--sp-7);
   border-radius: var(--radius-sm);
   letter-spacing: 0.06em;
@@ -64,7 +64,7 @@
 .permission-meta {
   color: var(--text-dim);
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
 }
 
 .handoff-actions,
@@ -80,7 +80,7 @@
 .interrupt-replay-badge,
 .permission-replay-badge {
   font-family: var(--mono);
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-sm);
   color: var(--text-dim);
   margin-left: var(--sp-4);
   font-weight: 400;
@@ -105,7 +105,7 @@
 .handoff-header {
   font-weight: 500;
   color: var(--text-muted);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
 }
 .handoff-header .route { color: var(--orange); font-weight: 600; }
 .handoff-header .status-badge {
@@ -118,8 +118,8 @@
 [data-kind="handoff"].status-cancelled .status-badge { background: color-mix(in oklab, var(--orange) 12%, transparent);  color: var(--orange); }
 [data-kind="handoff"].status-expired   .status-badge { background: color-mix(in oklab, var(--text-dim) 18%, transparent);   color: var(--text-dim); }
 
-.handoff-task   { color: var(--text); font-weight: 500; font-size: var(--fs-lg); line-height: var(--lh-base); }
-.handoff-reason { color: var(--text-muted); font-size: var(--fs-base); font-style: italic; }
+.handoff-task   { color: var(--text); font-weight: 500; font-size: var(--fs-sm); line-height: var(--lh-base); }
+.handoff-reason { color: var(--text-muted); font-size: var(--fs-sm); font-style: italic; }
 .handoff-meta   { letter-spacing: 0.02em; }
 
 .handoff-context details {
@@ -167,7 +167,7 @@
 
 .handoff-countdown {
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   color: var(--text-dim);
 }
 .handoff-replay-badge { letter-spacing: 0.02em; }
@@ -195,7 +195,7 @@
   color: var(--red);
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-sm);
 }
 [data-kind="interrupt"].status-acknowledged .interrupt-header { color: var(--text-dim); }
 .interrupt-header .status-badge {
@@ -275,7 +275,7 @@
   color: var(--red);
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-sm);
 }
 [data-kind="permission"].status-allowed .permission-header,
 [data-kind="permission"].status-denied  .permission-header { color: var(--text-dim); }
@@ -305,7 +305,7 @@
   line-height: var(--size-18);
   padding: 0;
   border-radius: var(--radius-md);
-  font-size: var(--fs-4xl);
+  font-size: var(--fs-md);
   cursor: pointer;
   margin-left: var(--sp-4);
   transition: background var(--motion-fast), color var(--motion-fast);
@@ -360,7 +360,7 @@
   cursor: pointer;
   transition: background var(--motion-fast);
 }
-.permission-actions button.allow { background: var(--orange, #d97757); }
+.permission-actions button.allow { background: var(--orange); }
 .permission-actions button.allow:hover { background: var(--orange-hover); }
 .permission-actions button.deny { background: var(--red); }
 .permission-actions button.deny:hover { background: var(--red-hover); }
@@ -397,13 +397,13 @@ body.board-open.no-terminal .chat-col { flex: 0 1 calc((100% - var(--size-300)) 
    so the filter row and the sticky column headers (below) are both always visible. */
 body.board-open .board-col {
   display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0;
-  overflow: visible; padding: var(--sp-4, 8px); gap: var(--sp-4, 8px);   /* visible: the Filters panel hangs over the columns */
+  overflow: visible; padding: var(--sp-4); gap: var(--sp-4);   /* visible: the Filters panel hangs over the columns */
 }
 /* Columns stretch to the tallest one, so every column header stays stuck while the cards scroll. */
 .ticket-board-columns {
   /* One row, never wrapped: a wrapped row would scroll its sticky headers away. A narrow pane scrolls sideways.
      A column with tickets takes the free width; an empty one is a 40 px strip. */
-  display: flex; gap: var(--sp-4, 8px); align-items: stretch;
+  display: flex; gap: var(--sp-4); align-items: stretch;
   flex: 1 1 auto; min-height: 0; overflow: auto; align-content: start;
 }
 .ticket-col { flex: 1 1 210px; min-width: 200px; }
@@ -418,51 +418,51 @@ body.board-open .board-col {
 .ticket-col.collapsed .ticket-add { width: 26px; }
 .ticket-col h3 .ticket-add { width: 26px; margin-left: auto; padding: 0; line-height: 1.4; }
 .ticket-col h3 {
-  font-size: 0.85em; margin: 0 0 4px; color: var(--text-muted);
-  position: sticky; top: 0; z-index: 1; background: var(--bg); padding: 4px 0;
+  font-size: var(--fs-sm); margin: 0 0 var(--sp-4); color: var(--text-muted);
+  position: sticky; top: 0; z-index: 1; background: var(--bg); padding: var(--sp-4) 0;
 }
 .ticket-col .count { opacity: 0.7; }
-.ticket-card { border: 1px solid var(--border, #444); border-radius: 6px; padding: 6px; margin-bottom: 6px; font-size: 0.85em; }
+.ticket-card { border: 1px solid var(--line-hover); border-radius: var(--radius-lg); padding: var(--sp-6); margin-bottom: var(--sp-6); font-size: var(--fs-sm); }
 .ticket-card { cursor: pointer; }
-.ticket-card:focus-visible { outline: 2px solid var(--accent, #6aa9ff); outline-offset: 1px; }
-.ticket-view-fields { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0 0 8px; font-size: 0.9em; }
+.ticket-card:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+.ticket-view-fields { display: grid; grid-template-columns: max-content 1fr; gap: var(--sp-2) var(--sp-12); margin: 0 0 var(--sp-8); font-size: var(--fs-sm); }
 .ticket-view-fields dt { color: var(--text-muted); }
 .ticket-view-fields dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.ticket-view-h { font-size: 0.9em; margin: 8px 0 4px; color: var(--text-muted); }
-.ticket-view-criteria { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.9em; }
-#ticket-view-actions { margin-top: 8px; }
-.ticket-notes { margin-top: 4px; font-size: 0.9em; }
+.ticket-view-h { font-size: var(--fs-sm); margin: var(--sp-8) 0 var(--sp-4); color: var(--text-muted); }
+.ticket-view-criteria { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-sm); }
+#ticket-view-actions { margin-top: var(--sp-8); }
+.ticket-notes { margin-top: var(--sp-4); font-size: var(--fs-sm); }
 .ticket-notes summary { cursor: pointer; color: var(--text-muted); }
-.ticket-notes-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ticket-notes-list { list-style: none; margin: var(--sp-4) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-6); }
 .ticket-note-author { font-weight: 600; }
-.ticket-notes-list time { color: var(--text-muted); font-size: 0.9em; }
+.ticket-notes-list time { color: var(--text-muted); font-size: var(--fs-sm); }
 .ticket-note-text { white-space: pre-wrap; overflow-wrap: anywhere; }
-.ticket-notes-empty { color: var(--text-muted); font-size: 0.9em; }
+.ticket-notes-empty { color: var(--text-muted); font-size: var(--fs-sm); }
 .ticket-card.archived { opacity: 0.6; border-style: dashed; }
 .ticket-title { font-weight: 600; }
-.ticket-meta { color: var(--text-muted); font-size: 0.9em; }
-.ticket-assignee-row { display: flex; flex-direction: column; gap: 4px; }
+.ticket-meta { color: var(--text-muted); font-size: var(--fs-sm); }
+.ticket-assignee-row { display: flex; flex-direction: column; gap: var(--sp-4); }
 /* Move to and Assignee: two equal columns, label on top of its select; two rows only when the card is narrow. */
-.ticket-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 4px 8px; margin-top: 4px; }
-.ticket-move-label, .ticket-assign-label { display: flex; flex-direction: column; align-items: stretch; gap: 2px; color: var(--text-muted); font-size: 0.9em; min-width: 0; }
-#ticket-view .ticket-move-label, #ticket-view .ticket-assign-label { color: var(--text); font-size: var(--fs-base); gap: var(--sp-4); }
-.ticket-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.ticket-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: var(--sp-4) var(--sp-8); margin-top: var(--sp-4); }
+.ticket-move-label, .ticket-assign-label { display: flex; flex-direction: column; align-items: stretch; gap: var(--sp-2); color: var(--text-muted); font-size: var(--fs-sm); min-width: 0; }
+#ticket-view .ticket-move-label, #ticket-view .ticket-assign-label { color: var(--text); font-size: var(--fs-sm); gap: var(--sp-4); }
+.ticket-actions { display: flex; flex-wrap: wrap; gap: var(--sp-4); margin-top: var(--sp-4); }
 /* Status light: three macOS window-button dots, the active one lit, the others dim grey. Card: bottom right of the
    actions row. Full view: top right of the dialog. */
-.ticket-light { display: inline-flex; gap: 4px; margin-left: auto; align-self: center; }
-.ticket-light i { width: 8px; height: 8px; border-radius: 50%; background: #8a8a8e; opacity: 0.35; }
+.ticket-light { display: inline-flex; gap: var(--sp-4); margin-left: auto; align-self: center; }
+.ticket-light i { width: 8px; height: 8px; border-radius: 50%; background: var(--light-off); opacity: 0.35; }
 .ticket-light i.on { opacity: 1; }
-.ticket-light i.light-red { background: #ff5f57; }
-.ticket-light i.light-orange { background: #febc2e; }
-.ticket-light i.light-green { background: #28c840; }
+.ticket-light i.light-red { background: var(--light-red); }
+.ticket-light i.light-orange { background: var(--light-amber); }
+.ticket-light i.light-green { background: var(--light-green); }
 #ticket-view .modal { position: relative; }
 .ticket-view-light { position: absolute; top: 14px; right: 16px; }
 .ticket-board-empty { color: var(--text-muted); }
 .ticket-move-status { flex: none; color: var(--text-muted); }
 .ticket-move-status:empty { display: none; }
 .ticket-add {
-  width: 100%; background: none; border: 1px dashed var(--border, #444); border-radius: 6px;
-  color: var(--text-muted); padding: 4px; cursor: pointer; font-size: 0.85em;
+  width: 100%; background: none; border: 1px dashed var(--line-hover); border-radius: var(--radius-lg);
+  color: var(--text-muted); padding: var(--sp-4); cursor: pointer; font-size: var(--fs-sm);
 }
 .ticket-add:hover, .ticket-add:focus-visible { color: var(--text); border-style: solid; }
 /* Native <dialog> + showModal(): dialog role, inert page behind it (Tab stays inside), Escape = cancel.
@@ -475,10 +475,10 @@ body.board-open .board-col {
 .ticket-dialog[open] { display: flex; align-items: center; justify-content: center; }
 .ticket-dialog .modal { width: min(var(--size-560), calc(100% - 32px)); max-height: calc(100% - 32px); overflow: auto; }
 .ticket-dialog::backdrop { background: var(--scrim); }
-.ticket-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-10, 10px); }
-.ticket-form-row > div { display: flex; flex-direction: column; gap: 4px; }
+.ticket-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-10); }
+.ticket-form-row > div { display: flex; flex-direction: column; gap: var(--sp-4); }
 /* Every ticket select shares the modal field look (.modal input in modals.css): inset background, --line
-   border that lifts to --line-hover on hover and focus, mono at --fs-base, --sp-8/--sp-12 padding. The
+   border that lifts to --line-hover on hover and focus, mono at --fs-sm, --sp-8/--sp-12 padding. The
    native arrow is replaced by one drawn with the same tokens, so all selects match. */
 #ticket-modal select,
 #ticket-view select,
@@ -497,8 +497,8 @@ body.board-open .board-col {
   border: var(--border-1) solid var(--line);
   border-radius: var(--radius-md);
   color: var(--text);
-  font-family: var(--mono); font-size: var(--fs-base); line-height: normal;
-  padding: var(--sp-8) calc(var(--sp-12) + 14px) var(--sp-8) var(--sp-12);
+  font-family: var(--mono); font-size: var(--fs-sm); line-height: normal;
+  padding: var(--sp-8) calc(var(--sp-12) + var(--sp-14)) var(--sp-8) var(--sp-12);
   outline: none; cursor: pointer;
   transition: border-color var(--motion-fast);
 }
@@ -516,7 +516,7 @@ body.board-open .board-col {
 .ticket-card .ticket-assign, .ticket-card .ticket-move {
   width: auto; min-width: 0;
   font-size: var(--fs-sm);
-  padding: var(--sp-4) calc(var(--sp-8) + 14px) var(--sp-4) var(--sp-8);
+  padding: var(--sp-4) calc(var(--sp-8) + var(--sp-14)) var(--sp-4) var(--sp-8);
   background-position: calc(100% - 13px) 50%, calc(100% - 8px) 50%;
 }
 .ticket-card .ticket-assign, #ticket-view .ticket-assign,
@@ -531,7 +531,7 @@ body.board-open .board-col {
 .roster-lead {
   margin-left: auto;
   display: inline-flex; align-items: center; gap: var(--sp-6);
-  font-family: var(--mono); font-size: var(--fs-2xs); letter-spacing: 0.12em; text-transform: uppercase;
+  font-family: var(--mono); font-size: var(--fs-sm); letter-spacing: 0.12em; text-transform: uppercase;
   color: var(--text-dim);
 }
 .roster-lead[hidden] { display: none; }
@@ -554,11 +554,11 @@ body.board-open .board-col {
   padding: var(--sp-12);
   background: var(--bg-elev); border: var(--border-1) solid var(--line); border-radius: var(--radius-lg);
   box-shadow: var(--shadow-popover);
-  font-family: var(--mono); font-size: var(--fs-base); color: var(--text);
+  font-family: var(--mono); font-size: var(--fs-sm); color: var(--text);
 }
 .ticket-filter-panel[hidden] { display: none; }
 .ff-section { display: flex; flex-direction: column; gap: var(--sp-6); }
-.ff-label { font-size: var(--fs-2xs); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-dim); }
+.ff-label { font-size: var(--fs-sm); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-dim); }
 .ff-check { display: flex; align-items: center; gap: var(--sp-8); cursor: pointer; }
 .ff-check input { accent-color: var(--orange); cursor: pointer; margin: 0; }
 .ff-seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-6); }
@@ -577,24 +577,24 @@ body.board-open .board-col {
 }
 .ff-seg input:focus-visible + span { outline: 2px solid var(--orange); outline-offset: 1px; }
 .ff-footer { display: flex; justify-content: space-between; align-items: center; padding-top: var(--sp-8); border-top: var(--border-1) solid var(--line); }
-.ff-reset { background: none; border: none; padding: var(--sp-4) 0; color: var(--orange); cursor: pointer; font-family: var(--mono); font-size: var(--fs-base); }
+.ff-reset { background: none; border: none; padding: var(--sp-4) 0; color: var(--orange); cursor: pointer; font-family: var(--mono); font-size: var(--fs-sm); }
 .ff-reset:hover { color: var(--orange-hover); }
-.ff-done { background: var(--orange); color: var(--bg-inset); border: none; font-weight: 600; padding: var(--sp-6) var(--sp-14, 14px); border-radius: var(--radius-md); }
+.ff-done { background: var(--orange); color: var(--bg-inset); border: none; font-weight: 600; padding: var(--sp-6) var(--sp-14); border-radius: var(--radius-md); }
 .ff-done:hover { background: var(--orange-hover); color: var(--bg-inset); }
 /* "Archive all done" lives in the Done column header, small and right-aligned. */
 .ticket-col h3 { display: flex; align-items: center; gap: var(--sp-6); }
-.ticket-archive-all { margin-left: auto; font-size: var(--fs-sm); padding: var(--sp-2, 2px) var(--sp-8); font-weight: 400; }
+.ticket-archive-all { margin-left: auto; font-size: var(--fs-sm); padding: var(--sp-2) var(--sp-8); font-weight: 400; }
 
 /* ---- Attachments: the Attach controls and the list in the ticket view ---- */
 .ticket-view-attach { display: flex; align-items: center; gap: var(--sp-8); margin-top: var(--sp-8); }
 #ticket-view-attach-status { font-size: var(--fs-sm); color: var(--text-muted); }
-.ticket-attach-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ticket-attach-list { list-style: none; margin: var(--sp-4) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-6); }
 .ticket-attach-list li { display: flex; align-items: center; gap: var(--sp-8); }
 .ticket-attach-thumb { display: block; width: 48px; height: 48px; object-fit: cover; border-radius: var(--radius-md); border: var(--border-1) solid var(--line); background: var(--bg-inset); }
 .ticket-attach-ext {
   display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; flex: none;
   border-radius: var(--radius-md); border: var(--border-1) solid var(--line); background: var(--bg-inset);
-  font-size: var(--fs-2xs); letter-spacing: 0.08em; color: var(--text-muted);
+  font-size: var(--fs-sm); letter-spacing: 0.08em; color: var(--text-muted);
 }
 .ticket-attach-info { display: flex; flex-direction: column; min-width: 0; }
 .ticket-attach-name { overflow-wrap: anywhere; color: var(--orange); text-decoration: none; }
@@ -607,7 +607,7 @@ body.board-open .board-col {
 .ticket-f-file-list:empty { display: none; }
 .ticket-f-file-list li { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); font-size: var(--fs-sm); }
 .ticket-f-file-name { overflow-wrap: anywhere; }
-.ticket-f-file-remove { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0 var(--sp-4); font-size: var(--fs-base); }
+.ticket-f-file-remove { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0 var(--sp-4); font-size: var(--fs-sm); }
 .ticket-f-file-remove:hover { color: var(--red); }
 
 /* ---- Acceptance criteria: the toolbar above the field, and the rendered Markdown ---- */
@@ -620,12 +620,12 @@ body.board-open .board-col {
 .md-toolbar code { font-size: inherit; }
 .md p { margin: 0 0 var(--sp-6); }
 .md p:last-child, .md ul:last-child { margin-bottom: 0; }
-.md ul { margin: 0 0 var(--sp-6); padding-left: var(--sp-16, 16px); }
+.md ul { margin: 0 0 var(--sp-6); padding-left: var(--sp-16); }
 .md .md-checklist { list-style: none; padding-left: 0; }
 /* A checklist item: a 15 px box, filled --green with a check when done, an outline when not. */
 .md .md-checklist input {
   appearance: none; -webkit-appearance: none; position: relative; box-sizing: border-box; width: 15px; height: 15px;
-  margin: 0 var(--sp-4) 0 0; vertical-align: middle; border: 1.5px solid var(--text-muted); border-radius: 3px; background: transparent;
+  margin: 0 var(--sp-4) 0 0; vertical-align: middle; border: 1.5px solid var(--text-muted); border-radius: var(--radius-sm); background: transparent;
 }
 .md .md-checklist input:checked { background: var(--green); border-color: var(--green); }
 .md .md-checklist input:checked::after {
@@ -635,25 +635,25 @@ body.board-open .board-col {
 /* Write / Preview tabs above the criteria editor. */
 .ticket-tabs { display: flex; gap: var(--sp-4); border-bottom: var(--border-1) solid var(--line); }
 .ticket-tabs [role="tab"] {
-  padding: var(--sp-4) var(--sp-8); background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  padding: var(--sp-4) var(--sp-8); background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: calc(-1 * var(--sp-1));
   color: var(--text-muted); font-size: var(--fs-sm); cursor: pointer;
 }
 .ticket-tabs [role="tab"][aria-selected="true"] { color: var(--text); border-bottom-color: var(--orange); }
 .ticket-tabs [role="tab"]:focus-visible { outline: 2px solid var(--orange); outline-offset: -2px; }
-.md code { font-family: var(--mono); font-size: 0.95em; padding: 0 var(--sp-4); background: var(--bg-inset); border-radius: var(--radius-md); }
+.md code { font-family: var(--mono); font-size: var(--fs-sm); padding: 0 var(--sp-4); background: var(--bg-inset); border-radius: var(--radius-md); }
 .ticket-view-criteria.md { white-space: normal; }
-.ticket-agent-notes { margin-top: 10px; font-size: 0.9em; }
+.ticket-agent-notes { margin-top: var(--sp-10); font-size: var(--fs-sm); }
 .ticket-agent-notes summary { cursor: pointer; color: var(--text); }
-.ticket-agent-notes-text { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 4px; color: var(--text); }
+.ticket-agent-notes-text { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: var(--sp-4); color: var(--text); }
 
 /* Request label and blockers (ticket-grouping 6.2, 6.3, 6.5). Part 14 restyles these.
    Text uses --text, not --text-muted: measured, --text-muted is below 4.5:1 on the dawn theme (4.0 on --bg)
    and on the moon theme's raised and inset surfaces (4.4-4.5). --text is 6.3:1 or more in all three themes. */
 .ticket-lock { margin-left: var(--sp-6); color: var(--text); white-space: nowrap; }
-.ticket-view-blockers { margin: 0 0 8px; padding-left: 1.2em; font-size: 0.9em; color: var(--text); }
-.ticket-request-form { display: flex; flex-direction: column; gap: var(--sp-6); margin: 8px 0; }
-.ticket-request-form label { display: flex; flex-direction: column; gap: 2px; color: var(--text); font-size: 0.9em; }
-.ticket-request-form input, .ticket-request-form textarea, .ticket-request-form select { background: var(--bg-inset); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 4px 6px; }
+.ticket-view-blockers { margin: 0 0 var(--sp-8); padding-left: var(--sp-14); font-size: var(--fs-sm); color: var(--text); }
+.ticket-request-form { display: flex; flex-direction: column; gap: var(--sp-6); margin: var(--sp-8) 0; }
+.ticket-request-form label { display: flex; flex-direction: column; gap: var(--sp-2); color: var(--text); font-size: var(--fs-sm); }
+.ticket-request-form input, .ticket-request-form textarea, .ticket-request-form select { background: var(--bg-inset); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-md); padding: var(--sp-4) var(--sp-6); }
 /* The dialog's bottom row: Cancel ticket / Archive, Attach file, Close, Save. Save is the primary button when the
    ticket is editable; otherwise Close is (the look of .modal-actions in modals.css). */
 /* The error line and the action row stay at the bottom of the dialog while the content scrolls: Save never scrolls out of view. */
@@ -664,11 +664,11 @@ body.board-open .board-col {
    so the label stays --text and the danger is the outline and the changed label ("Confirm cancel"), not colour alone. */
 .ticket-cancel-btn { margin-right: auto; border: 1px solid var(--red); color: var(--text); }
 .ticket-cancel-btn.armed { border-width: 2px; font-weight: 700; }
-#ticket-view-notice { margin-top: var(--sp-8); color: var(--text); font-size: 0.9em; }
+#ticket-view-notice { margin-top: var(--sp-8); color: var(--text); font-size: var(--fs-sm); }
 #ticket-view-notice:empty { display: none; }
 /* A refused Save. No red token reaches 4.5:1 as text on all three themes (dark 4.43 and dawn 4.04 on --bg-raised), so the text is --text
    and the red is the border: the field's border, and the left bar of a message with no field. */
-.ticket-field-error, .ticket-view-notice-error { color: var(--text); font-size: 0.9em; }
+.ticket-field-error, .ticket-view-notice-error { color: var(--text); font-size: var(--fs-sm); }
 .ticket-field-error { margin-top: calc(var(--sp-6) * -0.5); border-left: 3px solid var(--red); padding-left: var(--sp-8); }   /* the red cue does not rest on the field border alone */
 .ticket-view-notice-error { display: inline-block; border-left: 3px solid var(--red); padding-left: var(--sp-8); }
 /* ".modal input:focus" and ":hover" (modals.css) outrank a plain attribute rule, and "#ticket-view select:focus" (kinds.css) too: the invalid border also wins on focus and hover. */
@@ -708,22 +708,22 @@ label[for="ticket-filter-request"] { color: var(--text); }
 
 /* ---- 15.3: the card ---- */
 .ticket-card { display: flex; flex-direction: column; gap: var(--sp-6); padding: var(--sp-10); background: var(--bg-raised); }
-.ticket-card-top { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-6); font-family: var(--mono); font-size: var(--fs-xs); min-width: 0; }
-.ticket-tag { text-transform: uppercase; letter-spacing: 0.04em; padding: 1px var(--sp-6); border-radius: var(--radius-sm, 4px); background: var(--bg-inset); color: var(--text); }
+.ticket-card-top { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-6); font-family: var(--mono); font-size: var(--fs-sm); min-width: 0; }
+.ticket-tag { text-transform: uppercase; letter-spacing: 0.04em; padding: var(--sp-1) var(--sp-6); border-radius: var(--radius-sm); background: var(--bg-inset); color: var(--text); }
 .ticket-tag.tag-code { background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--text); }
 .ticket-code { color: var(--text-meta); }
 .ticket-card-top .ticket-id { font-family: var(--mono); color: var(--text-meta); white-space: nowrap; }
 .ticket-card-top .ticket-id { flex: none; }
 .ticket-card-top .ticket-tag, .ticket-card-top .ticket-prio { flex-shrink: 0; }
 .ticket-prio { margin-left: auto; display: inline-flex; align-items: center; gap: var(--sp-4); color: var(--text); white-space: nowrap; }
-.ticket-bars { display: inline-flex; align-items: flex-end; gap: 1px; height: 10px; }
+.ticket-bars { display: inline-flex; align-items: flex-end; gap: var(--sp-1); height: 10px; }
 .ticket-bars i { width: 2px; background: var(--text-meta); opacity: 0.45; }
 .ticket-bars i:nth-child(1) { height: 3px; } .ticket-bars i:nth-child(2) { height: 5px; } .ticket-bars i:nth-child(3) { height: 7px; } .ticket-bars i:nth-child(4) { height: 10px; }
 .ticket-bars i.on { background: var(--orange); opacity: 1; }
-.ticket-title { font-size: var(--fs-xl); font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.ticket-title { font-size: var(--fs-base); font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
 .ticket-sub { color: var(--text-muted); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .ticket-chips { display: flex; flex-wrap: wrap; gap: var(--sp-4); }
-.ticket-chip { display: inline-flex; align-items: center; gap: var(--sp-4); max-width: 100%; min-width: 0; font-family: var(--mono); font-size: var(--fs-xs); padding: 1px var(--sp-6); border-radius: var(--radius-sm, 4px); background: var(--bg-inset); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ticket-chip { display: inline-flex; align-items: center; gap: var(--sp-4); max-width: 100%; min-width: 0; font-family: var(--mono); font-size: var(--fs-sm); padding: var(--sp-1) var(--sp-6); border-radius: var(--radius-sm); background: var(--bg-inset); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ticket-chip.ticket-radius { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--text); }
 .ticket-status-line { display: flex; align-items: center; gap: var(--sp-4); font-size: var(--fs-sm); color: var(--text); }
 .ticket-status-line.is-blocked .ticket-icon { color: var(--amber); }
@@ -732,9 +732,9 @@ label[for="ticket-filter-request"] { color: var(--text); }
 .ticket-who { display: inline-flex; align-items: center; gap: var(--sp-6); font-family: var(--mono); font-size: var(--fs-sm); min-width: 0; color: var(--text); }
 .ticket-who-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ticket-unassigned { font-style: italic; color: var(--text-muted); }
-.ticket-avatar { width: 18px; height: 18px; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: color-mix(in srgb, var(--amber) 22%, transparent); color: var(--text); font-size: var(--fs-xs); font-weight: 600; }
-.ticket-counts { display: inline-flex; gap: var(--sp-6); margin-left: auto; font-family: var(--mono); font-size: var(--fs-xs); color: var(--text-meta); }
-.ticket-count { display: inline-flex; align-items: center; gap: 2px; }
+.ticket-avatar { width: 18px; height: 18px; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: color-mix(in srgb, var(--amber) 22%, transparent); color: var(--text); font-size: var(--fs-sm); font-weight: 600; }
+.ticket-counts { display: inline-flex; gap: var(--sp-6); margin-left: auto; font-family: var(--mono); font-size: var(--fs-sm); color: var(--text-meta); }
+.ticket-count { display: inline-flex; align-items: center; gap: var(--sp-2); }
 .ticket-card-foot .ticket-light { margin-left: 0; }
 /* The controls are hidden until the card has the pointer or focus (visibility, not display: they stay reachable by Tab once the card has focus). */
 .ticket-card-controls { visibility: hidden; height: 0; overflow: hidden; }
@@ -752,21 +752,21 @@ label[for="ticket-filter-request"] { color: var(--text); }
 .ticket-card-controls .ticket-move-label { flex: 1 1 auto; min-width: 0; font-size: 0; }
 .ticket-card-controls .ticket-move { width: 100%; }
 .ticket-card-controls .ticket-actions { margin-top: 0; flex: none; flex-wrap: nowrap; align-items: center; }
-.ticket-cancel-icon { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-4); min-width: 26px; height: 26px; padding: 0 var(--sp-4); color: var(--text); border: 1px solid var(--red); border-radius: var(--radius-md); font-size: var(--fs-xs); }
+.ticket-cancel-icon { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-4); min-width: 26px; height: 26px; padding: 0 var(--sp-4); color: var(--text); border: 1px solid var(--red); border-radius: var(--radius-md); font-size: var(--fs-sm); }
 .ticket-cancel-icon.armed { border-width: 2px; font-weight: 700; }
 
 /* ---- 15.5: the dialog shell: header, a body that scrolls, a footer that stays ---- */
 #ticket-view .modal.ticket-view { padding: 0; overflow: hidden; display: flex; flex-direction: column; width: calc(100% - 32px); max-width: none; max-height: calc(100% - 32px); gap: 0; }
-.ticket-view-head { flex: none; padding: var(--sp-14, 14px) var(--sp-20) var(--sp-10, 10px); border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: var(--sp-6); }
+.ticket-view-head { flex: none; padding: var(--sp-14) var(--sp-20) var(--sp-10); border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: var(--sp-6); }
 .ticket-view-head-row { display: flex; align-items: center; gap: var(--sp-8); }
-.ticket-view-head-meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-8); min-width: 0; font-family: var(--mono); font-size: var(--fs-xs); }
+.ticket-view-head-meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-8); min-width: 0; font-family: var(--mono); font-size: var(--fs-sm); }
 .ticket-view-head-actions { margin-left: auto; display: flex; align-items: center; gap: var(--sp-6); }
 .ticket-view-x { width: 28px; height: 28px; padding: 0; color: var(--text); border-radius: var(--radius-md); }
-#ticket-view-title { margin: 0; font-size: var(--fs-6xl); font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; color: var(--text); }
-.ticket-title-input { width: 100%; font-size: var(--fs-6xl); font-weight: 600; font-family: var(--sans); }
-.ticket-view-sub { color: var(--text-muted); font-size: var(--fs-base); }
+#ticket-view-title { margin: 0; font-size: var(--fs-lg); font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; color: var(--text); }
+.ticket-title-input { width: 100%; font-size: var(--fs-lg); font-weight: 600; font-family: var(--sans); }
+.ticket-view-sub { color: var(--text-muted); font-size: var(--fs-sm); }
 .ticket-view-light { position: static; display: inline-flex; align-items: center; gap: var(--sp-6); color: var(--text); }
-.ticket-pill { padding: 1px var(--sp-8); border-radius: 999px; background: var(--bg-inset); color: var(--text); font-size: var(--fs-xs); white-space: nowrap; }
+.ticket-pill { padding: var(--sp-1) var(--sp-8); border-radius: var(--radius-round); background: var(--bg-inset); color: var(--text); font-size: var(--fs-sm); white-space: nowrap; }
 .ticket-pill.pill-draft { border: 1px dashed var(--line-hover); }
 .ticket-pill.pill-queued { background: color-mix(in srgb, var(--blue) 20%, transparent); }
 .ticket-pill.pill-in_progress { background: color-mix(in srgb, var(--amber) 20%, transparent); }
@@ -774,20 +774,20 @@ label[for="ticket-filter-request"] { color: var(--text); }
 .ticket-pill.pill-done { background: color-mix(in srgb, var(--green) 20%, transparent); }
 .ticket-pill.pill-cancelled { background: color-mix(in srgb, var(--red) 20%, transparent); }
 /* The body is the one thing that scrolls. Wide: content left, properties right. Narrow (a container query on the body): the panel goes above. */
-.ticket-view-body { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-wrap: wrap; gap: var(--sp-20); padding: var(--sp-14, 14px) var(--sp-20); container-type: inline-size; align-content: flex-start; }
+.ticket-view-body { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-wrap: wrap; gap: var(--sp-20); padding: var(--sp-14) var(--sp-20); container-type: inline-size; align-content: flex-start; }
 .ticket-view-main { flex: 999 1 380px; min-width: 0; }
-.ticket-view-panel { flex: 1 1 264px; min-width: 264px; align-self: flex-start; padding: var(--sp-10, 10px); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-inset); }
+.ticket-view-panel { flex: 1 1 264px; min-width: 264px; align-self: flex-start; padding: var(--sp-10); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-inset); }
 @container (max-width: 600px) { .ticket-view-panel { order: -1; flex-basis: 100%; } }
 .ticket-view-panel .ticket-view-fields { grid-template-columns: max-content minmax(0, 1fr); font-size: var(--fs-sm); }
 .ticket-view-panel .ticket-view-fields dt { color: var(--text-meta); }
 .ticket-view-rule { border: 0; border-top: 1px solid var(--line); margin: var(--sp-8) 0; }
 .ticket-view-status { margin-bottom: var(--sp-8); }
 .ticket-id { font-family: var(--mono); overflow-wrap: anywhere; }
-.ticket-copy-id { color: var(--text); font-size: var(--fs-xs); padding: 0 var(--sp-6); }
+.ticket-copy-id { color: var(--text); font-size: var(--fs-sm); padding: 0 var(--sp-6); }
 /* Section headings: sentence case, with the count in --text-meta; no uppercase mono labels. */
-.ticket-view-h { font-size: var(--fs-xl); font-weight: 600; color: var(--text); text-transform: none; letter-spacing: normal; font-family: var(--sans); margin: var(--sp-10, 10px) 0 var(--sp-4); }
+.ticket-view-h { font-size: var(--fs-base); font-weight: 600; color: var(--text); text-transform: none; letter-spacing: normal; font-family: var(--sans); margin: var(--sp-10) 0 var(--sp-4); }
 /* The footer stays at the bottom: the body scrolls, not the footer. */
-#ticket-view .ticket-view-foot { position: static; flex: none; padding: var(--sp-10, 10px) var(--sp-20); border-top: 1px solid var(--line); background: var(--bg-raised); }
+#ticket-view .ticket-view-foot { position: static; flex: none; padding: var(--sp-10) var(--sp-20); border-top: 1px solid var(--line); background: var(--bg-raised); }
 /* The panel row already says "Assignee": the select's own label text is not repeated. */
 #ticket-view .ticket-view-panel dd .ticket-assign-label { font-size: 0; display: block; }
 #ticket-view .ticket-view-panel dd .ticket-assign { font-size: var(--fs-sm); }
@@ -795,8 +795,8 @@ label[for="ticket-filter-request"] { color: var(--text); }
 /* ---- 15.6: read mode and edit mode ---- */
 .ticket-edit-btn { color: var(--text); }
 .ticket-pill.pill-editing { background: color-mix(in srgb, var(--amber) 22%, transparent); }
-.ticket-view-hint { color: var(--text-meta); font-size: var(--fs-xs); margin-top: var(--sp-4); }
-.ticket-edit-warning { padding: var(--sp-8) var(--sp-10, 10px); margin-bottom: var(--sp-10, 10px); border: 1px solid color-mix(in srgb, var(--amber) 50%, transparent); border-radius: var(--radius-md); background: color-mix(in srgb, var(--amber) 12%, transparent); color: var(--text); font-size: var(--fs-sm); }
+.ticket-view-hint { color: var(--text-meta); font-size: var(--fs-sm); margin-top: var(--sp-4); }
+.ticket-edit-warning { padding: var(--sp-8) var(--sp-10); margin-bottom: var(--sp-10); border: 1px solid color-mix(in srgb, var(--amber) 50%, transparent); border-radius: var(--radius-md); background: color-mix(in srgb, var(--amber) 12%, transparent); color: var(--text); font-size: var(--fs-sm); }
 .ticket-view-dirty { margin-right: var(--sp-6); align-self: center; color: var(--text); font-size: var(--fs-sm); }
 .ticket-view-dirty::before { content: "\25CF"; color: var(--amber); margin-right: var(--sp-4); }
 .ticket-discard-btn { margin-right: auto; color: var(--text); }
@@ -804,7 +804,7 @@ label[for="ticket-filter-request"] { color: var(--text); }
 .ticket-radio-pair { display: inline-flex; border: var(--border-1) solid var(--line); border-radius: var(--radius-md); overflow: hidden; }
 .ticket-radio { position: relative; display: inline-flex; margin: 0; }
 .ticket-radio input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
-.ticket-radio span { padding: var(--sp-4) var(--sp-14, 14px); color: var(--text); font-size: var(--fs-sm); }
+.ticket-radio span { padding: var(--sp-4) var(--sp-14); color: var(--text); font-size: var(--fs-sm); }
 .ticket-radio input:checked + span { background: var(--bg-inset); font-weight: 600; box-shadow: inset 0 0 0 2px var(--line-hover); }
 .ticket-radio.is-high input:checked + span { background: color-mix(in srgb, var(--red) 20%, transparent); }
 .ticket-radio input:focus-visible + span { outline: 2px solid var(--text); outline-offset: -2px; }
@@ -832,7 +832,7 @@ label[for="ticket-filter-request"] { color: var(--text); }
 .ticket-blocker-add { align-self: flex-start; color: var(--text); border: 1px dashed var(--line-hover); }
 .ticket-blocker-box { display: flex; flex-direction: column; gap: var(--sp-4); }
 .ticket-blocker-box input { width: 100%; }
-#ticket-blocker-listbox { list-style: none; margin: 0; padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-inset); max-height: 220px; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+#ticket-blocker-listbox { list-style: none; margin: 0; padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-inset); max-height: 220px; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-2); }
 .ticket-blocker-opt { display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-6) var(--sp-8); border-radius: var(--radius-md); cursor: pointer; font-size: var(--fs-sm); color: var(--text); min-width: 0; }
 .ticket-blocker-opt.active, .ticket-blocker-opt:hover { background: var(--bg-elev); }
 .ticket-blocker-none { padding: var(--sp-6) var(--sp-8); color: var(--text-meta); font-size: var(--fs-sm); }
@@ -840,12 +840,12 @@ label[for="ticket-filter-request"] { color: var(--text); }
 /* ---- 15.10: files and notes ---- */
 .ticket-attach-list li { padding: var(--sp-6) var(--sp-8); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-inset); }
 .ticket-attach-thumb { width: 44px; height: 44px; }
-.ticket-attach-ext { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; flex: none; border-radius: var(--radius-md); border: var(--border-1) solid var(--line); background: var(--bg-raised); color: var(--text); font-family: var(--mono); font-size: var(--fs-xs); }
+.ticket-attach-ext { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; flex: none; border-radius: var(--radius-md); border: var(--border-1) solid var(--line); background: var(--bg-raised); color: var(--text); font-family: var(--mono); font-size: var(--fs-sm); }
 .ticket-attach-meta { color: var(--text-meta); }
 .ticket-attach-actions button { width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-md); }
-.ticket-attach-actions .ticket-file-remove.armed { width: auto; padding: 0 var(--sp-8); gap: var(--sp-4); border: 2px solid var(--red); font-weight: 700; font-size: var(--fs-xs); }
+.ticket-attach-actions .ticket-file-remove.armed { width: auto; padding: 0 var(--sp-8); gap: var(--sp-4); border: 2px solid var(--red); font-weight: 700; font-size: var(--fs-sm); }
 /* The dashed drop area under the list; "browse" is the file picker button. */
-.ticket-view-attach { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--sp-8); margin-top: var(--sp-8); padding: var(--sp-14, 14px) var(--sp-10, 10px); border: 1px dashed var(--line-hover); border-radius: var(--radius-md); color: var(--text); font-size: var(--fs-sm); text-align: center; }
+.ticket-view-attach { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--sp-8); margin-top: var(--sp-8); padding: var(--sp-14) var(--sp-10); border: 1px dashed var(--line-hover); border-radius: var(--radius-md); color: var(--text); font-size: var(--fs-sm); text-align: center; }
 .ticket-view-attach.over { border-style: solid; background: color-mix(in srgb, var(--orange) 10%, transparent); }
 .ticket-browse { color: var(--text); background: none; border: none; text-decoration: underline; padding: 0; font: inherit; cursor: pointer; }
 /* Notes: author in mono and role colour (a 30 % token tint mixed into --text: 4.5:1 or more in all three themes), then the time. */
@@ -860,7 +860,7 @@ label[for="ticket-filter-request"] { color: var(--text); }
 /* ---- 15.11: layout fixes ---- */
 /* The heading line: the title and its count on the left, the Write and Preview tabs at the right. */
 .ticket-crit-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-8); flex-wrap: wrap; border-bottom: var(--border-1) solid var(--line); }
-.ticket-request-form .ticket-crit-head label { display: inline; font-size: var(--fs-xl); font-weight: 600; color: var(--text); }
+.ticket-request-form .ticket-crit-head label { display: inline; font-size: var(--fs-base); font-weight: 600; color: var(--text); }
 .ticket-crit-head .ticket-tabs { border-bottom: 0; }
 /* The panel: labels above their fields (the dates keep label and value on one line); long values wrap and are not cut off. */
 .ticket-view-panel .ticket-view-fields:first-of-type { grid-template-columns: minmax(0, 1fr); gap: var(--sp-4) 0; }
@@ -876,9 +876,9 @@ label[for="ticket-filter-request"] { color: var(--text); }
 .plan-row { display: flex; align-items: center; gap: var(--sp-10); padding: var(--sp-8) var(--sp-10); border: 1px solid var(--orange); border-radius: var(--radius-md); background: var(--bg-raised); }
 .plan-text { flex: 1; min-width: 0; }
 .plan-title { font-size: var(--fs-sm); color: var(--text); font-weight: 600; }
-.plan-why { margin-top: var(--sp-2); font-size: var(--fs-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.plan-origin, .plan-features, .plan-changes-head { margin-top: var(--sp-2); font-size: var(--fs-xs); color: var(--text-muted); }
-.plan-tickets, .plan-changes { margin: var(--sp-2) 0 0; padding-left: 1.2em; font-size: var(--fs-xs); color: var(--text-muted); }
+.plan-why { margin-top: var(--sp-2); font-size: var(--fs-sm); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-origin, .plan-features, .plan-changes-head { margin-top: var(--sp-2); font-size: var(--fs-sm); color: var(--text-muted); }
+.plan-tickets, .plan-changes { margin: var(--sp-2) 0 0; padding-left: var(--sp-14); font-size: var(--fs-sm); color: var(--text-muted); }
 .plan-ticket.high { font-weight: 600; }
 .plan-approve { flex: none; background: var(--orange); color: var(--bg-inset); border: none; font-weight: 600; padding: var(--sp-4) var(--sp-12); border-radius: var(--radius-md); }
 .plan-approve:hover:not(:disabled) { background: var(--orange-hover); }
@@ -889,12 +889,12 @@ label[for="ticket-filter-request"] { color: var(--text); }
 .needs-row { padding: var(--sp-8) var(--sp-10); border: 1px solid var(--red); border-radius: var(--radius-md); background: var(--bg-raised); }
 .needs-head { display: flex; align-items: center; gap: var(--sp-6); }
 .needs-head .plan-title { flex: 1; min-width: 0; }
-.needs-count { flex: none; font-size: var(--fs-xs); color: var(--text-muted); }
-.needs-btn { flex: none; min-width: 24px; min-height: 24px; padding: var(--sp-2) var(--sp-8); border: var(--border-1) solid var(--line); border-radius: var(--radius-md); background: transparent; color: var(--text); font-size: var(--fs-xs); }
+.needs-count { flex: none; font-size: var(--fs-sm); color: var(--text-muted); }
+.needs-btn { flex: none; min-width: 24px; min-height: 24px; padding: var(--sp-2) var(--sp-8); border: var(--border-1) solid var(--line); border-radius: var(--radius-md); background: transparent; color: var(--text); font-size: var(--fs-sm); }
 .needs-btn:hover { background: var(--bg-inset); }
 .needs-btn:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
 .needs-findings { margin: var(--sp-4) 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--sp-3); }
-.needs-finding { display: flex; gap: var(--sp-8); font-size: var(--fs-xs); color: var(--text); }
+.needs-finding { display: flex; gap: var(--sp-8); font-size: var(--fs-sm); color: var(--text); }
 .needs-sev { flex: none; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
 /* The severity is a coloured dot (3:1 is enough for a mark); the words stay in text colours that pass 4.5:1. */
 .needs-sev::before { content: "●"; margin-right: var(--sp-3); }
@@ -906,7 +906,7 @@ label[for="ticket-filter-request"] { color: var(--text); }
 #ticket-filter-id {
   width: 100%; min-height: 28px; box-sizing: border-box;
   background: var(--bg-inset); border: var(--border-1) solid var(--line); border-radius: var(--radius-md);
-  color: var(--text); font-family: var(--mono); font-size: var(--fs-base);
+  color: var(--text); font-family: var(--mono); font-size: var(--fs-sm);
   padding: var(--sp-8) var(--sp-12); outline: none;
   transition: border-color var(--motion-fast);
 }

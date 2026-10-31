@@ -32,7 +32,8 @@ export function resolveTmuxBin(): string {
 
 export async function tmuxSocket(): Promise<TmuxHarness> {
   const tmux = resolveTmuxBin();
-  const sock = `/tmp/cubilot-test-${process.pid}-${counter++}.sock`;
+  // scripts/test.sh gives each part of a split run its own folder for the sockets.
+  const sock = `${process.env.CUBILOT_TEST_TMUX_DIR ?? "/tmp"}/cubilot-test-${process.pid}-${counter++}.sock`;
 
   const run = async (args: string[]) => {
     const p = spawn([tmux, "-S", sock, ...args], {

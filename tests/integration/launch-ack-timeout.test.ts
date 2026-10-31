@@ -6,6 +6,7 @@ import { Database } from "bun:sqlite";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const ACK_MS = 500;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -17,7 +18,7 @@ describe("launch ack and time-out over HTTP", () => {
   let stream: ReturnType<typeof openSSE>;
   const prior = process.env.CUBILOT_LAUNCH_ACK_MS;
 
-  const ack = (id: string, body: unknown) => postJson(hub, `/launches/${id}/ack`, body);
+  const ack = (id: string, body: unknown) => ackLaunch(hub, id, body);
   const stagesOf = async (ticket: string) => ((await getJson(hub, "/stages?status=all")).json as any[]).filter((s) => s.ticket_id === ticket);
   const until = async <T>(f: () => Promise<T | null | undefined | false>, ms = 5000): Promise<T> => {
     const end = Date.now() + ms;
@@ -41,7 +42,7 @@ describe("launch ack and time-out over HTTP", () => {
     if (prior === undefined) delete process.env.CUBILOT_LAUNCH_ACK_MS; else process.env.CUBILOT_LAUNCH_ACK_MS = prior;
     await giveProjectHttp(hub, "r1");
     open.push(await registerAgent(hub, "alice", { room: "r1" }));
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     // The fake shell: it keeps every request and acks every close at once; a launch is acked by the test.
     void (async () => {
       try {

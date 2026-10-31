@@ -91,7 +91,12 @@ export function createStreamHandlers(deps: StreamsDeps): StreamHandlers {
     if (!self) {
       return Response.json({ error: "agent queue missing" }, { status: 500 });
     }
+    // A stage lease is renewed by each heartbeat the stream accepts, and when the stream connects (memory only, no event).
+    const beat = () => {
+      for (const k of kinds) k.onAgentBeat?.(agent);
+    };
     return makeSSE(async (send, signal) => {
+      beat();
       // The agent has one live stream and every open stream pulls from its one queue, oldest waiter
       // first, so a stream whose bridge is already gone (a restarted bridge's old connection lives
       // on until its next heartbeat) would swallow the next event: a newer connection ends the older
@@ -168,7 +173,7 @@ export function createStreamHandlers(deps: StreamsDeps): StreamHandlers {
         if (agents.get(agent) === self) agents.disconnect(agent);
         broadcastPresence();
       }
-    });
+    }, beat);
   }
 
   return { handleStream, handleAgentStream };

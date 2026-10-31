@@ -4,6 +4,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 describe("result handoff schema", () => {
   let hub: HubHandle;
@@ -20,10 +21,10 @@ describe("result handoff schema", () => {
     });
     ticketId = (t.json as { snapshot: { id: string } }).snapshot.id;
     // The shell: read the launch request and ack it, so the stage is running.
-    const sse = openSSE(hub, "/launches/stream");
+    const sse = openLaunchStream(hub);
     for await (const req of sse.events) {
       expect(req.session).toBe("validator-1");
-      expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+      expect((await ackLaunch(hub, req.id, { result: "spawned" })).status).toBe(200);
       break;
     }
     sse.close();
@@ -82,7 +83,7 @@ describe("result handoff schema", () => {
   test("after the pass, the turn end of the session queues its close once; another session cannot report", async () => {
     expect(((await getJson(hub, `/stages/${stageId}`)).json as { status: string }).status).toBe("passed");
     expect((await postJson(hub, `/stages/${stageId}/turn-end`, { agent: "alice" })).status).toBe(403);
-    const sse = openSSE(hub, "/launches/stream");
+    const sse = openLaunchStream(hub);
     const got: Array<{ kind: string; session: string }> = [];
     void (async () => { try { for await (const e of sse.events) got.push(e); } catch { /* closed */ } })();
     await new Promise((r) => setTimeout(r, 150));
@@ -115,10 +116,10 @@ describe("tester result needs a full commit sha", () => {
       by: "alice", title: "T", acceptance_criteria: "c", blast_radius: "low", priority: "medium", role: "tester",
     });
     ticketId = (t.json as { snapshot: { id: string } }).snapshot.id;
-    const sse = openSSE(hub, "/launches/stream");
+    const sse = openLaunchStream(hub);
     for await (const req of sse.events) {
       expect(req.session).toBe("tester-1");
-      expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+      expect((await ackLaunch(hub, req.id, { result: "spawned" })).status).toBe(200);
       break;
     }
     sse.close();
@@ -133,7 +134,7 @@ describe("tester result needs a full commit sha", () => {
   const send = (commit?: unknown) =>
     postJson(hub, "/handoffs", {
       from: "tester-1", to_role: "validator", task: "validate",
-      context: { notes: "n", stage_id: stageId, ticket_id: ticketId, verdict: "PASS", report: "r", ...(commit === undefined ? {} : { commit }) },
+      context: { notes: "n", stage_id: stageId, ticket_id: ticketId, verdict: "PASS", report: "r", full_suite: false, tests_run: ["tests/unit/a.test.ts"], ...(commit === undefined ? {} : { commit }) },
     });
   const validatorStages = async () => ((await getJson(hub, "/stages")).json as Array<{ role: string }>).filter((s) => s.role === "validator").length;
   const FULL = "a".repeat(40);

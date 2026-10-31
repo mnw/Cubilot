@@ -3972,7 +3972,7 @@ describe("request label and blockers (6.2, 6.3)", () => {
 
   test("15.5 section headings are sentence case in the sans font with no uppercase mono label", () => {
     const css = readFileSync("ui/styles/kinds.css", "utf8");
-    expect(css).toMatch(/\.ticket-view-h \{[^}]*font-size: var\(--fs-xl\); font-weight: 600;[^}]*text-transform: none;[^}]*font-family: var\(--sans\)/);
+    expect(css).toMatch(/\.ticket-view-h \{[^}]*font-size: var\(--fs-base\); font-weight: 600;[^}]*text-transform: none;[^}]*font-family: var\(--sans\)/);
   });
 
   test("15.5 the header Close button asks first when there are changes, like the footer Close and Escape", async () => {
@@ -4703,7 +4703,7 @@ describe("request label and blockers (6.2, 6.3)", () => {
   test("15.10 the drop area says what it takes; browse opens the file picker; a file dropped on it is attached", async () => {
     const html = readFileSync("ui/index.html", "utf8");
     expect(html).toContain('Drop files here or <button type="button" class="ticket-browse" id="ticket-view-attach-btn">browse</button> &middot; pdf, md, txt, png, jpg &middot; up to 8 MB');
-    expect(readFileSync("ui/styles/kinds.css", "utf8")).toContain(".ticket-view-attach { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--sp-8); margin-top: var(--sp-8); padding: var(--sp-14, 14px) var(--sp-10, 10px); border: 1px dashed var(--line-hover);");
+    expect(readFileSync("ui/styles/kinds.css", "utf8")).toContain(".ticket-view-attach { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--sp-8); margin-top: var(--sp-8); padding: var(--sp-14) var(--sp-10); border: 1px dashed var(--line-hover);");
     await show(mk("a", "in_progress"));
     ctx.TicketBoard.openView("a");
     posts = []; uploads.length = 0;

@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Harness is per agent and immutable.** Unknown values rejected. docs/rules/terminal.md
 - **Pi gets the chatbridge as an extension.** Rerun build-sidecars.sh after extension changes. docs/rules/bridge.md
 - **Pi shares Claude skills and commands only.** No MCP, plugins or hooks. docs/rules/bridge.md
-- **Per-agent skill switches live in <app data>/factory/agents/.** Only the app writes .skills-off. docs/rules/bridge.md
+- **Per-agent skill switches live in <app data>/factory/agents/.** Only the hub writes .skills-off. docs/rules/bridge.md
 - **Skills are added per role, not per agent.** docs/rules/bridge.md
 - **After changing hub/hub.ts rebuild sidecars.** Run ./scripts/build-sidecars.sh first. docs/rules/core.md
 - **Never mutate knownAgents, agentQueues, agentConnections or staleTimers directly.** Use agents.ensure/remove. docs/rules/core.md
@@ -22,12 +22,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **One event plus one table update per state change.** Same transaction; never bypass. docs/rules/kinds.md
 - **Only three cross-kind transactions.** Add no fourth without updating docs/PROTOCOL.md. The Approve writes `request.approved` in its own transaction; the queue transaction after it writes only `ticket.queued`. docs/rules/kinds.md
 - **Broadcasts carry version = events.seq.** docs/rules/kinds.md
-- **by/from are self-asserted.** Not cryptographically verified. docs/rules/permissions.md
+- **by/from of an agent are self-asserted; the human is known by the credential.** The human token is separate from `hub.token` (the agent token). An agent that names the human gets 403. docs/rules/permissions.md
 - **Terminal-state retries.** Same-status retry returns 200 (idempotent); different-status retry returns 409. docs/rules/kinds.md
 - **/interrupts: pending to acknowledged only.** docs/rules/kinds.md
 - **Briefings re-send on roster or presence change, not once per process.** docs/rules/bridge.md
 - **Raw PTY only.** Never tmux -C; no send-keys for interactive input (only for one-shot commands the user starts). docs/rules/terminal.md
-- **pty.rs plumbing helper changes need an integration test.** docs/rules/terminal.md
+- **Hub tmux plumbing changes need an integration test.** docs/rules/terminal.md
+- **The hub owns the tmux plumbing.** `hub/core/tmux.ts` and `hub/core/terminal.ts` change only with a test in `tests/integration/pty-plumbing.test.ts` or `hub-tmux.test.ts`. docs/rules/terminal.md
 - **tmux needs UTF-8 locale env.** LANG and LC_ALL on new-session and attach. docs/rules/terminal.md
 - **tmux uses tmux.sock; new-session -d -x 80 -y 24.** Wrap in $SHELL -ic as ONE argv element. docs/rules/terminal.md
 - **tmux sessions survive Cubilot restart.** Never kill on exit; remain-on-exit off. docs/rules/terminal.md
@@ -36,13 +37,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Bridge core owns policy; adapters implement Host only.** Policy goes in core.ts. docs/rules/bridge.md
 - **Mod tool hook must ask $.tool.check.** docs/rules/bridge.md
 - **Pre/PostToolUse hooks do not run for chatbridge tools.** docs/rules/bridge.md
-- **Keep --allowed-tools on the claude command in pty.rs.** docs/rules/bridge.md
+- **--allowed-tools stays on the claude command in hub/core/launch-command.ts.** docs/rules/bridge.md
 - **In the mod, pass $ only to top-level function declarations.** docs/rules/bridge.md
 - **After changing `hub/channel/**`.** Rerun build-sidecars.sh AND check-mod.sh. docs/rules/bridge.md
 - **Claude Code 2.1.296 is the minimum.** Never force tengu_plugin_hooks_modules. docs/rules/bridge.md
 - **Verified on Claude Code 2.1.296 and pi 0.87.1.** Rerun spike evidence on change. `usage.cache_read_input_tokens` checked on 2.1.311. docs/rules/bridge.md
 - **Claude hooks pass via --settings <path>.** Never write ~/.claude/settings.json. docs/rules/bridge.md
-- **pty_capture_turn is the single TUI capture primitive.** docs/rules/terminal.md
+- **captureTurn is the single TUI capture primitive.** It lives in `hub/core/tmux.ts`; the UI calls `POST /terminal/<agent>/capture-turn`. docs/rules/terminal.md
 - **Dev rebuilds only via ./scripts/install.sh.** Never pkill + cp. docs/rules/core.md
 - **Human is a permanent roster member.** docs/rules/core.md
 - **Never skip the ad-hoc re-sign in build-sidecars.sh.** docs/rules/core.md
@@ -61,7 +62,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **One Approve per request; an edit keeps the ticket status.** The human approves a request once (L1): later tickets of it queue without a new Approve. A request of origin `human`, or with a high ticket or a feature, needs the Approve. An edit changes no status (L2). docs/rules/kinds.md
 - **Radius has a floor from the rule.** `blast_radius` is never below `radius_rule` (config `radius_rule`). The lead or the creator raises it. Only the human lowers it below the rule. docs/rules/permissions.md
 - **A checkpoint clears the lead's session.** The hub writes the note request and the summary file, and sends `/clear` as an `input` launch request to one named session. docs/rules/kinds.md
-- **Hub decides launches; Rust shell only executes.** docs/rules/kinds.md
+- **Hub decides and executes launches.** The hub runs launch, close and input itself (`hub/core/launch-executor.ts`). docs/rules/kinds.md
 - **Stage state changes only via createStageApi.** docs/rules/kinds.md
 - **system is the hub's own actor, never a caller's.** Hub returns 400 if a body names it. docs/rules/kinds.md
 - **Validator and Reviewer worktrees are read-only.** Hub refuses a writable one. docs/rules/kinds.md
@@ -78,7 +79,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Accepted risks (known, not bugs)
 
 - **blast_radius high is advisory.** docs/rules/permissions.md
-- **Launch stream has no per-role token.** docs/rules/permissions.md
 - **devtools is on in release builds.** docs/rules/core.md
 - **post_file follows symlinks.** docs/rules/bridge.md
 - **Persisted transcripts may capture secrets.** Opt-in only. docs/rules/transcripts.md
@@ -108,8 +108,10 @@ bun install
 
 Run the hub standalone (for iterating on hub.ts without rebuilding the app):
 ```
-PORT=8011 bun run hub/hub.ts       # or any free port
+AGENT=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n'); HUMAN=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')
+printf '%s\n' "$HUMAN" | PORT=8011 CUBILOT_TOKEN="$AGENT" bun run hub/hub.ts       # or any free port
 ```
+The human token is the first line of stdin (read within 5 s, never in env or a file). Without it no caller is the human and the human-only routes give 403.
 The `.app` picks a free port at runtime — only set `PORT` when running `hub.ts` directly for dev.
 
 Build + install the full macOS app to `/Applications/Cubilot.app`:
@@ -136,10 +138,11 @@ Quick test the hub (against the running `.app`):
 ```
 HUB=$(cat ~/Library/Application\ Support/Cubilot/hub.url)
 TOK=$(cat ~/Library/Application\ Support/Cubilot/hub.token)
-curl -s "$HUB/agents?token=$TOK"                                 # roster (human only)
-curl -sN --max-time 1 "$HUB/agent-stream?agent=foo&token=$TOK"   # auto-registers "foo"
+curl -s "$HUB/agents?token=$TOK"                                 # roster (agent token or human token)
+curl -sN --max-time 1 "$HUB/agent-stream?agent=foo&token=$TOK"   # auto-registers "foo" (agent token only)
 curl -s "$HUB/agents?token=$TOK"                                 # includes "foo"
 ```
+`hub.token` is the agent token. The human token is in no file: `/stream`, the human-only routes (Approve, `/remove`, pause, launches, room settings, checkpoints, decision answers) and `by: <human_name>` need it, so the running `.app` gives a developer no curl for them. To try those, start the hub standalone with your own two tokens (above) and send the human token.
 
 Full test run: `./scripts/test.sh [bun test args]` is the default. It takes the heavy lock itself, runs `bun test "$@"`, and stops the run and its process group at a time or memory limit. Settings: `CUBILOT_TEST_TIMEOUT_S` (default 520 s), `CUBILOT_TEST_MAX_RSS_MB` (default 2048 MB), `CUBILOT_HEAVY_LOCK` (default `/tmp/cubilot-heavy.lock`). Memory check: RSS sum of the process group, once per second; not a strict ceiling.
 

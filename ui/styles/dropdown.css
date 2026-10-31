@@ -57,7 +57,7 @@
   gap: var(--sp-8);
   padding: var(--sp-7) var(--sp-10);
   font-family: var(--mono);
-  font-size: var(--fs-md);
+  font-size: var(--fs-sm);
   color: var(--text-muted);
   cursor: pointer;
   border-radius: var(--radius-md);
@@ -128,7 +128,7 @@
   gap: var(--sp-8);
   padding: var(--sp-7) var(--sp-10);
   font-family: var(--mono);
-  font-size: var(--fs-md);
+  font-size: var(--fs-sm);
   color: var(--text-muted);
   cursor: pointer;
   border-radius: var(--radius-md);
@@ -242,7 +242,7 @@
   gap: var(--sp-8);
   padding: var(--sp-7) var(--sp-10);
   font-family: var(--mono);
-  font-size: var(--fs-md);
+  font-size: var(--fs-sm);
   color: var(--text-muted);
   cursor: pointer;
   border-radius: var(--radius-md);
@@ -253,7 +253,7 @@
 .target-option.selected::before { content: "✓"; color: var(--orange); font-weight: 700; margin-right: var(--sp-2); }
 .target-option.interrupt { color: var(--red-hover); }
 .target-option.interrupt:hover { background: color-mix(in oklab, var(--red) 12%, transparent); color: var(--red-strong); }
-.target-option .prefix { color: var(--text-dim); font-size: var(--fs-xs); }
+.target-option .prefix { color: var(--text-dim); font-size: var(--fs-sm); }
 .target-option.interrupt .prefix { color: inherit; opacity: 0.8; }
 
 .target-menu-divider {

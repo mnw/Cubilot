@@ -12,6 +12,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { attachArgv, createTerminal } from "../../hub/core/terminal";
+import { createTmux, resolveLocale } from "../../hub/core/tmux";
 import { tmuxSocket, type TmuxHarness } from "../helpers/tmux";
 
 let h: TmuxHarness;
@@ -371,7 +373,7 @@ describe("pty plumbing — skill view", () => {
   }
 });
 
-// P6-15: the checkpoint `/clear` is written to the PTY of one named session (launches.rs `input`, pty.rs `write_input`:
+// P6-15: the checkpoint `/clear` is written to the PTY of one named session (hub/core/launch-executor.ts `input`, pty.rs `write_input`:
 // the text and Enter to the PTY master of that session's attach client; never `send-keys`). The Rust tests pin the request
 // parse, the routing and the one-line rule. This scenario pins what tmux does with it: two sessions each run `cat`; a client
 // attached to A gets a line on its PTY; the line reaches the pane of A and the pane of B stays empty.
@@ -406,6 +408,89 @@ describe("pty plumbing — input to a named session", () => {
     } finally {
       try { client?.kill(); } catch { /* gone */ }
       rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20000);
+});
+
+// The same primitives through the hub code (hub/core/tmux.ts, hub/core/terminal.ts), on the hermetic socket of the harness
+// (hub-first-browser group 5, terminal-projection).
+describe("pty plumbing — hub code", () => {
+  const hubTmux = () => createTmux({ bin: h.tmux, socket: h.sock });
+  const until = async (f: () => boolean | Promise<boolean>, ms = 5000) => {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      if (await f()) return true;
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    return false;
+  };
+
+  test("Locale resolution with a UTF-8 environment", () => {
+    expect(resolveLocale({ LANG: "en_US.UTF-8" })).toBe("en_US.UTF-8");
+    expect(resolveLocale({ LANG: "de_DE.utf8" })).toBe("de_DE.utf8");
+  });
+
+  test("Locale resolution with a blank environment", () => {
+    expect(resolveLocale({ LANG: "", LC_ALL: "" })).toBe("en_US.UTF-8");
+    expect(resolveLocale({})).toBe("en_US.UTF-8");
+  });
+
+  test("Locale resolution rejects a non-UTF-8 locale", () => {
+    expect(resolveLocale({ LANG: "C" })).toBe("en_US.UTF-8");
+  });
+
+  test("tmux session creates and accepts attach", async () => {
+    const tmux = hubTmux();
+    await tmux.newSession({ name: "hub-1", cwd: "/tmp", command: "cat" });
+    let out = "";
+    const v = await createTerminal(tmux).attach("hub-1", { onData: (c) => (out += new TextDecoder().decode(c)) });
+    try {
+      expect(await until(async () => (await tmux.run(["list-clients", "-F", "#{client_session}"])).includes("hub-1"))).toBe(true);
+      await new Promise((r) => setTimeout(r, 300));
+      v.write("hello-from-viewer\r");
+      expect(await until(async () => (await tmux.run(["capture-pane", "-p", "-t", "=hub-1:"])).includes("hello-from-viewer"))).toBe(true);
+      expect(await until(() => out.includes("hello-from-viewer"))).toBe(true);
+    } finally {
+      v.close();
+    }
+  }, 20000);
+
+  test("Existing-session reconfiguration clears remain-on-exit", async () => {
+    const tmux = hubTmux();
+    await tmux.newSession({ name: "hub-2", cwd: "/tmp", command: "sleep 30" });
+    await tmux.run(["set-option", "-t", "=hub-2:", "remain-on-exit", "on"]);
+    expect((await tmux.run(["show-options", "-v", "-t", "=hub-2:", "remain-on-exit"])).trim()).toBe("on");
+    expect(await tmux.reconfigure("hub-2")).toBe(true);
+    expect((await tmux.run(["show-options", "-v", "-t", "=hub-2:", "remain-on-exit"])).trim()).toBe("off");
+    expect(await tmux.reconfigure("hub-none")).toBe(false);
+  });
+
+  test("Session lifecycle: create, kill, confirm gone, create again", async () => {
+    const tmux = hubTmux();
+    await tmux.newSession({ name: "hub-3", cwd: "/tmp", command: "sleep 30" });
+    expect(await tmux.listSessions()).toEqual(["hub-3"]);
+    expect(await tmux.killSession("hub-3")).toBe(true);
+    expect(await until(async () => !(await tmux.hasSession("hub-3")), 500)).toBe(true);
+    expect(await tmux.killSession("hub-3")).toBe(false);
+    await tmux.newSession({ name: "hub-3", cwd: "/tmp", command: "sleep 30" });
+    expect(await tmux.hasSession("hub-3")).toBe(true);
+  });
+
+  test("hub attach is raw-PTY, not control mode: arrow keys and Enter arrive as raw bytes, no %output framing", async () => {
+    const tmux = hubTmux();
+    await tmux.newSession({ name: "hub-4", cwd: "/tmp", command: "cat -v" });
+    let out = "";
+    const v = await createTerminal(tmux).attach("hub-4", { onData: (c) => (out += new TextDecoder().decode(c)) });
+    try {
+      await new Promise((r) => setTimeout(r, 400));
+      v.write("\x1b[A\r");
+      expect(await until(async () => (await tmux.run(["capture-pane", "-p", "-t", "=hub-4:"])).includes("^[[A"))).toBe(true);
+      expect(out).not.toContain("%output");
+      expect(out).not.toContain("%begin ");
+      expect(out).not.toContain("%end ");
+      expect(attachArgv(tmux, "hub-4")).not.toContain("-C");
+    } finally {
+      v.close();
     }
   }, 20000);
 });

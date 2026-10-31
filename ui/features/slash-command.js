@@ -223,20 +223,20 @@ function _resolveTargets(target, roomName) {
 }
 
 // =============================================================================
-// DISCOVERY — built-ins + per-Agent filesystem scan via Tauri
+// DISCOVERY — built-ins + per-Agent filesystem scan via the hub
 // =============================================================================
 
 async function _discoverCommandsForAgent(agent) {
   // Harness is read from tmux, so it stays correct across app restarts.
   let harness = 'claude';
   try {
-    harness = (await tauriInvoke('pty_harness', { agent })) || 'claude';
+    harness = (await hubGet(`/agents/${encodeURIComponent(agent)}/harness`)).harness || 'claude';
   } catch {
     // Best-effort: fall back to the claude built-ins.
   }
   const map = new Map(builtinsFor(harness));
   try {
-    const items = await tauriInvoke('slash_discover_for_agent', { agent });
+    const items = (await hubGet(`/agents/${encodeURIComponent(agent)}/slash-commands`)).commands;
     if (Array.isArray(items)) {
       for (const item of items) {
         if (typeof item === 'string') {
@@ -247,7 +247,7 @@ async function _discoverCommandsForAgent(agent) {
       }
     }
   } catch {
-    // Best-effort: built-ins still returned on Tauri-call failure.
+    // Best-effort: built-ins still returned when the hub call fails.
   }
   return map;
 }
@@ -436,12 +436,12 @@ function slashPickerClose() {
 }
 
 // =============================================================================
-// SEND — fan parsed slash sends to Agent PTYs via pty_capture_turn / pty_write
+// SEND — fan parsed slash sends to Agent PTYs via the hub's capture-turn and input routes
 // =============================================================================
 
 function _ptyBridge() {
   const pty = window.__CUBILOT_TERM__?.pty;
-  if (!pty?.ptyCaptureTurn || !pty?.ptyReadCapture || !pty?.ptyWrite || !pty?.strToB64) {
+  if (!pty?.ptyCaptureTurn || !pty?.ptyReadCapture || !pty?.ptyInput) {
     throw new Error('PTY bridge not available');
   }
   return pty;
@@ -583,9 +583,9 @@ async function sendSlash({ slashCommand, target, args }) {
 
   // Split write so the lone \r registers as Enter, not as a newline inside a buffered paste.
   async function _writeAsTyped(agent) {
-    await pty.ptyWrite(agent, pty.strToB64(cmdText));
+    await pty.ptyInput(agent, cmdText);
     await new Promise((r) => setTimeout(r, 60));
-    await pty.ptyWrite(agent, pty.strToB64('\r'));
+    await pty.ptyInput(agent, '\r');
   }
 
   if (!captureable) {
@@ -623,10 +623,10 @@ async function sendSlash({ slashCommand, target, args }) {
     (async () => {
       try {
         const result = await pty.ptyCaptureTurn(agent, payload, _CAPTURE_TIMEOUT_MS);
-        if (!result || !result.log_path) return;
+        if (!result || !result.name) return;
         let raw = '';
         try {
-          raw = await pty.ptyReadCapture(result.log_path, null);
+          raw = await pty.ptyReadCapture(agent, result.name, null);
         } catch (e) {
           console.error(`[slash-command] read capture for ${agent}:`, e);
           return;
@@ -680,10 +680,9 @@ async function sendShiftTab({ target }) {
   if (pty.ptyHealGeometry) {
     await Promise.all(resolved.map((a) => pty.ptyHealGeometry(a).catch(() => {})));
   }
-  const b64 = pty.strToB64('\x1B[Z');
   const failures = [];
   await Promise.all(resolved.map(async (agent) => {
-    try { await pty.ptyWrite(agent, b64); }
+    try { await pty.ptyInput(agent, '\x1B[Z'); }
     catch (e) { failures.push({ name: agent, reason: e?.message || String(e) }); }
   }));
   const finalResolved = resolved.filter((n) => !failures.find((f) => f.name === n));
