@@ -43,10 +43,12 @@ test("a disposed runtime writes no retro folder after its test", async () => {
   try {
     const { sent } = retroLaunch();
     expect(sent.filter((r) => r.kind === "launch")).toHaveLength(1);
-    const first = retroDirs(data).length;
+    const before = sent.length;
     disposeRuntimes();
-    await new Promise((r) => setTimeout(r, 200)); // 6 ack periods: a live timer would have retried by now
-    expect(retroDirs(data)).toHaveLength(first);
+    // Observe for 6 ack periods (ackMs 30): a live timer would send a second request by then. A deadline, not a result wait.
+    const retried = await wait(() => sent.length > before, 200);
+    expect(retried).toBe(false);
+    expect(sent).toHaveLength(before);
   } finally {
     process.env.CUBILOT_DATA_DIR = saved;
     removeTree(data);
