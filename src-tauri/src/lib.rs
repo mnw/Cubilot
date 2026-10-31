@@ -1273,13 +1273,9 @@ pub fn run() {
             open_global_mcp_config,
             open_in_editor,
             reload_settings,
-            pty::pty_spawn,
+            pty::pty_attach,
             pty::pty_write,
-            pty::pty_resize,
-            pty::pty_kill,
-            pty::pty_list,
-            pty::pty_spawn_shell,
-            pty::pty_shell_exists
+            pty::pty_resize
         ])
         .setup(|app| {
             let handle = app.handle().clone();

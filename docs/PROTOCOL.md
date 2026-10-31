@@ -753,6 +753,18 @@ All four routes are human-only: the agent token gets 403 `{"error":"only the hum
 
 A missing session gives 404. A tmux error from `has-session` gives 500.
 
+### Session routes
+
+The human creates, lists and kills the agent sessions and the Shell tab session through the hub (`hub/features/sessions.ts`). All five routes are human-only: the agent token gets 403. Without `CUBILOT_TMUX` the routes give 503. The old `claude_sessions` routes on `/sessions` (resume flag capture) had no caller and are removed. The table stays.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/sessions` | Body `{name, cwd, role, room?, harness?, model?, provider?, effort?, resume?}`. `harness` is `claude` (default) or `pi`. `resume` is `resume` or `continue`. `room` defaults to the name of the git root of `cwd`. Answers `{ok, name, created}`. A running session of that name gives `created: false` for the same role and 409 for another role. A new session needs a role. The name `shell`, a name with a dot, a reserved name, an unknown harness, an unknown role or a missing `cwd` give 400. |
+| GET | `/sessions` | `{sessions: [name]}`. The Shell tab session is not in the list. |
+| POST | `/sessions/shell` | Creates the Shell tab session when it is missing. `{ok, created}`. |
+| GET | `/sessions/shell` | `{exists}`. |
+| POST | `/sessions/<name>/kill` | Kills the session. `{ok}`. A missing session gives 404. |
+
 Request formats (`id` has the format `l_[0-9a-f]{16}`):
 
 ```json

@@ -300,6 +300,8 @@ if (ledgerDb) {
   for (const k of KINDS) k.start?.(buildCap());
 }
 
+const hubTmux = (() => { try { return createTmux(tmuxFromEnv()); } catch { return null; } })();
+
 const FEATURES: readonly HubFeature[] = [
   ...KINDS,
   createUsageFeature(),
@@ -309,7 +311,7 @@ const FEATURES: readonly HubFeature[] = [
     version: (process.env.CUBILOT_FACTORY_VERSION ?? "").trim(),
     online: (name) => (agents.presenceSnapshot().agents as Record<string, boolean> | undefined)?.[name] === true,
   }),
-  ...(ledgerDb ? [createSessionsFeature(ledgerDb)] : []),
+  createSessionsFeature({ tmux: hubTmux }),
   createAttachmentsFeature({
     attachmentsDir: ATTACHMENTS_DIR,
     allowedExtensions: ALLOWED_EXTENSIONS,
@@ -318,7 +320,7 @@ const FEATURES: readonly HubFeature[] = [
   createRosterFeature({ agents, removeAgent, readNutshell }),
   createSettingsFeature({ agents, defaultRoom: DEFAULT_ROOM }),
   createTerminalFeature({
-    tmux: (() => { try { return createTmux(tmuxFromEnv()); } catch { return null; } })(),
+    tmux: hubTmux,
     capturesRoot: defaultCapturesRoot(),
   }),
   createSearchFeature({ db: ledgerDb, agents, humanName: HUMAN_NAME }),

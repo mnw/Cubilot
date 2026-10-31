@@ -582,7 +582,7 @@ export type LaunchInput = {
 };
 
 /** What hub/core/tmux.ts newSession takes (name, cwd, command, env) plus the facts a pill record needs. */
-export type LaunchPlan = { name: string; cwd: string; command: string; env: string[]; harness: Harness; role: string | null; choice: LaunchChoice };
+export type LaunchPlan = { name: string; cwd: string; command: string; env: string[]; harness: Harness; role: string | null; choice: LaunchChoice; spec: RoleSpec | null };
 
 export type LaunchDeps = {
   loginPath: () => Promise<string | undefined>;
@@ -627,5 +627,5 @@ export async function prepareLaunch(i: LaunchInput, env: Env = process.env, deps
     agent: i.agent, room: i.room, cwd: i.cwd, harness: i.harness, sessionMode: i.sessionMode, role: launch, choice, bins, mcpConfig,
     stageId: i.stageId, loginPath: path, firstMessageFile: firstFile, home: homeDir(env),
   });
-  return { name: i.agent, cwd: i.cwd, command, env: spawnEnv({ dataDir: dataDir(env), apiKey: i.apiKey, stageId: i.stageId }), harness: i.harness, role, choice };
+  return { name: i.agent, cwd: i.cwd, command, env: spawnEnv({ dataDir: dataDir(env), apiKey: i.apiKey, stageId: i.stageId }), harness: i.harness, role, choice, spec };
 }

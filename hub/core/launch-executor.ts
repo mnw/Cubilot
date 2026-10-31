@@ -8,6 +8,7 @@
 // exports a `start(host)` function. No session is ever killed on hub exit.
 
 import { prepareLaunch, type LaunchDeps } from "./launch-role";
+import { startAgentSession } from "./session-create";
 import { createTerminal } from "./terminal";
 import { createTmux, tmuxFromEnv, type Tmux } from "./tmux";
 import type { AckOutcome, AckStatus, LaunchRequest } from "./launch-types";
@@ -102,7 +103,7 @@ export function startLaunchExecutor(host: ExecutorHost, deps: ExecutorDeps): { s
         env,
         deps.launchDeps,
       );
-      await deps.tmux.newSession({ name: plan.name, cwd: plan.cwd, command: plan.command, env: plan.env });
+      await startAgentSession(deps.tmux, plan);
       return { result: "spawned" };
     } catch (e) {
       return { result: "error", error: (e as Error).message };

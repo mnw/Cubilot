@@ -127,13 +127,17 @@ describe("ptySpawn and the launch alert", () => {
     new Function("window", "TextEncoder", readFileSync("ui/terminal/pty.js", "utf8"))(win, TextEncoder);
     return win.__CUBILOT_TERM__.pty;
   };
-  test("attachOnly is sent only when true", async () => {
+  test("attachOnly attaches only; otherwise the hub creates the session first", async () => {
     const seen: any[] = [];
-    const pty = load(async (_c: string, a: any) => { seen.push(a); });
+    const posts: string[] = [];
+    const win: any = { __TAURI__: { core: { invoke: async (c: string, a: any) => { seen.push([c, a]); } } }, authedFetch: async (p: string) => { posts.push(p); return { ok: true }; } };
+    new Function("window", "TextEncoder", readFileSync("ui/terminal/pty.js", "utf8"))(win, TextEncoder);
+    const pty = win.__CUBILOT_TERM__.pty;
     await pty.ptySpawn("a", "/tmp", null, null, null, null, null, null, null, true);
+    expect(posts).toEqual([]);
     await pty.ptySpawn("b", "/tmp");
-    expect(seen[0].attachOnly).toBe(true);
-    expect("attachOnly" in seen[1]).toBe(false);
+    expect(posts).toEqual(["/sessions"]);
+    expect(seen).toEqual([["pty_attach", { agent: "a" }], ["pty_attach", { agent: "b" }]]);
   });
   test("a Rust error (a string) reaches the Launch failed alert unchanged", async () => {
     const block = between("  async function handleLaunch(", "  async function handleOpenEditor(");

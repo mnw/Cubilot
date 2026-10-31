@@ -12,7 +12,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::{
-    app_data_dir, resolve_anthropic_api_key, resolve_claude_path,
+    app_data_dir,
     resolve_pi_extension, resolve_pi_path,
     resolve_tmux_bin as real_tmux_bin,
 };
@@ -1284,138 +1284,30 @@ fn existing_session_state(agent: &str, role: Option<&str>, attach_only: bool, la
     Ok(existed)
 }
 
+/// Attaches the output stream of a session the hub created (POST /sessions, POST /sessions/shell) to this window. It
+/// creates nothing: no session is "session not found". It stays until the terminal WebSocket (group 9) replaces it.
 #[tauri::command]
-pub async fn pty_spawn(
-    app: AppHandle,
-    state: State<'_, PtyRegistry>,
-    agent: String,
-    cwd: String,
-    session_mode: Option<String>,
-    room: Option<String>,
-    harness: Option<String>,
-    role: Option<String>,
-    model: Option<String>,
-    effort: Option<String>,
-    provider: Option<String>,
-    attach_only: Option<bool>,
-    stage_id: Option<String>,
-    first_message: Option<String>,
-) -> Result<(), String> {
-    if let Some(id) = stage_id.as_deref() {
-        if !valid_stage_id(id) {
-            return Err(format!("invalid stage id: {id}"));
+pub fn pty_attach(app: AppHandle, state: State<'_, PtyRegistry>, agent: String) -> Result<(), String> {
+    let is_shell = agent == SHELL_SESSION_NAME;
+    if !is_shell {
+        if !valid_agent_name(&agent) {
+            return Err(format!("invalid agent name: {agent}"));
+        }
+        if let Some(e) = terminal_name_error(&agent) {
+            return Err(e.to_string());
         }
     }
-    // An unknown or council role fails here, before any tmux session exists. No role: nothing changes.
-    let role = spawn_role(role)?;
-    if !valid_agent_name(&agent) {
-        return Err(format!("invalid agent name: {agent}"));
-    }
-    if let Some(e) = terminal_name_error(&agent) {
-        return Err(e.to_string());
-    }
-    let harness = Harness::parse(harness.as_deref())?;
-    // The harness from the modal decides the launch (task 9.4); a role's own harness is only its default. The
-    // model x effort grid (task 5.5): only what the human changed arrives here. Checked against the launch harness,
-    // so a Claude effort level on a Pi launch (or the reverse) is refused, not guessed.
-    let choice = crate::factory::launch_choice(harness == Harness::Pi, model.as_deref(), provider.as_deref(), effort.as_deref())?;
-    // A role on the other harness than its own needs a chosen model: refused here, before any tmux session exists.
-    if let Some(r) = role.as_deref() {
-        crate::factory::check_role_harness(&crate::factory::resolve_role_spec(r)?, if harness == Harness::Pi { "pi" } else { "claude" }, &choice)?;
-    }
-
-    let resolved_room = match room.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        Some(r) if valid_room_label(r) => r.to_string(),
-        Some(r) => return Err(format!("invalid room: {r}")),
-        None => default_room_for_cwd(std::path::Path::new(&cwd)),
-    };
-
     {
         let map = state.0.lock().unwrap();
         if map.contains_key(&agent) {
-            return Err(format!("agent '{agent}' already attached"));
+            // The Shell tab attaches again without an error; an agent keeps the "already attached" answer the UI reads.
+            return if is_shell { Ok(()) } else { Err(format!("agent '{agent}' already attached")) };
         }
     }
-
     let lang = resolve_utf8_locale();
-    let api_key = resolve_anthropic_api_key();
-    let existed = existing_session_state(&agent, role.as_deref(), attach_only.unwrap_or(false), &lang, || {})?;
-    if !existed {
-        // Built only for a new session: re-attaching to a live one must not depend on the
-        // Claude version check or mod staging.
-        // A Pi role needs its provider signed in: check before any session exists, launch nothing on failure.
-        if let Some(provider) = pi_provider_to_check(harness, role.as_deref(), &choice)? {
-            let pi = crate::resolve_pi_path();
-            tauri::async_runtime::spawn_blocking(move || pi_auth_check(&pi, &provider))
-                .await
-                .map_err(|e| format!("Pi sign-in check worker failed: {e}"))??;
-        }
-        let claude_path = match harness {
-            Harness::Claude => {
-                let path = resolve_claude_path();
-                let check_path = path.clone();
-                tauri::async_runtime::spawn_blocking(move || ensure_claude_version(&check_path))
-                    .await
-                    .map_err(|e| format!("Claude version check worker failed: {e}"))??;
-                Some(path)
-            }
-            Harness::Pi => None,
-        };
-        let spawn_cmd = agent_command(
-            &agent,
-            &resolved_room,
-            &cwd,
-            session_mode.as_deref(),
-            harness,
-            claude_path.as_deref(),
-            role.as_deref(),
-            &choice,
-        )?;
-        let login = if wants_login_path(harness, stage_id.as_deref()) {
-            // Blocking on the first call (up to 5 s): off the async runtime. None keeps the inherited PATH.
-            tauri::async_runtime::spawn_blocking(crate::login_path::login_path)
-                .await
-                .map_err(|e| format!("login PATH worker failed: {e}"))?
-        } else {
-            None
-        };
-        // A hub launch carries the ticket part of the first message: written to a file, read by the command.
-        let first_file = match first_message.as_deref().filter(|m| !m.is_empty()) {
-            Some(text) => Some(write_first_message(&sessions_dir(), &agent, text)?),
-            None => None,
-        };
-        let (spawn_cmd, argv) = final_spawn(
-            &agent, &cwd, &lang, api_key.as_deref(), spawn_cmd, harness, stage_id.as_deref(), login.as_deref(), first_file.as_deref(),
-        );
-        let argv_refs: Vec<&str> = argv.iter().map(String::as_str).collect();
-        tmux_run(&argv_refs)?;
-        // Authoritative harness record; pane_harness falls back to the command only without it.
-        if let Err(e) = tmux_run(&["set-option", "-t", &tmux_pane(&agent), "@cubilot_harness", harness.as_str()]) {
-            eprintln!("[pty] pty_spawn/@cubilot_harness (falls back to command inspection): {e}");
-        }
-        // The skills mode of a role launch (a record only: skills::mode_from_command reads the real flags).
-        if role.is_some() {
-            let mode = if spawn_cmd.contains(".view/") { "view" } else { "plain" };
-            if let Err(e) = tmux_run(&["set-option", "-t", &tmux_pane(&agent), "@cubilot_skills", mode]) {
-                eprintln!("[pty] pty_spawn/@cubilot_skills (record only): {e}");
-            }
-        }
-        // Best effort, like the harness record: a missing pill must not fail a launch that already runs.
-        // A role launch records the role's details, a launch without a role records its chosen ones.
-        let options = match &role {
-            Some(r) => crate::factory::resolve_role_spec(r).ok().map(|spec| role_options(&spec, harness, &choice)),
-            None => Some(plain_options(harness, &choice)),
-        };
-        for (k, v) in options.into_iter().flatten() {
-            if let Err(e) = tmux_run(&["set-option", "-t", &tmux_pane(&agent), k, &v]) {
-                eprintln!("[pty] pty_spawn/{k} (pill only): {e}");
-            }
-        }
-        if let Err(e) = tmux_run(&["set-option", "-t", &tmux_pane(&agent), "status", "off"]) {
-            eprintln!("[pty] pty_spawn/status-off (best-effort): {e}");
-        }
+    if !ensure_session_configured(&agent, &lang)? {
+        return Err(SESSION_NOT_FOUND.to_string());
     }
-
     attach_and_stream(app, state.0.clone(), &agent, &lang)
 }
 
@@ -1596,72 +1488,6 @@ pub fn close_session(name: &str) -> Result<bool, String> {
     }
 }
 
-#[tauri::command]
-pub fn pty_kill(agent: String) -> Result<(), String> {
-    if !valid_agent_name(&agent) {
-        return Err(format!("invalid agent name: {agent}"));
-    }
-    tmux_run(&["kill-session", "-t", &tmux_session(&agent)])?;
-    Ok(())
-}
-
-// Pinned "shell" tmux session — human's scratch shell. No claude, no MCP, no room.
-#[tauri::command]
-pub fn pty_spawn_shell(
-    app: AppHandle,
-    state: State<'_, PtyRegistry>,
-) -> Result<(), String> {
-    let name = SHELL_SESSION_NAME;
-    {
-        let map = state.0.lock().unwrap();
-        if map.contains_key(name) {
-            return Ok(());
-        }
-    }
-
-    let lang = resolve_utf8_locale();
-    let lang_env = format!("LANG={lang}");
-    let lc_all_env = format!("LC_ALL={lang}");
-
-    let user_shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    // -il for parity with Terminal.app; explicit -i so plugin `[[ -o interactive ]]` guards fire.
-    let shell_cmd = format!("'{}' -il", user_shell.replace('\'', r"'\''"));
-
-    // .zshrc checks $CUBILOT_SHELL to scope Cubilot-only theming.
-    let cubilot_marker_env = "CUBILOT_SHELL=1";
-
-    let existed_shell = ensure_session_configured(name, &lang)?;
-    if existed_shell {
-        // allow-passthrough lets yazi's DA1/DSR probes reach xterm.js (silences "response timeout").
-        let _ = tmux_run(&["set-option", "-t", &tmux_pane(name), "allow-passthrough", "on"]);
-        let _ = tmux_run(&["set-environment", "-t", &tmux_session(name), "CUBILOT_SHELL", "1"]);
-    } else {
-        let args: Vec<&str> = vec![
-            "new-session", "-d", "-s", name,
-            "-e", "TERM=xterm-256color",
-            "-e", "COLORTERM=truecolor",
-            "-e", &lang_env,
-            "-e", &lc_all_env,
-            "-e", cubilot_marker_env,
-            "-x", "80",
-            "-y", "24",
-            "-c", &home,
-            &shell_cmd,
-        ];
-        tmux_run(&args)?;
-        let _ = tmux_run(&["set-option", "-t", &tmux_pane(name), "status", "off"]);
-        let _ = tmux_run(&["set-option", "-t", &tmux_pane(name), "allow-passthrough", "on"]);
-    }
-
-    attach_and_stream(app, state.0.clone(), name, &lang)
-}
-
-#[tauri::command]
-pub fn pty_shell_exists() -> Result<bool, String> {
-    Ok(session_exists(SHELL_SESSION_NAME))
-}
-
 // Live sessions and the start command of every live pane, for the factory cleanup. No tmux server means nothing is
 // live, and that is known only when the socket file does not exist. Any other failure (a stale or non-socket file,
 // a refused connection) is an error, so the cleanup deletes nothing.
@@ -1672,26 +1498,6 @@ pub(crate) fn live_tmux_state() -> Result<(Vec<String>, String), String> {
     };
     let sessions = ask(&["list-sessions", "-F", "#S"])?.lines().map(|l| l.trim().to_string()).collect();
     Ok((sessions, ask(&["list-panes", "-a", "-F", "#{pane_start_command}"])?))
-}
-
-#[tauri::command]
-pub fn pty_list() -> Result<Vec<String>, String> {
-    let tmux = resolve_tmux_bin()?;
-    let out = tmux_cmd(tmux)
-        .args(["list-sessions", "-F", "#S"])
-        .output()
-        .map_err(|e| format!("tmux list-sessions spawn: {e}"))?;
-    if !out.status.success() {
-        // "no server running" is exit 1 — treat as empty.
-        return Ok(vec![]);
-    }
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let names: Vec<String> = stdout
-        .lines()
-        .map(|l| l.trim().to_string())
-        .filter(|l| valid_agent_name(l))
-        .collect();
-    Ok(names)
 }
 
 // Live cwd of the agent's pane (tracks `cd`), not the original spawn path.
