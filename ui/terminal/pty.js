@@ -1,16 +1,8 @@
-// terminal/pty.js — Tauri PTY-invoke wrappers + base64 helpers; standalone (window.__TAURI__).
+// terminal/pty.js — Tauri spawn/kill wrappers, the hub's terminal WebSocket and routes, base64 helpers; standalone.
 
 (function () {
   function _invoke() {
     return window.__TAURI__?.core?.invoke || window.__TAURI_INTERNALS__?.invoke;
-  }
-
-  // The event an agent's pane listens on. Tauri event names allow only alphanumerics, - / : _ but an agent name may
-  // hold spaces and dots, so the name part is the lowercase hex of its UTF-8 bytes. Same string as pty_event in
-  // pty.rs (tests/unit/pty-event-name.test.ts and a Rust test pin the same vectors).
-  function ptyEventName(kind, agent) {
-    const hex = Array.from(new TextEncoder().encode(String(agent)), (b) => b.toString(16).padStart(2, '0')).join('');
-    return `pty://${kind}/${hex}`;
   }
 
   async function ptySpawn(agent, cwd, sessionMode, room, harness, role, model, effort, provider, attachOnly) {
@@ -43,20 +35,19 @@
   async function listRoles() {
     return (await hubGet('/roles')).roles;
   }
-  async function ptyWrite(agent, b64) {
-    return _invoke()('pty_write', { agent, b64 });
-  }
-  async function ptyResize(agent, cols, rows) {
-    return _invoke()('pty_resize', { agent, cols, rows });
-  }
   async function ptyKill(agent) {
     return _invoke()('pty_kill', { agent });
   }
+  // The live tmux sessions, by agent name (the hub lists them; no Tauri needed). A failed read gives [].
   async function ptyList() {
-    try { return await _invoke()('pty_list'); }
-    catch { return []; }
+    try {
+      const r = await window.authedFetch('/terminal-sessions');
+      if (!r.ok) return [];
+      const body = await r.json();
+      return Array.isArray(body.sessions) ? body.sessions : [];
+    } catch { return []; }
   }
-  // The hub runs these four (hub/features/terminal.ts); the webview calls its routes, not the shell.
+  // The hub runs these (hub/features/terminal.ts); the webview calls its routes, not the shell.
   async function _terminal(path, init) {
     const r = await window.authedFetch(path, init);
     if (!r.ok) throw new Error(await parseErrorBody(r));
@@ -90,6 +81,59 @@
       return await (await _terminal(`${_agentPath(agent)}/tap${q}`)).text();
     } catch (e) { console.warn('[pty] tap-read failed for', agent, e); return ''; }
   }
+  // The composer's slash mode: one write, no Take control (POST /terminal/<agent>/input).
+  async function ptyInput(agent, text) {
+    await _terminal(`${_agentPath(agent)}/input`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+  }
+
+  // ws(s)://<hub>/terminal/<agent>?token=...&cols=..&rows=.. (a browser WebSocket cannot send a header).
+  function terminalWsUrl(base, token, agent, cols, rows) {
+    const q = new URLSearchParams();
+    if (token) q.set('token', token);
+    if (cols > 0) q.set('cols', String(cols));
+    if (rows > 0) q.set('rows', String(rows));
+    return `${String(base).replace(/^http/, 'ws')}${_agentPath(agent)}?${q}`;
+  }
+
+  // One viewer of one agent's terminal (hub-first-browser, design decision 4). Read-only until take().
+  //   onOutput(Uint8Array)  raw PTY bytes     onControl('you' | 'other' | 'none')   onReadOnly()  input was dropped
+  //   onClose(event)        the socket ended
+  // opts.base / opts.token default to the page's hub URL and token; opts.WebSocketImpl is for tests.
+  function openTerminalSocket(agent, opts = {}) {
+    const base = opts.base ?? (typeof BUS !== 'undefined' ? BUS : '');
+    const token = opts.token ?? (typeof AUTH_TOKEN !== 'undefined' ? AUTH_TOKEN : '');
+    const WS = opts.WebSocketImpl || window.WebSocket;
+    const ws = new WS(terminalWsUrl(base, token, agent, opts.cols, opts.rows));
+    ws.binaryType = 'arraybuffer';
+    const view = { controller: false };
+    const send = (m) => { if (ws.readyState === 1) ws.send(JSON.stringify(m)); };
+    ws.onmessage = (e) => {
+      if (typeof e.data !== 'string') { opts.onOutput?.(new Uint8Array(e.data)); return; }
+      let m;
+      try { m = JSON.parse(e.data); } catch { return; }
+      if (m.t === 'control') {
+        view.controller = m.by === 'you';
+        opts.onControl?.(m.by);
+      } else if (m.t === 'error' && m.e === 'read-only') {
+        opts.onReadOnly?.();
+      }
+    };
+    ws.onclose = (e) => { view.controller = false; opts.onClose?.(e); };
+    ws.onerror = () => {};
+    return {
+      get isControl() { return view.controller; },
+      take: (cols, rows) => send({ t: 'take', cols, rows }),
+      handBack: () => send({ t: 'hand_back' }),
+      input: (text) => send({ t: 'in', d: strToB64(text) }),
+      resize: (cols, rows) => send({ t: 'resize', cols, rows }),
+      close: () => { try { ws.close(); } catch {} },
+    };
+  }
+
   const encoder = new TextEncoder();
   function strToB64(str) {
     const bytes = encoder.encode(str);
@@ -106,8 +150,9 @@
 
   window.__CUBILOT_TERM__ = window.__CUBILOT_TERM__ || {};
   window.__CUBILOT_TERM__.pty = {
-    ptySpawn, listRoles, listModels, ptyWrite, ptyResize, ptyKill, ptyList, ptyEventName,
-    ptyCaptureTurn, ptyReadCapture, ptyHealGeometry, ptyTapRead,
+    ptySpawn, listRoles, listModels, ptyKill, ptyList,
+    ptyCaptureTurn, ptyReadCapture, ptyHealGeometry, ptyTapRead, ptyInput,
+    terminalWsUrl, openTerminalSocket,
     strToB64, b64ToBytes,
   };
 })();
