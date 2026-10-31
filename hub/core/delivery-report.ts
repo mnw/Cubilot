@@ -19,12 +19,24 @@ type TicketRow = { id: string; title: string; status: string; blast_radius: "low
 
 export type TicketFail = { handoff_id: string; findings: { severity: string; text: string }[]; fix_commit: string | null };
 
-/** One check of a delivery (H3): a numbered line of a ticket's acceptance criteria. check_id is `<ticket_id>#<n>`; a ticket with no numbered line has one check, #1, with the whole text. */
+/** One check of a delivery (H3): a numbered line of a ticket's acceptance criteria (only the lines of the "Acceptance criteria" block when that heading exists). check_id is `<ticket_id>#<n>`; a ticket with no numbered line has one check, #1, with the whole text. */
 export type CheckRow = { check_id: string; ticket_id: string; text: string };
 
 export function checkRows(ticketId: string, criteria: string): CheckRow[] {
   const rows: CheckRow[] = [];
-  for (const m of criteria.matchAll(/^\s*(\d+)\.\s+(.*)$/gm)) rows.push({ check_id: `${ticketId}#${m[1]}`, ticket_id: ticketId, text: m[2].trim() });
+  const add = (n: string, text: string) => rows.push({ check_id: `${ticketId}#${n}`, ticket_id: ticketId, text: text.trim() });
+  const lines = criteria.split("\n");
+  const start = lines.findIndex((l) => /^\s*acceptance criteria\s*:?\s*$/i.test(l));
+  if (start >= 0) {
+    // Headed form: only the numbered lines up to the next heading line (a line that ends with ":" and has no number).
+    for (const l of lines.slice(start + 1)) {
+      const m = /^\s*(\d+)\.\s+(.*)$/.exec(l);
+      if (m) add(m[1], m[2]);
+      else if (/:\s*$/.test(l) || /^\s*(verify|out of scope)\s*:/i.test(l)) break;
+    }
+  } else {
+    for (const m of criteria.matchAll(/^\s*(\d+)\.\s+(.*)$/gm)) add(m[1], m[2]);
+  }
   return rows.length ? rows : [{ check_id: `${ticketId}#1`, ticket_id: ticketId, text: criteria.trim() }];
 }
 
