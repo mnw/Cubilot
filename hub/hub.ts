@@ -37,6 +37,8 @@ import { createSearchFeature } from "./features/search";
 import { createSettingsFeature } from "./features/settings";
 import { createTranscriptFeature } from "./features/transcript";
 import { createChatFeature } from "./features/chat";
+import { createTerminalFeature, defaultCapturesRoot } from "./features/terminal";
+import { createTmux, tmuxFromEnv } from "./core/tmux";
 import { createStreamHandlers } from "./features/streams";
 import {
   openLedger as openLedgerCore,
@@ -306,6 +308,10 @@ const FEATURES: readonly HubFeature[] = [
   }),
   createRosterFeature({ agents, removeAgent, readNutshell }),
   createSettingsFeature({ agents, defaultRoom: DEFAULT_ROOM }),
+  createTerminalFeature({
+    tmux: (() => { try { return createTmux(tmuxFromEnv()); } catch { return null; } })(),
+    capturesRoot: defaultCapturesRoot(),
+  }),
   createSearchFeature({ db: ledgerDb, agents, humanName: HUMAN_NAME }),
   ...(ledgerDb
     ? [createTranscriptFeature({ db: ledgerDb, chatLog, roomSummariser, onRoleLimitsChanged: (room, cap) => { for (const k of KINDS) k.onRoomLimitsChanged?.(room, cap); } })]

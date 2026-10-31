@@ -184,7 +184,7 @@
 
   const {
     ptySpawn, listRoles, listModels, ptyWrite, ptyResize, ptyKill, ptyList, ptyEventName,
-    strToB64, b64ToBytes,
+    ptyHealGeometry, strToB64, b64ToBytes,
   } = window.__CUBILOT_TERM__.pty;
 
   const currentXtermTheme = window.__CUBILOT_TERM__.xtermThemes.current;
@@ -1138,7 +1138,7 @@
   async function _connectLiveTab(agent) {
     setTabState(agent, 'live');
     await attachOutputListener(agent);
-    try { await invoke('pty_heal_geometry', { agent }); } catch {}
+    try { await ptyHealGeometry(agent); } catch {}
     const tt = tabs.get(agent);
     if (tt) sendResize(tt);
   }

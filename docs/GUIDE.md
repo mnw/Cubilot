@@ -97,7 +97,7 @@ Two dispatch paths based on the command type:
 - **Panel commands** (`/context`, `/usage`, `/cost`, `/memory`, `/agents`, `/skills`, `/help`, `/mcp`, `/model`, `/status`, `/permissions`, `/config`, `/release-notes`, `/doctor`) go through a deterministic capture orchestrator that forces tmux geometry to 240×100 (avoiding narrow-width self-corruption), tees the panel render to a per-turn log, and posts the cleaned content back to chat under the agent's avatar.
 - **Everything else** (custom `.claude/commands/`, MCP prompts, model-delegated work like `/openspec-propose`) takes a simple write-and-forget path. ` - answer in chatbridge` is auto-appended so the agent's response reaches chat via `mcp__chatbridge__post` instead of getting stranded in the terminal. The directive is skipped if you already wrote it in your args.
 
-Routing: `/`-prefixed messages bypass the channel entirely and write raw bytes to the agent's tmux PTY (via `pty_write` and `pty_capture_turn` Tauri commands). They do **not** become MCP `notifications/claude/channel` messages.
+Routing: `/`-prefixed messages bypass the channel entirely and write raw bytes to the agent's tmux PTY (via the `pty_write` Tauri command and the hub route `POST /terminal/<agent>/capture-turn`). They do **not** become MCP `notifications/claude/channel` messages.
 
 Guardrails:
 

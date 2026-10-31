@@ -43,7 +43,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Claude Code 2.1.296 is the minimum.** Never force tengu_plugin_hooks_modules. docs/rules/bridge.md
 - **Verified on Claude Code 2.1.296 and pi 0.87.1.** Rerun spike evidence on change. `usage.cache_read_input_tokens` checked on 2.1.311. docs/rules/bridge.md
 - **Claude hooks pass via --settings <path>.** Never write ~/.claude/settings.json. docs/rules/bridge.md
-- **pty_capture_turn is the single TUI capture primitive.** docs/rules/terminal.md
+- **captureTurn is the single TUI capture primitive.** It lives in `hub/core/tmux.ts`; the UI calls `POST /terminal/<agent>/capture-turn`. docs/rules/terminal.md
 - **Dev rebuilds only via ./scripts/install.sh.** Never pkill + cp. docs/rules/core.md
 - **Human is a permanent roster member.** docs/rules/core.md
 - **Never skip the ad-hoc re-sign in build-sidecars.sh.** docs/rules/core.md
