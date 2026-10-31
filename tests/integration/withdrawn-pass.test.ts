@@ -2,7 +2,7 @@
 // validator_passes, delivery report). The hub sets an interrupt's ticket_id from the launch record at send time.
 // In-process hub kinds, like tests/integration/high-ticket-two-validators.test.ts.
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { giveProject, giveProjectHttp, projectRepo } from "../helpers/repo";
 import { spawnHub, type HubHandle } from "../helpers/hub";
@@ -15,7 +15,9 @@ import { createDeliveryCheckKind } from "../../hub/kinds/delivery-check";
 import { createInterruptKind } from "../../hub/kinds/interrupt";
 import { createPermissionKind } from "../../hub/kinds/permission";
 import { createRequestKind } from "../../hub/kinds/request";
-import { createStageRuntime } from "../../hub/kinds/stage";
+import { trackedRuntime, disposeRuntimes } from "../helpers/stage-runtimes";
+
+afterEach(disposeRuntimes);
 import { createTicketKind } from "../../hub/kinds/ticket";
 import type { Entry, HubCapabilities, Scope } from "../../hub/core/types";
 import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
@@ -41,7 +43,7 @@ function makeEnv() {
   interrupts.migrate(db);
   createRequestKind(db).migrate(db);
   createDeliveryCheckKind(db).migrate(db);
-  const rt = createStageRuntime(db, { ackMs: 60_000, launchRecord });
+  const rt = trackedRuntime(db, { ackMs: 60_000, launchRecord });
   rt.module.migrate(db);
   giveProject(db, "r1");
   db.run("INSERT OR REPLACE INTO ticket_room_lead (room, agent, updated_at_ms) VALUES ('r1', 'lead-1', 1)");

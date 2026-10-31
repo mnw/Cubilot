@@ -1,7 +1,7 @@
 // The Approve rule (plan-approval, work-tickets): the approved scope, the spec PASS gate and the lead's queue.
 // In-process: route handlers and the stage runtime run against an in-memory ledger with a fake HubCapabilities.
 
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { giveProject } from "../helpers/repo";
 import { migrateLedger } from "../../hub/core/ledger";
@@ -9,7 +9,10 @@ import { insertEvent } from "../../hub/core/events";
 import { createPermissionKind } from "../../hub/kinds/permission";
 import { createTicketKind } from "../../hub/kinds/ticket";
 import { approveRequest, createRequestKind } from "../../hub/kinds/request";
-import { createStageRuntime, waitingForApproval } from "../../hub/kinds/stage";
+import { waitingForApproval } from "../../hub/kinds/stage";
+import { trackedRuntime, disposeRuntimes } from "../helpers/stage-runtimes";
+
+afterEach(disposeRuntimes);
 import type { Entry, HubCapabilities, KindModule, Scope } from "../../hub/core/types";
 
 const HUMAN = "human";
@@ -17,7 +20,7 @@ const HUMAN = "human";
 function makeEnv() {
   const db = new Database(":memory:");
   migrateLedger(db);
-  const rt = createStageRuntime(db, { ackMs: 60_000 });
+  const rt = trackedRuntime(db, { ackMs: 60_000 });
   const kinds: KindModule[] = [createPermissionKind(db), createTicketKind(db), createRequestKind(db)];
   for (const k of kinds) k.migrate(db);
   rt.module.migrate(db);
