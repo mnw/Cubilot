@@ -1,6 +1,6 @@
 // hub/core/skills.ts: the skills.rs test cases (list, store, mode, prepare) on a temp factory folder, never the real app data.
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, symlinkSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, mkdirSync, symlinkSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { takeLock } from "../../hub/features/factory-skills";
@@ -276,3 +276,23 @@ describe("prepare", () => {
     await expect(applyIn(dest, v, "ag", null, null)).rejects.toThrow("no role");
   });
 });
+
+describe("role from a tmux pill is not trusted", () => {
+  test("a role that is a path is refused before any read or write, and nothing outside the factory is touched", async () => {
+    const { root, dest, v } = staged();
+    const outside = join(root, "owned");
+    mkdirSync(join(outside, "skills", "x"), { recursive: true });
+    writeFileSync(join(outside, "skills", "x", "SKILL.md"), "x");
+    mkdirSync(join(root, "factory-sibling"), { recursive: true });
+    const before = readdirSyncSorted(join(dest, "agents"));
+    for (const role of ["../../owned", `../${"owned"}`, "/tmp/owned", "shared", "Worker", "a/b", "missing"]) {
+      expect(() => listIn(dest, v, "ag", role, null), role).toThrow(SkillsError);
+      expect(() => setOffIn(dest, v, "ag", role, []), role).toThrow(SkillsError);
+      await expect(applyIn(dest, v, "ag", role, null), role).rejects.toBeInstanceOf(SkillsError);
+    }
+    expect(readdirSyncSorted(join(dest, "agents"))).toEqual(before);
+    expect(existsSync(rec(dest, "ag", ".skills-off"))).toBe(false);
+    expect(readdirSyncSorted(outside)).toEqual(["skills"]);
+  });
+});
+const readdirSyncSorted = (p: string) => readdirSync(p).sort();

@@ -199,12 +199,26 @@ describe("skill switches (C6c)", () => {
         if (cmd === "agent_skills") return structuredClone(current);
         return null;
       },
+      // The hub routes, answered by the same handler under the old command names (the cases below name the route by it).
+      authedFetch: async (url: string, init: any = {}) => {
+        const method = init.method ?? "GET";
+        const cmd = url.endsWith("/skills/apply") ? "agent_skills_apply" : method === "PUT" ? "agent_skills_set" : "agent_skills";
+        const agent = decodeURIComponent(url.split("/")[2]);
+        const body = init.body ? JSON.parse(init.body) : {};
+        try {
+          const data = await ctx.invoke(cmd, cmd === "agent_skills_set" ? { agent, off: body.off } : { agent });
+          return { ok: true, json: async () => data ?? { ok: true } };
+        } catch (e) {
+          return { ok: false, text: async () => String(e) };
+        }
+      },
+      parseErrorBody: async (r: any) => r.text(),
     });
     tab.tabEl.querySelector = ((orig) => (q: string) => (q === ".reload-btn" ? (tab.btn ??= new El("button", doc)) : q === ".reload-msg" ? (tab.msg ??= new El("div", doc)) : orig(q)))(tab.tabEl.querySelector);
     tab.tabEl.dataset = {};
     vm.runInContext(
       ["errText", "skillName", "skillChanged", "skillsOf", "changesOf"].map((n) => (term.includes(`const ${n} = `) ? sliceConst(n) : sliceFn(n))).join("") +
-      sliceFn("skillNote") + sliceFn("refreshSkills") + sliceFn("syncChangeState") + sliceFn("changeSkills") + sliceFn("saveSkills") + sliceFn("skillBox") +
+      sliceFn("hubSkills") + sliceFn("skillNote") + sliceFn("refreshSkills") + sliceFn("syncChangeState") + sliceFn("changeSkills") + sliceFn("saveSkills") + sliceFn("skillBox") +
       sliceFn("skillsStrip") + sliceFn("fillSkills") + sliceFn("renderRowDetails") + sliceFn("setReloadState") +
       "\nthis.refreshSkills = refreshSkills; this.renderRowDetails = renderRowDetails; this.changeSkills = changeSkills;",
       ctx,

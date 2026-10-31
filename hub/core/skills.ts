@@ -65,6 +65,12 @@ function skillFolders(versionDir: string, group: string): string[] {
   }
 }
 
+// A role names a staged folder: a plain name, never a path. The role comes from a tmux pill, so it is not trusted.
+const ROLE_RE = /^[a-z][a-z0-9-]*$/;
+export function assertRole(versionDir: string, role: string): void {
+  if (!ROLE_RE.test(role) || role === "shared" || !isDir(join(versionDir, role))) throw new SkillsError(`invalid role: ${role}`, 409);
+}
+
 // Every skill id of the version: `<role>/<folder>` and `shared/<folder>`, sorted.
 export function inventory(versionDir: string, role: string): string[] {
   return [...skillFolders(versionDir, role).map((f) => `${role}/${f}`), ...skillFolders(versionDir, "shared").map((f) => `shared/${f}`)].sort();
@@ -141,6 +147,7 @@ export function modeFromCommand(cmd: string, dest: string, agent: string): "view
 // `.skills-applied`: loaded, not_loaded (in the applied inventory and off there) or new (not in the inventory).
 export function listIn(dest: string, versionDir: string, agent: string, role: string | null, command: string | null): AgentSkills {
   if (!role) return { role: null, mode: "none", relaunch_needed: false, groups: [] };
+  assertRole(versionDir, role);
   const mode = command === null ? "legacy" : modeFromCommand(command, dest, agent);
   // An id of an older role (a name used again with another role) is ignored here, as launch_in ignores it.
   const inv = inventory(versionDir, role);
@@ -163,6 +170,7 @@ export function listIn(dest: string, versionDir: string, agent: string, role: st
 // ---- Store ----
 // Unknown id: error, nothing written. Empty list: the file goes. A failed write changes nothing.
 export function setOffIn(dest: string, versionDir: string, agent: string, role: string, off: string[]): void {
+  assertRole(versionDir, role);
   const inv = inventory(versionDir, role);
   const bad = off.find((id) => !inv.includes(id));
   if (bad !== undefined) throw new SkillsError(`unknown skill: ${bad}`, 400);
@@ -257,6 +265,7 @@ function cleanupViews(dest: string, agent: string): void {
 // The Reload click: builds the next view from the stored choice and writes `.skills-prepared`. Publishes nothing.
 export async function applyIn(dest: string, versionDir: string, agent: string, role: string | null, command: string | null, waitMs?: number): Promise<void> {
   if (!role) throw new SkillsError("the agent has no role", 409);
+  assertRole(versionDir, role);
   const state = listIn(dest, versionDir, agent, role, command);
   if (state.relaunch_needed) throw new SkillsError(`Relaunch ${agent} to apply: it was started without a skill view`, 409);
   let release: () => void;
