@@ -43,3 +43,40 @@ The `get_hub_url` Tauri command SHALL return a JSON object of shape `{ url: stri
 - **WHEN** the desktop window invokes `get_hub_url`
 - **THEN** the returned value has `url` matching `http://127.0.0.1:<port>`
 - **AND** `token` differs from the contents of `hub.token`
+
+## ADDED Requirements
+
+### Requirement: The human token is in one Keychain item for the Terminal command
+
+At every app start the shell SHALL store the human token in one macOS Keychain item (service `Cubilot`, account `human-token`) with an access object that has no trusted application (`SecAccessCreate` with an empty trusted list), so macOS asks the login password at each read, by each app, and not Touch ID, replacing the item of the previous launch. No file and no environment variable holds the token.
+
+#### Scenario: Terminal command with the human token
+
+- **GIVEN** the app is running and has stored the item
+- **WHEN** the human runs `cubilot hub GET /agents` and enters the login password
+- **THEN** the command prints `HTTP 200` and the response body
+- **AND** neither the output nor an error line holds the human token
+
+#### Scenario: No item
+
+- **GIVEN** the Keychain has no item `Cubilot` / `human-token`
+- **WHEN** the human runs `cubilot hub GET /agents`
+- **THEN** the command exits not 0 with one line that says there is no Keychain item
+- **AND** a refused prompt or a hub that does not answer also gives one cause line and exit not 0
+
+#### Scenario: Password prompt refused
+
+- **GIVEN** the Keychain has the item `Cubilot` / `human-token`
+- **WHEN** the human runs `cubilot hub GET /agents` and refuses the login password prompt
+- **THEN** the command gets no token
+- **AND** it exits not 0 with one line that says the prompt was refused
+
+### Requirement: The Terminal command reads the item with a password prompt
+
+`cubilot hub <METHOD> <path> [json-body]` SHALL read the Keychain item, which makes macOS ask the login password, send the request to the URL in `hub.url` with the token as bearer, print the status and body, and never print the token.
+
+#### Scenario: Command reads the item after the prompt
+
+- **GIVEN** the app has stored the item
+- **WHEN** the human runs `cubilot hub GET /agents` and enters the login password
+- **THEN** the command reads the item and sends the request with the bearer token

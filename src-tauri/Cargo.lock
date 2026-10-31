@@ -480,6 +480,8 @@ name = "cubilot"
 version = "0.12.0"
 dependencies = [
  "base64 0.22.1",
+ "core-foundation",
+ "core-foundation-sys",
  "dirs 5.0.1",
  "libc",
  "serde",
