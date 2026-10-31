@@ -32,6 +32,7 @@ export function buildKinds(db: Database | null, launchRecord?: LaunchRecord): re
   const stage = createStageRuntime(db, {
     launchRecord,
     ackMs: Number(process.env.CUBILOT_LAUNCH_ACK_MS) || undefined,
+    sweepMs: Number(process.env.CUBILOT_STAGE_SWEEP_MS) || undefined,
     // A failed stage cancel or sweep leaves a row for the human (cancel-trace).
     traceFailure: (input, cap) => cancelTrace.record(input, cap),
     // The context pack is built before each launch is queued (context-pack 3.5).
