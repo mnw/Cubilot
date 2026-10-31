@@ -11,7 +11,7 @@ import "../helpers/repo"; // sets CUBILOT_DATA_DIR to a temp folder
 import { migrateLedger, setRoomSettings } from "../../hub/core/ledger";
 import { insertEvent } from "../../hub/core/events";
 import { buildKinds } from "../../hub/kinds";
-import { createStageRuntime } from "../../hub/kinds/stage";
+import { disposeRuntimes, trackedRuntime } from "../helpers/stage-runtimes";
 import { removesHumanGate } from "../../hub/core/retro";
 import type { Entry, HubCapabilities, Scope } from "../../hub/core/types";
 
@@ -33,6 +33,7 @@ beforeEach(() => {
   process.env.CUBILOT_LEDGER_DB = join(dir, "ledger.db");
 });
 afterEach(() => {
+  disposeRuntimes();
   if (savedDb === undefined) delete process.env.CUBILOT_LEDGER_DB;
   else process.env.CUBILOT_LEDGER_DB = savedDb;
   rmSync(dir, { recursive: true, force: true });
@@ -52,7 +53,7 @@ function env(done: string[] = []) {
   const db = new Database(":memory:");
   migrateLedger(db);
   for (const k of buildKinds(db)) k.migrate?.(db);
-  const rt = createStageRuntime(db, { ackMs: 60_000 });
+  const rt = trackedRuntime(db, { ackMs: 60_000 });
   rt.module.migrate(db);
   setRoomSettings(db, "A", { project_folder: project });
   const cap = { db, sse: { emit: (_e: Entry, _s: Scope) => {} }, briefing: { refresh: () => {} } } as unknown as HubCapabilities;

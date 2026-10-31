@@ -3,10 +3,11 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { giveProject } from "../helpers/repo";
+import { removeTree } from "../helpers/stage-runtimes";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createTicketKind } from "../../hub/kinds/ticket";
 import { createStageRuntime, type LaunchInput } from "../../hub/kinds/stage";
@@ -27,7 +28,7 @@ beforeEach(() => {
 afterEach(() => {
   if (before === undefined) delete process.env.CUBILOT_DATA_DIR;
   else process.env.CUBILOT_DATA_DIR = before;
-  rmSync(dir, { recursive: true, force: true });
+  removeTree(dir);
 });
 const config = (text: string) => writeFileSync(join(dir, "config.yml"), text);
 
