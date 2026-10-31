@@ -55,7 +55,6 @@ describe("one live stage per ticket", () => {
   const launches: any[] = [];
   let stream: ReturnType<typeof openSSE>;
   const extraHubs: HubHandle[] = [];
-  let draftWithExpiringHandoff = "";
 
   const watch = (h: HubHandle, into: any[]) => {
     const s = openSSE(h, "/launches/stream");
@@ -73,9 +72,6 @@ describe("one live stage per ticket", () => {
     expect(put.status).toBe(200);
     stream = watch(hub, launches);
     await sleep(200);
-    // an unspent expiring handoff: recorded on a draft ticket, expired before the ticket is queued (the sweep runs every 5 s)
-    draftWithExpiringHandoff = await mk({ status: "draft" });
-    expect((await roleHandoff(draftWithExpiringHandoff, "tester", { ttl_seconds: 1 })).status).toBe(201);
   });
   afterAll(async () => {
     stream.close();
@@ -321,8 +317,9 @@ describe("one live stage per ticket", () => {
     await finish(tester, await run(tester.id));
     await settle();
     // an unspent expired handoff: recorded on a draft ticket, expired before the ticket is queued
-    // (recorded in beforeAll, so the 5 s sweep has run while the other tests ran)
-    const d = draftWithExpiringHandoff;
+    const d = await mk({ status: "draft" });
+    expect((await roleHandoff(d, "tester", { ttl_seconds: 1 })).status).toBe(201);
+    // the sweep runs every 5 s: wait for the real expiry, then prove it
     const status = await until("the handoff expires", async () => {
       const all = (await getJson(hub, `/handoffs?status=expired`)).json as Array<{ status: string; context: { ticket_id: string } }>;
       return all.find((x) => x.context?.ticket_id === d)?.status;
