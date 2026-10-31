@@ -1,5 +1,5 @@
 // stage-sessions 4.3: the first message of a stage session holds the ticket part only; a retry adds one line.
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { giveProject } from "../helpers/repo";
 import { migrateLedger } from "../../hub/core/ledger";
@@ -8,11 +8,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_TEMPLATE, loadTemplate, renderFirstMessage, renderSpecFirstMessage } from "../../hub/core/first-message";
 import { createTicketKind } from "../../hub/kinds/ticket";
-import { createStageRuntime } from "../../hub/kinds/stage";
+import { trackedRuntime, disposeRuntimes } from "../helpers/stage-runtimes";
 import type { LaunchRequest } from "../../hub/core/launch-queue";
 import type { Entry, HubCapabilities, Scope } from "../../hub/core/types";
 
 const ticket = { id: "t_1", title: "Fix the thing", acceptance_criteria: "It works.\nIt is tested.", blast_radius: "high", request_id: "r-1" };
+
+afterEach(disposeRuntimes);
 
 describe("renderFirstMessage", () => {
   test("agent notes for each role", () => {
@@ -127,7 +129,7 @@ describe("the launch request carries the first message", () => {
     const db = new Database(":memory:");
     migrateLedger(db);
     createTicketKind(db).migrate(db);
-    const rt = createStageRuntime(db, { ackMs: 60_000 });
+    const rt = trackedRuntime(db, { ackMs: 60_000 });
     rt.module.migrate(db);
     giveProject(db, "r1");
     const cap = { db, sse: { emit: (_e: Entry, _s: Scope) => {} }, briefing: { refresh: () => {} } } as unknown as HubCapabilities;
@@ -180,7 +182,7 @@ describe("the handoff that started the stage (gap A)", () => {
     const db = new Database(":memory:");
     migrateLedger(db);
     createTicketKind(db).migrate(db);
-    const rt = createStageRuntime(db, { ackMs: 60_000 });
+    const rt = trackedRuntime(db, { ackMs: 60_000 });
     rt.module.migrate(db);
     giveProject(db, "r1");
     const cap = { db, sse: { emit: (_e: Entry, _s: Scope) => {} }, briefing: { refresh: () => {} } } as unknown as HubCapabilities;

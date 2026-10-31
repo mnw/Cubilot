@@ -1,11 +1,11 @@
 // Turn end, reminder and close of a stage session (stage-sessions 5.2, brief test 5).
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { giveProject } from "../helpers/repo";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createTicketKind } from "../../hub/kinds/ticket";
-import { createStageRuntime } from "../../hub/kinds/stage";
+import { trackedRuntime, disposeRuntimes } from "../helpers/stage-runtimes";
 import type { LaunchRequest } from "../../hub/core/launch-queue";
 import type { Entry, HubCapabilities, RouteDef, Scope } from "../../hub/core/types";
 
@@ -13,7 +13,7 @@ function makeEnv() {
   const db = new Database(":memory:");
   migrateLedger(db);
   createTicketKind(db).migrate(db);
-  const rt = createStageRuntime(db, { ackMs: 60_000 });
+  const rt = trackedRuntime(db, { ackMs: 60_000 });
   rt.module.migrate(db);
   giveProject(db, "r1");
   const emitted: Array<{ e: Entry; s: Scope }> = [];
@@ -45,6 +45,8 @@ function makeEnv() {
 
 // The turn-end route of a stage: (stage id, session) -> response.
 const route = (e: ReturnType<typeof makeEnv>) => (stageId: string, agent: string) => e.turnEnd(stageId, agent);
+
+afterEach(disposeRuntimes);
 
 describe("turn end", () => {
   test("the first end without a result sends one reminder to that session, the stage stays running; a later one sends none", async () => {

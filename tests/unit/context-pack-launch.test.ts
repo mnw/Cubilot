@@ -1,5 +1,5 @@
 // context-pack 3.5: the pack is built inside enqueueLaunch, after stage.launching and before the first message and queue.push.
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { existsSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -8,7 +8,7 @@ import { giveProject } from "../helpers/repo";
 import { repoWithBranch, stubGraphify, withEnv, writeGraph } from "../helpers/pack-fixture";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createTicketKind } from "../../hub/kinds/ticket";
-import { createStageRuntime } from "../../hub/kinds/stage";
+import { trackedRuntime, disposeRuntimes } from "../helpers/stage-runtimes";
 import { buildPack, type Pack, type PackInput } from "../../hub/core/context-pack";
 import type { LaunchRequest } from "../../hub/core/launch-queue";
 import type { Entry, HubCapabilities, Scope } from "../../hub/core/types";
@@ -21,7 +21,7 @@ function makeEnv(buildPackFn: (i: PackInput) => Promise<Pack>) {
   const db = new Database(":memory:");
   migrateLedger(db);
   createTicketKind(db).migrate(db);
-  const rt = createStageRuntime(db, { ackMs: 60_000, buildPack: buildPackFn });
+  const rt = trackedRuntime(db, { ackMs: 60_000, buildPack: buildPackFn });
   rt.module.migrate(db);
   const cap = { db, sse: { emit: (_e: Entry, _s: Scope) => {} }, briefing: { refresh: () => {} } } as unknown as HubCapabilities;
   const sent: LaunchRequest[] = [];
@@ -49,6 +49,8 @@ function deferred() {
   const gate = new Promise<Pack>((r) => (release = r));
   return { calls, release, fn: async (input: PackInput) => { calls.push({ input, worktreeExisted: existsSync(input.worktree), status: null }); return gate; } };
 }
+
+afterEach(disposeRuntimes);
 
 describe("pack at the launch seam (3.5)", () => {
   test("ordering: worktree exists and the stage is launching before the first pack command; no push until the pack resolves; the message holds the pack", async () => {
