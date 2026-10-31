@@ -1,6 +1,6 @@
 // Skill switch routes (Part 12 group 4): GET/PUT /agents/<name>/skills and POST /agents/<name>/skills/apply on a real
 // hub. The factory tree and tmux are fixtures in a temp folder, never the real app data.
-// Group 11 (caller: "human") is not on this branch: the agent-token 403 test comes with it.
+// The two write routes are human-only (group 11): the agent token gets 403 and nothing is written.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
@@ -15,7 +15,7 @@ const v = join(factory, "v1");
 const fakeTmux = join(fx, "tmux");
 let hub: HubHandle;
 
-const call = (method: string, path: string, body?: unknown, token = hub.token) =>
+const call = (method: string, path: string, body?: unknown, token = hub.humanToken) =>
   fetch(`${hub.url}${path}`, { method, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
 const offFile = (agent: string) => join(factory, "agents", `${agentKey(agent)}.skills-off`);
 
@@ -103,6 +103,18 @@ describe("skill switch routes", () => {
     const plain = await call("POST", "/agents/w2/skills/apply");
     expect(plain.status).toBe(409);
     expect((await plain.json()).error).toMatch(/^Relaunch w2 to apply/);
+  });
+
+  test("the agent token gets 403 on PUT and apply and writes nothing; the human token works", async () => {
+    const offBefore = existsSync(offFile("w1")) ? readFileSync(offFile("w1"), "utf8") : null;
+    const put = await call("PUT", "/agents/w1/skills", { off: ["worker/a", "worker/b"] }, hub.token);
+    expect(put.status).toBe(403);
+    expect(existsSync(offFile("w1")) ? readFileSync(offFile("w1"), "utf8") : null).toBe(offBefore);
+    const before = existsSync(join(factory, "agents", `${agentKey("w1")}.skills-prepared`));
+    expect((await call("POST", "/agents/w1/skills/apply", undefined, hub.token)).status).toBe(403);
+    expect(existsSync(join(factory, "agents", `${agentKey("w1")}.skills-prepared`))).toBe(before);
+    expect((await call("GET", "/agents/w1/skills", undefined, hub.token)).status).toBe(200);
+    expect((await call("PUT", "/agents/w1/skills", { off: [] }, hub.humanToken)).status).toBe(200);
   });
 
   test("a request without a token gets 401 on each route", async () => {

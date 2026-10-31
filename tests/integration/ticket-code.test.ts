@@ -33,7 +33,7 @@ describe("GET /tickets/<id>/code", () => {
     commit("base");
     const res = await fetch(`${hub.url}/rooms/rc/settings`, {
       method: "PUT",
-      headers: { Authorization: `Bearer ${hub.token}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${hub.humanToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({ project_folder: repo }),
     });
     expect(res.ok).toBe(true);

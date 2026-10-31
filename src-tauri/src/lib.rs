@@ -948,17 +948,38 @@ fn pick_free_port() -> Result<u16, String> {
     Ok(port)
 }
 
+// 32 random bytes from the OS, URL-safe base64 without padding: 43 characters.
 fn mint_token() -> Result<String, String> {
+    use base64::Engine as _;
     let mut buf = [0u8; TOKEN_BYTES];
     File::open("/dev/urandom")
         .map_err(|e| format!("open /dev/urandom: {e}"))?
         .read_exact(&mut buf)
         .map_err(|e| format!("read urandom: {e}"))?;
-    let mut out = String::with_capacity(TOKEN_BYTES * 2);
-    for b in &buf {
-        out.push_str(&format!("{:02x}", b));
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf))
+}
+
+// The two credentials of one app start. The agent token goes to hub.token and to the hub env (the bridge and the mod read
+// it). The human token goes to the hub on stdin and to the window through get_hub_url; no file and no env holds it.
+struct HubTokens {
+    agent: String,
+    human: String,
+}
+
+fn mint_hub_tokens() -> Result<HubTokens, String> {
+    let agent = mint_token()?;
+    let human = mint_token()?;
+    if agent == human {
+        return Err("minted two equal tokens".to_string());
     }
-    Ok(out)
+    Ok(HubTokens { agent, human })
+}
+
+// First line of the hub's stdin. The hub reads one line, within 5 s.
+fn give_human_token(child: &mut CommandChild, human: &str) -> Result<(), String> {
+    child
+        .write(format!("{human}\n").as_bytes())
+        .map_err(|e| format!("write the human token to the hub stdin: {e}"))
 }
 
 fn chmod_0600(path: &Path) -> Result<(), String> {
@@ -1126,7 +1147,7 @@ fn reload_settings(
 
     let port = pick_free_port()?;
     let url = format!("http://127.0.0.1:{port}");
-    let token = mint_token()?;
+    let tokens = mint_hub_tokens()?;
 
     // Kill first so two hub-bin processes never race for the same port.
     {
@@ -1139,7 +1160,7 @@ fn reload_settings(
     if let Err(e) = write_discovery_file(&url) {
         return Err(format!("write discovery file: {e}"));
     }
-    if let Err(e) = write_token_file(&token) {
+    if let Err(e) = write_token_file(&tokens.agent) {
         return Err(format!("write token file: {e}"));
     }
 
@@ -1150,7 +1171,7 @@ fn reload_settings(
         .env("PORT", port.to_string())
         .env("CUBILOT_MODE", "hub")
         .env("CUBILOT_DATA_DIR", app_data_dir().to_string_lossy().to_string())
-        .env("CUBILOT_TOKEN", &token)
+        .env("CUBILOT_TOKEN", &tokens.agent)
         .env("CUBILOT_ATTACHMENTS_DIR", attachments_dir.to_string_lossy().to_string())
         .env("CUBILOT_LEDGER_DB", ledger_path.to_string_lossy().to_string())
         .env("CUBILOT_HUMAN_NAME", &human_name)
@@ -1164,11 +1185,12 @@ fn reload_settings(
     }
     cmd = apply_summariser_env(cmd);
     cmd = apply_tmux_env(cmd);
-    let (rx, child) = cmd.spawn().map_err(|e| format!("spawn cubilot-bin: {e}"))?;
+    let (rx, mut child) = cmd.spawn().map_err(|e| format!("spawn cubilot-bin: {e}"))?;
+    give_human_token(&mut child, &tokens.human)?;
 
     let new_info = HubInfo {
         url: url.clone(),
-        token: token.clone(),
+        token: tokens.human.clone(),
     };
     {
         *state.child.lock().unwrap_or_else(|e| e.into_inner()) = Some(child);
@@ -1272,13 +1294,13 @@ pub fn run() {
 
             let port = pick_free_port()?;
             let url = format!("http://127.0.0.1:{port}");
-            let token = mint_token()?;
+            let tokens = mint_hub_tokens()?;
             println!("[setup] hub port: {port}");
 
             if let Err(e) = write_discovery_file(&url) {
                 eprintln!("[setup] discovery file write failed: {e}");
             }
-            if let Err(e) = write_token_file(&token) {
+            if let Err(e) = write_token_file(&tokens.agent) {
                 eprintln!("[setup] token file write failed: {e}");
             }
 
@@ -1310,7 +1332,7 @@ pub fn run() {
                 .env("PORT", port.to_string())
                 .env("CUBILOT_MODE", "hub")
                 .env("CUBILOT_DATA_DIR", app_data_dir().to_string_lossy().to_string())
-                .env("CUBILOT_TOKEN", &token)
+                .env("CUBILOT_TOKEN", &tokens.agent)
                 .env("CUBILOT_ATTACHMENTS_DIR", attachments_dir.to_string_lossy().to_string())
                 .env("CUBILOT_LEDGER_DB", ledger_path.to_string_lossy().to_string())
                 .env("CUBILOT_HUMAN_NAME", &human_name)
@@ -1325,7 +1347,8 @@ pub fn run() {
             cmd = apply_summariser_env(cmd);
             cmd = apply_tmux_env(cmd);
 
-            let (rx, child) = cmd.spawn().map_err(|e| format!("spawn cubilot-bin: {e}"))?;
+            let (rx, mut child) = cmd.spawn().map_err(|e| format!("spawn cubilot-bin: {e}"))?;
+            give_human_token(&mut child, &tokens.human)?;
 
             {
                 let state = handle.state::<HubState>();
@@ -1336,7 +1359,7 @@ pub fn run() {
                 *state
                     .info
                     .lock()
-                    .unwrap_or_else(|e| e.into_inner()) = Some(HubInfo { url, token });
+                    .unwrap_or_else(|e| e.into_inner()) = Some(HubInfo { url, token: tokens.human });
                 *state
                     .human_name
                     .lock()
@@ -1744,6 +1767,72 @@ mod chatbridge_mod_tests {
         assert!(leftovers.is_empty(), "left temp dirs: {leftovers:?}");
         assert!(mod_dir_is_complete(&dest));
         let _ = fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod hub_tokens {
+    use super::*;
+
+    fn scratch(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("cubilot-hub-tokens-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        d
+    }
+
+    fn url_safe(t: &str) -> bool {
+        t.len() >= 40 && t.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    }
+
+    #[test]
+    fn the_two_tokens_differ_and_are_url_safe_base64_of_at_least_40_characters() {
+        let t = mint_hub_tokens().unwrap();
+        assert_ne!(t.agent, t.human);
+        assert!(url_safe(&t.agent), "{}", t.agent);
+        assert!(url_safe(&t.human), "{}", t.human);
+    }
+
+    #[test]
+    fn a_second_mint_gives_new_tokens() {
+        let a = mint_hub_tokens().unwrap();
+        let b = mint_hub_tokens().unwrap();
+        assert_ne!(a.agent, b.agent);
+        assert_ne!(a.human, b.human);
+    }
+
+    #[test]
+    fn the_token_file_holds_the_token_with_mode_0600_and_leaves_no_temp_file() {
+        let dir = scratch("file");
+        let t = mint_hub_tokens().unwrap();
+        atomic_write(&dir, "hub.token", &t.agent).unwrap();
+        let path = dir.join("hub.token");
+        assert_eq!(fs::read_to_string(&path).unwrap(), t.agent);
+        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert!(!dir.join("hub.token.tmp").exists());
+        // A second write replaces the file as a whole.
+        let u = mint_hub_tokens().unwrap();
+        atomic_write(&dir, "hub.token", &u.agent).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), u.agent);
+        let names: Vec<_> = fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names.len(), 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // The human token reaches the hub on stdin only: no env value and no file holds it.
+    #[test]
+    fn the_human_token_is_in_no_env_call_and_no_file_write() {
+        let src = include_str!("lib.rs");
+        let prod = &src[..src.find("#[cfg(test)]\nmod hub_tokens").unwrap()];
+        for (i, line) in prod.lines().enumerate() {
+            let l = line.trim_start();
+            if l.starts_with("//") {
+                continue;
+            }
+            let has_human = l.contains("tokens.human") || l.contains("human_token");
+            assert!(!(has_human && l.contains(".env(")), "line {}: {line}", i + 1);
+            assert!(!(has_human && (l.contains("write_token_file") || l.contains("atomic_write") || l.contains("fs::write"))), "line {}: {line}", i + 1);
+        }
+        assert!(prod.contains("give_human_token(&mut child, &tokens.human)"));
     }
 }
 

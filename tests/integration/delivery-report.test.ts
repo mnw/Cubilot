@@ -86,7 +86,7 @@ describe("delivery report", () => {
     expect((await postJson(hub, `/rooms/${ROOM}/lead`, { by: hub.humanName, agent: "dr-lead" })).status).toBe(200);
     const put = await fetch(`${hub.url}/rooms/${ROOM}/settings`, {
       method: "PUT",
-      headers: { Authorization: `Bearer ${hub.token}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${hub.humanToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({ project_folder: repo }),
     });
     expect(put.ok).toBe(true);

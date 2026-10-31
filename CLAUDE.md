@@ -22,7 +22,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **One event plus one table update per state change.** Same transaction; never bypass. docs/rules/kinds.md
 - **Only three cross-kind transactions.** Add no fourth without updating docs/PROTOCOL.md. The Approve writes `request.approved` in its own transaction; the queue transaction after it writes only `ticket.queued`. docs/rules/kinds.md
 - **Broadcasts carry version = events.seq.** docs/rules/kinds.md
-- **by/from are self-asserted.** Not cryptographically verified. docs/rules/permissions.md
+- **by/from of an agent are self-asserted; the human is known by the credential.** The human token is separate from `hub.token` (the agent token). An agent that names the human gets 403. docs/rules/permissions.md
 - **Terminal-state retries.** Same-status retry returns 200 (idempotent); different-status retry returns 409. docs/rules/kinds.md
 - **/interrupts: pending to acknowledged only.** docs/rules/kinds.md
 - **Briefings re-send on roster or presence change, not once per process.** docs/rules/bridge.md
@@ -109,8 +109,10 @@ bun install
 
 Run the hub standalone (for iterating on hub.ts without rebuilding the app):
 ```
-PORT=8011 bun run hub/hub.ts       # or any free port
+AGENT=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n'); HUMAN=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')
+printf '%s\n' "$HUMAN" | PORT=8011 CUBILOT_TOKEN="$AGENT" bun run hub/hub.ts       # or any free port
 ```
+The human token is the first line of stdin (read within 5 s, never in env or a file). Without it no caller is the human and the human-only routes give 403.
 The `.app` picks a free port at runtime — only set `PORT` when running `hub.ts` directly for dev.
 
 Build + install the full macOS app to `/Applications/Cubilot.app`:
@@ -137,10 +139,11 @@ Quick test the hub (against the running `.app`):
 ```
 HUB=$(cat ~/Library/Application\ Support/Cubilot/hub.url)
 TOK=$(cat ~/Library/Application\ Support/Cubilot/hub.token)
-curl -s "$HUB/agents?token=$TOK"                                 # roster (human only)
-curl -sN --max-time 1 "$HUB/agent-stream?agent=foo&token=$TOK"   # auto-registers "foo"
+curl -s "$HUB/agents?token=$TOK"                                 # roster (agent token or human token)
+curl -sN --max-time 1 "$HUB/agent-stream?agent=foo&token=$TOK"   # auto-registers "foo" (agent token only)
 curl -s "$HUB/agents?token=$TOK"                                 # includes "foo"
 ```
+`hub.token` is the agent token. The human token is in no file: `/stream`, the human-only routes (Approve, `/remove`, pause, launches, room settings, checkpoints, decision answers) and `by: <human_name>` need it, so the running `.app` gives a developer no curl for them. To try those, start the hub standalone with your own two tokens (above) and send the human token.
 
 Full test run: `./scripts/test.sh [bun test args]` is the default. It takes the heavy lock itself, runs `bun test "$@"`, and stops the run and its process group at a time or memory limit. Settings: `CUBILOT_TEST_TIMEOUT_S` (default 520 s), `CUBILOT_TEST_MAX_RSS_MB` (default 2048 MB), `CUBILOT_HEAVY_LOCK` (default `/tmp/cubilot-heavy.lock`). Memory check: RSS sum of the process group, once per second; not a strict ceiling.
 

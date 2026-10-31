@@ -3,6 +3,22 @@
 
 import type { HubHandle } from "./hub";
 
+// The credential of a request. A body whose by or from names someone but the human is an agent's request, so it takes the
+// agent token. Every other request is the human's, as the UI sends it: the human token. A test that wants the other one
+// sets the Authorization header itself.
+const ACTING_FIELDS = ["by", "from", "actor", "voter", "requester", "creator"];
+function tokenFor(hub: HubHandle, init: RequestInit): string {
+  if (typeof init.body !== "string") return hub.humanToken;
+  try {
+    const o = JSON.parse(init.body) as Record<string, unknown>;
+    const names = ACTING_FIELDS.map((f) => o?.[f]).filter((v): v is string => typeof v === "string");
+    // `system` is the hub's reserved actor: a test that sends it checks a refusal of the guard, as the human's UI would.
+    return names.some((n) => n.trim() !== hub.humanName && n.trim().toLowerCase() !== "system") ? hub.token : hub.humanToken;
+  } catch {
+    return hub.humanToken;
+  }
+}
+
 export async function authedFetch(
   hub: HubHandle,
   path: string,
@@ -10,7 +26,7 @@ export async function authedFetch(
 ): Promise<Response> {
   const url = `${hub.url}${path}`;
   const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${hub.token}`);
+  if (!headers.has("Authorization")) headers.set("Authorization", `Bearer ${tokenFor(hub, init)}`);
   if (init.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
@@ -96,7 +112,7 @@ export function openSSE(
   hub: HubHandle,
   path: string,
 ): { events: AsyncGenerator<any, void, void>; close: () => void } {
-  const url = `${hub.url}${path}${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(hub.token)}`;
+  const url = `${hub.url}${path}${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(path.startsWith("/agent-stream") ? hub.token : hub.humanToken)}`;
   const ac = new AbortController();
   let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
