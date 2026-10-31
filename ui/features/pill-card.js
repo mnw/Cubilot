@@ -8,7 +8,7 @@
   function pillCardFields(info, harness = info?.harness, effort = info?.effort) {
     const or = (v) => (v ? String(v) : '-');
     const h = harness === 'claude' || harness === 'pi' ? harness : '';
-    // Shows what the launch recorded: "no role" for a launch without a role, and "default" only when pty_spawn
+    // Shows what the launch recorded: "no role" for a launch without a role, and "default" only when the hub
     // wrote it (no model or effort flag). A missing value (an older session, an external agent) is "-".
     return [
       ['Role', info ? (info.role || 'no role') : '-'],

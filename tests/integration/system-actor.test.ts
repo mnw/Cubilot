@@ -24,6 +24,8 @@ const ROUTES: R[] = [
   { method: "POST", path: "/remove", body: {} },
   { method: "POST", path: "/upload", body: {} },
   { method: "POST", path: "/sessions", body: {} },
+  { method: "POST", path: "/sessions/shell", body: {} },
+  { method: "POST", path: "/sessions/sw-alice/kill", body: {} },
   { method: "POST", path: "/factory/relink", body: {} },
   { method: "POST", path: "/factory/applied", body: {} },
   { method: "POST", path: "/handoffs", body: { to: "sw-alice", task: "x" } },

@@ -44,7 +44,7 @@ describe("a blocker clears when its code is merged into staging", () => {
   let n = 0;
 
   beforeAll(async () => {
-    hub = await spawnHub();
+    hub = await spawnHub({ env: { CUBILOT_STAGE_SWEEP_MS: "500" } }); // the "staging moves" test waits for the stage sweep
     stream = openLaunchStream(hub);
     // Every launch request is acked and its session joins the room, as the shell and the bridge do.
     void (async () => {
