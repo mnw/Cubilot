@@ -1340,7 +1340,9 @@
   async function handleOpenEditor(agent) {
     if (!invoke) return;
     try {
-      const cwd = await invoke('open_in_editor', { agent });
+      const paths = await hubGet(`/settings/paths?agent=${encodeURIComponent(agent)}`);
+      if (!paths.agent_cwd) throw new Error(`no working folder for agent '${agent}'`);
+      const cwd = await invoke('open_in_editor', { cwd: paths.agent_cwd });
       if (typeof window.showCopyToast === 'function') {
         window.showCopyToast(`Editor opened: ${cwd}`);
       }

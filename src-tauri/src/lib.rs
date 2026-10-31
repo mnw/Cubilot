@@ -1,7 +1,6 @@
 mod factory;
 mod login_path;
 mod skills;
-mod tmux;
 
 use std::{
     fs::{self, File, OpenOptions},
@@ -927,7 +926,7 @@ fn hub_settings_env() -> Vec<(&'static str, String)> {
     if let Some(dir) = staged_mod_dir_for_env(&CHATBRIDGE_MOD_STAGED, chatbridge_mod_dir()) {
         env.push(("CUBILOT_MOD_DIR", dir.to_string_lossy().into_owned()));
     }
-    if let Ok(tmux) = tmux::resolve_tmux_bin() {
+    if let Ok(tmux) = resolve_tmux_bin() {
         env.push(("CUBILOT_TMUX", tmux.to_string_lossy().into_owned()));
     }
     if let Ok(src) = factory::resolve_factory_src() {
@@ -1213,9 +1212,9 @@ fn reload_settings(
     Ok(new_info)
 }
 
-// Editor cmd from config.yml; cwd is the agent's live pane path (tracks `cd`), appended as last arg.
+// Editor cmd from config.yml; cwd is the agent's live pane path (the UI reads it from the hub), appended as last arg.
 #[tauri::command]
-fn open_in_editor(agent: String) -> Result<String, String> {
+fn open_in_editor(cwd: String) -> Result<String, String> {
     let cfg = load_config();
     let raw_editor = cfg
         .editor
@@ -1225,7 +1224,7 @@ fn open_in_editor(agent: String) -> Result<String, String> {
             "editor not configured — set `editor:` in config.yml".to_string()
         })?;
 
-    let cwd = tmux::pane_current_path(&agent)?;
+    let cwd = std::path::PathBuf::from(cwd);
     if !cwd.exists() {
         return Err(format!("cwd does not exist: {}", cwd.display()));
     }
