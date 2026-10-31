@@ -745,6 +745,19 @@ The hub does not start or stop an agent session. It queues requests, and the Rus
 | GET | `/launches/stream` | Bearer (human token) header OR `?token=` | SSE stream of launch and close requests. Each event has `id: <request id>` and `data: <request JSON>`. |
 | POST | `/launches/{id}/ack` | Bearer (human token) header | The shell's answer to one request. |
 
+### Terminal routes
+
+All four routes are human-only: the agent token gets 403 `{"error":"only the human may call this route"}`. Send the human token as Bearer. The hub reads the tmux session of `<agent>`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/terminal/<agent>/capture-turn` | Human-only. Body `{input, timeout_ms?}`. Types `input` into the session and returns the captured turn. |
+| GET | `/terminal/<agent>/tap?ms=` | Human-only. Returns the current screen bytes as text. |
+| GET | `/terminal/<agent>/capture?name=&max_bytes=` | Human-only. Returns a capture log. `max_bytes` above 262144 (`CAPTURE.readMaxBytes`) is clamped to it. |
+| POST | `/terminal/<agent>/heal` | Human-only. Resets the window size of the session to `latest`. |
+
+A missing session gives 404. A tmux error from `has-session` gives 500.
+
 Request formats (`id` has the format `l_[0-9a-f]{16}`):
 
 ```json

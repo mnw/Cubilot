@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { detectIdlePrompt, readCapture, CapturePathError } from "../../hub/core/tmux";
+import { CAPTURE, detectIdlePrompt, readCapture, CapturePathError } from "../../hub/core/tmux";
 import { createTmux } from "../../hub/core/tmux";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { resolveTmuxBin } from "../helpers/tmux";
@@ -34,7 +34,7 @@ afterEach(async () => {
   rmSync(work, { recursive: true, force: true });
 });
 
-const auth = () => ({ Authorization: `Bearer ${hub.token}` });
+const auth = () => ({ Authorization: `Bearer ${hub.humanToken}` });
 const get = (path: string, token = true) => fetch(`${hub.url}${path}`, { headers: token ? auth() : {} });
 const post = (path: string, body: unknown = {}) =>
   fetch(`${hub.url}${path}`, { method: "POST", headers: { ...auth(), "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -137,6 +137,36 @@ describe("Capture read", () => {
     writeFileSync(join(dir, "a.log"), "0123456789");
     expect(readCapture(dir, "a.log", 4)).toBe("0123");
     expect(() => readCapture(dir, "../x")).toThrow(CapturePathError);
+  });
+});
+
+describe("Human-only and error mapping", () => {
+  test("the agent token gets 403 on the four routes", async () => {
+    const a = { Authorization: `Bearer ${hub.token}`, "Content-Type": "application/json" };
+    for (const [m, p] of [["POST", "/terminal/w1/capture-turn"], ["GET", "/terminal/w1/tap"], ["GET", "/terminal/w1/capture?name=x"], ["POST", "/terminal/w1/heal"]]) {
+      const r = await fetch(`${hub.url}${p}`, { method: m, headers: a, body: m === "POST" ? "{}" : undefined });
+      expect(r.status, p).toBe(403);
+    }
+  });
+
+  test("a missing session is 404; a tmux error from has-session is 500", async () => {
+    expect((await get("/terminal/nope/tap?ms=0")).status).toBe(404);
+    // A tmux that fails with an error other than "no session" or "no server": has-session throws.
+    await hub.kill();
+    const fake = join(work, "fake-tmux.sh");
+    writeFileSync(fake, "#!/bin/sh\necho 'protocol version mismatch' >&2\nexit 1\n");
+    chmodSync(fake, 0o755);
+    hub = await spawnHub({ env: { CUBILOT_TMUX: fake, CUBILOT_CAPTURES_DIR: capturesRoot, SHELL: "/bin/sh" } });
+    const r = await get("/terminal/w1/tap?ms=0");
+    expect(r.status).toBe(500);
+  });
+
+  test("max_bytes above CAPTURE.readMaxBytes is clamped", async () => {
+    const dir = join(capturesRoot, "w1", "captures");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "big.log"), "a".repeat(CAPTURE.readMaxBytes + 1000));
+    const r = await get(`/terminal/w1/capture?name=big.log&max_bytes=${CAPTURE.readMaxBytes * 4}`);
+    expect((await r.text()).length).toBe(CAPTURE.readMaxBytes);
   });
 });
 
