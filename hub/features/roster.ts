@@ -22,7 +22,7 @@ export function createRosterFeature(deps: RosterDeps): HubFeature {
         method: "GET",
         path: "/agents",
         auth: "read",
-        handler: () => Response.json([...agents.values()].map((a) => ({ ...a, context_pct: readContextPct(a.name) }))),
+        handler: () => Response.json([...agents.values()].map((a) => ({ ...a, context_pct: readContextPct(a.name), held: agents.heldCount(a.name) }))),
       },
       {
         method: "GET",
