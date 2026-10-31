@@ -52,7 +52,7 @@ describe("agent pause", () => {
     await sleep(200);
     const r = await fetch(`${hub.url}/agents/pause-c/pause`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${hub.token}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${hub.humanToken}`, "Content-Type": "application/json" },
       body: "null",
     });
     expect(r.status).toBe(400);
@@ -82,7 +82,12 @@ describe("agent pause", () => {
     const state = async () => ((await getJson(hub, "/agents/pause-e/pause")).json as { paused: boolean }).paused;
 
     for (const by of [undefined, "pause-f", "pause-e", "Human", "", 7]) {
-      const r = await postJson(hub, "/agents/pause-e/pause", { paused: true, ...(by === undefined ? {} : { by }) });
+      // The agent token: the human token is the human whatever `by` holds.
+      const r = await fetch(`${hub.url}/agents/pause-e/pause`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${hub.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ paused: true, ...(by === undefined ? {} : { by }) }),
+      });
       expect(r.status).toBe(403);
     }
     expect(await state()).toBe(false);

@@ -34,6 +34,7 @@ export function createRosterFeature(deps: RosterDeps): HubFeature {
         method: "POST",
         path: "/remove",
         auth: "mutating",
+        caller: "human",
         handler: async (req) => {
           const body = (await req.json().catch(() => ({}))) as { agent?: string };
           const name = (body.agent ?? "").trim();

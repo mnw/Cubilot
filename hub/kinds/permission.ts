@@ -332,6 +332,7 @@ export function createPermissionKind(db: Database): KindModule {
       method: "POST",
       path: /^\/permissions\/([^/]+)\/verdict$/,
       auth: "mutating",
+      caller: "human",
       bodyMax: PERMISSION_BODY_MAX,
       handler: async (req, cap, params) => {
         const id = params.id;
