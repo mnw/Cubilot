@@ -8,15 +8,15 @@ tmux, PTY, harness spawn, slash commands and TUI capture rules.
 
 ## Terminal pane uses a raw PTY, not `tmux -C` control mode
 
-- **Terminal pane uses a raw PTY, not `tmux -C` control mode.** xterm.js consumes tmux's ANSI directly; keystrokes go to the PTY master as raw bytes. Never re-introduce `tmux -C` or `send-keys` for interactive input forwarding — that's what v0.6 broke on. `send-keys` is only allowed for one-shot commands the user invoked explicitly (none in v0.7). The v0.9.8 regression guard at `tests/integration/pty-plumbing.test.ts` asserts raw-PTY mode (no `%output` / `%begin` / `%end` control-mode framing on the attach stream). Evidence for the choice: [docs/spikes/terminal-transport.md](../spikes/terminal-transport.md) (both transports pass the same cases; truecolour needs the tmux `terminal-features` RGB option, which `pty.rs` does not set).
+- **Terminal pane uses a raw PTY, not `tmux -C` control mode.** xterm.js consumes tmux's ANSI directly; keystrokes go to the PTY master as raw bytes. Never re-introduce `tmux -C` or `send-keys` for interactive input forwarding — that's what v0.6 broke on. `send-keys` is only allowed for one-shot commands the user invoked explicitly (none in v0.7). The v0.9.8 regression guard at `tests/integration/pty-plumbing.test.ts` asserts raw-PTY mode (no `%output` / `%begin` / `%end` control-mode framing on the attach stream). Evidence for the choice: [docs/spikes/terminal-transport.md](../spikes/terminal-transport.md) (both transports pass the same cases; truecolour needs the tmux `terminal-features` RGB option).
 
 ## The hub owns the tmux plumbing in `hub/core/tmux.ts` and `hub/core/terminal.ts`
 
-- **The hub owns the tmux plumbing in `hub/core/tmux.ts` and `hub/core/terminal.ts`.** `tmux.ts` holds the tmux path (env `CUBILOT_TMUX`, set by `lib.rs`), the locale rule, `newSession`, `hasSession`, `listSessions`, `killSession` and `reconfigure`, with the same behaviour as `pty.rs`. `terminal.ts` holds `attach(agent, {readOnly})`: a `Bun.Terminal` on `tmux attach -t =<agent>`; a read-only viewer adds `-f read-only,ignore-size`. The hub sets the tmux server option `terminal-features` `xterm-256color:RGB` (raw PTY truecolour; `pty.rs` does not). A change to either file needs a scenario in `tests/integration/pty-plumbing.test.ts` or `tests/integration/hub-tmux.test.ts`. `pty.rs` stays until group 10.
+- **The hub owns the tmux plumbing in `hub/core/tmux.ts` and `hub/core/terminal.ts`.** `tmux.ts` holds the tmux path (env `CUBILOT_TMUX`, set by `lib.rs`), the locale rule, `newSession`, `hasSession`, `listSessions`, `killSession` and `reconfigure`, with the behaviour of the former shell terminal code. `terminal.ts` holds `attach(agent, {readOnly})`: a `Bun.Terminal` on `tmux attach -t =<agent>`; a read-only viewer adds `-f read-only,ignore-size`. The hub sets the tmux server option `terminal-features` `xterm-256color:RGB` (raw PTY truecolour). A change to either file needs a scenario in `tests/integration/pty-plumbing.test.ts` or `tests/integration/hub-tmux.test.ts`.
 
-## Any change to `pty.rs`'s `resolve_utf8_locale`, `configure_existing_session`, or `attach_and_stream` helpers SHALL have an integration test scenario covering the affected plumbing before the change ships
+## Any change to the hub's tmux helpers (`hub/core/tmux.ts`, `hub/core/terminal.ts`) SHALL have an integration test scenario covering the affected plumbing before the change ships
 
-- **Any change to `pty.rs`'s `resolve_utf8_locale`, `configure_existing_session`, or `attach_and_stream` helpers SHALL have an integration test scenario covering the affected plumbing before the change ships.** The baseline is `tests/integration/pty-plumbing.test.ts` (7 scenarios across session lifecycle, locale env, remain-on-exit toggle, raw-PTY mode). Per-helper coverage closed the pre-v0.9.5 deferral cycle — without it, pty.rs refactors keep getting pushed to "some future change with tests first". Don't repeat that.
+- **Any change to the hub's tmux helpers (`hub/core/tmux.ts`, `hub/core/terminal.ts`) SHALL have an integration test scenario covering the affected plumbing before the change ships.** The baseline is `tests/integration/pty-plumbing.test.ts` (7 scenarios across session lifecycle, locale env, remain-on-exit toggle, raw-PTY mode). Per-helper coverage closed the pre-v0.9.5 deferral cycle — without it, plumbing refactors keep getting pushed to "some future change with tests first". Don't repeat that.
 
 ## tmux sessions need UTF-8 locale env
 
@@ -28,7 +28,7 @@ tmux, PTY, harness spawn, slash commands and TUI capture rules.
 
 ## tmux sessions survive Cubilot restart
 
-- **tmux sessions survive Cubilot restart.** The Rust shell MUST NOT kill tmux sessions on app exit. Drop the PTY handles (which detaches our `attach-session` client) and let tmux keep running. The pane auto-attaches on next launch via `GET /sessions` + `pty_attach` (the shell only attaches; the hub creates). Also: on every auto-attach, force `remain-on-exit off` on the session — legacy sessions from earlier builds had it ON, which silently holds panes after claude exits and blocks the clean tab-close flow.
+- **tmux sessions survive Cubilot restart.** The Rust shell MUST NOT kill tmux sessions on app exit. The hub holds the attach clients; when they close, tmux keeps running. The pane attaches again on next launch through `GET /terminal/<agent>`. Also: on every auto-attach, force `remain-on-exit off` on the session — legacy sessions from earlier builds had it ON, which silently holds panes after claude exits and blocks the clean tab-close flow.
 
 ## `captureTurn(agent, input, { dir, write, timeoutMs })` is the single primitive for deterministic single-turn TUI capture
 

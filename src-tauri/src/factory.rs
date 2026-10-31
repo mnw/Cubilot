@@ -375,91 +375,7 @@ pub(crate) fn staged_version_or_log(staged: Result<String, String>, what: &str) 
 
 pub(crate) fn materialize_factory() -> Result<String, String> {
     let version = stage_factory(&resolve_factory_src()?, &factory_dir(), &super::app_data_dir().join("factory-user"))?;
-    for line in cleanup_versions(&factory_dir(), super::pty::live_tmux_state(), std::time::SystemTime::now()) {
-        eprintln!("{line}");
-    }
     Ok(version)
-}
-
-const CLEANUP_MIN_AGE: std::time::Duration = std::time::Duration::from_secs(10 * 60);
-
-// `v-<16 hex>` names found anywhere in a text (the start commands of live panes: legacy launches name a version).
-fn version_names_in(text: &str) -> Vec<String> {
-    let b = text.as_bytes();
-    (0..b.len())
-        .filter(|&i| b[i..].starts_with(b"v-") && b.len() >= i + 18 && b[i + 2..i + 18].iter().all(u8::is_ascii_hexdigit))
-        .map(|i| text[i..i + 18].to_string())
-        .collect()
-}
-
-// Delete what no launch can still use. `live` is (names of live tmux sessions, start commands of live panes), or the
-// error of asking tmux. In use: `current`, `active`, any agent link, any version a live pane command names. An agent
-// link whose session is gone, and older than CLEANUP_MIN_AGE, is deleted first, so it no longer holds its version. Unused versions younger than
-// CLEANUP_MIN_AGE stay: a spawn may have read `current` just before a publish and not made its link yet. Any failed
-// read deletes nothing. Returns the log lines.
-pub(crate) fn cleanup_versions(dest: &Path, live: Result<(Vec<String>, String), String>, now: std::time::SystemTime) -> Vec<String> {
-    let fail = |what: String| vec![format!("[factory] cleanup skipped, nothing deleted: {what}")];
-    let (sessions, panes) = match live {
-        Ok(l) => l,
-        Err(e) => return fail(format!("tmux: {e}")),
-    };
-    let keys: std::collections::HashSet<String> = sessions.iter().map(|a| agent_key(a)).collect();
-    let agents = dest.join("agents");
-    let mut links: Vec<(PathBuf, String)> = Vec::new(); // (link, target version name)
-    if agents.is_dir() {
-        let entries = match fs::read_dir(&agents) {
-            Ok(r) => r,
-            Err(e) => return fail(format!("read {}: {e}", agents.display())),
-        };
-        for e in entries.flatten() {
-            let name = e.file_name().to_string_lossy().into_owned();
-            // The skill records, the view symlink, its builds and the lock (skills.rs) are not agent links.
-            if name.contains(".tmp-") || name.contains(".skills-") || name.contains(".view") || AGENT_RECORD_SUFFIXES.iter().any(|x| name.ends_with(x)) {
-                continue;
-            }
-            match fs::read_link(e.path()) {
-                Ok(t) => links.push((e.path(), t.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())),
-                Err(err) => return fail(format!("read link {}: {err}", e.path().display())),
-            }
-        }
-    }
-    let mut in_use: std::collections::HashSet<String> = version_names_in(&panes).into_iter().collect();
-    match fs::read_to_string(dest.join("current")) {
-        Ok(c) => { in_use.insert(c.trim().to_string()); }
-        Err(e) => return fail(format!("read current: {e}")),
-    }
-    if dest.join("active").symlink_metadata().is_ok() {
-        match fs::read_link(dest.join("active")) {
-            Ok(t) => { in_use.extend(t.file_name().map(|n| n.to_string_lossy().into_owned())); }
-            Err(e) => return fail(format!("read link active: {e}")),
-        }
-    }
-    let mut log = Vec::new();
-    for (link, target) in links {
-        let key = link.file_name().unwrap().to_string_lossy().into_owned();
-        // A link younger than the age rule may belong to a spawn whose tmux session does not exist yet.
-        let young = link.symlink_metadata().and_then(|m| m.modified()).ok().and_then(|m| now.duration_since(m).ok()).is_none_or(|age| age < CLEANUP_MIN_AGE);
-        if keys.contains(&key) || young {
-            in_use.insert(target);
-        } else if fs::remove_file(&link).is_ok() {
-            for x in AGENT_RECORD_SUFFIXES {
-                let _ = fs::remove_file(agents.join(format!("{key}{x}")));
-            }
-            log.push(format!("[factory] deleted agent link {key}: its session is gone"));
-        }
-    }
-    let Ok(entries) = fs::read_dir(dest) else { return fail(format!("read {}", dest.display())) };
-    for e in entries.flatten() {
-        let name = e.file_name().to_string_lossy().into_owned();
-        if !name.starts_with("v-") || !e.path().is_dir() || in_use.contains(&name) {
-            continue;
-        }
-        let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|m| now.duration_since(m).ok()).is_some_and(|age| age >= CLEANUP_MIN_AGE);
-        if old && fs::remove_dir_all(e.path()).is_ok() {
-            log.push(format!("[factory] deleted unused version {name}"));
-        }
-    }
-    log
 }
 
 // ---- Per-agent settings (task 2.3; same rules as write_settings in factory/scripts/factory-launch.sh, task 1.3) ----
@@ -1005,58 +921,6 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_keeps_what_is_in_use_and_deletes_old_unused_versions() {
-        use std::time::{Duration, SystemTime};
-        let root = tmp_root("cleanup");
-        let dest = root.join("out");
-        let mk = |n: &str| fs::create_dir_all(dest.join(n)).unwrap();
-        let ver = |c: char| format!("v-{}", c.to_string().repeat(16));
-        for c in ['a', 'b', 'c', 'd', 'e', 'f', '1'] {
-            mk(&ver(c));
-        }
-        fs::write(dest.join("current"), ver('a')).unwrap();
-        std::os::unix::fs::symlink(ver('b'), dest.join("active")).unwrap();
-        fs::create_dir_all(dest.join("agents")).unwrap();
-        std::os::unix::fs::symlink(dest.join(ver('c')), dest.join("agents").join(agent_key("live one"))).unwrap();
-        std::os::unix::fs::symlink(dest.join(ver('f')), dest.join("agents").join(agent_key("dead one"))).unwrap();
-        fs::write(dest.join("agents").join(format!("{}.applied", agent_key("dead one"))), ver('f')).unwrap();
-        fs::write(dest.join("agents").join(format!("{}.applied", agent_key("live one"))), ver('c')).unwrap();
-        let pane = format!("sh -c \"claude --plugin-dir /x/factory/{}/worker\"", ver('d'));
-        let later = SystemTime::now() + Duration::from_secs(11 * 60);
-        let live = || Ok((vec!["live one".to_string()], pane.clone()));
-        // Too young: nothing goes, not even the link with no session (a spawn may not have its session yet).
-        let log = cleanup_versions(&dest, live(), SystemTime::now());
-        assert!(log.is_empty(), "{log:?}");
-        assert!(dest.join("agents").join(agent_key("dead one")).symlink_metadata().is_ok(), "a young link with no session stays");
-        assert!(dest.join("agents").join(format!("{}.applied", agent_key("dead one"))).exists());
-        assert!(dest.join(ver('e')).is_dir() && dest.join(ver('f')).is_dir(), "younger than 10 minutes stays");
-        // A failed tmux query deletes nothing.
-        let log = cleanup_versions(&dest, Err("boom".into()), later);
-        assert_eq!(log.len(), 1);
-        assert!(dest.join(ver('e')).is_dir());
-        // Old: current (a), active (b), agent link (c), pane command (d) stay. The old link with no session goes
-        // with its .applied, so e, f and 1 go too (4 log lines).
-        let log = cleanup_versions(&dest, live(), later);
-        assert_eq!(log.len(), 4, "{log:?}");
-        assert!(dest.join("agents").join(agent_key("dead one")).symlink_metadata().is_err());
-        assert!(!dest.join("agents").join(format!("{}.applied", agent_key("dead one"))).exists(), "its .applied goes with it");
-        assert!(dest.join("agents").join(format!("{}.applied", agent_key("live one"))).exists());
-        for c in ['a', 'b', 'c', 'd'] {
-            assert!(dest.join(ver(c)).is_dir(), "{c} is in use");
-        }
-        for c in ['e', 'f', '1'] {
-            assert!(!dest.join(ver(c)).exists(), "{c} is unused");
-        }
-        // An unreadable link deletes nothing.
-        mk(&ver('2'));
-        fs::write(dest.join("agents").join("notalink"), "x").unwrap();
-        let log = cleanup_versions(&dest, live(), later);
-        assert_eq!(log.len(), 1);
-        assert!(dest.join(ver('2')).is_dir());
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
     fn a_role_launch_writes_the_link_and_applied_and_a_new_session_clears_both() {
         let root = tmp_root("applied");
         let src = make_src(&root);
@@ -1099,60 +963,6 @@ mod tests {
         clear_agent_records(&dest, "bob").unwrap();
         assert_eq!(all(), (false, false, false));
         assert!(!last(), "the last reload result of an earlier session goes too");
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    // C6b: the skill records, the view link, its builds and the lock sit in agents/ too. They are not agent links, so
-    // they must not stop the cleanup (a "read link" error deletes nothing) and a live agent's view keeps working.
-    #[test]
-    fn cleanup_is_not_stopped_by_skill_records_view_builds_and_a_lock() {
-        use std::time::{Duration, SystemTime};
-        let root = tmp_root("cleanup-skills");
-        let src = make_src(&root);
-        let dest = root.join("out");
-        let v = stage_factory(&src, &dest, &root.join("user")).unwrap();
-        let old = format!("v-{}", "3".repeat(16));
-        fs::create_dir_all(dest.join(&old)).unwrap();
-        let agents = dest.join("agents");
-        link_agent(&dest, "bob", &v).unwrap();
-        let key = agent_key("bob");
-        for suffix in [".skills-off", ".skills-prepared", ".skills-published", ".skills-pending", ".skills-applied"] {
-            fs::write(agents.join(format!("{key}{suffix}")), "{}").unwrap();
-        }
-        fs::create_dir_all(agents.join(format!("{key}.skills-lock"))).unwrap();
-        fs::create_dir_all(agents.join(format!("{key}.view-1/worker"))).unwrap();
-        std::os::unix::fs::symlink(format!("{key}.view-1"), agents.join(format!("{key}.view"))).unwrap();
-        let later = SystemTime::now() + Duration::from_secs(11 * 60);
-        let log = cleanup_versions(&dest, Ok((vec!["bob".into()], String::new())), later);
-        assert!(!dest.join(&old).exists(), "skill records blocked the cleanup: {log:?}");
-        assert!(agents.join(format!("{key}.view-1")).exists() && agents.join(format!("{key}.skills-off")).exists());
-        assert!(dest.join(&v).exists(), "the live agent's version stays");
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn cleanup_ignores_a_pending_record_and_removes_it_with_a_stale_link() {
-        use std::time::{Duration, SystemTime};
-        let root = tmp_root("cleanup-pending");
-        let src = make_src(&root);
-        let dest = root.join("out");
-        let v = stage_factory(&src, &dest, &root.join("user")).unwrap();
-        let old = format!("v-{}", "2".repeat(16));
-        fs::create_dir_all(dest.join(&old)).unwrap();
-        let agents = dest.join("agents");
-        link_agent(&dest, "bob", &v).unwrap();
-        let key = agent_key("bob");
-        fs::write(agents.join(format!("{key}.pending")), &v).unwrap();
-        let later = SystemTime::now() + Duration::from_secs(11 * 60);
-        // A live session with a pending record: the record is not read as a link, the old version goes.
-        let log = cleanup_versions(&dest, Ok((vec!["bob".into()], String::new())), later);
-        assert!(!dest.join(&old).exists(), "a pending record blocked the cleanup: {log:?}");
-        assert!(agents.join(format!("{key}.pending")).exists(), "a live agent keeps its pending record");
-        // Its session is gone and the link is old: link, .applied and .pending go together.
-        let log = cleanup_versions(&dest, Ok((vec![], String::new())), later);
-        assert!(agents.join(&key).symlink_metadata().is_err(), "{log:?}");
-        assert!(!agents.join(format!("{key}.applied")).exists());
-        assert!(!agents.join(format!("{key}.pending")).exists());
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1318,7 +1128,7 @@ mod tests {
     }
 
     #[test]
-    fn an_existing_empty_folder_is_preserved_not_replaced_by_the_publish_step() {
+    fn an_existing_folder_with_nothing_in_it_is_preserved_not_replaced_by_the_publish_step() {
         let root = tmp_root("seed-empty");
         let src = make_src(&root);
         let (dest, user) = (root.join("out"), root.join("user"));

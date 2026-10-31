@@ -1,7 +1,6 @@
 mod factory;
 mod login_path;
 mod skills;
-mod pty;
 
 use std::{
     fs::{self, File, OpenOptions},
@@ -927,7 +926,7 @@ fn hub_settings_env() -> Vec<(&'static str, String)> {
     if let Some(dir) = staged_mod_dir_for_env(&CHATBRIDGE_MOD_STAGED, chatbridge_mod_dir()) {
         env.push(("CUBILOT_MOD_DIR", dir.to_string_lossy().into_owned()));
     }
-    if let Ok(tmux) = pty::resolve_tmux_bin() {
+    if let Ok(tmux) = resolve_tmux_bin() {
         env.push(("CUBILOT_TMUX", tmux.to_string_lossy().into_owned()));
     }
     if let Ok(src) = factory::resolve_factory_src() {
@@ -1114,7 +1113,7 @@ fn open_skills_folder() -> Result<(), String> {
 // chatbridge omitted from template intentionally; it's force-injected per-agent and stripped from user configs.
 #[tauri::command]
 fn open_global_mcp_config() -> Result<(), String> {
-    let path = pty::global_mcp_config_path();
+    let path = app_data_dir().join("mcp.json");
     if !path.exists() {
         let template = serde_json::to_string_pretty(&json!({
             "_comment": "Global MCP servers shared by all Claude agents (pi agents have no MCP support). Standard .mcp.json schema. \
@@ -1213,9 +1212,9 @@ fn reload_settings(
     Ok(new_info)
 }
 
-// Editor cmd from config.yml; cwd is the agent's live pane path (tracks `cd`), appended as last arg.
+// Editor cmd from config.yml; cwd is the agent's live pane path (the UI reads it from the hub), appended as last arg.
 #[tauri::command]
-fn open_in_editor(agent: String) -> Result<String, String> {
+fn open_in_editor(cwd: String) -> Result<String, String> {
     let cfg = load_config();
     let raw_editor = cfg
         .editor
@@ -1225,7 +1224,7 @@ fn open_in_editor(agent: String) -> Result<String, String> {
             "editor not configured — set `editor:` in config.yml".to_string()
         })?;
 
-    let cwd = pty::pane_current_path(&agent)?;
+    let cwd = std::path::PathBuf::from(cwd);
     if !cwd.exists() {
         return Err(format!("cwd does not exist: {}", cwd.display()));
     }
@@ -1265,7 +1264,6 @@ pub fn run() {
             info: Mutex::new(None),
             human_name: Mutex::new(None),
         })
-        .manage(pty::PtyRegistry::default())
         .invoke_handler(tauri::generate_handler![
             get_hub_url,
             open_config_file,

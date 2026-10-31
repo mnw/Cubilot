@@ -40,6 +40,7 @@ import { createTranscriptFeature } from "./features/transcript";
 import { createChatFeature } from "./features/chat";
 import { createTerminalFeature, createTerminalSocket, defaultCapturesRoot } from "./features/terminal";
 import { createTmux, tmuxFromEnv } from "./core/tmux";
+import { runFactoryCleanup } from "./core/factory-cleanup";
 import { createStreamHandlers } from "./features/streams";
 import {
   openLedger as openLedgerCore,
@@ -301,6 +302,7 @@ if (ledgerDb) {
 }
 
 const terminalTmux = (() => { try { return createTmux(tmuxFromEnv()); } catch { return null; } })();
+try { for (const line of runFactoryCleanup()) console.error(line); } catch (e) { console.error(`[factory] cleanup failed: ${(e as Error).message}`); }
 const terminalSocket = createTerminalSocket({ tmux: terminalTmux, agents, requireReadAuth });
 
 const FEATURES: readonly HubFeature[] = [
