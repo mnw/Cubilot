@@ -403,18 +403,16 @@ xterm-only flow.
 | Method | Path | Auth | Body cap | Purpose |
 |---|---|---|---|---|
 | POST | `/permissions` | Bearer | 16 KiB | Create pending. Body `{agent, request_id, tool_name, description, input_preview}`. Same-id replay while pending → idempotent 200; same id already resolved → 409. |
-| POST | `/permissions/{id}/verdict` | Bearer | 16 KiB | Submit verdict. Body `{by, behavior: "allow"\|"deny"}`. `by` must be the human or a registered agent (else 403). A paused agent voting on another agent's request → 423. Same-status retry → idempotent 200; different status → 409; missing id → 404. |
-| POST | `/permissions/{id}/dismiss` | Bearer | 16 KiB | Clear a ghost pending card. Body `{by}`. Only the requesting agent or the human (else 403; an unknown name or an agent of another room → 403). Pending → `dismissed`; same-status retry → idempotent; non-pending non-dismissed → 409. |
+| POST | `/permissions/{id}/verdict` | Bearer (human token) | 16 KiB | Submit verdict. Human only (`RouteDef.caller: "human"`): an agent caller gets 403, also without `by`. Body `{by, behavior: "allow"\|"deny"}`. Same-status retry → idempotent 200; different status → 409; missing id → 404. |
+| POST | `/permissions/{id}/dismiss` | Bearer | 16 KiB | Clear a ghost pending card. Open to the agent token: the relay hook dismisses its own request. An agent caller that names the human gets 403. Body `{by}`. Only the requesting agent or the human (else 403; an unknown name or an agent of another room → 403). Pending → `dismissed`; same-status retry → idempotent; non-pending non-dismissed → 409. |
 | GET | `/permissions?status=&for=&limit=` | Bearer header OR `?token=` | — | List snapshots. Default `status=pending`. |
 | GET | `/permissions/{id}/wait?timeout_ms=` | Bearer header OR `?token=` | — | Long-poll one request. Returns the snapshot as soon as its status is terminal, or the `pending` snapshot when `timeout_ms` elapses. Default 60000, capped at 300000, `0` returns the current snapshot immediately. Invalid id or `timeout_ms` → 400; unknown id → 404. Polls the ledger every 250 ms per waiting request. |
 
 ### MCP tools
 
-- `ack_permission({request_id, behavior})` — any agent may ack any pending permission. First verdict wins; later arrivals are idempotent (same behavior) or rejected with 409 (different behavior).
+- `ack_permission({request_id, behavior})` — the verdict route is human-only. The hub gives 403 to an agent that calls this tool. The tool is kept in the bridge but has no effect for agents. First verdict wins for a human caller; later arrivals are idempotent (same behavior) or rejected with 409 (different behavior).
 
-  Tool return value: `verdict_applied=<allow|deny> resolved_by=<agent> your_verdict_won=<true|false>` (plus `already_resolved=true` suffix when the race was lost). Delegation-minded callers (four-eyes, peer-quorum) must read `your_verdict_won` — a `200` alone means the state is resolved, not that the caller's verdict was the transitioning one.
-
-  **Design note:** `ack_permission` is itself an MCP tool call, so Claude Code's local permission UI gates it for the acking agent unless `chatbridge__ack_permission` is in that agent's allowlist. For delegation to race the human's manual click on the original prompt, pre-allowlist the tool in the delegator's Claude Code config (`"permissions": { "allow": ["mcp__chatbridge__ack_permission"] }` or equivalent). Without pre-allowlist, the human typically wins the race and the peer-ack becomes a signal channel, not an actual delegation mechanism.
+  Peer verdicts end with group 11. A delegation by an agent verdict is not possible. Only the human token gives a verdict.
 
 ### MCP capability
 
@@ -1162,7 +1160,7 @@ project.
 | `interrupt` (single) | Yes (from non-human) | 403 `cross-room interrupt not permitted`. |
 | `interrupt` (bulk) | Human-only | `{ from: <human>, rooms: [<labels>], text }`. Fans out one interrupt per non-human agent in each listed room. |
 | `permission` request | Fan-out scoped to same room | Peers in other rooms never see the prompt. |
-| `permission` verdict | Voter must be same-room or human | 403 `cross-room verdict not permitted` otherwise. |
+| `permission` verdict | Human only | An agent caller gets 403 (`only the human may call this route`). |
 | `nutshell` | One row per room | Edits propagate to same-room agents live + included in briefing on connect. |
 
 ### Nutshell per room
@@ -1378,7 +1376,7 @@ project.
 | `interrupt` (single) | Yes (from non-human) | 403 `cross-room interrupt not permitted`. |
 | `interrupt` (bulk) | Human-only | `{ from: <human>, rooms: [<labels>], text }`. Fans out one interrupt per non-human agent in each listed room. |
 | `permission` request | Fan-out scoped to same room | Peers in other rooms never see the prompt. |
-| `permission` verdict | Voter must be same-room or human | 403 `cross-room verdict not permitted` otherwise. |
+| `permission` verdict | Human only | An agent caller gets 403 (`only the human may call this route`). |
 | `nutshell` | One row per room | Edits propagate to same-room agents live + included in briefing on connect. |
 
 ### Nutshell per room
