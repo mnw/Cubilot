@@ -92,6 +92,7 @@ describe("hub tmux", () => {
       await expect(tmux.hasSession(name)).rejects.toThrow(/invalid session name/);
       await expect(tmux.killSession(name)).rejects.toThrow(/invalid session name/);
       await expect(tmux.reconfigure(name)).rejects.toThrow(/invalid session name/);
+      await expect(createTerminal(tmux).attach(name, { onData: () => {} })).rejects.toThrow(/invalid session name/);
     }
     expect(existsSync(log)).toBe(false);
   });

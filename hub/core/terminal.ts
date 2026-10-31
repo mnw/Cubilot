@@ -28,8 +28,8 @@ export function attachArgv(tmux: Pick<Tmux, "bin" | "socket">, agent: string, re
 
 export function createTerminal(tmux: Tmux) {
   async function attach(agent: string, opts: AttachOpts): Promise<Viewer> {
-    await tmux.ensureRgb().catch(() => {}); // no server yet: hasSession below says so
-    if (!(await tmux.hasSession(agent))) throw new Error(`no session: ${agent}`);
+    if (!(await tmux.hasSession(agent))) throw new Error(`no session: ${agent}`); // validates the name first
+    await tmux.ensureRgb().catch(() => {});
     const readOnly = opts.readOnly ?? false;
     const proc = Bun.spawn(attachArgv(tmux, agent, readOnly), {
       env: tmux.clientEnv({ TERM: "xterm-256color", COLORTERM: "truecolor" }),
