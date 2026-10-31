@@ -43,6 +43,7 @@
       "../factory/a11y/": "factory/a11y/",
       "../factory/editor/": "factory/editor/",
       "../factory/orchestrator/": "factory/orchestrator/",
+      "../factory/retrospective/": "factory/retrospective/",
       "../factory/reviewer/": "factory/reviewer/",
       "../factory/seo/": "factory/seo/",
       "../factory/tester/": "factory/tester/",
