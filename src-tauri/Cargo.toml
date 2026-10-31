@@ -25,6 +25,8 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", 
 portable-pty = "0.8"
 base64 = "0.22"
 libc = "0.2"
+core-foundation = "0.10"
+core-foundation-sys = "0.8"
 
 [profile.release]
 opt-level = "s"

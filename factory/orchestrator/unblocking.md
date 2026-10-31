@@ -45,14 +45,15 @@ When the work moves again, ask: will this block come back? If yes, open one low 
 
 The hub accepts these moves from the human. Give the command when the board is slow to use. The human runs it in Terminal on the Mac.
 
+The command is the app binary: `/Applications/Cubilot.app/Contents/MacOS/cubilot hub <METHOD> <path> [json-body]`. It reads the human token from the Keychain (item "Cubilot" / "human-token") after Touch ID. Add this line to `~/.zshrc` once, so that `cubilot` works: `export PATH="/Applications/Cubilot.app/Contents/MacOS:$PATH"`. The command prints the HTTP status and the body.
+
 ```bash
 D="$HOME/Library/Application Support/Cubilot"
 N=$(awk -F': *' '/^human_name:/{gsub(/["'\'']/,"",$2);print $2}' "$D/config.yml"); N=${N:-human}
-U=$(cat "$D/hub.url"); T=$(cat "$D/hub.token")
 # Queue one ticket:
-curl -sS -X POST "$U/tickets/<ticket id>/transition" -H "Authorization: Bearer $T" -H "Content-Type: application/json" -d "{\"by\":\"$N\",\"to\":\"queued\"}"
+cubilot hub POST /tickets/<ticket id>/transition "{\"by\":\"$N\",\"to\":\"queued\"}"
 # Change the blast radius:
-curl -sS -X POST "$U/tickets/<ticket id>/edit" -H "Authorization: Bearer $T" -H "Content-Type: application/json" -d "{\"by\":\"$N\",\"blast_radius\":\"high\"}"
+cubilot hub POST /tickets/<ticket id>/edit "{\"by\":\"$N\",\"blast_radius\":\"high\"}"
 ```
 
 A read-only Validator or Reviewer worktree: `chmod -R u+w <folder>`, then `git worktree remove --force <folder>`.

@@ -1,4 +1,6 @@
+pub mod cli;
 mod factory;
+mod keychain;
 mod launches;
 mod login_path;
 mod skills;
@@ -975,6 +977,13 @@ fn mint_hub_tokens() -> Result<HubTokens, String> {
     Ok(HubTokens { agent, human })
 }
 
+// The Keychain item behind Touch ID, for `cubilot hub`. A failure is logged (no token in the line) and does not stop the app.
+fn store_human_token_in_keychain(human: &str) {
+    if let Err(e) = keychain::store_human_token(human) {
+        eprintln!("[setup] Keychain item for the human token not stored: {}", e.describe());
+    }
+}
+
 // First line of the hub's stdin. The hub reads one line, within 5 s.
 fn give_human_token(child: &mut CommandChild, human: &str) -> Result<(), String> {
     child
@@ -1187,6 +1196,7 @@ fn reload_settings(
     cmd = apply_tmux_env(cmd);
     let (rx, mut child) = cmd.spawn().map_err(|e| format!("spawn cubilot-bin: {e}"))?;
     give_human_token(&mut child, &tokens.human)?;
+    store_human_token_in_keychain(&tokens.human);
 
     let new_info = HubInfo {
         url: url.clone(),
@@ -1349,6 +1359,7 @@ pub fn run() {
 
             let (rx, mut child) = cmd.spawn().map_err(|e| format!("spawn cubilot-bin: {e}"))?;
             give_human_token(&mut child, &tokens.human)?;
+            store_human_token_in_keychain(&tokens.human);
 
             {
                 let state = handle.state::<HubState>();
