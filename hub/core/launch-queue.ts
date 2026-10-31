@@ -1,7 +1,7 @@
-// Launch-request queue between the hub and the Rust shell. The hub never starts a process: it queues a
-// `launch` or `close` request, the shell reads the requests from one SSE stream, does the work and answers
-// each request with an ack. This file holds the queue, the delivery and the ack timer only. It knows nothing
-// about stages: the stage kind decides what an ack or a time-out means (hub/kinds/stage.ts).
+// Launch-request queue inside the hub. The stage logic queues a `launch`, `close` or `input` request. One consumer is
+// attached (`attach`): the launch executor (hub/core/launch-executor.ts) does the work and answers each request with an
+// ack through `ack`. This file holds the queue, the delivery and the ack timer only. It knows nothing about stages: the
+// stage kind decides what an ack or a time-out means (hub/kinds/stage.ts).
 //
 // Only hub/kinds/stage.ts may import this file (tests/unit/launch-queue.test.ts greps for it): that keeps
 // "one function queues launches, and only the stage logic calls it" true by code path.
@@ -26,30 +26,30 @@ export type LaunchRequest =
       env: Record<string, string>;
     }
   | { id: string; kind: "close"; session: string }
-  /** Text for the PTY of one named session (the checkpoint `/clear`). The shell writes `text` and Enter to that session only. */
+  /** Text for the PTY of one named session (the checkpoint `/clear`). The executor writes `text` and Enter to that session only. */
   | { id: string; kind: "input"; session: string; text: string };
 
 /**
  * `spawned` means done: the session started (launch) or was closed (close). `error` for a launch ends the attempt. For a
- * close, `error` keeps the request pending (it is sent again on the next connection) unless `absent` is true: the shell
+ * close, `error` keeps the request pending (it is sent again on the next connection) unless `absent` is true: the executor
  * reports that the session does not exist, so there is nothing left to close.
  */
 export type AckOutcome = { result: "spawned" } | { result: "error"; error: string; absent?: boolean };
 
-/** What happened to a launch request: the shell answered, or no answer came in time. */
+/** What happened to a launch request: the executor answered, or no answer came in time. */
 export type LaunchEnd = { by: "ack"; outcome: AckOutcome } | { by: "timeout" };
 
 export type LaunchQueueOpts = {
-  /** A launch with no ack in this time (from its delivery to the shell) counts as failed. */
+  /** A launch with no ack in this time (from its delivery to the executor) counts as failed. */
   ackMs: number;
   /** How long a finished request (with its prompt) stays in memory, for late or repeated acks. Default 10 min. */
   retainMs?: number;
   onLaunchEnd(req: Extract<LaunchRequest, { kind: "launch" }>, end: LaunchEnd, cap: HubCapabilities): void;
-  /** A close is done: the shell closed the session, or reported that it does not exist. Never throws into the ack. */
+  /** A close is done: the executor closed the session, or reported that it does not exist. Never throws into the ack. */
   onCloseEnd?(session: string, cap: HubCapabilities, id: string): void;
   /**
    * A launch ack arrives after its time-out. True: the stage logic takes it (the ack is recorded and answered ok). False or
-   * absent: the ack is refused with a conflict. A throw keeps the time-out state, so the shell can ack again.
+   * absent: the ack is refused with a conflict. A throw keeps the time-out state, so the executor can ack again.
    */
   onLateAck?(req: Extract<LaunchRequest, { kind: "launch" }>, outcome: AckOutcome, cap: HubCapabilities): boolean;
 };
@@ -58,19 +58,21 @@ export type AckStatus = "ok" | "idempotent" | "unknown" | "conflict" | "error" |
 
 export type LaunchQueue = {
   /**
-   * Queues a request. Delivered at once when the shell is connected, else when it connects.
+   * Queues a request. Delivered at once when a consumer is attached, else when it attaches.
    * Throws for a launch whose session name still has a close without an ack: the name is reserved until that close is
    * done, because a close that is sent again would kill the new session of the same name.
    */
   push(req: LaunchRequest): void;
   /** Session names that have a close without an ack. */
   pendingCloses(): string[];
-  /** The request with this id when the shell has not received it yet, else null. */
+  /** Sends again every close without an ack to the attached consumer (a close that failed stays pending). */
+  resendCloses(): void;
+  /** The request with this id when the executor has not received it yet, else null. */
   undelivered(id: string): LaunchRequest | null;
-  /** Removes a request the shell never received. True when it was dropped; false when it was delivered (or is unknown). */
+  /** Removes a request the executor never received. True when it was dropped; false when it was delivered (or is unknown). */
   drop(id: string): boolean;
   /**
-   * Called by the stream route for one shell connection; the newest connection replaces the older one.
+   * Attaches the consumer of the requests (the launch executor); the newest attachment replaces the older one.
    * Requests that were never delivered are sent, and so is every `close` that has no ack yet.
    */
   attach(send: (req: LaunchRequest) => void, signal: AbortSignal, cap: HubCapabilities): void;
@@ -112,7 +114,7 @@ export function createLaunchQueue(opts: LaunchQueueOpts): LaunchQueue {
       if (entry.done) return;
       const req = entry.req;
       if (req.kind === "close") {
-        // Nothing to undo for a close: it is sent again when the shell reconnects. The timer only makes it visible.
+        // Nothing to undo for a close: it is sent again when a consumer attaches again. The timer only makes it visible.
         console.error(`[launch-queue] close ${req.session} has no ack after ${opts.ackMs} ms`);
         arm(entry);
         return;
@@ -159,6 +161,10 @@ export function createLaunchQueue(opts: LaunchQueueOpts): LaunchQueue {
     },
 
     pendingCloses,
+
+    resendCloses() {
+      if (active) for (const e of sent.values()) if (!e.done && e.req.kind === "close") deliver(e.req, active);
+    },
 
     undelivered(id) {
       return undelivered.find((r) => r.id === id) ?? null;
@@ -214,7 +220,7 @@ export function createLaunchQueue(opts: LaunchQueueOpts): LaunchQueue {
         try {
           opts.onLaunchEnd(entry.req, { by: "ack", outcome }, cap);
         } catch (e) {
-          // The stage change failed. The request stays pending (its timer still runs) so the shell can ack again.
+          // The stage change failed. The request stays pending (its timer still runs) so the executor can ack again.
           console.error("[launch-queue] ack handler failed, request stays pending:", e);
           return { status: "error", message: "could not record the ack; send it again" };
         }
@@ -231,7 +237,7 @@ export function createLaunchQueue(opts: LaunchQueueOpts): LaunchQueue {
         try {
           opts.onCloseEnd?.(entry.req.session, cap, id);
         } catch (e) {
-          // The durable release failed: the close stays pending so the shell can ack again.
+          // The durable release failed: the close stays pending so the executor can ack again.
           console.error("[launch-queue] close-done handler failed, close stays pending:", e);
           entry.done = null;
           arm(entry);
