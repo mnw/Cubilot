@@ -1,20 +1,23 @@
 // Retry and final failure (stage-sessions 5.3, brief test 6).
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { giveProject } from "../helpers/repo";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createTicketKind } from "../../hub/kinds/ticket";
 import { createStageRuntime } from "../../hub/kinds/stage";
+import { disposeRuntimes, trackedRuntime } from "../helpers/stage-runtimes";
 import type { Entry, HubCapabilities, RouteDef, Scope } from "../../hub/core/types";
 import type { LaunchRequest } from "../../hub/core/launch-queue";
+
+afterEach(disposeRuntimes);
 
 function makeEnv(agents: string[] = [], o: { workerLimit?: number; closeGraceMs?: number; db?: Database } = {}) {
   const db = o.db ?? new Database(":memory:");
   migrateLedger(db);
   createTicketKind(db).migrate(db);
   const failures: Array<{ stage: string; reason: string }> = [];
-  const rt = createStageRuntime(db, { ackMs: 60_000, bootGraceMs: 1000, closeGraceMs: o.closeGraceMs, onFinalFailure: (i) => failures.push({ stage: i.stage.id, reason: i.reason }) });
+  const rt = trackedRuntime(db, { ackMs: 60_000, bootGraceMs: 1000, closeGraceMs: o.closeGraceMs, onFinalFailure: (i) => failures.push({ stage: i.stage.id, reason: i.reason }) });
   rt.module.migrate(db);
   giveProject(db, "r1");
   if (o.workerLimit !== undefined) {
