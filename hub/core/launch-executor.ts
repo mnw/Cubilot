@@ -47,8 +47,8 @@ export type ExecutorDeps = {
   ackPauseMs?: number;
   /** A close that failed stays pending; it is sent again after this time (default 5 s). */
   closeRetryMs?: number;
-  /** After the write, the input client waits until its output is quiet this long (default 150 ms). */
-  inputHoldMs?: number;
+  /** After the write, the client output must show the input text within this time, else the input is an error (default 2 s). */
+  inputEchoMs?: number;
   /** The input client must show the session within this time, else the input is an error (default 5 s). */
   inputAttachMs?: number;
   /** Test seam: the terminal that attaches the input client. */
@@ -63,7 +63,7 @@ export function startLaunchExecutor(host: ExecutorHost, deps: ExecutorDeps): { s
   const tries = deps.ackTries ?? 10;
   const pause = deps.ackPauseMs ?? 1000;
   const retryMs = deps.closeRetryMs ?? 5000;
-  const hold = deps.inputHoldMs ?? 150;
+  const echoMs = deps.inputEchoMs ?? 2000;
   const attachMs = deps.inputAttachMs ?? 5000;
   const ac = new AbortController();
 
@@ -144,28 +144,39 @@ export function startLaunchExecutor(host: ExecutorHost, deps: ExecutorDeps): { s
       if (!(await deps.tmux.hasSession(req.session))) throw new Error(`unknown session: ${req.session}`);
       // Raw PTY write to a client of that one session; never `tmux send-keys`. The client has `ignore-size`, so it
       // never resizes the session. It writes only after tmux drew the session to it (the client is attached), writes
-      // all bytes, then waits until its output is quiet for `hold` before it closes.
+      // all bytes, then waits until the client output shows the text (tmux took the bytes and the session echoed or
+      // redrew them). No echo within `echoMs` (2 s) is an error, never `spawned`. Bun's `drain` does not fire for a PTY write
+      // (probed on the pinned Bun), so the echo is the delivery proof.
       let ready!: () => void;
       const attached = new Promise<void>((r) => (ready = r));
-      let lastData = Date.now();
+      let seen = "";
+      let writing = false;
+      const decoder = new TextDecoder();
       const viewer = await (deps.terminal ?? createTerminal(deps.tmux)).attach(req.session, {
         ignoreSize: true,
-        onData: () => { lastData = Date.now(); ready(); },
+        onData: (chunk) => {
+          ready();
+          if (writing) seen += decoder.decode(chunk, { stream: true });
+        },
       });
       try {
         const first = await Promise.race([attached.then(() => true), viewer.exited.then(() => false), sleep(attachMs).then(() => false)]);
         if (!first) throw new Error(`could not attach to the session: ${req.session}`);
         const bytes = Buffer.from(line);
+        writing = true;
+        seen = "";
         for (let off = 0; off < bytes.length; ) {
           const n = viewer.write(bytes.subarray(off));
           if (n <= 0) await sleep(10);
           off += Math.max(n, 0);
         }
-        // The client draws the first screen in several chunks. Wait until its output is quiet for `hold`, so tmux
-        // has taken the bytes before the client closes. At most 2 s.
-        const end = Date.now() + 2000;
-        lastData = Date.now();
-        while (Date.now() < end && Date.now() - lastData < hold) await sleep(10);
+        const needle = line.replace(/[\r\n]+$/, "");
+        const strip = (t: string) => t.replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, "").replace(/\x1b[()][A-Za-z0-9]/g, "");
+        const end = Date.now() + echoMs;
+        while (!strip(seen).includes(needle)) {
+          if (Date.now() >= end) throw new Error(`no echo of the input from the session: ${req.session}`);
+          await sleep(10);
+        }
       } finally {
         viewer.close();
       }
