@@ -97,6 +97,7 @@ export function createChatFeature(deps: ChatFeatureDeps): HubFeature {
         method: "POST",
         path: AGENT_PAUSE_RE,
         auth: "mutating",
+        caller: "human",
         handler: async (req, cap, params) => {
           const agent = decodeURIComponent(params.id);
           const a = deps.agents.get(agent);

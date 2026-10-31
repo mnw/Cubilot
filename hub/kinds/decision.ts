@@ -459,6 +459,7 @@ export function createDecisionKind(db: Database): DecisionKind {
       method: "POST",
       path: /^\/decisions\/([^/]+)\/answer$/,
       auth: "mutating",
+      caller: "human",
       handler: async (req, cap, params) => {
         const id = params.id;
         if (!DECISION_ID_RE.test(id)) return Response.json({ error: "invalid decision id" }, { status: 400 });

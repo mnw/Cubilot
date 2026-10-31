@@ -119,6 +119,7 @@ describe("room transcript persistence: hub restart hydration", () => {
     const attachmentsDir = join(base, "attachments");
     mkdirSync(attachmentsDir, { recursive: true });
     const token = `hyd-${Math.random().toString(36).slice(2, 10)}`;
+    const humanToken = `hyd-human-${Math.random().toString(36).slice(2, 12)}`;
 
     async function spawn(): Promise<HubHandle> {
       const proc = Bun.spawn(["bun", "run", "hub/hub.ts"], {
@@ -133,9 +134,12 @@ describe("room transcript persistence: hub restart hydration", () => {
           CUBILOT_TRANSCRIPTS_DIR: transcriptsDir,
           CUBILOT_ALLOWED_EXTENSIONS: "jpg,jpeg,png,pdf,md,txt,json",
         },
+        stdin: "pipe",
         stdout: "pipe",
         stderr: "pipe",
       });
+      proc.stdin.write(`${humanToken}\n`);
+      proc.stdin.end();
       // Wait for "listening on http://127.0.0.1:<port>"
       const decoder = new TextDecoder();
       const reader = proc.stdout.getReader();
@@ -155,7 +159,7 @@ describe("room transcript persistence: hub restart hydration", () => {
         throw new Error("hub didn't announce port");
       }
       return {
-        url, token, ledgerPath, attachmentsDir, humanName: "human",
+        url, token, humanToken, pid: proc.pid, ledgerPath, attachmentsDir, humanName: "human",
         kill: async () => { proc.kill(); await proc.exited; },
       };
     }
@@ -176,7 +180,7 @@ describe("room transcript persistence: hub restart hydration", () => {
     // Hydration is lazy (ADR 0001): an agent reconnect to the room triggers it.
     const reconnect = await registerAgent(hub, "hyd1", { room });
     await new Promise((r) => setTimeout(r, 200));
-    const r = await fetch(`${hub.url}/stream?token=${token}&lastSeenId=0`, {
+    const r = await fetch(`${hub.url}/stream?token=${humanToken}&lastSeenId=0`, {
       headers: { Accept: "text/event-stream" },
       signal: AbortSignal.timeout(2000),
     });

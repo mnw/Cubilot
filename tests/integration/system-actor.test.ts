@@ -124,7 +124,7 @@ describe("the system actor is refused on every route", () => {
   // 2.5b: the guard must not depend on the Content-Type header. A route parses its body as JSON whatever the header says.
   describe("whatever the Content-Type header", () => {
     const raw = (path: string, method: string, body: string | Uint8Array, headers: Record<string, string>) =>
-      fetch(`${hub.url}${path}`, { method, body, headers: { Authorization: `Bearer ${hub.token}`, ...headers } });
+      fetch(`${hub.url}${path}`, { method, body, headers: { Authorization: `Bearer ${hub.humanToken}`, ...headers } });
     const probe = JSON.stringify({ by: SYS, persist_transcript: true });
     const persist = async () => ((await getJson(hub, "/rooms/sw/settings")).json as { settings: { persist_transcript: boolean } }).settings.persist_transcript;
 

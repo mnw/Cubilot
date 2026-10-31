@@ -8,12 +8,16 @@ import { dirname, join } from "node:path";
 
 export type HubHandle = {
   url: string;
+  /** The agent token: what hub.token holds and the bridge sends. */
   token: string;
+  /** The human token: the hub gets it on stdin, as the shell gives it in the app. */
+  humanToken: string;
   ledgerPath: string;
   attachmentsDir: string;
   /** Where this hub writes room transcripts: a temp folder, never the real app data. */
   transcriptsDir: string;
   humanName: string;
+  pid: number;
   /** The hub's data folder (CUBILOT_DATA_DIR): config.yml goes here. */
   dataDir: string;
   kill: () => Promise<void>;
@@ -23,6 +27,9 @@ export async function spawnHub(opts?: {
   humanName?: string;
   defaultRoom?: string;
   token?: string;
+  humanToken?: string;
+  /** Gives the hub no human token (stdin closed): nobody is the human. */
+  noHumanToken?: boolean;
   allowedExtensions?: string;
   /** Boots a new hub on the folders and token of a killed one (a restart on the same ledger). */
   restartOf?: HubHandle;
@@ -38,6 +45,7 @@ export async function spawnHub(opts?: {
   const transcriptsDir = process.env.CUBILOT_TRANSCRIPTS_DIR || join(base, "transcripts");
 
   const token = opts?.token ?? opts?.restartOf?.token ?? `tst-${Math.random().toString(36).slice(2, 10)}`;
+  const humanToken = opts?.noHumanToken ? "" : opts?.humanToken ?? opts?.restartOf?.humanToken ?? `hum-${Math.random().toString(36).slice(2, 12)}${Math.random().toString(36).slice(2, 12)}`;
   const humanName = opts?.humanName ?? "human";
   const defaultRoom = opts?.defaultRoom ?? "default";
 
@@ -56,9 +64,13 @@ export async function spawnHub(opts?: {
       CUBILOT_ALLOWED_EXTENSIONS: opts?.allowedExtensions ?? "jpg,jpeg,png,pdf,md,txt,json",
       ...opts?.env,
     },
+    stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
   });
+  // The human token is the first line of the hub's stdin, never env or a file.
+  if (humanToken) proc.stdin.write(`${humanToken}\n`);
+  proc.stdin.end();
 
   // Tail stdout until the "listening on http://127.0.0.1:<port>" line appears,
   // then extract the port. 5-second wall-clock limit — if boot is slower than
@@ -68,10 +80,12 @@ export async function spawnHub(opts?: {
   return {
     url,
     token,
+    humanToken,
     ledgerPath,
     attachmentsDir,
     transcriptsDir,
     humanName,
+    pid: proc.pid,
     dataDir: join(base, "data"),
     kill: async () => {
       try { proc.kill(); } catch {}

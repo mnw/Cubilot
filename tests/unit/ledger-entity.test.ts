@@ -85,8 +85,8 @@ function makeFakeCap(db: Database, sseLog: SseLog): HubCapabilities {
       },
     },
     auth: {
-      requireAuth: () => null,
-      requireReadAuth: () => null,
+      requireAuth: () => "agent" as const,
+      requireReadAuth: () => "agent" as const,
       requireJsonBody: () => null,
     },
     events: {

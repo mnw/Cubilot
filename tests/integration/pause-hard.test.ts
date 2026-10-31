@@ -168,20 +168,17 @@ describe("permission verdict and dismiss authority", () => {
   const verdict = (id: string, by: string) => postJson(hub, `/permissions/${id}/verdict`, { by, behavior: "allow" });
   const dismiss = (id: string, by: string) => postJson(hub, `/permissions/${id}/dismiss`, { by });
 
-  test("a paused agent cannot vote on a peer's request (423); its own request and the human still pass", async () => {
+  test("a verdict with the agent token is 403, also for the requester; the human still passes", async () => {
     expect(await ask("pvaaa")).toBe(201);
     expect(await ask("pvbbb", "pv-b")).toBe(201);
-    await postJson(hub, "/agents/pv-b/pause", { paused: true, by: hub.humanName });
-    const r = await verdict("pvaaa", "pv-b");
-    expect([r.status, r.json?.error]).toEqual([423, "agent is paused"]);
-    expect((await verdict("pvbbb", "pv-b")).status).toBe(200);   // its own request
+    const peer = await verdict("pvaaa", "pv-b");
+    expect([peer.status, peer.json?.error]).toEqual([403, "only the human may call this route"]);
+    expect((await verdict("pvbbb", "pv-b")).status).toBe(403);   // its own request
     expect((await verdict("pvaaa", hub.humanName)).status).toBe(200);
-    await postJson(hub, "/agents/pv-b/pause", { paused: false, by: hub.humanName });
   });
 
-  test("a verdict or dismiss by an unregistered name is 403, and the request stays pending", async () => {
+  test("a dismiss by an unregistered name is 403, and the request stays pending", async () => {
     expect(await ask("pvccc")).toBe(201);
-    expect((await verdict("pvccc", "ghost")).status).toBe(403);
     expect((await dismiss("pvccc", "ghost")).status).toBe(403);
     expect((await dismiss("pvccc", "pv-a")).status).toBe(200);   // the requester dismisses (relay hook)
   });

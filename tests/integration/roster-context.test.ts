@@ -42,7 +42,7 @@ test("Empty value: no used_percentage gives null; so do a missing file and a bad
 });
 
 async function sseRosters(ac: AbortController): Promise<AsyncGenerator<any>> {
-  const r = await fetch(`${hub.url}/stream`, { headers: H(), signal: ac.signal });
+  const r = await fetch(`${hub.url}/stream`, { headers: { Authorization: `Bearer ${hub.humanToken}` }, signal: ac.signal });
   const reader = r.body!.getReader();
   const dec = new TextDecoder();
   async function* gen() {
