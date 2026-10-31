@@ -1562,7 +1562,13 @@ export function createStageRuntime(
       const q = db
         .query<{ seq: number | null }, [string]>("SELECT MAX(seq) AS seq FROM events WHERE entity_id = ? AND kind = 'ticket.queued'")
         .get(ticketId)!.seq;
-      if (!stages.some((s) => s.role === t.role && s.status !== "cancelled" && (q === null || s.created_seq > q || s.updated_seq > q))) {
+      // A delivery-check problem (H3) reopens the ticket: it needs a new stage of its role after that move, so old PASS evidence is not reused.
+      const reopenedByCheck =
+        q !== null &&
+        db
+          .query<{ n: number }, [number]>("SELECT COUNT(*) AS n FROM events WHERE seq = ? AND json_extract(payload_json, '$.reason') = 'delivery check problem'")
+          .get(q)!.n > 0;
+      if (!stages.some((s) => s.role === t.role && s.status !== "cancelled" && (q === null || s.created_seq > q || (!reopenedByCheck && s.updated_seq > q)))) {
         const c = q ?? db.query<{ seq: number | null }, [string]>("SELECT MIN(seq) AS seq FROM events WHERE entity_id = ? AND kind = 'ticket.created'").get(ticketId)!.seq;
         ready.push({ role: t.role, seq: c ?? 0 });
         ready.sort((x, y) => x.seq - y.seq);

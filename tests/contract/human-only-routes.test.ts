@@ -11,6 +11,7 @@ const ROUTES: Array<[method: string, path: string]> = [
   ["POST", "/requests/r1/req-1/approve"],
   ["POST", "/decisions/d_0123456789abcdef/answer"],
   ["POST", "/checkpoints"],
+  ["POST", "/requests/r1/req-1/delivery/checks"],
   ["PUT", "/rooms/r1/settings"],
   ["POST", "/agents/w1/pause"],
   ["POST", "/remove"],

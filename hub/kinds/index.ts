@@ -8,6 +8,7 @@ import type { KindModule } from "../core/types";
 import { createCancelTraceKind } from "./cancel-trace";
 import { createCheckpointKind } from "./checkpoint";
 import { createDecisionKind } from "./decision";
+import { createDeliveryCheckKind } from "./delivery-check";
 import { createHandoffKind, createSystemHandoff } from "./handoff";
 import { createInterruptKind } from "./interrupt";
 import { createPermissionKind } from "./permission";
@@ -80,6 +81,8 @@ export function buildKinds(db: Database | null, launchRecord?: LaunchRecord): re
     stage.module,
     cancelTrace,
     createDecisionKind(db),
+    // The delivery check reopens a ticket through the ticket tables and starts its stage: after the ticket kind.
+    createDeliveryCheckKind(db, stage.hooks),
     // The checkpoint asks the shell for a `/clear` through the stage runtime, the one owner of the launch queue.
     createCheckpointKind(db, { sendInput: stage.sendInput, dropInput: stage.dropInput }),
   ];
