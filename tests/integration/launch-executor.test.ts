@@ -10,6 +10,12 @@ import { startLaunchExecutor, inputLine, type ExecutorHost } from "../../hub/cor
 import type { AckOutcome, AckStatus, LaunchRequest } from "../../hub/core/launch-queue";
 import { prepareLaunch } from "../../hub/core/launch-role";
 import { createTmux } from "../../hub/core/tmux";
+import { Database } from "bun:sqlite";
+import { giveProject } from "../helpers/repo";
+import { migrateLedger } from "../../hub/core/ledger";
+import { createTicketKind } from "../../hub/kinds/ticket";
+import { createStageRuntime } from "../../hub/kinds/stage";
+import type { Entry, HubCapabilities, Scope } from "../../hub/core/types";
 import { resolveTmuxBin } from "../helpers/tmux";
 
 const V = "v-0000000000000001";
@@ -164,7 +170,8 @@ describe("One launch of a session at a time", () => {
     run(t.h, { tmux: counted, prepare: g.prepare });
     t.push(launchReq());
     t.push(launchReq({ id: "l_00000000000000a5" })); // the retry after the ack time-out
-    await sleep(50);
+    expect(await until(() => g.calls() >= 1)).toBe(true);
+    await sleep(0); // both requests are queued; the guard decides on the first tick
     expect(g.calls()).toBe(1);
     g.open(0);
     expect(await until(() => t.acks.length === 2)).toBe(true);
@@ -196,6 +203,49 @@ describe("One launch of a session at a time", () => {
     g.open(1);
     expect(await until(() => t.acks.some((a) => a.id === "l_00000000000000b4"))).toBe(true);
     expect(await tmux.hasSession("validator-1")).toBe(false);
+  });
+});
+
+describe("One launch of a session at a time, through the real stage runtime", () => {
+  test("a prepare that outlasts the ack time-out: the retry joins the launch, one newSession, the stage ends running and never failed", async () => {
+    const ACK_MS = 1000;
+    const db = new Database(":memory:");
+    migrateLedger(db);
+    createTicketKind(db).migrate(db);
+    let opened = false;
+    let newSessions = 0;
+    let prepares = 0;
+    const counted = { ...tmux, newSession: (o: Parameters<typeof tmux.newSession>[0]) => { newSessions++; return tmux.newSession(o); } };
+    const prepare: typeof prepareLaunch = async (...a) => {
+      prepares++;
+      while (!opened) await sleep(10);
+      return prepareLaunch(...a);
+    };
+    const rt = createStageRuntime(db, {
+      ackMs: ACK_MS,
+      startExecutor: (h) => { stops.push(startLaunchExecutor(h, { tmux: counted, env, prepare, ackPauseMs: 10, closeRetryMs: 30, inputHoldMs: 100 }).stop); },
+    });
+    rt.module.migrate(db);
+    const cap = { db, sse: { emit: (_e: Entry, _s: Scope) => {} }, briefing: { refresh: () => {} } } as unknown as HubCapabilities;
+    stops.push(() => rt.module.dispose!());
+    giveProject(db, "cubilot");
+    db.run(
+      `INSERT INTO tickets (id, room, title, acceptance_criteria, blast_radius, priority, creator, status, created_at_ms, updated_at_ms, version)
+       VALUES ('t_0000000000000001', 'cubilot', 'T', 'c', 'low', 'medium', 'a', 'queued', 1, 1, 1)`,
+    );
+    rt.module.start?.(cap);
+    const stage = rt.api.create({ ticket_id: "t_0000000000000001", role: "validator" }, "system", cap);
+    const q = rt.enqueueLaunch({ stage_id: stage.id, session: "validator-1", room: "cubilot", harness: "claude", cwd: join(root, "work"), prompt: "TICKET TEXT" }, cap);
+    expect(q.ok).toBe(true);
+    const kinds = () => db.query<{ kind: string }, [string]>("SELECT kind FROM events WHERE entity_id = ? ORDER BY seq").all(stage.id).map((e) => e.kind);
+    expect(await until(() => kinds().includes("stage.retrying"))).toBe(true); // the ack time-out passed while prepare still waits
+    opened = true;
+    expect(await until(() => rt.api.load(stage.id)!.status === "running")).toBe(true);
+    expect(prepares).toBe(1);
+    expect(newSessions).toBe(1);
+    expect(await tmux.listSessions()).toEqual(["validator-1"]);
+    expect(kinds()).not.toContain("stage.failed");
+    expect(rt.api.load(stage.id)!.status).toBe("running");
   });
 });
 
