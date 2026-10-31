@@ -1490,4 +1490,26 @@ mod tests {
             "agent-introspection-debugging", "context-engineering", "growth-log", "loop-design-check", "retrospective-review"]);
         let _ = fs::remove_dir_all(&root);
     }
+
+    // Every factory/<role>/<role>.md that a stage role can name (a council is refused) must be bundled by tauri.conf.json.
+    // Without it the installed app answers "unknown role: <role>" (install 33, retrospective).
+    #[test]
+    fn every_launchable_role_folder_is_in_the_tauri_bundle_resources() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let conf: serde_json::Value = serde_json::from_str(&fs::read_to_string(root.join("tauri.conf.json")).unwrap()).unwrap();
+        let res = conf["bundle"]["resources"].as_object().expect("bundle.resources is an object");
+        let mut roles = vec![];
+        for e in fs::read_dir(root.join("../factory")).unwrap().flatten() {
+            let role = e.file_name().to_string_lossy().to_string();
+            let Ok(text) = fs::read_to_string(e.path().join(format!("{role}.md"))) else { continue };
+            if parse_role_spec(&role, &text).is_ok() {
+                roles.push(role);
+            }
+        }
+        assert!(roles.iter().any(|r| r == "retrospective") && roles.iter().any(|r| r == "worker"), "{roles:?}");
+        for role in roles {
+            let (k, v) = (format!("../factory/{role}/"), format!("factory/{role}/"));
+            assert_eq!(res.get(&k).and_then(|x| x.as_str()), Some(v.as_str()), "tauri.conf.json bundle.resources lacks {k}");
+        }
+    }
 }

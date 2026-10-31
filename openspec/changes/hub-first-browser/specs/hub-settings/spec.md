@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: The hub serves the settings the UI reads
-The hub SHALL serve, to a human caller, the values that the Tauri commands `get_ui_settings`, `get_human_name`, `get_app_version`, `get_mcp_template`, `resolve_default_room`, `list_roles`, `pty_roles` and `pty_harness` return today, with the same values. The hub SHALL read `config.yml` at each request, so a theme or font scale change shows at the next request without a reload. The hub SHALL NOT restage the Claude mod: when the mod folder is stale, missing or incomplete, the mcp template answers 503, and the next Claude spawn in the shell stages the mod again.
+The hub SHALL serve, to a human caller, the values that the Tauri commands `get_ui_settings`, `get_human_name`, `get_app_version`, `get_mcp_template`, `resolve_default_room`, `list_roles`, `pty_roles` and `pty_harness` return today, with the same values. The hub SHALL read `config.yml` at each request, so a theme or font scale change shows at the next request without a reload.
 
 #### Scenario: Theme change without reload
 - **GIVEN** `config.yml` has `theme: dark`
@@ -11,6 +11,14 @@ The hub SHALL serve, to a human caller, the values that the Tauri commands `get_
 #### Scenario: Same values as the shell
 - **WHEN** the UI requests the human name, the app version, the roles and the harness of agent `w1`
 - **THEN** each value equals what the removed Tauri command returned for the same config
+
+### Requirement: The hub does not restage the Claude mod
+The hub SHALL NOT restage the Claude mod. When the mod folder is stale, missing or incomplete, the mcp template answers 503. The next Claude spawn in the shell stages the mod again.
+
+#### Scenario: Stale mod folder
+- **GIVEN** the mod folder is missing
+- **WHEN** the UI requests the mcp template
+- **THEN** the answer is 503 and the hub stages no files
 
 ### Requirement: The hub serves models, slash commands and skills
 The hub SHALL serve the model list of a harness (`claude` at once, `pi` from `pi --list-models` with a time limit), the slash commands of an agent, and the skill switches of an agent (read, set, apply). Only the hub SHALL write `<app data>/factory/agents/<agent>/.skills-off`.
