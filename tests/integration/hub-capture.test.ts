@@ -42,9 +42,11 @@ const post = (path: string, body: unknown = {}) =>
 /** A TUI that reads one line, prints a reply, then shows the divider, the prompt and the cursor (the idle signature). */
 async function fakeTui(name: string) {
   const script = join(work, `${name}.sh`);
-  writeFileSync(script, `#!/bin/sh\nIFS= read -r line\nprintf 'reply to %s\\n' "$line"\nprintf '%s\\n' '${DIVIDER}'\nprintf '❯ \\033[?25h'\nsleep 60\n`);
+  writeFileSync(script, `#!/bin/sh\nprintf 'tui-ready\\n'\nIFS= read -r line\nprintf 'reply to %s\\n' "$line"\nprintf '%s\\n' '${DIVIDER}'\nprintf '❯ \\033[?25h'\nsleep 60\n`);
   chmodSync(script, 0o755);
   await tmux.newSession({ name, cwd: work, command: script });
+  // Input sent before the script runs `read` can be lost: wait for the marker.
+  for (let i = 0; i < 100 && !(await tmux.run(["capture-pane", "-p", "-t", `=${name}:`])).includes("tui-ready"); i++) await Bun.sleep(50);
 }
 
 describe("Turn capture", () => {
