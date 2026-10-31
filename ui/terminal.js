@@ -552,11 +552,19 @@
   }
 
   // ---- C6c: skill switches of the open row. The backend (skills.rs) owns the choice and the states; the row only shows
-  // them (design note factory/brief/04a-c6-design.md, section 2a point 8) and saves a change at once: agent_skills_set
-  // (the intent), then agent_skills_apply (prepares the build; "Relaunch <agent> to apply" when the agent has no view).
+  // them (design note factory/brief/04a-c6-design.md, section 2a point 8) and saves a change at once: PUT /agents/<name>/skills
+  // (the intent), then POST /agents/<name>/skills/apply (prepares the build; "Relaunch <agent> to apply" when the agent has no view).
   // A reload is a separate click: the strip button calls reloadAgent. The box always shows the SAVED value (t.skills.data),
   // except while its own save runs (t.skillsPending).
   const errText = (e) => (typeof e === 'string' ? e : e?.message || String(e));
+  // The hub's skill routes as JSON; rejects with the hub's error text.
+  async function hubSkills(agent, method, suffix = '', body) {
+    const r = await authedFetch(`/agents/${encodeURIComponent(agent)}/skills${suffix}`, body === undefined ? { method } : {
+      method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(await parseErrorBody(r));
+    return r.json();
+  }
   const skillName = (id) => id.slice(id.indexOf('/') + 1);
   const skillChanged = (s) => s.on !== (s.state === 'loaded');   // the box differs from what the agent loaded
   // The label of one skill: loaded and off-and-loaded show none; "not loaded" only after a reload applied it.
@@ -574,12 +582,12 @@
     const seq = (t.skillsSeq = (t.skillsSeq || 0) + 1);   // a save started later makes this answer stale
     t.skillsLoading = true;
     try {
-      const data = await invoke('agent_skills', { agent });
+      const data = await hubSkills(agent, 'GET');
       if (tabs.get(agent) !== t || t.skillsSeq !== seq) return;
       t.skills = { data, error: t.skills?.error || '', readError: '' };   // a good read clears an old read error, never a save error
     } catch (e) {
       if (tabs.get(agent) !== t || t.skillsSeq !== seq) return;
-      console.warn('[terminal] agent_skills', agent, e);
+      console.warn('[terminal] skills', agent, e);
       t.skills = { data: t.skills?.data || null, error: t.skills?.error || '', readError: `Skills not available: ${errText(e)}` };
     } finally {
       if (tabs.get(agent) === t) t.skillsLoading = false;
@@ -616,7 +624,7 @@
     t.skillsSeq = (t.skillsSeq || 0) + 1;
     const done = () => { for (const [id] of touched) t.skillsPending?.delete(id); };
     try {
-      await invoke('agent_skills_set', { agent, off: [...off].sort() });
+      await hubSkills(agent, 'PUT', '', { off: [...off].sort() });
     } catch (e) {
       done();
       t.skills.error = `Could not save the skill choice: ${errText(e)}`;
@@ -627,10 +635,10 @@
     for (const s of skillsOf(d)) s.on = !off.has(s.id);
     done();
     try {
-      await invoke('agent_skills_apply', { agent });
+      await hubSkills(agent, 'POST', '/apply');
     } catch (e) {
       const m = errText(e);
-      // "Relaunch <agent> to apply" is not a failure: the strip says it (relaunch_needed comes back from agent_skills).
+      // "Relaunch <agent> to apply" is not a failure: the strip says it (relaunch_needed comes back from the GET).
       if (!/^Relaunch /.test(m)) t.skills.error = `The choice is saved, but it could not be prepared: ${m}`;
     }
     await refreshSkills(agent);   // states, relaunch_needed and the count as the backend sees them
