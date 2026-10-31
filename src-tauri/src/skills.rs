@@ -19,27 +19,6 @@ use std::time::{Duration, Instant};
 pub(crate) const LOCK_WAIT: Duration = Duration::from_secs(2);
 static RUNS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-#[derive(Debug, PartialEq, serde::Serialize)]
-pub struct SkillItem {
-    pub id: String,
-    pub on: bool,
-    pub state: &'static str, // loaded | not_loaded | new
-}
-
-#[derive(Debug, PartialEq, serde::Serialize)]
-pub struct SkillGroup {
-    pub name: String,
-    pub skills: Vec<SkillItem>,
-}
-
-#[derive(Debug, PartialEq, serde::Serialize)]
-pub struct AgentSkills {
-    pub role: Option<String>,
-    pub mode: &'static str, // none | legacy | plain | view
-    pub relaunch_needed: bool,
-    pub groups: Vec<SkillGroup>,
-}
-
 fn agents_dir(dest: &Path) -> PathBuf {
     dest.join("agents")
 }
@@ -105,6 +84,7 @@ fn read_off(dest: &Path, agent: &str) -> Vec<String> {
 
 // ---- Mode: proven from the real launch flags, never from a substring ----
 // Splits like a shell: single quotes, double quotes (backslash before " \ $ `), backslash. No expansion.
+#[cfg(test)]
 pub(crate) fn shell_words(s: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();
@@ -162,6 +142,7 @@ pub(crate) fn shell_words(s: &str) -> Vec<String> {
 }
 
 // Flags that take a value in the role launch commands. The word after one is a value, never a flag.
+#[cfg(test)]
 const VALUE_FLAGS: [&str; 13] = [
     "--append-system-prompt", "--append-system-prompt-file", "--settings", "--model", "--effort", "--thinking", "--provider",
     "--exclude-tools", "--mcp-config", "--allowed-tools", "--disallowed-tools", "-e", "--prompt-template",
@@ -169,6 +150,7 @@ const VALUE_FLAGS: [&str; 13] = [
 
 // `view`: a --skill or --plugin-dir value is under this agent's `<key>.view/`. `plain`: under its link `<key>/`.
 // Anything else, or no command: `legacy`. A path of another agent, or a view path in another argument, is no proof.
+#[cfg(test)]
 pub(crate) fn mode_from_command(cmd: &str, dest: &Path, agent: &str) -> &'static str {
     let key = crate::factory::agent_key(agent);
     let view_prefix = format!("{}/", agents_dir(dest).join(format!("{key}.view")).display());
@@ -205,50 +187,9 @@ pub(crate) fn mode_from_command(cmd: &str, dest: &Path, agent: &str) -> &'static
     }
 }
 
-// ---- List ----
-// The skills of the staged version `version_dir`, in two groups, with the box (`on`) and the state derived only from
-// `.skills-applied`: loaded, not_loaded (in the applied inventory and off there) or new (not in the inventory).
-pub(crate) fn list_in(dest: &Path, version_dir: &Path, agent: &str, role: Option<&str>, command: Option<&str>) -> AgentSkills {
-    let Some(role) = role.filter(|r| !r.is_empty()) else {
-        return AgentSkills { role: None, mode: "none", relaunch_needed: false, groups: vec![] };
-    };
-    let mode = command.map(|c| mode_from_command(c, dest, agent)).unwrap_or("legacy");
-    // An id of an older role (a name used again with another role) is ignored here, as launch_in ignores it.
-    let inv = inventory(version_dir, role);
-    let off = read_off(dest, agent);
-    let relaunch_needed = matches!(mode, "legacy" | "plain") && off.iter().any(|id| inv.contains(id));
-    let applied = read_json(&rec(dest, agent, ".skills-applied"));
-    let (a_skills, a_off) = match &applied {
-        Some(a) => (strings(a.get("skills")), strings(a.get("off"))),
-        None => (vec![], vec![]),
-    };
-    let group = |name: String, g: &str| SkillGroup {
-        name,
-        skills: skill_folders(version_dir, g)
-            .into_iter()
-            .map(|f| {
-                let id = format!("{g}/{f}");
-                let state = if !a_skills.contains(&id) {
-                    "new"
-                } else if a_off.contains(&id) {
-                    "not_loaded"
-                } else {
-                    "loaded"
-                };
-                SkillItem { on: !off.contains(&id), id, state }
-            })
-            .collect(),
-    };
-    AgentSkills {
-        role: Some(role.to_string()),
-        mode,
-        relaunch_needed,
-        groups: vec![group(format!("Role \u{b7} {role}"), role), group("Shared".to_string(), "shared")],
-    }
-}
-
 // ---- Store ----
 // Unknown id: error, nothing written. Empty list: the file goes. A failed write changes nothing.
+#[cfg(test)]
 pub(crate) fn set_off_in(dest: &Path, version_dir: &Path, agent: &str, role: &str, off: &[String]) -> Result<(), String> {
     let inv = inventory(version_dir, role);
     if let Some(bad) = off.iter().find(|id| !inv.contains(id)) {
@@ -524,36 +465,6 @@ fn remove_record(dest: &Path, agent: &str, suffix: &str) {
     let _ = fs::remove_file(rec(dest, agent, suffix));
 }
 
-// The Reload click: builds the next view from the stored choice and writes `.skills-prepared`. Publishes nothing.
-pub(crate) fn apply_in(dest: &Path, version_dir: &Path, agent: &str, role: Option<&str>, command: Option<&str>) -> Result<(), String> {
-    let Some(role) = role.filter(|r| !r.is_empty()) else { return Err("the agent has no role".to_string()) };
-    let state = list_in(dest, version_dir, agent, Some(role), command);
-    if state.relaunch_needed {
-        return Err(format!("Relaunch {agent} to apply: it was started without a skill view"));
-    }
-    let _lock = SkillsLock::take(dest, agent, "app", LOCK_WAIT)?;
-    let inv = inventory(version_dir, role);
-    let off: Vec<String> = read_off(dest, agent).into_iter().filter(|id| inv.contains(id)).collect();
-    let gen = next_gen(dest, agent);
-    let version = version_dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    if state.mode != "view" {
-        // Plain or legacy, and every skill on: the launch flags name the agent link and already load everything, so there
-        // is no build. The inventory is still refreshed: a version may have added a skill, and without a new record
-        // every Reload would keep the old inventory and show that skill as "new" for good. The hub publishes this
-        // record at the next relink (kind "inventory": no view swap).
-        let prepared = json!({ "gen": gen, "off": [], "skills": inv, "kind": "inventory", "version": version });
-        return write_atomic(&rec(dest, agent, ".skills-prepared"), &prepared.to_string());
-    }
-    build_view(dest, version_dir, agent, role, gen, &off)?;
-    let prepared = json!({ "gen": gen, "off": off, "skills": inv, "kind": "view", "version": version });
-    if let Err(e) = write_atomic(&rec(dest, agent, ".skills-prepared"), &prepared.to_string()) {
-        let _ = fs::remove_dir_all(agents_dir(dest).join(format!("{}.view-{gen}", crate::factory::agent_key(agent))));
-        return Err(e);
-    }
-    cleanup_views(dest, agent);
-    Ok(())
-}
-
 // A role launch. An empty choice keeps the launch flags byte for byte (None) and writes the empty records. A choice
 // with a skill off builds the view, publishes it and returns the view root the flags name.
 pub(crate) fn launch_in(dest: &Path, version_dir: &Path, agent: &str, role: &str, version: &str) -> Result<Option<PathBuf>, String> {
@@ -576,39 +487,6 @@ pub(crate) fn launch_in(dest: &Path, version_dir: &Path, agent: &str, role: &str
     remove_record(dest, agent, ".skills-pending");
     cleanup_views(dest, agent);
     Ok(root)
-}
-
-// ---- Tauri commands ----
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
-    tauri::async_runtime::spawn_blocking(f).await.map_err(|e| format!("skills worker failed: {e}"))?
-}
-
-#[tauri::command]
-pub async fn agent_skills(agent: String) -> Result<AgentSkills, String> {
-    blocking(move || {
-        let (role, command) = crate::pty::agent_role_and_command(&agent);
-        Ok(list_in(&crate::factory::factory_dir(), &crate::factory::current_version_dir()?, &agent, role.as_deref(), command.as_deref()))
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn agent_skills_set(agent: String, off: Vec<String>) -> Result<(), String> {
-    blocking(move || {
-        let (role, _) = crate::pty::agent_role_and_command(&agent);
-        let role = role.ok_or_else(|| "the agent has no role".to_string())?;
-        set_off_in(&crate::factory::factory_dir(), &crate::factory::current_version_dir()?, &agent, &role, &off)
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn agent_skills_apply(agent: String) -> Result<(), String> {
-    blocking(move || {
-        let (role, command) = crate::pty::agent_role_and_command(&agent);
-        apply_in(&crate::factory::factory_dir(), &crate::factory::current_version_dir()?, &agent, role.as_deref(), command.as_deref())
-    })
-    .await
 }
 
 #[cfg(test)]
@@ -642,136 +520,10 @@ mod tests {
         (dest, v)
     }
 
-    fn ids(s: &AgentSkills) -> Vec<(String, bool, &'static str)> {
-        s.groups.iter().flat_map(|g| g.skills.iter().map(|k| (k.id.clone(), k.on, k.state))).collect()
-    }
-
     fn view_cmd(dest: &Path, agent: &str, with_view: bool) -> String {
         let key = crate::factory::agent_key(agent);
         let base = if with_view { format!("{}/agents/{key}.view", dest.display()) } else { format!("{}/agents/{key}", dest.display()) };
         format!("CHATBRIDGE_ROLE='worker' '/bin/pi' --no-skills --skill '{base}/worker/skills' --skill '{base}/shared/skills' -e '/e.js'")
-    }
-
-    #[test]
-    fn a_role_less_agent_has_no_groups_and_a_legacy_agent_with_a_role_is_not_role_less() {
-        let root = tmp("none");
-        let (dest, v) = staged(&root);
-        let none = list_in(&dest, &v, "ag", None, None);
-        assert_eq!((none.role.clone(), none.mode, none.relaunch_needed, none.groups.len()), (None, "none", false, 0));
-        let legacy = list_in(&dest, &v, "ag", Some("worker"), Some("'/bin/claude' --plugin-dir '/m'"));
-        assert_eq!((legacy.role.as_deref(), legacy.mode), (Some("worker"), "legacy"));
-        assert_eq!(legacy.groups.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(), ["Role \u{b7} worker", "Shared"]);
-        // no applied record: every skill is new
-        assert!(ids(&legacy).iter().all(|(_, on, st)| *on && *st == "new"), "{:?}", ids(&legacy));
-        assert!(list_in(&dest, &v, "ag", Some("worker"), None).mode == "legacy", "an unreadable command is legacy");
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn states_come_only_from_the_applied_record() {
-        let root = tmp("state");
-        let (dest, v) = staged(&root);
-        write_atomic(&rec(&dest, "ag", ".skills-applied"), r#"{"version":"x","gen":1,"off":["worker/b"],"skills":["worker/a","worker/b"]}"#).unwrap();
-        set_off_in(&dest, &v, "ag", "worker", &["worker/a".into()]).unwrap();
-        let l = list_in(&dest, &v, "ag", Some("worker"), Some(&view_cmd(&dest, "ag", true)));
-        assert_eq!(
-            ids(&l),
-            vec![
-                ("worker/a".into(), false, "loaded"),     // off in the store, still loaded: a change waits
-                ("worker/b".into(), true, "not_loaded"),  // re-enabled, still not loaded
-                ("shared/s".into(), true, "new"),         // not in the applied inventory
-            ]
-        );
-        assert!(!l.relaunch_needed, "view mode never needs a relaunch");
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn relaunch_is_needed_for_the_first_uncheck_of_a_plain_or_legacy_agent_only() {
-        let root = tmp("relaunch");
-        let (dest, v) = staged(&root);
-        let plain = view_cmd(&dest, "ag", false);
-        assert!(!list_in(&dest, &v, "ag", Some("worker"), Some(&plain)).relaunch_needed, "nothing off");
-        set_off_in(&dest, &v, "ag", "worker", &["worker/a".into()]).unwrap();
-        let l = list_in(&dest, &v, "ag", Some("worker"), Some(&plain));
-        assert_eq!((l.mode, l.relaunch_needed), ("plain", true));
-        assert!(list_in(&dest, &v, "ag", Some("worker"), Some("'/bin/claude'")).relaunch_needed);
-        assert!(!list_in(&dest, &v, "ag", Some("worker"), Some(&view_cmd(&dest, "ag", true))).relaunch_needed);
-        // apply on such an agent returns the error and builds nothing
-        let e = apply_in(&dest, &v, "ag", Some("worker"), Some(&plain)).unwrap_err();
-        assert!(e.contains("Relaunch ag to apply"), "{e}");
-        assert!(view_gens(&dest, "ag").is_empty() && !rec(&dest, "ag", ".skills-prepared").exists());
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    // Validator finding (C6b): a plain agent with every skill on must still refresh its inventory, or a skill that a new
-    // version adds stays "new" through every Reload.
-    #[test]
-    fn a_plain_agent_with_every_skill_on_prepares_an_inventory_record_and_no_build() {
-        let root = tmp("inventory");
-        let (dest, v) = staged(&root);
-        launch_in(&dest, &v, "ag", "worker", "v-0000000000000001").unwrap();
-        let cmd = view_cmd(&dest, "ag", false);
-        // a new version adds worker/c
-        fs::create_dir_all(v.join("worker/skills/c")).unwrap();
-        apply_in(&dest, &v, "ag", Some("worker"), Some(&cmd)).unwrap();
-        let prepared = read_json(&rec(&dest, "ag", ".skills-prepared")).unwrap();
-        assert_eq!((prepared["kind"].as_str(), prepared["gen"].as_u64(), strings(prepared.get("off"))), (Some("inventory"), Some(1), vec![]));
-        assert!(strings(prepared.get("skills")).contains(&"worker/c".to_string()));
-        assert!(view_gens(&dest, "ag").is_empty(), "no build and no view link for a plain agent");
-        // a legacy agent too
-        assert!(apply_in(&dest, &v, "ag", Some("worker"), Some("'/bin/claude'")).is_ok());
-        assert_eq!(read_json(&rec(&dest, "ag", ".skills-prepared")).unwrap()["gen"], 2);
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    // Validator suggestion: an id of an older role must not demand a relaunch.
-    #[test]
-    fn an_obsolete_role_id_in_the_store_does_not_set_relaunch_needed() {
-        let root = tmp("obsolete");
-        let (dest, v) = staged(&root);
-        write_atomic(&rec(&dest, "ag", ".skills-off"), r#"["old-role/x"]"#).unwrap();
-        let plain = view_cmd(&dest, "ag", false);
-        assert!(!list_in(&dest, &v, "ag", Some("worker"), Some(&plain)).relaunch_needed);
-        assert!(apply_in(&dest, &v, "ag", Some("worker"), Some(&plain)).is_ok(), "apply does not refuse");
-        assert_eq!(strings(read_json(&rec(&dest, "ag", ".skills-prepared")).unwrap().get("off")), Vec::<String>::new(), "the obsolete id is not carried");
-        // a real id next to it still needs the relaunch
-        write_atomic(&rec(&dest, "ag", ".skills-off"), r#"["old-role/x","worker/a"]"#).unwrap();
-        assert!(list_in(&dest, &v, "ag", Some("worker"), Some(&plain)).relaunch_needed);
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    // C6-1 (Validator): the full plain reload. A plain agent with every skill on launches with the link flags and no view; a
-    // version adds a skill; the click prepares an inventory record; the hub's publication and success report (simulated
-    // here exactly as factory-skills.ts writes them) make the new skill `loaded`. No view exists at any point, and the flags
-    // the launch gave are the same before and after.
-    #[test]
-    fn a_plain_agent_reload_makes_a_new_skill_loaded_with_no_view_and_the_same_flags() {
-        let root = tmp("plain-reload");
-        let (dest, v) = staged(&root);
-        let key = crate::factory::agent_key("ag");
-        let flags_before = view_cmd(&dest, "ag", false);
-        assert_eq!(launch_in(&dest, &v, "ag", "worker", "v-0000000000000001").unwrap(), None);
-        fs::create_dir_all(v.join("worker/skills/c")).unwrap(); // the new version's skill
-        let before = list_in(&dest, &v, "ag", Some("worker"), Some(&flags_before));
-        assert_eq!(ids(&before).iter().find(|(i, _, _)| i == "worker/c").unwrap().2, "new");
-        apply_in(&dest, &v, "ag", Some("worker"), Some(&flags_before)).unwrap();
-        // the hub: publish the prepared record, copy it to pending, then to applied on the success report
-        let prepared = read_json(&rec(&dest, "ag", ".skills-prepared")).unwrap();
-        assert_eq!(prepared["kind"], "inventory");
-        let mut published = serde_json::json!({ "gen": prepared["gen"], "off": prepared["off"], "skills": prepared["skills"], "version": "v-0000000000000001" });
-        write_atomic(&rec(&dest, "ag", ".skills-published"), &published.to_string()).unwrap();
-        published["attempt"] = "a1".into();
-        write_atomic(&rec(&dest, "ag", ".skills-pending"), &published.to_string()).unwrap();
-        let applied = serde_json::json!({ "version": published["version"], "gen": published["gen"], "off": published["off"], "skills": published["skills"] });
-        write_atomic(&rec(&dest, "ag", ".skills-applied"), &applied.to_string()).unwrap();
-        let after = list_in(&dest, &v, "ag", Some("worker"), Some(&flags_before));
-        assert_eq!(ids(&after).iter().find(|(i, _, _)| i == "worker/c").unwrap(), &("worker/c".to_string(), true, "loaded"));
-        assert!(ids(&after).iter().all(|(_, on, st)| *on && *st == "loaded"));
-        assert_eq!((after.mode, after.relaunch_needed), ("plain", false));
-        assert!(view_gens(&dest, "ag").is_empty() && agents_dir(&dest).join(format!("{key}.view")).symlink_metadata().is_err(), "no view at any point");
-        assert_eq!(view_cmd(&dest, "ag", false), flags_before, "the launch flags did not change");
-        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -895,69 +647,6 @@ mod tests {
         write_atomic(&rec(&dest, "ag", ".skills-off"), r#"["old-role/x"]"#).unwrap();
         assert_eq!(launch_in(&dest, &v, "ag", "worker", "v-0000000000000001").unwrap(), None);
         assert_eq!(fs::read_to_string(rec(&dest, "ag", ".skills-off")).unwrap(), r#"["old-role/x"]"#);
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn a_launch_with_a_skill_off_builds_and_publishes_the_view_and_the_view_holds_only_what_is_on() {
-        let root = tmp("launch-off");
-        let (dest, v) = staged(&root);
-        set_off_in(&dest, &v, "ag", "worker", &["worker/a".into()]).unwrap();
-        let key = crate::factory::agent_key("ag");
-        let view = launch_in(&dest, &v, "ag", "worker", "v-0000000000000001").unwrap().unwrap();
-        assert_eq!(view, agents_dir(&dest).join(format!("{key}.view")));
-        assert_eq!(fs::read_link(&view).unwrap(), Path::new(&format!("{key}.view-1")));
-        assert!(!view.join("worker/skills/a").exists() && view.join("worker/skills/b/SKILL.md").is_file());
-        assert!(view.join("shared/skills/s/SKILL.md").is_file());
-        // the targets go through the agent link; role.md and hooks are links; the manifest is a real copy
-        assert_eq!(fs::read_link(view.join("worker/skills/b")).unwrap(), agents_dir(&dest).join(&key).join("worker/skills/b"));
-        assert!(view.join("worker/role.md").symlink_metadata().unwrap().file_type().is_symlink() && view.join("worker/role.md").is_file());
-        assert!(view.join("worker/hooks/hooks.json").is_file());
-        let manifest = view.join("worker/.claude-plugin");
-        assert!(manifest.symlink_metadata().unwrap().file_type().is_dir() && manifest.join("plugin.json").is_file());
-        // the staged skill is still there for another agent of the role
-        assert!(v.join("worker/skills/a/SKILL.md").is_file());
-        let j = read_json(&rec(&dest, "ag", ".skills-applied")).unwrap();
-        assert_eq!((j["gen"].as_u64(), strings(j.get("off"))), (Some(1), vec!["worker/a".to_string()]));
-        // the list: view mode, a is off and not_loaded
-        let l = list_in(&dest, &v, "ag", Some("worker"), Some(&view_cmd(&dest, "ag", true)));
-        assert_eq!(ids(&l)[0], ("worker/a".into(), false, "not_loaded"));
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn a_preparation_builds_without_publishing_and_a_newer_one_replaces_the_older_unpublished_build() {
-        let root = tmp("prepare");
-        let (dest, v) = staged(&root);
-        let key = crate::factory::agent_key("ag");
-        set_off_in(&dest, &v, "ag", "worker", &["worker/a".into()]).unwrap();
-        launch_in(&dest, &v, "ag", "worker", "v-0000000000000001").unwrap(); // gen 1 published
-        let cmd = view_cmd(&dest, "ag", true);
-        let published_link = agents_dir(&dest).join(format!("{key}.view"));
-        let before = fs::read_link(&published_link).unwrap();
-        let published_rec = fs::read_to_string(rec(&dest, "ag", ".skills-published")).unwrap();
-        set_off_in(&dest, &v, "ag", "worker", &["worker/a".into(), "worker/b".into()]).unwrap();
-        apply_in(&dest, &v, "ag", Some("worker"), Some(&cmd)).unwrap();
-        assert_eq!(fs::read_link(&published_link).unwrap(), before, "the published symlink is unchanged");
-        assert_eq!(fs::read_to_string(rec(&dest, "ag", ".skills-published")).unwrap(), published_rec);
-        assert_eq!(read_json(&rec(&dest, "ag", ".skills-prepared")).unwrap()["gen"], 2);
-        assert!(!agents_dir(&dest).join(format!("{key}.view-2/worker/skills/b")).exists());
-        // all on again: a full view, prepared as gen 3; the unpublished gen 2 goes
-        set_off_in(&dest, &v, "ag", "worker", &[]).unwrap();
-        apply_in(&dest, &v, "ag", Some("worker"), Some(&cmd)).unwrap();
-        assert_eq!(read_json(&rec(&dest, "ag", ".skills-prepared")).unwrap()["gen"], 3);
-        let full = agents_dir(&dest).join(format!("{key}.view-3"));
-        assert!(full.join("worker/skills/a").exists() && full.join("worker/skills/b").exists() && full.join("shared/skills/s").exists(), "all on: every skill");
-        assert!(!agents_dir(&dest).join(format!("{key}.view-2")).exists(), "the older unpublished build is deleted");
-        assert!(agents_dir(&dest).join(format!("{key}.view-1")).exists(), "the published build stays");
-        // a failing build (the role folder is missing) leaves .skills-prepared as it was
-        let prepared = fs::read_to_string(rec(&dest, "ag", ".skills-prepared")).unwrap();
-        fs::rename(v.join("shared"), v.join("shared-away")).unwrap();
-        assert!(apply_in(&dest, &v, "ag", Some("worker"), Some(&cmd)).is_err());
-        fs::rename(v.join("shared-away"), v.join("shared")).unwrap();
-        assert_eq!(fs::read_to_string(rec(&dest, "ag", ".skills-prepared")).unwrap(), prepared);
-        // plain agent, everything on: apply is a no-op
-        assert!(apply_in(&dest, &v, "ag", Some("worker"), Some(&view_cmd(&dest, "ag", false))).is_ok());
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1322,20 +1011,26 @@ mod tests {
     }
 
     #[test]
-    fn a_preparation_waits_for_the_lock_and_errors_after_the_wait() {
-        let root = tmp("lock-wait");
+    fn a_launch_with_a_skill_off_builds_and_publishes_the_view_and_the_view_holds_only_what_is_on() {
+        let root = tmp("launch-off");
         let (dest, v) = staged(&root);
         set_off_in(&dest, &v, "ag", "worker", &["worker/a".into()]).unwrap();
-        launch_in(&dest, &v, "ag", "worker", "v-0000000000000001").unwrap();
-        let (mut child, line) = child_owner("hub");
-        set_lock(&dest, "ag", Some(&line));
-        let t0 = Instant::now();
-        let cmd = view_cmd(&dest, "ag", true);
-        let e = apply_in(&dest, &v, "ag", Some("worker"), Some(&cmd)).unwrap_err();
-        assert!(e.contains("busy") && t0.elapsed() >= LOCK_WAIT, "{e} {:?}", t0.elapsed());
-        assert!(view_gens(&dest, "ag").len() == 1, "no build made, none deleted");
-        let _ = child.kill();
-        let _ = child.wait();
+        let key = crate::factory::agent_key("ag");
+        let view = launch_in(&dest, &v, "ag", "worker", "v-0000000000000001").unwrap().unwrap();
+        assert_eq!(view, agents_dir(&dest).join(format!("{key}.view")));
+        assert_eq!(fs::read_link(&view).unwrap(), Path::new(&format!("{key}.view-1")));
+        assert!(!view.join("worker/skills/a").exists() && view.join("worker/skills/b/SKILL.md").is_file());
+        assert!(view.join("shared/skills/s/SKILL.md").is_file());
+        // the targets go through the agent link; role.md and hooks are links; the manifest is a real copy
+        assert_eq!(fs::read_link(view.join("worker/skills/b")).unwrap(), agents_dir(&dest).join(&key).join("worker/skills/b"));
+        assert!(view.join("worker/role.md").symlink_metadata().unwrap().file_type().is_symlink() && view.join("worker/role.md").is_file());
+        assert!(view.join("worker/hooks/hooks.json").is_file());
+        let manifest = view.join("worker/.claude-plugin");
+        assert!(manifest.symlink_metadata().unwrap().file_type().is_dir() && manifest.join("plugin.json").is_file());
+        // the staged skill is still there for another agent of the role
+        assert!(v.join("worker/skills/a/SKILL.md").is_file());
+        let j = read_json(&rec(&dest, "ag", ".skills-applied")).unwrap();
+        assert_eq!((j["gen"].as_u64(), strings(j.get("off"))), (Some(1), vec!["worker/a".to_string()]));
         let _ = fs::remove_dir_all(&root);
     }
 }

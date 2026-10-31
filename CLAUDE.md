@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Harness is per agent and immutable.** Unknown values rejected. docs/rules/terminal.md
 - **Pi gets the chatbridge as an extension.** Rerun build-sidecars.sh after extension changes. docs/rules/bridge.md
 - **Pi shares Claude skills and commands only.** No MCP, plugins or hooks. docs/rules/bridge.md
-- **Per-agent skill switches live in <app data>/factory/agents/.** Only the app writes .skills-off. docs/rules/bridge.md
+- **Per-agent skill switches live in <app data>/factory/agents/.** Only the hub writes .skills-off. docs/rules/bridge.md
 - **Skills are added per role, not per agent.** docs/rules/bridge.md
 - **After changing hub/hub.ts rebuild sidecars.** Run ./scripts/build-sidecars.sh first. docs/rules/core.md
 - **Never mutate knownAgents, agentQueues, agentConnections or staleTimers directly.** Use agents.ensure/remove. docs/rules/core.md
