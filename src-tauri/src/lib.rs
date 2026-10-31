@@ -1,4 +1,6 @@
+pub mod cli;
 mod factory;
+mod keychain;
 mod login_path;
 mod skills;
 
@@ -980,6 +982,13 @@ fn mint_hub_tokens() -> Result<HubTokens, String> {
     Ok(HubTokens { agent, human })
 }
 
+// The Keychain item with a password prompt on each read, for `cubilot hub`. A failure is logged (no token in the line) and does not stop the app.
+fn store_human_token_in_keychain(human: &str) {
+    if let Err(e) = keychain::store_human_token(human) {
+        eprintln!("[setup] Keychain item for the human token not stored: {}", e.describe());
+    }
+}
+
 // First line of the hub's stdin. The hub reads one line, within 5 s.
 fn give_human_token(child: &mut CommandChild, human: &str) -> Result<(), String> {
     child
@@ -1192,6 +1201,7 @@ fn reload_settings(
     cmd = apply_tmux_env(cmd);
     let (rx, mut child) = cmd.spawn().map_err(|e| format!("spawn cubilot-bin: {e}"))?;
     give_human_token(&mut child, &tokens.human)?;
+    store_human_token_in_keychain(&tokens.human);
 
     let new_info = HubInfo {
         url: url.clone(),
@@ -1346,6 +1356,7 @@ pub fn run() {
 
             let (rx, mut child) = cmd.spawn().map_err(|e| format!("spawn cubilot-bin: {e}"))?;
             give_human_token(&mut child, &tokens.human)?;
+            store_human_token_in_keychain(&tokens.human);
 
             {
                 let state = handle.state::<HubState>();
@@ -1827,6 +1838,17 @@ mod hub_tokens {
             assert!(!(has_human && (l.contains("write_token_file") || l.contains("atomic_write") || l.contains("fs::write"))), "line {}: {line}", i + 1);
         }
         assert!(prod.contains("give_human_token(&mut child, &tokens.human)"));
+    }
+
+    // Regression (spec review h_f8ae): one launch token goes to hub stdin, the Keychain item and get_hub_url.
+    #[test]
+    fn stdin_keychain_and_get_hub_url_get_the_same_launch_token() {
+        let src = include_str!("lib.rs");
+        let prod = &src[..src.find("#[cfg(test)]\nmod hub_tokens").unwrap()];
+        assert_eq!(prod.matches("give_human_token(&mut child, &tokens.human)?;").count(), 2);
+        assert_eq!(prod.matches("store_human_token_in_keychain(&tokens.human);").count(), 2);
+        assert!(prod.contains("token: tokens.human.clone(),"));
+        assert!(prod.contains("HubInfo { url, token: tokens.human }"));
     }
 }
 
