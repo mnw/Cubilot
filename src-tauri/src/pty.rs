@@ -6,10 +6,8 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
-use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
-use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, State};
 
 use crate::{
     app_data_dir,
@@ -46,7 +44,8 @@ fn terminal_name_error(name: &str) -> Option<&'static str> {
 }
 
 pub struct PtyHandle {
-    master: Box<dyn portable_pty::MasterPty + Send>,
+    // Kept alive with the child: dropping the master closes the PTY.
+    _master: Box<dyn portable_pty::MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     // Kept alive so the tmux attach-session child isn't reaped while we still read from master.
     _child: Box<dyn portable_pty::Child + Send + Sync>,
@@ -54,12 +53,6 @@ pub struct PtyHandle {
 
 #[derive(Default)]
 pub struct PtyRegistry(pub Arc<Mutex<HashMap<String, Arc<Mutex<PtyHandle>>>>>);
-
-#[derive(Serialize, Clone)]
-struct OutputPayload {
-    agent: String,
-    b64: String,
-}
 
 #[cfg(test)]
 thread_local! {
@@ -88,13 +81,6 @@ fn tmux_socket_path() -> PathBuf {
 // `=name`; one for a pane, window or option (set-option, list-panes, resize-window, capture-pane,
 // display-message, pipe-pane) needs the colon, `=name:` (`=name` alone is rejected there).
 // Not for `refresh-client -t`, which takes a client, not a session.
-// Tauri event names allow only alphanumerics, `-`, `/`, `:` and `_`, but an agent name may hold spaces and dots.
-// The name part of an event is the lowercase hex of the agent name's UTF-8 bytes: injective, and in the allowed
-// set. The JS side builds the same string (ptyEventName in ui/terminal/pty.js); both sides use ONE helper.
-fn pty_event(kind: &str, agent: &str) -> String {
-    format!("pty://{kind}/{}", crate::factory::agent_key(agent))
-}
-
 fn tmux_session(name: &str) -> String {
     format!("={name}")
 }
@@ -886,7 +872,7 @@ fn format_claude_command(
 
 // Caller owns name-validation + session-creation; this helper only attaches and streams.
 fn attach_and_stream(
-    app: AppHandle,
+    _app: AppHandle,
     registry: Arc<Mutex<HashMap<String, Arc<Mutex<PtyHandle>>>>>,
     name: &str,
     lang: &str,
@@ -934,15 +920,15 @@ fn attach_and_stream(
         map.insert(
             name.to_string(),
             Arc::new(Mutex::new(PtyHandle {
-                master: pair.master,
+                _master: pair.master,
                 writer,
                 _child: child,
             })),
         );
     }
 
-    // PTY reads block; dedicated thread so we don't starve the tokio executor.
-    let app_clone = app.clone();
+    // The webview reads the terminal from the hub's WebSocket (hub-first-browser, group 9), so nothing is emitted here.
+    // This thread only drains the PTY, so the tmux attach client never blocks, and drops the handle at the end.
     let name_clone = name.to_string();
     let registry_clone = registry.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -950,21 +936,10 @@ fn attach_and_stream(
         let mut buf = [0u8; 8192];
         loop {
             match reader.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    let b64 = B64.encode(&buf[..n]);
-                    let _ = app_clone.emit(
-                        &pty_event("output", &name_clone),
-                        OutputPayload {
-                            agent: name_clone.clone(),
-                            b64,
-                        },
-                    );
-                }
-                Err(_) => break,
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
             }
         }
-        let _ = app_clone.emit(&pty_event("exit", &name_clone), &name_clone);
         let mut map = registry_clone.lock().unwrap();
         map.remove(&name_clone);
     });
@@ -1311,29 +1286,6 @@ pub fn pty_attach(app: AppHandle, state: State<'_, PtyRegistry>, agent: String) 
     attach_and_stream(app, state.0.clone(), &agent, &lang)
 }
 
-#[tauri::command]
-pub fn pty_write(
-    state: State<'_, PtyRegistry>,
-    agent: String,
-    b64: String,
-) -> Result<(), String> {
-    let bytes = B64
-        .decode(b64.as_bytes())
-        .map_err(|e| format!("base64 decode: {e}"))?;
-    let handle_arc = {
-        let map = state.0.lock().unwrap();
-        map.get(&agent)
-            .cloned()
-            .ok_or_else(|| format!("unknown agent: {agent}"))?
-    };
-    let mut h = handle_arc.lock().unwrap();
-    h.writer
-        .write_all(&bytes)
-        .map_err(|e| format!("write: {e}"))?;
-    h.writer.flush().map_err(|e| format!("flush: {e}"))?;
-    Ok(())
-}
-
 /// The bytes of one input line: the text and Enter. `None` when the text is empty, too long or holds a control character,
 /// so one request is one line and never a key sequence.
 pub fn input_line(text: &str) -> Option<Vec<u8>> {
@@ -1346,7 +1298,7 @@ pub fn input_line(text: &str) -> Option<Vec<u8>> {
 }
 
 /// Writes `text` and Enter to the PTY of the named session and to no other (P6-15, the checkpoint `/clear`). Raw PTY
-/// write, the same path as `pty_write`; never `tmux send-keys`. An unknown session is an error, never a fallback.
+/// write, the the same path the webview input used before the hub took it; never `tmux send-keys`. An unknown session is an error, never a fallback.
 pub fn write_input(state: &PtyRegistry, session: &str, text: &str) -> Result<(), String> {
     let bytes = input_line(text).ok_or("the input is empty, too long or holds a control character")?;
     let handle_arc = {
@@ -1356,31 +1308,6 @@ pub fn write_input(state: &PtyRegistry, session: &str, text: &str) -> Result<(),
     let mut h = handle_arc.lock().unwrap();
     h.writer.write_all(&bytes).map_err(|e| format!("write: {e}"))?;
     h.writer.flush().map_err(|e| format!("flush: {e}"))?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn pty_resize(
-    state: State<'_, PtyRegistry>,
-    agent: String,
-    cols: u16,
-    rows: u16,
-) -> Result<(), String> {
-    let handle_arc = {
-        let map = state.0.lock().unwrap();
-        map.get(&agent)
-            .cloned()
-            .ok_or_else(|| format!("unknown agent: {agent}"))?
-    };
-    let h = handle_arc.lock().unwrap();
-    h.master
-        .resize(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|e| format!("resize: {e}"))?;
     Ok(())
 }
 
@@ -2297,24 +2224,6 @@ mod spawn_argv_tests {
         }
         // the name stays valid for the hub rules (valid_agent_name still allows dots): only the terminal refuses it
         assert!(super::valid_agent_name("t a.b"));
-    }
-
-    #[test]
-    fn pty_event_names_are_hex_of_the_agent_name_and_only_use_allowed_characters() {
-        assert_eq!(super::pty_event("output", "alice"), "pty://output/616c696365");
-        assert_eq!(super::pty_event("exit", "orchestrator-Test room"), "pty://exit/6f7263686573747261746f722d5465737420726f6f6d");
-        assert_eq!(super::pty_event("output", "t a.b"), "pty://output/7420612e62");
-        assert_eq!(super::pty_event("output", "é"), "pty://output/c3a9");
-        let allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '/' | ':' | '_');
-        for n in ["a b", "a.b", "a  b", "a-b_c", "orchestrator-Test room", "Z.z 9"] {
-            let e = super::pty_event("output", n);
-            assert!(e.chars().all(allowed), "{n}: {e}");
-        }
-        // injective: names that differ only by a space, a dot or a case never collide
-        let names = ["a b", "a.b", "a_b", "a-b", "A b", "a  b"];
-        let set: std::collections::HashSet<_> = names.iter().map(|n| super::pty_event("output", n)).collect();
-        assert_eq!(set.len(), names.len());
-        assert_ne!(super::pty_event("output", "a"), super::pty_event("exit", "a"));
     }
 
     #[test]

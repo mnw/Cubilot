@@ -1272,10 +1272,7 @@ pub fn run() {
             open_skills_folder,
             open_global_mcp_config,
             open_in_editor,
-            reload_settings,
-            pty::pty_attach,
-            pty::pty_write,
-            pty::pty_resize
+            reload_settings
         ])
         .setup(|app| {
             let handle = app.handle().clone();

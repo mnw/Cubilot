@@ -10,7 +10,7 @@ const block = src.slice(src.indexOf("  async function autoAttach(agent, cwd) {")
 
 function run(spawnError: string | null, connectFails = false, opts: { listening?: boolean; inList?: boolean } = {}) {
   const tab: any = { state: "external" };
-  if (opts.listening) { tab.outputUnlisten = () => {}; tab.exitUnlisten = () => {}; }
+  if (opts.listening) { tab.socket = {}; }
   const calls: string[] = [];
   const spawnArgs: any[][] = [];
   const ctx: any = vm.createContext({
@@ -53,13 +53,12 @@ describe("autoAttach", () => {
   });
 
   // "already attached" also happens for a normal agent (a window reload): its tab may already listen.
-  test("a tab that already has both listeners gets no second pair; one missing listener is connected", async () => {
+  test("a tab that already has its socket gets no second one; a tab without a socket is connected", async () => {
     const has = run("agent 'worker-1' already attached", false, { listening: true });
     await has.go();
     expect(has.calls).not.toContain("connect");
     expect(has.tab.state).toBe("live");
     const half = run("agent 'worker-1' already attached");
-    half.tab.outputUnlisten = () => {}; // only the output listener exists
     await half.go();
     expect(half.calls).toContain("connect");
   });

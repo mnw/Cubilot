@@ -127,7 +127,7 @@ describe("ptySpawn and the launch alert", () => {
     new Function("window", "TextEncoder", readFileSync("ui/terminal/pty.js", "utf8"))(win, TextEncoder);
     return win.__CUBILOT_TERM__.pty;
   };
-  test("attachOnly attaches only; otherwise the hub creates the session first", async () => {
+  test("attachOnly creates nothing; otherwise the hub creates the session; no Tauri command", async () => {
     const seen: any[] = [];
     const posts: string[] = [];
     const win: any = { __TAURI__: { core: { invoke: async (c: string, a: any) => { seen.push([c, a]); } } }, authedFetch: async (p: string) => { posts.push(p); return { ok: true }; } };
@@ -137,7 +137,7 @@ describe("ptySpawn and the launch alert", () => {
     expect(posts).toEqual([]);
     await pty.ptySpawn("b", "/tmp");
     expect(posts).toEqual(["/sessions"]);
-    expect(seen).toEqual([["pty_attach", { agent: "a" }], ["pty_attach", { agent: "b" }]]);
+    expect(seen).toEqual([]);
   });
   test("a Rust error (a string) reaches the Launch failed alert unchanged", async () => {
     const block = between("  async function handleLaunch(", "  async function handleOpenEditor(");

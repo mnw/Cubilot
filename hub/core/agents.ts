@@ -35,6 +35,11 @@ export type AgentRegistry = {
   setPaused(name: string, paused: boolean): boolean;
   // The pause policy for one entry bound for `name` (null = drop, else the entry, stamped `paused` where it applies).
   forDelivery(name: string, entry: Entry): Entry | null;
+  // Hold (human control, hub-first-browser design decision 4): while held, forDelivery keeps each entry for the agent in
+  // an in-memory list (drop-oldest at the queue cap). setHeld(false), and remove(), release it. setHeld reports a change.
+  isHeld(name: string): boolean;
+  heldCount(name: string): number;
+  setHeld(name: string, held: boolean): boolean;
   values(): IterableIterator<Agent>;
   entries(): IterableIterator<[string, Agent]>;
   connectionCount(name: string): number;
@@ -131,6 +136,7 @@ export function createAgentRegistry(opts: AgentRegistryOptions): AgentRegistry {
     knownAgents.delete(name);
     agentQueues.delete(name);
     agentConnections.delete(name);
+    holds.delete(name);
     console.log(`[hub] agent removed: ${name} (${reason})`);
     opts.onRosterChange();
     opts.onPresenceChange();
@@ -176,7 +182,7 @@ export function createAgentRegistry(opts: AgentRegistryOptions): AgentRegistry {
   // permission traffic is no business of a paused agent (only the human votes on it).
   // Applied when an entry is queued AND again where it is delivered (queue pull, reconnect replay),
   // because the pause can start after the entry was queued or stored.
-  function forDelivery(name: string, entry: Entry): Entry | null {
+  function pausePolicy(name: string, entry: Entry): Entry | null {
     if (!isPaused(name)) return entry;
     const from = typeof entry.from === "string" ? entry.from : "";
     // A peer is anyone but the human ("you" is the webview's label), the system, and a permanent member.
@@ -186,6 +192,44 @@ export function createAgentRegistry(opts: AgentRegistryOptions): AgentRegistry {
     if (entry.kind?.startsWith("permission.") && from !== name) return null;
     if (entry.kind && !entry.kind.startsWith("permission.") && entry.paused !== true) return { ...entry, paused: true };
     return entry;
+  }
+
+  // The hold list of each held agent, in arrival order. Memory only on purpose (design decision 4): a hub restart
+  // under control drops held plain chat; handoffs, tickets and interrupts replay from the ledger.
+  const holds = new Map<string, Entry[]>();
+  const isHeld = (name: string): boolean => holds.has(name);
+  const heldCount = (name: string): number => holds.get(name)?.length ?? 0;
+
+  function setHeld(name: string, held: boolean): boolean {
+    if (!knownAgents.has(name) || holds.has(name) === held) return false;
+    if (held) {
+      holds.set(name, []);
+    } else {
+      const list = holds.get(name) ?? [];
+      holds.delete(name);
+      const q = agentQueues.get(name);
+      for (const e of list) {
+        const out = pausePolicy(name, e);
+        if (out && q) {
+          q.push(out);
+          opts.onEnqueue?.(name, out);
+        }
+      }
+    }
+    opts.onPresenceChange();
+    return true;
+  }
+
+  // The pause policy, then the hold: a held agent's entries wait in its hold list instead of its queue.
+  function forDelivery(name: string, entry: Entry): Entry | null {
+    const out = pausePolicy(name, entry);
+    if (!out) return null;
+    const list = holds.get(name);
+    if (!list) return out;
+    list.push(out);
+    while (list.length > opts.queueMax) list.shift();
+    opts.onPresenceChange();
+    return null;
   }
 
   function enqueueFor(name: string, entry: Entry): boolean {
@@ -231,7 +275,7 @@ export function createAgentRegistry(opts: AgentRegistryOptions): AgentRegistry {
   }
 
   function rosterSnapshot(): Entry {
-    return { type: "roster", agents: [...knownAgents.values()].map((a) => ({ ...a, context_pct: readContextPct(a.name) })) as unknown as Entry["agents"] };
+    return { type: "roster", agents: [...knownAgents.values()].map((a) => ({ ...a, context_pct: readContextPct(a.name), held: heldCount(a.name) })) as unknown as Entry["agents"] };
   }
 
   function presenceSnapshot(): Entry {
@@ -240,7 +284,10 @@ export function createAgentRegistry(opts: AgentRegistryOptions): AgentRegistry {
       // Permanent members (e.g. human) have no channel-bin → force online whenever the hub is up.
       map[name] = permanentAgents.has(name) ? true : (agentConnections.get(name) ?? 0) > 0;
     }
-    return { type: "presence", agents: map };
+    // `held`: the count of entries waiting for each held agent (absent = not held).
+    const held: Record<string, number> = {};
+    for (const [name, list] of holds) held[name] = list.length;
+    return { type: "presence", agents: map, held } as Entry;
   }
 
   return {
@@ -250,6 +297,9 @@ export function createAgentRegistry(opts: AgentRegistryOptions): AgentRegistry {
     isPaused,
     setPaused,
     forDelivery,
+    isHeld,
+    heldCount,
+    setHeld,
     values: () => knownAgents.values(),
     entries: () => knownAgents.entries(),
     connectionCount: (name) => agentConnections.get(name) ?? 0,

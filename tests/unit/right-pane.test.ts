@@ -61,6 +61,8 @@ beforeEach(() => {
     tabs: new Map(),
     splitter: { classList: { add: () => {} }, setPointerCapture: () => {} },
     appBody: { getBoundingClientRect: () => ({ width: 1000 }) },
+    PANE_KEY: "cubilot_terminal_enabled",
+    localStorage: { setItem: () => {}, getItem: () => null },
     reconcile: () => calls.push("reconcile"),
     ensureShellAttached: () => calls.push("attach"),
   });
@@ -136,8 +138,8 @@ describe("board and terminal share the right pane", () => {
 
   test("handleLaunch and startup restore enable the terminal through setPaneEnabled", () => {
     const fn = (name: string) => TERM_SRC.slice(TERM_SRC.indexOf(`function ${name}(`), TERM_SRC.indexOf(`function ${name}(`) + 400);
-    expect(fn("handleLaunch")).toContain("setPaneEnabled(true)");
-    expect(TERM_SRC).toMatch(/!_paneEnabled\) \{\n\s+setPaneEnabled\(true\);\n\s+reconcile\(\);/);   // startup restore
+    expect(fn("handleLaunch")).toContain("setPaneEnabled(true, false)");   // a launch opens the pane for now, it does not store the choice
+    expect(TERM_SRC).toMatch(/if \(_paneEnabled\) \{\n\s+reconcile\(\);\n\s+ensureShellAttached\(\);/);   // startup restore: only the stored choice
     // No other direct write: only the declaration, the helper and onRightPane.
     const writes = TERM_SRC.match(/\b_paneEnabled = /g) ?? [];
     expect(writes.length).toBe(3);

@@ -57,7 +57,7 @@ function handleEvent(data) {
     return;
   }
   if (data.type === 'roster')   { applyRoster(data.agents || []); return; }
-  if (data.type === 'presence') { applyPresence(data.agents || {}); return; }
+  if (data.type === 'presence') { applyPresence(data.agents || {}); window.noteHeld?.(data.held || {}); return; }
   if (data.type === 'nutshell.updated') { applyNutshell(data.snapshot || null); return; }
   if (typeof data.id === 'number') {
     if (data.id <= lastSeenId) return;

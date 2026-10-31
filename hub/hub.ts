@@ -38,7 +38,7 @@ import { createSearchFeature } from "./features/search";
 import { createSettingsFeature } from "./features/settings";
 import { createTranscriptFeature } from "./features/transcript";
 import { createChatFeature } from "./features/chat";
-import { createTerminalFeature, defaultCapturesRoot } from "./features/terminal";
+import { createTerminalFeature, createTerminalSocket, defaultCapturesRoot } from "./features/terminal";
 import { createTmux, tmuxFromEnv } from "./core/tmux";
 import { createStreamHandlers } from "./features/streams";
 import {
@@ -300,7 +300,8 @@ if (ledgerDb) {
   for (const k of KINDS) k.start?.(buildCap());
 }
 
-const hubTmux = (() => { try { return createTmux(tmuxFromEnv()); } catch { return null; } })();
+const terminalTmux = (() => { try { return createTmux(tmuxFromEnv()); } catch { return null; } })();
+const terminalSocket = createTerminalSocket({ tmux: terminalTmux, agents, requireReadAuth });
 
 const FEATURES: readonly HubFeature[] = [
   ...KINDS,
@@ -311,7 +312,7 @@ const FEATURES: readonly HubFeature[] = [
     version: (process.env.CUBILOT_FACTORY_VERSION ?? "").trim(),
     online: (name) => (agents.presenceSnapshot().agents as Record<string, boolean> | undefined)?.[name] === true,
   }),
-  createSessionsFeature({ tmux: hubTmux }),
+  createSessionsFeature({ tmux: terminalTmux }),
   createAttachmentsFeature({
     attachmentsDir: ATTACHMENTS_DIR,
     allowedExtensions: ALLOWED_EXTENSIONS,
@@ -320,7 +321,7 @@ const FEATURES: readonly HubFeature[] = [
   createRosterFeature({ agents, removeAgent, readNutshell }),
   createSettingsFeature({ agents, defaultRoom: DEFAULT_ROOM }),
   createTerminalFeature({
-    tmux: hubTmux,
+    tmux: terminalTmux,
     capturesRoot: defaultCapturesRoot(),
   }),
   createSearchFeature({ db: ledgerDb, agents, humanName: HUMAN_NAME }),
@@ -368,7 +369,8 @@ const server = Bun.serve({
   hostname: "127.0.0.1",
   port: PORT,
   idleTimeout: 0,
-  async fetch(req) {
+  websocket: terminalSocket.websocket,
+  async fetch(req, srv) {
     const url = new URL(req.url);
     const { pathname } = url;
 
@@ -394,6 +396,10 @@ const server = Bun.serve({
         const room = url.searchParams.get("room");
         return handleAgentStream(agent, room);
       }
+
+      const ws = await terminalSocket.upgrade(req, url, srv as never);
+      if (ws === "upgraded") return undefined;
+      if (ws) return ws;
 
       const featResp = await dispatch(req, url);
       if (featResp) return featResp;

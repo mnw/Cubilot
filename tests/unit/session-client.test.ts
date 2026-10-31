@@ -24,12 +24,12 @@ function load(answer: (c: Call) => { ok: boolean; status?: number; body?: unknow
 const sent = (c: Call) => JSON.parse(String(c.init?.body));
 
 describe("session routes", () => {
-  test("ptySpawn posts the launch form to /sessions, then attaches with pty_attach", async () => {
+  test("ptySpawn posts the launch form to /sessions, and calls no Tauri command", async () => {
     const { pty, fetched, invoked } = load();
     await pty.ptySpawn("w1", "/work", "resume", "cubilot", "pi", "worker", "m1", "high", "prov");
     expect(fetched.map((c) => `${c.init?.method} ${c.path}`)).toEqual(["POST /sessions"]);
     expect(sent(fetched[0])).toEqual({ name: "w1", cwd: "/work", resume: "resume", room: "cubilot", harness: "pi", role: "worker", model: "m1", effort: "high", provider: "prov" });
-    expect(invoked).toEqual([["pty_attach", { agent: "w1" }]]);
+    expect(invoked).toEqual([]);
   });
 
   test("ptySpawn sends only what is set", async () => {
@@ -38,11 +38,11 @@ describe("session routes", () => {
     expect(sent(fetched[0])).toEqual({ name: "w1", cwd: "/work", role: "worker" });
   });
 
-  test("attachOnly calls the hub for nothing and only attaches", async () => {
+  test("attachOnly calls the hub for nothing and no Tauri command", async () => {
     const { pty, fetched, invoked } = load();
     await pty.ptySpawn("w1", "/work", null, null, null, null, null, null, null, true);
     expect(fetched).toEqual([]);
-    expect(invoked).toEqual([["pty_attach", { agent: "w1" }]]);
+    expect(invoked).toEqual([]);
   });
 
   test("a hub refusal rejects with the hub's text and nothing is attached", async () => {
@@ -68,14 +68,14 @@ describe("session routes", () => {
     expect(await load(() => ({ ok: false, body: { error: "x" } })).pty.ptyList()).toEqual([]);
   });
 
-  test("ptyShellExists reads GET /sessions/shell; ptySpawnShell posts it, then attaches the shell", async () => {
+  test("ptyShellExists reads GET /sessions/shell; ptySpawnShell posts it and calls no Tauri command", async () => {
     expect(await load(() => ({ ok: true, body: { exists: true } })).pty.ptyShellExists()).toBe(true);
     expect(await load(() => ({ ok: true, body: { exists: false } })).pty.ptyShellExists()).toBe(false);
     expect(await load(() => ({ ok: false, body: { error: "x" } })).pty.ptyShellExists()).toBe(false);
     const { pty, fetched, invoked } = load();
     await pty.ptySpawnShell();
     expect(fetched.map((c) => `${c.init?.method} ${c.path}`)).toEqual(["POST /sessions/shell"]);
-    expect(invoked).toEqual([["pty_attach", { agent: "shell" }]]);
+    expect(invoked).toEqual([]);
   });
 });
 

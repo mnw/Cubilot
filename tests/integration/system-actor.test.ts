@@ -60,6 +60,7 @@ const ROUTES: R[] = [
   { method: "POST", path: "/agents/sw-alice/turn-end", body: {} },
   { method: "POST", path: "/terminal/sw-alice/capture-turn", body: { input: "/cost" } },
   { method: "POST", path: "/terminal/sw-alice/heal", body: {} },
+  { method: "POST", path: "/terminal/sw-alice/input", body: { text: "x" } },
   { method: "PUT", path: "/agents/sw-alice/skills", body: { off: [] } },
   { method: "POST", path: "/agents/sw-alice/skills/apply", body: {} },
   { method: "POST", path: "/agents/sw-alice/checkpoint-note", body: { text: "x" } },
