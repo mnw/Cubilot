@@ -12,6 +12,7 @@ import type { AgentRegistry } from "../core/agents";
 import { readConfig } from "../core/config-file";
 import { AGENT_NAME_RE } from "../core/ids";
 import { claudeModels, loginPath, piModels, PiListError } from "../core/models";
+import { applyIn, listIn, setOffIn, SkillsError } from "../core/skills";
 import { discoverSlashCommands, readGlobalMcpServers } from "../core/slash-discover";
 
 export type SettingsDeps = {
@@ -238,6 +239,22 @@ export function createSettingsFeature(deps: SettingsDeps): HubFeature {
   const { agents, defaultRoom } = deps;
   const err = (error: string, status: number) => Response.json({ error }, { status });
 
+  // The agent's role (tmux pill) and launch command (pane start command), with the factory and the staged version.
+  const skillTarget = (name: string) => {
+    const known = agents.get(name) !== null || (validAgentName(name) && tmuxRun(["has-session", "-t", `=${name}`]) !== null);
+    if (!known) return err(`unknown agent: ${name}`, 404);
+    const dest = (process.env.CUBILOT_FACTORY_DIR ?? "").trim();
+    const vdir = currentVersionDir();
+    if (!dest || !vdir) return err("no factory is staged", 503);
+    const pills = parseRolePills(tmuxRun(["list-sessions", "-F", PILL_FORMAT]) ?? "");
+    const command = tmuxRun(["list-panes", "-t", tmuxPane(name), "-F", "#{pane_start_command}"]);
+    return { name, dest, vdir, role: pills[name]?.role || null, command };
+  };
+  const skillsFail = (e: unknown) => {
+    if (e instanceof SkillsError) return err(e.message, e.status);
+    throw e;
+  };
+
   return {
     routes: [
       { method: "GET", path: "/settings/ui", auth: "read", handler: () => Response.json(uiSettings()) },
@@ -342,6 +359,49 @@ export function createSettingsFeature(deps: SettingsDeps): HubFeature {
               mcpServers: readGlobalMcpServers(join(dataDir(), "mcp.json")),
             }),
           });
+        },
+      },
+      {
+        method: "GET",
+        path: /^\/agents\/([^/]+)\/skills$/,
+        auth: "read",
+        handler: (_req, _cap, params) => {
+          const t = skillTarget(decodeURIComponent(params.id ?? ""));
+          if (t instanceof Response) return t;
+          return Response.json(listIn(t.dest, t.vdir, t.name, t.role, t.command));
+        },
+      },
+      {
+        method: "PUT",
+        path: /^\/agents\/([^/]+)\/skills$/,
+        auth: "mutating",
+        handler: async (req, _cap, params) => {
+          const t = skillTarget(decodeURIComponent(params.id ?? ""));
+          if (t instanceof Response) return t;
+          const body = (await req.json().catch(() => null)) as { off?: unknown } | null;
+          if (!body || !Array.isArray(body.off) || body.off.some((x) => typeof x !== "string")) return err("off must be an array of skill ids", 400);
+          if (!t.role) return err("the agent has no role", 409);
+          try {
+            setOffIn(t.dest, t.vdir, t.name, t.role, body.off as string[]);
+          } catch (e) {
+            return skillsFail(e);
+          }
+          return Response.json({ ok: true });
+        },
+      },
+      {
+        method: "POST",
+        path: /^\/agents\/([^/]+)\/skills\/apply$/,
+        auth: "mutating",
+        handler: async (_req, _cap, params) => {
+          const t = skillTarget(decodeURIComponent(params.id ?? ""));
+          if (t instanceof Response) return t;
+          try {
+            await applyIn(t.dest, t.vdir, t.name, t.role, t.command);
+          } catch (e) {
+            return skillsFail(e);
+          }
+          return Response.json({ ok: true });
         },
       },
       {

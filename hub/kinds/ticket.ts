@@ -1540,8 +1540,9 @@ export function createTicketKind(db: Database, stage?: Pick<StageHooks, "onTicke
             cap.briefing.refresh();
             if (stage) {
               // Run the stage evaluator after the commit: a draft that became queued, and every ticket that was
-              // waiting for this one when it became done. A cancelled ticket does not unblock anything.
-              if (before?.status === "draft" && r.snapshot.status === "queued") stage.onTicketChanged(params.id, cap);
+              // waiting for this one when it became done. Any move to queued is evaluated: a failed stage of the role may
+              // start again (see evaluateStages). A cancelled ticket does not unblock anything.
+              if (r.snapshot.status === "queued") stage.onTicketChanged(params.id, cap);
               if (r.snapshot.status === "cancelled") stage.onTicketCancelled?.(params.id, cap);
               if (r.snapshot.status === "draft" || r.snapshot.status === "done") stage.onTicketParked?.(params.id, r.snapshot.status, cap);
               if (r.snapshot.status === "done") {

@@ -1500,13 +1500,14 @@ export function createStageRuntime(
     const ready: RoleHandoff[] = [...(opts.roleHandoffs ?? storedRoleHandoffs)(ticketId), ...handoffs]
       .filter((h) => isRole(h.role) && !spent(h))
       .sort((x, y) => x.seq - y.seq);
-    // The ticket's own role starts once: only while no stage of the ticket and that role exists. Its ready seq is the
-    // newest ticket.queued event, else the ticket.created event of a ticket created as queued.
+    // The ticket's own role starts once per ready seq: its ready seq is the newest ticket.queued event, else the
+    // ticket.created event of a ticket created as queued. A stage of the role that is not cancelled spends it, unless
+    // the stage was created and last changed before a later ticket.queued event (the human moved the ticket back).
     if (t.role && isRole(t.role)) {
-      if (!stages.some((s) => s.role === t.role && s.status !== "cancelled")) {
-        const q = db
-          .query<{ seq: number | null }, [string]>("SELECT MAX(seq) AS seq FROM events WHERE entity_id = ? AND kind = 'ticket.queued'")
-          .get(ticketId)!.seq;
+      const q = db
+        .query<{ seq: number | null }, [string]>("SELECT MAX(seq) AS seq FROM events WHERE entity_id = ? AND kind = 'ticket.queued'")
+        .get(ticketId)!.seq;
+      if (!stages.some((s) => s.role === t.role && s.status !== "cancelled" && (q === null || s.created_seq > q || s.updated_seq > q))) {
         const c = q ?? db.query<{ seq: number | null }, [string]>("SELECT MIN(seq) AS seq FROM events WHERE entity_id = ? AND kind = 'ticket.created'").get(ticketId)!.seq;
         ready.push({ role: t.role, seq: c ?? 0 });
         ready.sort((x, y) => x.seq - y.seq);

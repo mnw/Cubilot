@@ -484,7 +484,9 @@ fn parse_role_pills(out: &str) -> std::collections::HashMap<String, PillInfo> {
     map
 }
 
-// The role and the start command of a running agent's pane, for the skills commands. None: no session or no role.
+// The role and the start command of a running agent's pane. The hub reads both now (skillTarget in hub/features/settings.ts);
+// this stays as the reader the mode tests check against a real pane. None: no session or no role.
+#[cfg(test)]
 pub(crate) fn agent_role_and_command(agent: &str) -> (Option<String>, Option<String>) {
     if !valid_agent_name(agent) {
         return (None, None);
