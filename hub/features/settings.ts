@@ -375,6 +375,7 @@ export function createSettingsFeature(deps: SettingsDeps): HubFeature {
         method: "PUT",
         path: /^\/agents\/([^/]+)\/skills$/,
         auth: "mutating",
+        caller: "human",
         handler: async (req, _cap, params) => {
           const t = skillTarget(decodeURIComponent(params.id ?? ""));
           if (t instanceof Response) return t;
@@ -393,6 +394,7 @@ export function createSettingsFeature(deps: SettingsDeps): HubFeature {
         method: "POST",
         path: /^\/agents\/([^/]+)\/skills\/apply$/,
         auth: "mutating",
+        caller: "human",
         handler: async (_req, _cap, params) => {
           const t = skillTarget(decodeURIComponent(params.id ?? ""));
           if (t instanceof Response) return t;

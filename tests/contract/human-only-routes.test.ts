@@ -17,6 +17,8 @@ const ROUTES: Array<[method: string, path: string]> = [
   ["GET", "/launches/stream"],
   ["POST", "/launches/l_0123456789abcdef/ack"],
   ["POST", "/permissions/abcde/verdict"],
+  ["PUT", "/agents/w1/skills"],
+  ["POST", "/agents/w1/skills/apply"],
 ];
 
 describe("human-only routes", () => {
