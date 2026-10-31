@@ -63,6 +63,15 @@ describe("delivery checks", () => {
     expect(by[`${ticket}#2`]).toMatchObject({ mark: null, note: null, attachments: [], marked_at_ms: null });
   });
 
+  test("a human mark with no by field is stored with by = the human name", async () => {
+    const { request_id, ticket } = await delivered();
+    const r = await postJson(hub, `/requests/${ROOM}/${request_id}/delivery/checks`, { check_id: `${ticket}#1`, mark: "works", note: "no by" });
+    expect(r.status).toBe(200);
+    const snap = (r.json as any).snapshot;
+    expect(snap).toMatchObject({ status: "works", note: "no by", check_id: `${ticket}#1`, marked_by: hub.humanName });
+    expect(events(snap.id, "delivery_check.marked")).toHaveLength(1);
+  });
+
   test("a problem mark adds the note and files to the ticket and moves it from done to queued in one transaction", async () => {
     const { request_id, ticket } = await delivered();
     const file = upload("dc-shot-1.png");
