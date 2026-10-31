@@ -6,6 +6,7 @@ import { Database } from "bun:sqlite";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp, projectRepo } from "../helpers/repo";
 import { authedFetch, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const ROOM = "rqs";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -30,7 +31,7 @@ describe("a ticket moved back to queued by the human", () => {
     open.push(await registerAgent(hub, "Orchestrator", { room: ROOM }));
     const put = await authedFetch(hub, `/rooms/${ROOM}/settings`, { method: "PUT", body: JSON.stringify({ role_limits: { worker: 10, tester: 10, validator: 10 } }) });
     expect(put.status).toBe(200);
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) launches.push(e); } catch { /* closed */ } })();
     await sleep(200);
   });
@@ -64,7 +65,7 @@ describe("a ticket moved back to queued by the human", () => {
   const failStage = async (stageId: string) => {
     for (let n = 0; n < 2; n++) {
       const req = await launchOf(stageId, n);
-      await postJson(hub, `/launches/${req.id}/ack`, { result: "error", error: "tmux failed" });
+      await ackLaunch(hub, req.id, { result: "error", error: "tmux failed" });
     }
     await settle();
   };
@@ -91,7 +92,7 @@ describe("a ticket moved back to queued by the human", () => {
     await settle();
     const [worker] = stagesOf(t);
     const req = await launchOf(worker.id, 0);
-    expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, req.id, { result: "spawned" })).status).toBe(200);
     open.push(await registerAgent(hub, req.session, { room: ROOM }));
     const tip = git("rev-parse", "staging");
     const commit = git("commit-tree", `${tip}^{tree}`, "-p", tip, "-m", "work");

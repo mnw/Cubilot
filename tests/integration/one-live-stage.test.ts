@@ -6,9 +6,10 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnHub, type HubHandle } from "../helpers/hub";
+import { spawnHub, type HubHandle, fakeExecutorEnv } from "../helpers/hub";
 import { giveProjectHttp, projectRepo } from "../helpers/repo";
 import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const ROOM = "ols";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -26,7 +27,7 @@ async function bootOn(ledgerPath: string, token: string): Promise<HubHandle> {
   mkdirSync(join(base, "att"), { recursive: true });
   const proc = Bun.spawn(["bun", "run", "hub/hub.ts"], {
     env: {
-      ...process.env, PORT: "0", CUBILOT_TOKEN: token, CUBILOT_LEDGER_DB: ledgerPath,
+      ...process.env, PORT: "0", CUBILOT_TOKEN: token, CUBILOT_LEDGER_DB: ledgerPath, ...fakeExecutorEnv(ledgerPath),
       CUBILOT_ATTACHMENTS_DIR: join(base, "att"), CUBILOT_HUMAN_NAME: "human", CUBILOT_DEFAULT_ROOM: "default",
       CUBILOT_DATA_DIR: join(base, "data"),
     },
@@ -59,7 +60,7 @@ describe("one live stage per ticket", () => {
   const extraHubs: HubHandle[] = [];
 
   const watch = (h: HubHandle, into: any[]) => {
-    const s = openSSE(h, "/launches/stream");
+    const s = openLaunchStream(h);
     void (async () => { try { for await (const e of s.events) into.push(e); } catch { /* closed */ } })();
     return s;
   };
@@ -115,7 +116,7 @@ describe("one live stage per ticket", () => {
   const run = async (stageId: string, h: HubHandle = hub, reqs: any[] = launches) => {
     const req = await until(`launch of ${stageId}`, () => reqs.find((r) => r.stage_id === stageId));
     expect(req).toBeDefined();
-    expect((await postJson(h, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(h, req.id, { result: "spawned" })).status).toBe(200);
     open.push(await registerAgent(h, req.session, { room: ROOM }));
     return req.session as string;
   };
@@ -180,7 +181,7 @@ describe("one live stage per ticket", () => {
         for (let i = 1; i <= 2; i++) {
           const req = await until(`launch ${i} of ${worker.id}`, () => launches.filter((r) => r.stage_id === worker.id)[i - 1]);
           expect(req).toBeDefined();
-          await postJson(hub, `/launches/${req.id}/ack`, { result: "error", error: "tmux failed" });
+          await ackLaunch(hub, req.id, { result: "error", error: "tmux failed" });
         }
       }
       await settle();
@@ -296,7 +297,7 @@ describe("one live stage per ticket", () => {
     // the slot frees: the queued tester stage of t fails (no project folder); the evaluator then starts the worker stage
     const req = await until(`launch of ${aStage.id}`, () => l2.find((r) => r.stage_id === aStage.id));
     expect(req).toBeDefined();
-    expect((await postJson(h2, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(h2, req.id, { result: "spawned" })).status).toBe(200);
     const sess = await registerAgent(h2, req.session, { room: R2 });
     await finish(aStage, req.session, h2, "ols2-bob");
     await settle(h2);
@@ -304,7 +305,7 @@ describe("one live stage per ticket", () => {
     expect((await postJson(h2, `/stages/${aStage.id}/turn-end`, { agent: req.session })).json).toEqual({ action: "close" });
     const close = await until("close launch of the passed stage", () => l2.find((r) => r.kind === "close" && r.session === req.session));
     expect(close).toBeDefined();
-    expect((await postJson(h2, `/launches/${close.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(h2, close.id, { result: "spawned" })).status).toBe(200);
     await settle(h2);
     expect((await stagesOf(t, h2)).map((s) => [s.role, s.status])).toEqual([["tester", "failed"], ["worker", "failed"]]);
     sess.close();

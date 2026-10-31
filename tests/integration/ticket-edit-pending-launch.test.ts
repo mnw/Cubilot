@@ -4,6 +4,7 @@ import { describe, test, expect, afterEach } from "bun:test";
 import { spawnHub } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream } from "../helpers/fake-executor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const cleanup: Array<() => Promise<void> | void> = [];
@@ -28,7 +29,7 @@ describe("a criteria edit reaches a launch the shell has not received", () => {
     expect(e.status).toBe(200);
 
     const reqs: Array<{ kind: string; prompt?: string }> = [];
-    const sse = openSSE(hub, "/launches/stream");
+    const sse = openLaunchStream(hub);
     cleanup.push(() => sse.close());
     void (async () => { try { for await (const r of sse.events) reqs.push(r as { kind: string; prompt?: string }); } catch { /* closed */ } })();
     for (let i = 0; i < 120 && !reqs.some((r) => r.kind === "launch"); i++) await sleep(25);

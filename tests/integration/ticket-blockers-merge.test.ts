@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import "../helpers/repo"; // points CUBILOT_DATA_DIR at a temp folder
 import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const sh = (cwd: string, ...a: string[]) => {
@@ -44,13 +45,13 @@ describe("a blocker clears when its code is merged into staging", () => {
 
   beforeAll(async () => {
     hub = await spawnHub();
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     // Every launch request is acked and its session joins the room, as the shell and the bridge do.
     void (async () => {
       try {
         for await (const req of stream.events) {
           if (req.kind !== "launch") continue;
-          await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" });
+          await ackLaunch(hub, req.id, { result: "spawned" });
           open.push(await registerAgent(hub, req.session, { room: req.room }));
         }
       } catch { /* closed */ }

@@ -1,4 +1,4 @@
-// G4: a ticket cancel cancels every open stage (stage-cancelled-status). Real hub, fake shell: the test reads /launches/stream
+// G4: a ticket cancel cancels every open stage (stage-cancelled-status). Real hub, fake shell: the test reads the fake executor stream
 // and sends the acks itself.
 
 import { describe, test, expect, afterEach } from "bun:test";
@@ -6,9 +6,10 @@ import { Database } from "bun:sqlite";
 import { existsSync, mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnHub, type HubHandle } from "../helpers/hub";
+import { spawnHub, type HubHandle, fakeExecutorEnv } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type Req = { id: string; kind: "launch" | "close"; stage_id?: string; session: string; cwd?: string | null };
@@ -27,13 +28,13 @@ type Shell = { reqs: Req[]; closes: (session: string) => Req[]; launches: () => 
 
 function openShell(hub: HubHandle): Shell {
   const reqs: Req[] = [];
-  const sse = openSSE(hub, "/launches/stream");
+  const sse = openLaunchStream(hub);
   void (async () => { try { for await (const e of sse.events) reqs.push(e as Req); } catch { /* closed */ } })();
   return {
     reqs,
     closes: (session) => reqs.filter((r) => r.kind === "close" && r.session === session),
     launches: () => reqs.filter((r) => r.kind === "launch"),
-    ack: async (id, body) => (await postJson(hub, `/launches/${id}/ack`, body)).status,
+    ack: async (id, body) => (await ackLaunch(hub, id, body)).status,
     stop: () => sse.close(),
   };
 }
@@ -396,7 +397,7 @@ async function bootOn(ledgerPath: string, token: string): Promise<{ hub: HubHand
   mkdirSync(join(base, "att"), { recursive: true });
   const proc = Bun.spawn(["bun", "run", "hub/hub.ts"], {
     env: {
-      ...process.env, PORT: "0", CUBILOT_TOKEN: token, CUBILOT_LEDGER_DB: ledgerPath,
+      ...process.env, PORT: "0", CUBILOT_TOKEN: token, CUBILOT_LEDGER_DB: ledgerPath, ...fakeExecutorEnv(ledgerPath),
       CUBILOT_ATTACHMENTS_DIR: join(base, "att"), CUBILOT_TRANSCRIPTS_DIR: join(base, "tr"), CUBILOT_DATA_DIR: join(base, "data"),
       CUBILOT_HUMAN_NAME: "human", CUBILOT_DEFAULT_ROOM: "default",
     },

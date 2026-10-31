@@ -10,7 +10,7 @@
 import { prepareLaunch, type LaunchDeps } from "./launch-role";
 import { createTerminal } from "./terminal";
 import { createTmux, tmuxFromEnv, type Tmux } from "./tmux";
-import type { AckOutcome, AckStatus, LaunchRequest } from "./launch-queue";
+import type { AckOutcome, AckStatus, LaunchRequest } from "./launch-types";
 
 type Env = Record<string, string | undefined>;
 

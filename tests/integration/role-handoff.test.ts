@@ -6,6 +6,7 @@ import { Database } from "bun:sqlite";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream } from "../helpers/fake-executor";
 
 const ROOM = "rh";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -21,7 +22,7 @@ describe("to_role handoffs over HTTP", () => {
     await giveProjectHttp(hub, "elsewhere", "rh");
     open.push(await registerAgent(hub, "rh-alice", { room: ROOM }));
     open.push(await registerAgent(hub, "rh-bob", { room: ROOM }));
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) launches.push(e); } catch { /* closed */ } })();
     await sleep(200);
   });

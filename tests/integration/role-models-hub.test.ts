@@ -1,4 +1,4 @@
-// role_models in config.yml through a real hub: the launch request on GET /launches/stream, the stage in the ledger.
+// role_models in config.yml through a real hub: the launch request on the fake executor stream, the stage in the ledger.
 // The hub reads $CUBILOT_DATA_DIR/config.yml at each launch, so each test rewrites the file of the one hub.
 
 import { describe, test, expect, beforeAll, beforeEach, afterAll } from "bun:test";
@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Polls `fn` every 10 ms until it returns a value; throws when `ms` pass without one. */
@@ -33,7 +34,7 @@ describe("role_models through the hub", () => {
     const data = join(dirname(hub.ledgerPath), "data");
     mkdirSync(data, { recursive: true });
     configFile = join(data, "config.yml");
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) launches.push(e); } catch { /* closed */ } })();
     await sleep(200);
   });
@@ -76,7 +77,7 @@ describe("role_models through the hub", () => {
       return db.query<{ payload_json: string }, [string]>("SELECT payload_json FROM events WHERE entity_id = ? AND kind = 'stage.retrying'").all(stageId).map((r) => JSON.parse(r.payload_json).reason);
     } finally { db.close(); }
   };
-  const ack = (id: string, body: Record<string, unknown>) => postJson(hub, `/launches/${id}/ack`, body);
+  const ack = (id: string, body: Record<string, unknown>) => ackLaunch(hub, id, body);
 
   test("an entry sets harness, model, provider and effort", async () => {
     config("role_models:\n  worker:\n    harness: pi\n    model: m1\n    provider: p1\n    effort: high\n");

@@ -3,6 +3,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp, projectRepo } from "../helpers/repo";
 import { getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 describe("worker result needs a new commit", () => {
   let hub: HubHandle;
@@ -24,10 +25,10 @@ describe("worker result needs a new commit", () => {
       by: "alice", title: "T", acceptance_criteria: "c", blast_radius: "low", priority: "medium", role: "worker",
     });
     ticketId = (t.json as { snapshot: { id: string } }).snapshot.id;
-    const sse = openSSE(hub, "/launches/stream");
+    const sse = openLaunchStream(hub);
     for await (const req of sse.events) {
       expect(req.session).toBe("worker-1");
-      expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+      expect((await ackLaunch(hub, req.id, { result: "spawned" })).status).toBe(200);
       break;
     }
     sse.close();

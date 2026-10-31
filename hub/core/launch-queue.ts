@@ -8,33 +8,8 @@
 
 import type { HubCapabilities } from "./types";
 
-export type LaunchRequest =
-  | {
-      id: string;
-      kind: "launch";
-      stage_id: string;
-      session: string;
-      role: string;
-      room: string;
-      harness: string;
-      /** From role_models in config.yml (hub/core/role-models.ts). Present only when the role's entry sets them. */
-      model?: string;
-      provider?: string;
-      effort?: string;
-      cwd: string | null;
-      prompt: string;
-      env: Record<string, string>;
-    }
-  | { id: string; kind: "close"; session: string }
-  /** Text for the PTY of one named session (the checkpoint `/clear`). The executor writes `text` and Enter to that session only. */
-  | { id: string; kind: "input"; session: string; text: string };
-
-/**
- * `spawned` means done: the session started (launch) or was closed (close). `error` for a launch ends the attempt. For a
- * close, `error` keeps the request pending (it is sent again on the next connection) unless `absent` is true: the executor
- * reports that the session does not exist, so there is nothing left to close.
- */
-export type AckOutcome = { result: "spawned" } | { result: "error"; error: string; absent?: boolean };
+import type { AckOutcome, AckStatus, LaunchRequest } from "./launch-types";
+export type { AckOutcome, AckStatus, LaunchRequest };
 
 /** What happened to a launch request: the executor answered, or no answer came in time. */
 export type LaunchEnd = { by: "ack"; outcome: AckOutcome } | { by: "timeout" };
@@ -54,7 +29,6 @@ export type LaunchQueueOpts = {
   onLateAck?(req: Extract<LaunchRequest, { kind: "launch" }>, outcome: AckOutcome, cap: HubCapabilities): boolean;
 };
 
-export type AckStatus = "ok" | "idempotent" | "unknown" | "conflict" | "error" | "pending";
 
 export type LaunchQueue = {
   /**

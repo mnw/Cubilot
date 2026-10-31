@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const ROOM = "wce";
 const LEAD = "Orchestrator";
@@ -31,7 +32,7 @@ describe("writing chain end to end", () => {
     open.push(await registerAgent(hub, LEAD, { room: ROOM }));
     open.push(await registerAgent(hub, "wce-alice", { room: ROOM }));
     expect((await postJson(hub, `/rooms/${ROOM}/lead`, { by: hub.humanName, agent: LEAD })).status).toBe(200);
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) reqs.push(e); } catch { /* closed */ } })();
     await sleep(200);
   });
@@ -62,14 +63,14 @@ describe("writing chain end to end", () => {
   // The turn end queues the close; a session name is reused, so only a close after the mark counts.
   const closeAfter = (session: string, mark: number) => reqs.slice(mark).find((r) => r.kind === "close" && r.session === session);
   const spawn = async (req: any) => {
-    expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, req.id, { result: "spawned" })).status).toBe(200);
     open.push(await registerAgent(hub, req.session, { room: ROOM }));
   };
   const endTurn = async (req: any) => {
     const mark = reqs.length;
     expect((await postJson(hub, `/stages/${req.stage_id}/turn-end`, { agent: req.session })).status).toBe(200);
     for (let i = 0; i < 80 && !closeAfter(req.session, mark); i++) await sleep(50);
-    expect((await postJson(hub, `/launches/${closeAfter(req.session, mark).id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, closeAfter(req.session, mark).id, { result: "spawned" })).status).toBe(200);
   };
   const commit = (cwd: string, file: string) => {
     writeFileSync(join(cwd, file), file);

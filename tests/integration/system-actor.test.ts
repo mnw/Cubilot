@@ -11,7 +11,6 @@ import { authedFetch, getJson, postJson, registerAgent } from "../helpers/fetch"
 const T = "t_0123456789abcdef";
 const H = "h_0123456789abcdef";
 const I = "i_0123456789abcdef";
-const L = "l_0123456789abcdef";
 const SYS = "system";
 // Every field a route may read an actor from, all set to `system`.
 const actors = { by: SYS, from: SYS, agent: SYS, actor: SYS, voter: SYS, requester: SYS, name: SYS, creator: SYS };
@@ -51,7 +50,6 @@ const ROUTES: R[] = [
   { method: "POST", path: "/rooms/sw/lead", body: { agent: SYS } },
   { method: "PUT", path: "/rooms/sw/settings", body: { persist_transcript: true } },
   { method: "POST", path: "/rooms/sw/clear-transcript", body: {} },
-  { method: "POST", path: `/launches/${L}/ack`, body: {} },
   { method: "POST", path: "/requests/sw/req-1/approve", body: {} },
   { method: "POST", path: "/requests", body: { request_id: "req-1" } },
   { method: "POST", path: "/requests/sw/req-1/edit", body: { features: ["x"] } },
