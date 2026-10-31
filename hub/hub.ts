@@ -312,7 +312,7 @@ const FEATURES: readonly HubFeature[] = [
     version: (process.env.CUBILOT_FACTORY_VERSION ?? "").trim(),
     online: (name) => (agents.presenceSnapshot().agents as Record<string, boolean> | undefined)?.[name] === true,
   }),
-  ...(ledgerDb ? [createSessionsFeature(ledgerDb)] : []),
+  createSessionsFeature({ tmux: terminalTmux }),
   createAttachmentsFeature({
     attachmentsDir: ATTACHMENTS_DIR,
     allowedExtensions: ALLOWED_EXTENSIONS,

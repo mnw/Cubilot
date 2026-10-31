@@ -27,7 +27,7 @@ function features(): HubFeature[] {
     ...buildKinds(db),
     createUsageFeature(),
     createFactoryFeature({ dir: "", version: "", online: () => false }),
-    createSessionsFeature(db),
+    createSessionsFeature({ tmux: null }),
     createAttachmentsFeature(unused),
     createRosterFeature(unused),
     createTranscriptFeature(unused),

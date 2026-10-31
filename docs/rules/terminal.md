@@ -4,7 +4,7 @@ tmux, PTY, harness spawn, slash commands and TUI capture rules.
 
 ## Agent harness is chosen per agent at spawn and is immutable for the session
 
-- **Agent harness is chosen per agent at spawn and is immutable for the session.** `claude` (default) or `pi` (pi.dev), picked in the spawn modal, threaded `ptySpawn` → `pty_spawn` → `agent_command()` in `pty.rs` (the `Harness` enum). Unknown values are rejected, never defaulted — a UI typo must surface, not silently launch the wrong binary. Changing an agent's harness means killing and respawning, same as room. Both harnesses speak the same hub protocol, so mixed-harness rooms work and nothing hub-side is harness-aware.
+- **Agent harness is chosen per agent at spawn and is immutable for the session.** `claude` (default) or `pi` (pi.dev), picked in the spawn modal, threaded `ptySpawn` → `POST /sessions` → `prepareLaunch` in `hub/core/launch-role.ts` (`hub/features/sessions.ts`). Unknown values are rejected, never defaulted — a UI typo must surface, not silently launch the wrong binary. Changing an agent's harness means killing and respawning, same as room. Both harnesses speak the same hub protocol, so mixed-harness rooms work and nothing hub-side is harness-aware.
 
 ## Terminal pane uses a raw PTY, not `tmux -C` control mode
 
@@ -28,7 +28,7 @@ tmux, PTY, harness spawn, slash commands and TUI capture rules.
 
 ## tmux sessions survive Cubilot restart
 
-- **tmux sessions survive Cubilot restart.** The Rust shell MUST NOT kill tmux sessions on app exit. Drop the PTY handles (which detaches our `attach-session` client) and let tmux keep running. The pane auto-attaches on next launch via `pty_list()` + `pty_spawn` idempotent re-attach. Also: on every auto-attach, force `remain-on-exit off` on the session — legacy sessions from earlier builds had it ON, which silently holds panes after claude exits and blocks the clean tab-close flow.
+- **tmux sessions survive Cubilot restart.** The Rust shell MUST NOT kill tmux sessions on app exit. Drop the PTY handles (which detaches our `attach-session` client) and let tmux keep running. The pane auto-attaches on next launch via `GET /sessions` + `pty_attach` (the shell only attaches; the hub creates). Also: on every auto-attach, force `remain-on-exit off` on the session — legacy sessions from earlier builds had it ON, which silently holds panes after claude exits and blocks the clean tab-close flow.
 
 ## `captureTurn(agent, input, { dir, write, timeoutMs })` is the single primitive for deterministic single-turn TUI capture
 

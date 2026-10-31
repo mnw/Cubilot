@@ -22,6 +22,11 @@ const ROUTES: Array<[method: string, path: string]> = [
   ["GET", "/terminal/w1/tap"],
   ["GET", "/terminal/w1/capture"],
   ["POST", "/terminal/w1/heal"],
+  ["POST", "/sessions"],
+  ["GET", "/sessions"],
+  ["POST", "/sessions/shell"],
+  ["GET", "/sessions/shell"],
+  ["POST", "/sessions/w1/kill"],
 ];
 
 describe("human-only routes", () => {

@@ -181,7 +181,7 @@
   const { roleMemory, factoryRoom, modelGrid, spawnForm, gridView } = window.__CUBILOT_TERM__;
 
   const {
-    ptySpawn, listRoles, listModels, ptyKill, ptyList,
+    ptySpawn, ptySpawnShell, ptyShellExists, listRoles, listModels, ptyKill, ptyList,
     ptyHealGeometry, ptyInput, openTerminalSocket,
   } = window.__CUBILOT_TERM__.pty;
 
@@ -249,7 +249,7 @@
     if (t.state === 'live' || t.state === 'launching') return;
     setTabState(SHELL_NAME, 'launching');
     try {
-      await invoke('pty_spawn_shell');
+      await ptySpawnShell();
       setTabState(SHELL_NAME, 'live');
       await attachOutputListener(SHELL_NAME);
       const tt = tabs.get(SHELL_NAME);
@@ -1318,10 +1318,10 @@
     t._launchT0 = t0;
     t._launchStage = stage;
     try {
-      stage('invoke pty_spawn');
-      console.info('[terminal] pty_spawn', { agent, role, harness, model, effort, provider, sessionMode, room });
+      stage('POST /sessions');
+      console.info('[terminal] POST /sessions', { agent, role, harness, model, effort, provider, sessionMode, room });
       await ptySpawn(agent, cwd, sessionMode, room, harness, role, model, effort, provider);
-      stage('pty_spawn returned');
+      stage('session created and attached');
       rememberCwd(agent, cwd);
       roleMemory.remember(localStorage, agent, role, { model, provider, effort, harness });
       t.cwd = cwd;
@@ -1893,7 +1893,7 @@
     const t = tabs.get(agent);
     if (!t) return;
     if (t.state === 'live' || t.state === 'launching') return;
-    // pty_spawn creates a missing session, and without a role. List right before it and re-attach only a session
+    // ptySpawn creates a missing session, and without a role. List right before it and re-attach only a session
     // that exists now. The state stays as it is until then, so a launch that starts during the listing is not touched.
     if (!(await ptyList()).includes(agent)) return;
     if (tabs.get(agent) !== t || t.state === 'live' || t.state === 'launching') return;

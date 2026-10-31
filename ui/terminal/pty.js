@@ -1,28 +1,23 @@
-// terminal/pty.js — Tauri spawn/kill wrappers, the hub's terminal WebSocket and routes, base64 helpers; standalone.
+// terminal/pty.js — session routes and the terminal WebSocket of the hub, base64 helpers; standalone.
 
 (function () {
-  function _invoke() {
-    return window.__TAURI__?.core?.invoke || window.__TAURI_INTERNALS__?.invoke;
-  }
-
+  // The hub creates the session (POST /sessions); the caller then opens the terminal WebSocket. attachOnly creates nothing.
   async function ptySpawn(agent, cwd, sessionMode, room, harness, role, model, effort, provider, attachOnly) {
-    const args = { agent, cwd };
-    if (sessionMode === 'resume' || sessionMode === 'continue') {
-      args.sessionMode = sessionMode;
+    if (!attachOnly) {
+      const body = { name: agent, cwd };
+      if (sessionMode === 'resume' || sessionMode === 'continue') body.resume = sessionMode;
+      if (room) body.room = room;
+      // Omitted → the hub defaults to claude.
+      if (harness) body.harness = harness;
+      // Omitted → no role, and the hub refuses a new session ("a role is required").
+      if (role) body.role = role;
+      // Only sent when the user changed the role's default model; then it applies to this launch only.
+      if (model) body.model = model;
+      // The grid choice (5.5): only what differs from the role default. effort is --effort (Claude) or --thinking (Pi).
+      if (effort) body.effort = effort;
+      if (provider) body.provider = provider;
+      await _terminal('/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     }
-    if (room) args.room = room;
-    // Omitted → Rust defaults to claude, so existing call sites keep working.
-    if (harness) args.harness = harness;
-    // Omitted → no role, and the command is the same as before.
-    if (role) args.role = role;
-    // Only sent when the user changed the role's default model; then it applies to this launch only.
-    if (model) args.model = model;
-    // The grid choice (5.5): only what differs from the role default. effort is --effort (Claude) or --thinking (Pi).
-    if (effort) args.effort = effort;
-    if (provider) args.provider = provider;
-    // Attach to a live session only; Rust answers "session not found" instead of creating one (and without a role).
-    if (attachOnly) args.attachOnly = true;
-    return _invoke()('pty_spawn', args);
   }
   // Rows of the model x effort grid. Pi: every model of `pi --list-models` with whether its provider is signed in.
   async function listModels(harness) {
@@ -35,23 +30,28 @@
   async function listRoles() {
     return (await hubGet('/roles')).roles;
   }
-  async function ptyKill(agent) {
-    return _invoke()('pty_kill', { agent });
-  }
-  // The live tmux sessions, by agent name (the hub lists them; no Tauri needed). A failed read gives [].
-  async function ptyList() {
-    try {
-      const r = await window.authedFetch('/terminal-sessions');
-      if (!r.ok) return [];
-      const body = await r.json();
-      return Array.isArray(body.sessions) ? body.sessions : [];
-    } catch { return []; }
-  }
-  // The hub runs these (hub/features/terminal.ts); the webview calls its routes, not the shell.
+  // The hub runs the sessions (hub/features/sessions.ts) and the terminal routes (hub/features/terminal.ts); the
+  // webview calls its routes, not the shell.
   async function _terminal(path, init) {
     const r = await window.authedFetch(path, init);
     if (!r.ok) throw new Error(await parseErrorBody(r));
     return r;
+  }
+  async function ptyKill(agent) {
+    await _terminal(`/sessions/${encodeURIComponent(agent)}/kill`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  }
+  // Agent sessions only; the Shell tab has ptyShellExists.
+  async function ptyList() {
+    try { return (await (await _terminal('/sessions')).json()).sessions; }
+    catch { return []; }
+  }
+  async function ptyShellExists() {
+    try { return (await (await _terminal('/sessions/shell')).json()).exists === true; }
+    catch { return false; }
+  }
+  // The hub creates the shell session when it is missing; the caller opens the WebSocket.
+  async function ptySpawnShell() {
+    await _terminal('/sessions/shell', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   }
   const _agentPath = (agent) => `/terminal/${encodeURIComponent(agent)}`;
   // status ∈ { "alt-exit" | "idle-prompt" | "quiescence" | "timeout" }. Resolves to {name, log_path, start_ms, end_ms, status}.
@@ -150,7 +150,7 @@
 
   window.__CUBILOT_TERM__ = window.__CUBILOT_TERM__ || {};
   window.__CUBILOT_TERM__.pty = {
-    ptySpawn, listRoles, listModels, ptyKill, ptyList,
+    ptySpawn, ptySpawnShell, ptyShellExists, listRoles, listModels, ptyKill, ptyList,
     ptyCaptureTurn, ptyReadCapture, ptyHealGeometry, ptyTapRead, ptyInput,
     terminalWsUrl, openTerminalSocket,
     strToB64, b64ToBytes,

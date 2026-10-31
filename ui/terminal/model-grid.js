@@ -1,6 +1,6 @@
 // terminal/model-grid.js — the model x effort grid of the spawn modal (task 5.5). Pure (no DOM, no Tauri), so it
 // runs in node. Rows are models, columns are effort levels, one cell is selected, the role's default cell is marked.
-// Only what differs from the role default is sent to pty_spawn. A launch always has a role.
+// Only what differs from the role default is sent to POST /sessions. A launch always has a role.
 
 (function () {
   const EFFORTS = {
