@@ -199,10 +199,10 @@ describe("scripts/test.sh", () => {
     const sentinel = Bun.spawn(["sleep", "300"]);
     sentinels.push(sentinel);
     const pidfile = join(dir, "hang.pid");
-    const r = await run([join(dir, "hang.test.ts")], { CUBILOT_TEST_TIMEOUT_S: "5", PIDFILE: pidfile });
+    const r = await run([join(dir, "hang.test.ts")], { CUBILOT_TEST_TIMEOUT_S: "2", PIDFILE: pidfile });
     expect(r.code).toBe(124);
     expect(r.ms).toBeLessThan(12000);
-    expect(r.out).toContain("time limit of 5s");
+    expect(r.out).toContain("time limit of 2s");
     const child = Number(readFileSync(pidfile, "utf8"));
     expect(await gone(child)).toBe(true);
     expect(alive(sentinel.pid)).toBe(true);
@@ -266,7 +266,7 @@ describe("scripts/test.sh", () => {
     // The wait starts at the TERM, not at the start of the run: scripts/test.sh counts the time limit in whole seconds
     // (date +%s), so TERM comes between 1 and 2 s after the start for a 2 s limit. The test times the wait from the
     // moment the descendant sees the TERM, and the run from there to its end. The poll is 20 ms, the trap is up to 50 ms.
-    const running = run([join(dir, "ignore-term.test.ts")], { CUBILOT_TEST_TIMEOUT_S: "2", PIDFILE: pidfile, TERMFILE: termfile });
+    const running = run([join(dir, "ignore-term.test.ts")], { CUBILOT_TEST_TIMEOUT_S: "1", PIDFILE: pidfile, TERMFILE: termfile });
     let termAt = 0;
     let ended = false;
     const end = running.then((r) => ((ended = true), { r, endAt: Date.now() }));
@@ -290,9 +290,9 @@ describe("scripts/test.sh", () => {
     const lock = join(dir, "lock-held");
     mkdirSync(lock);
     writeFileSync(join(lock, "owner"), "other 1 1\n");
-    const r = await run([join(dir, "ok.test.ts")], { CUBILOT_LOCK_RETRY_S: "1", CUBILOT_LOCK_WAIT_S: "2" }, lock);
+    const r = await run([join(dir, "ok.test.ts")], { CUBILOT_LOCK_RETRY_S: "1", CUBILOT_LOCK_WAIT_S: "1" }, lock);
     expect(r.code).toBe(3);
-    expect(r.ms).toBeGreaterThanOrEqual(2000);
+    expect(r.ms).toBeGreaterThanOrEqual(1000);
     expect(r.out).toContain("other 1 1");
     expect(readFileSync(join(lock, "owner"), "utf8")).toBe("other 1 1\n");
   }, 30000);
@@ -324,7 +324,7 @@ describe("scripts/test.sh", () => {
     const live = Bun.spawn(["sleep", "300"]);
     try {
       const lock = seedLock("live", `other ${live.pid} 1\n`);
-      const r = await run([join(dir, "ok.test.ts")], { CUBILOT_LOCK_RETRY_S: "1", CUBILOT_LOCK_WAIT_S: "2" }, lock);
+      const r = await run([join(dir, "ok.test.ts")], { CUBILOT_LOCK_RETRY_S: "1", CUBILOT_LOCK_WAIT_S: "1" }, lock);
       expect(r.code).toBe(3);
       expect(takeovers(r.out)).toHaveLength(0);
       expect(readFileSync(join(lock, "owner"), "utf8")).toBe(`other ${live.pid} 1\n`);
@@ -500,7 +500,7 @@ describe("scripts/test.sh split run", () => {
   for (let i = 0; i < 400; i++) { for (let o = 0; o < b.length; o += 4096) b[o] ^= 1; await Bun.sleep(50); }
 }, 60000);`;
     mkRoot("sumrss", { a: hold, b: hold });
-    const alone = await split({ CUBILOT_TEST_PARTS: "1", CUBILOT_TEST_MAX_RSS_MB: "300", CUBILOT_TEST_TIMEOUT_S: "8" });
+    const alone = await split({ CUBILOT_TEST_PARTS: "1", CUBILOT_TEST_MAX_RSS_MB: "300", CUBILOT_TEST_TIMEOUT_S: "3" });
     expect(alone.code).toBe(124); // one part under the limit: only the time limit ends it
     const r = await split({ CUBILOT_TEST_PARTS: "2", CUBILOT_TEST_MAX_RSS_MB: "300" });
     expect(r.code).toBe(125);
@@ -516,9 +516,9 @@ describe("scripts/test.sh split run", () => {
   test("the time limit covers the whole run and stops all parts", async () => {
     const hang = `test("hang", () => { const p = Bun.spawn(["sleep", "301"]); for (;;) {} });`;
     mkRoot("time", { a: hang, b: hang });
-    const r = await split({ CUBILOT_TEST_PARTS: "2", CUBILOT_TEST_TIMEOUT_S: "3" });
+    const r = await split({ CUBILOT_TEST_PARTS: "2", CUBILOT_TEST_TIMEOUT_S: "2" });
     expect(r.code).toBe(124);
-    expect(r.out).toContain("time limit of 3s reached");
+    expect(r.out).toContain("time limit of 2s reached");
     expect(r.out).not.toContain("command not found");
     expect(r.out).toMatch(/^ \d+ pass$/m);
     expect(r.out).toMatch(/^ \d+ fail$/m);
