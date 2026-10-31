@@ -141,7 +141,8 @@ export function createDeliveryCheckKind(db: Database, stage?: Pick<StageHooks, "
         if (!REQUEST_ID_RE.test(requestId)) return Response.json({ error: "invalid request id" }, { status: 400 });
         const b = (await req.json().catch(() => null)) as Record<string, unknown> | null;
         const body = b && typeof b === "object" && !Array.isArray(b) ? b : {};
-        const by = typeof body.by === "string" ? body.by.trim() : "";
+        // The route is human-only (dispatcher gate), so an absent by means the human.
+        const by = body.by === undefined ? cap.config.humanName : typeof body.by === "string" ? body.by.trim() : "";
         if (!validName(by)) return Response.json({ error: "invalid by" }, { status: 400 });
         if (cap.agents.isPaused(by)) return pausedRefusal();
         if (by !== cap.config.humanName) return Response.json({ error: "only the human may mark a delivery check" }, { status: 403 });
