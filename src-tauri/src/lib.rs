@@ -1,5 +1,4 @@
 mod factory;
-mod launches;
 mod login_path;
 mod skills;
 mod pty;
@@ -934,6 +933,13 @@ fn hub_settings_env() -> Vec<(&'static str, String)> {
     if let Ok(src) = factory::resolve_factory_src() {
         env.push(("CUBILOT_FACTORY_SRC", src.to_string_lossy().into_owned()));
     }
+    // The hub starts, closes and feeds the stage sessions itself (hub/core/launch-executor.ts): it reads the staged
+    // Pi extension and the claude and pi binaries from env. CUBILOT_MOD_DIR is set above, only for a staged mod.
+    if let Ok(ext) = resolve_pi_extension() {
+        env.push(("CUBILOT_PI_EXTENSION", ext.to_string_lossy().into_owned()));
+    }
+    env.push(("CUBILOT_CLAUDE_BIN", resolve_claude_path().to_string_lossy().into_owned()));
+    env.push(("CUBILOT_PI_BIN", resolve_pi_path().to_string_lossy().into_owned()));
     env
 }
 
@@ -1365,9 +1371,6 @@ pub fn run() {
                     .lock()
                     .unwrap_or_else(|e| e.into_inner()) = Some(human_name);
             }
-            // The hub queues session launches and closes; the shell carries them out (stage-sessions 4.2).
-            launches::start(handle.clone());
-
             tauri::async_runtime::spawn(async move {
                 stream_to_log(rx, log_path).await;
             });

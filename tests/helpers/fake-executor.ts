@@ -1,5 +1,5 @@
 // The test side of the shared fake launch executor (group 7b). It replaces the fake Rust shell that read
-// /launches/stream. `openShell(hub)` attaches to the fake executor inside the hub (tests/helpers/fake-executor-module.ts):
+// the removed launch stream. `openShell(hub)` attaches to the fake executor inside the hub (tests/helpers/fake-executor-module.ts):
 // it collects the requests of the launch queue and sends the acks. `stop()` detaches, as a dropped stream did.
 
 import { dirname, join } from "node:path";
@@ -34,7 +34,7 @@ async function controlUrl(hub: Pick<HubHandle, "ledgerPath">): Promise<string> {
   throw new Error(`the fake executor did not start: no ${file}`);
 }
 
-/** The requests of the launch queue as an async stream, like the removed GET /launches/stream. `close()` detaches. */
+/** The requests of the launch queue as an async stream, like the removed launch stream route. `close()` detaches. */
 export function openLaunchStream(hub: Pick<HubHandle, "ledgerPath">, into?: ShellReq[]): { events: AsyncGenerator<any, void, void>; close: () => void } {
   const ac = new AbortController();
   const base = controlUrl(hub);

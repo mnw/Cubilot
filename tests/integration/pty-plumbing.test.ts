@@ -373,7 +373,7 @@ describe("pty plumbing — skill view", () => {
   }
 });
 
-// P6-15: the checkpoint `/clear` is written to the PTY of one named session (launches.rs `input`, pty.rs `write_input`:
+// P6-15: the checkpoint `/clear` is written to the PTY of one named session (hub/core/launch-executor.ts `input`, pty.rs `write_input`:
 // the text and Enter to the PTY master of that session's attach client; never `send-keys`). The Rust tests pin the request
 // parse, the routing and the one-line rule. This scenario pins what tmux does with it: two sessions each run `cat`; a client
 // attached to A gets a line on its PTY; the line reaches the pane of A and the pane of B stays empty.

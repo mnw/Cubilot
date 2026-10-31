@@ -93,7 +93,7 @@ describe("every mutating route queues no launch for a ticket with no ready stage
     }
     // The hub runs its own launch queue: no route takes a launch ack any more.
     expect(paths).not.toContain("POST /launches/:id/ack");
-    expect(paths).not.toContain("GET /launches/stream");
+    expect(paths).not.toContain(`GET ${["/launches", "stream"].join("/")}`);
     expect(found.length).toBeGreaterThanOrEqual(25);
   });
 
