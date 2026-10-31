@@ -34,7 +34,10 @@
   }
   // Rows of the model x effort grid. Pi: every model of `pi --list-models` with whether its provider is signed in.
   async function listModels(harness) {
-    return _invoke()('list_models', { harness });
+    const body = await hubGet(`/models?harness=${encodeURIComponent(harness)}`);
+    // Pi that does not answer gives an empty list and a warning: reject, so the form shows the reason.
+    if (body.warning) throw new Error(body.warning);
+    return body.models;
   }
   // Rejects when the command fails: a caller must not read an error as "no roles" (that cleared a picked role).
   async function listRoles() {
