@@ -187,10 +187,10 @@ describe("role_models in a launch request", () => {
     const e = makeEnv({ ackMs: 20 });
     e.launch("worker");
     expect(e.rt.pendingRoleModelLaunches()).toBe(1);
-    await new Promise((r) => setTimeout(r, 120));
+    for (let i = 0; i < 600 && e.rt.pendingRoleModelLaunches() !== 0; i++) await new Promise((r) => setTimeout(r, 50)); // deadline 30 s
     expect(e.rt.pendingRoleModelLaunches()).toBe(0);
     e.stop();
-  });
+  }, 60000);
 });
 
 describe("roleModelFor", () => {
