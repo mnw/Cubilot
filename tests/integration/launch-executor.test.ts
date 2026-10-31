@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { startLaunchExecutor, inputLine, type ExecutorHost } from "../../hub/core/launch-executor";
 import type { AckOutcome, AckStatus, LaunchRequest } from "../../hub/core/launch-queue";
 import { createTmux } from "../../hub/core/tmux";
+import { createTerminal } from "../../hub/core/terminal";
 import { resolveTmuxBin } from "../helpers/tmux";
 
 const V = "v-0000000000000001";
@@ -186,6 +187,34 @@ describe("Input to one session", () => {
     expect(t.acks[0].outcome).toEqual({ result: "spawned" });
     expect(await until(() => existsSync(join(root, "orch.txt")) && readFileSync(join(root, "orch.txt"), "utf8").includes("/clear"))).toBe(true);
     expect(readFileSync(join(root, "other.txt"), "utf8")).toBe("");
+  });
+
+  test("the ack comes after the line reached the session, also when the attach is slow, and the size stays 200x50", async () => {
+    const t = host();
+    const real = createTerminal(tmux);
+    let attachedAt = 0;
+    // A slow fake terminal: the attach takes 400 ms.
+    const slow = { attach: async (a: string, o: Parameters<typeof real.attach>[1]) => { await sleep(400); attachedAt = Date.now(); return real.attach(a, o); } };
+    run(t.h, { terminal: slow });
+    const out = join(root, "echo.txt");
+    await tmux.newSession({ name: "lead", cwd: root, command: `cat > '${out}'` });
+    const size = async () => (await tmux.run(["display-message", "-p", "-t", "=lead:", "#{window_width}x#{window_height}"])).trim();
+    const big = await real.attach("lead", { cols: 200, rows: 50, onData() {} });
+    try {
+      expect(await until(async () => (await size()) === "200x50")).toBe(true);
+      let seenAtAck = "";
+      const h2 = t.h.ack;
+      t.h.ack = (id, o) => { seenAtAck = existsSync(out) ? readFileSync(out, "utf8") : ""; return h2(id, o); };
+      t.push({ id: "l_00000000000000c4", kind: "input", session: "lead", text: "/clear" });
+      expect(await until(() => t.acks.length === 1)).toBe(true);
+      expect(t.acks[0].outcome).toEqual({ result: "spawned" });
+      expect(attachedAt).toBeGreaterThan(0);
+      expect(seenAtAck).toContain("/clear");
+      await sleep(200);
+      expect(await size()).toBe("200x50");
+    } finally {
+      big.close();
+    }
   });
 
   test("an unknown session and a bad text are acked as errors", async () => {

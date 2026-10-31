@@ -8,7 +8,7 @@
 // exports a `start(host)` function. No session is ever killed on hub exit.
 
 import { prepareLaunch, type LaunchDeps } from "./launch-role";
-import { createTerminal } from "./terminal";
+import { createTerminal, type Terminal } from "./terminal";
 import { createTmux, tmuxFromEnv, type Tmux } from "./tmux";
 import type { AckOutcome, AckStatus, LaunchRequest } from "./launch-types";
 
@@ -47,8 +47,12 @@ export type ExecutorDeps = {
   ackPauseMs?: number;
   /** A close that failed stays pending; it is sent again after this time (default 5 s). */
   closeRetryMs?: number;
-  /** The input session stays attached this long after the write (default 150 ms). */
+  /** After the write, the input client waits until its output is quiet this long (default 150 ms). */
   inputHoldMs?: number;
+  /** The input client must show the session within this time, else the input is an error (default 5 s). */
+  inputAttachMs?: number;
+  /** Test seam: the terminal that attaches the input client. */
+  terminal?: Terminal;
 };
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -60,6 +64,7 @@ export function startLaunchExecutor(host: ExecutorHost, deps: ExecutorDeps): { s
   const pause = deps.ackPauseMs ?? 1000;
   const retryMs = deps.closeRetryMs ?? 5000;
   const hold = deps.inputHoldMs ?? 150;
+  const attachMs = deps.inputAttachMs ?? 5000;
   const ac = new AbortController();
 
   /** Session names with a launch in progress. A close for the name waits until the launch ends (no "no such session" before new-session). */
@@ -137,11 +142,30 @@ export function startLaunchExecutor(host: ExecutorHost, deps: ExecutorDeps): { s
       if (!line) throw new Error("the input is empty, too long or holds a control character");
       if (!deps.tmux) throw new Error("tmux is not available");
       if (!(await deps.tmux.hasSession(req.session))) throw new Error(`unknown session: ${req.session}`);
-      // Raw PTY write to a client of that one session; never `tmux send-keys`.
-      const viewer = await createTerminal(deps.tmux).attach(req.session, { onData: () => {} });
+      // Raw PTY write to a client of that one session; never `tmux send-keys`. The client has `ignore-size`, so it
+      // never resizes the session. It writes only after tmux drew the session to it (the client is attached), writes
+      // all bytes, then waits until its output is quiet for `hold` before it closes.
+      let ready!: () => void;
+      const attached = new Promise<void>((r) => (ready = r));
+      let lastData = Date.now();
+      const viewer = await (deps.terminal ?? createTerminal(deps.tmux)).attach(req.session, {
+        ignoreSize: true,
+        onData: () => { lastData = Date.now(); ready(); },
+      });
       try {
-        viewer.write(line);
-        await sleep(hold);
+        const first = await Promise.race([attached.then(() => true), viewer.exited.then(() => false), sleep(attachMs).then(() => false)]);
+        if (!first) throw new Error(`could not attach to the session: ${req.session}`);
+        const bytes = Buffer.from(line);
+        for (let off = 0; off < bytes.length; ) {
+          const n = viewer.write(bytes.subarray(off));
+          if (n <= 0) await sleep(10);
+          off += Math.max(n, 0);
+        }
+        // The client draws the first screen in several chunks. Wait until its output is quiet for `hold`, so tmux
+        // has taken the bytes before the client closes. At most 2 s.
+        const end = Date.now() + 2000;
+        lastData = Date.now();
+        while (Date.now() < end && Date.now() - lastData < hold) await sleep(10);
       } finally {
         viewer.close();
       }
