@@ -207,7 +207,7 @@ const isDir = (p: string): boolean => {
 };
 
 // <hex>.view -> <target> by temp link and rename: a run reads a whole old view or a whole new one.
-function swapView(dir: string, key: string, target: string | null): void {
+export function swapView(dir: string, key: string, target: string | null): void {
   const link = agentsPath(dir, key, ".view");
   if (target === null) {
     rmSync(link, { force: true });

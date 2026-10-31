@@ -40,6 +40,33 @@ describe("hub tmux", () => {
     expect(await tmux.listSessions()).toEqual([]);
   });
 
+  test("a dot name gets its error before any tmux call", async () => {
+    // A tmux binary that does not exist: any call would fail with another error than the dot refusal.
+    const tmux = createTmux({ bin: join(dir, "no-such-tmux"), socket });
+    await expect(tmux.newSession({ name: "a.b", cwd: "/tmp", command: "sleep 30" })).rejects.toThrow("a dot is not allowed in a terminal agent name: tmux changes it");
+  });
+
+  test("an ensureRgb failure after new-session is best effort and logged; the launch still succeeds", async () => {
+    const calls = join(dir, "calls");
+    const fake = join(dir, "fake-tmux");
+    // new-session and set-option status succeed; the RGB feature check and its set-option -sa fail.
+    writeFileSync(fake, `#!/bin/sh\necho "$@" >> "${calls}"\ncase "$3" in show-options|set-option) case "$4" in -sa|-sv) echo boom >&2; exit 1;; esac;; esac\nexit 0\n`);
+    chmodSync(fake, 0o755);
+    const logged: string[] = [];
+    const orig = console.error;
+    console.error = (...a: unknown[]) => void logged.push(a.join(" "));
+    try {
+      const tmux = createTmux({ bin: fake, socket });
+      await tmux.newSession({ name: "w1", cwd: "/tmp", command: "sleep 30" });
+    } finally {
+      console.error = orig;
+    }
+    expect(logged.some((l) => l.includes("[tmux] ensureRgb after new-session w1 (best effort)"))).toBe(true);
+    const seen = readFileSync(calls, "utf8");
+    expect(seen).toContain("new-session");
+    expect(seen).toContain("set-option -t =w1: status off"); // the launch went on after the failure
+  });
+
   test("Blank locale: the new-session call carries a UTF-8 LANG and LC_ALL", async () => {
     const tmux = createTmux({ bin, socket, env: { ...process.env, LANG: "", LC_ALL: "" } });
     const argv = tmux.newSessionArgv({ name: "w1", cwd: "/tmp", command: "sleep 30" });
