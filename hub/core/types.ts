@@ -206,6 +206,8 @@ export type HubCapabilities = {
     get(name: string): AgentCtx | null;
     isPermanent(name: string): boolean;
     isPaused(name: string): boolean;
+    /** Open agent streams of a name. Optional: a fake without it falls back to `get`. */
+    connectionCount?(name: string): number;
     all(): AgentCtx[];
     // `room` defaults to DEFAULT_ROOM; pass null for permanent member (human).
     ensure(name: string, room?: string | null): AgentCtx | null;
@@ -266,4 +268,6 @@ export type KindModule = HubFeature & {
   start?: (cap: HubCapabilities) => void;
   /** Called after the commit of a room settings change that can free role slots (role_limits). It never throws. */
   onRoomLimitsChanged?: (room: string, cap: HubCapabilities) => void;
+  /** The agent stream of `agent` is alive: the hub wrote its heartbeat or the agent connected. Memory only; it never writes an event. */
+  onAgentBeat?: (agent: string) => void;
 };

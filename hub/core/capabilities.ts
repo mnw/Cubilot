@@ -40,6 +40,9 @@ export function createCapBuilder(deps: CapabilityDeps): (caller?: Caller) => Hub
         isPermanent(name) {
           return agents.isPermanent(name);
         },
+        connectionCount(name) {
+          return agents.connectionCount(name);
+        },
         all(): AgentCtx[] {
           return [...agents.values()].map((a) => ({
             name: a.name,
