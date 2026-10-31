@@ -5,7 +5,7 @@ import { Database } from "bun:sqlite";
 import { giveProject } from "../helpers/repo";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createTicketKind } from "../../hub/kinds/ticket";
-import { createStageRuntime } from "../../hub/kinds/stage";
+import { trackedRuntime, disposeRuntimes } from "../helpers/stage-runtimes";
 import { cancelTraceId, createCancelTraceKind } from "../../hub/kinds/cancel-trace";
 import type { Entry, HubCapabilities, RouteDef, Scope } from "../../hub/core/types";
 
@@ -16,7 +16,7 @@ function makeEnv(o: { launch?: boolean; ticketStatus?: string; withTrace?: boole
   migrateLedger(db);
   createTicketKind(db).migrate(db);
   const trace = createCancelTraceKind(db);
-  const rt = createStageRuntime(db, {
+  const rt = trackedRuntime(db, {
     ackMs: 60_000,
     bootGraceMs: 1000,
     traceFailure: o.withTrace === false ? undefined : (i, cap) => trace.record(i, cap),
@@ -53,7 +53,10 @@ let errors: ReturnType<typeof spyOn>;
 beforeEach(() => {
   errors = spyOn(console, "error").mockImplementation(() => {});
 });
-afterEach(() => errors.mockRestore());
+afterEach(() => {
+  errors.mockRestore();
+  disposeRuntimes();
+});
 const lines = () => errors.mock.calls.map((c: any[]) => c.map(String).join(" "));
 
 describe("a failed cancel leaves one row", () => {

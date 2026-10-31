@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { giveProject } from "../helpers/repo";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createTicketKind } from "../../hub/kinds/ticket";
-import { createStageRuntime } from "../../hub/kinds/stage";
+import { trackedRuntime, disposeRuntimes } from "../helpers/stage-runtimes";
 import { HANDOFF_SECTION_MAX, NOTES_SECTION_MAX, PACK_SECTION_MAX, renderFirstMessage } from "../../hub/core/first-message";
 import { renderStable } from "../../hub/core/primer";
 import { HEAD_CAP_BYTES, MAX_FIRST_MESSAGE_BYTES, claudeProjectFolder, metricsByRole, piSessionFolder, recordStageMetrics, selectTranscript, stagesMissingMetrics } from "../../hub/core/stage-metrics";
@@ -38,7 +38,7 @@ function makeEnv(extra: { recordMetrics?: typeof recordStageMetrics } = {}) {
   const db = new Database(":memory:");
   migrateLedger(db);
   createTicketKind(db).migrate(db);
-  const rt = createStageRuntime(db, { ackMs: 60_000, bootGraceMs: 1000, claudeProjectsDir: projects, ...extra });
+  const rt = trackedRuntime(db, { ackMs: 60_000, bootGraceMs: 1000, claudeProjectsDir: projects, ...extra });
   rt.module.migrate(db);
   giveProject(db, "r1");
   const cap = {
@@ -98,6 +98,7 @@ function capture() {
 }
 afterEach(() => {
   console.error = realError;
+  disposeRuntimes();
 });
 
 describe("stage metrics writer", () => {
@@ -254,7 +255,7 @@ describe("stage metrics writer", () => {
 describe("restart, old events and unreadable usage", () => {
   /** A new runtime on the same ledger: the hub restarted between the launch and the end of the stage. */
   const restarted = (e: ReturnType<typeof makeEnv>) => {
-    const rt2 = createStageRuntime(e.db, { ackMs: 60_000, bootGraceMs: 1000, claudeProjectsDir: e.projects });
+    const rt2 = trackedRuntime(e.db, { ackMs: 60_000, bootGraceMs: 1000, claudeProjectsDir: e.projects });
     return async () => {
       rt2.api.move(e.stageId, { to: "passed" }, "system", e.cap);
       await rt2.metricsIdle();
@@ -486,7 +487,7 @@ describe("start repair of missing rows (t_8c328391ae299304)", () => {
   /** The first runtime stops before the deferred write (a no-op writer); the second one starts on the same ledger. */
   const noWrite = async () => {};
   const startAgain = async (e: ReturnType<typeof makeEnv>, extra: { recordMetrics?: typeof recordStageMetrics } = {}) => {
-    const rt2 = createStageRuntime(e.db, { ackMs: 60_000, bootGraceMs: 1000, claudeProjectsDir: e.projects, ...extra });
+    const rt2 = trackedRuntime(e.db, { ackMs: 60_000, bootGraceMs: 1000, claudeProjectsDir: e.projects, ...extra });
     rt2.module.start!(e.cap);
     await rt2.metricsIdle();
     rt2.module.dispose?.();
@@ -580,7 +581,7 @@ describe("start repair of missing rows (t_8c328391ae299304)", () => {
     e.spawn();
     await e.pass();
     const steps: string[] = [];
-    const rt2 = createStageRuntime(e.db, {
+    const rt2 = trackedRuntime(e.db, {
       ackMs: 60_000,
       bootGraceMs: 1000,
       claudeProjectsDir: e.projects,
