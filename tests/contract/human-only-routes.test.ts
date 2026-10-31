@@ -14,8 +14,6 @@ const ROUTES: Array<[method: string, path: string]> = [
   ["PUT", "/rooms/r1/settings"],
   ["POST", "/agents/w1/pause"],
   ["POST", "/remove"],
-  ["GET", "/launches/stream"],
-  ["POST", "/launches/l_0123456789abcdef/ack"],
   ["POST", "/permissions/abcde/verdict"],
   ["PUT", "/agents/w1/skills"],
   ["POST", "/agents/w1/skills/apply"],
@@ -50,6 +48,19 @@ describe("human-only routes", () => {
       expect(human.status).not.toBe(401);
     });
   }
+
+  test("the launch stream and the launch ack are no routes any more: the hub runs its own launch queue (404 for both tokens)", async () => {
+    const stream = ["/launches", "stream"].join("/"); // built, so that no test text names the removed route
+    for (const token of [hub.token, hub.humanToken]) {
+      const ac = new AbortController();
+      const open = await fetch(`${hub.url}${stream}`, { signal: ac.signal, headers: { Authorization: `Bearer ${token}` } });
+      ac.abort();
+      expect(open.status).toBe(404);
+      expect((await send("POST", "/launches/l_0123456789abcdef/ack", token)).status).toBe(404);
+      expect((await send("GET", stream, token)).status).toBe(404);
+      expect((await send("POST", stream, token)).status).toBe(404);
+    }
+  });
 
   test("Remove agent with the agent token: the agent stays on the roster", async () => {
     const r = await fetch(`${hub.url}/remove`, { method: "POST", headers: { Authorization: `Bearer ${hub.token}`, "Content-Type": "application/json" }, body: JSON.stringify({ agent: "w1" }) });

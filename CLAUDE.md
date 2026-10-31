@@ -37,7 +37,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Bridge core owns policy; adapters implement Host only.** Policy goes in core.ts. docs/rules/bridge.md
 - **Mod tool hook must ask $.tool.check.** docs/rules/bridge.md
 - **Pre/PostToolUse hooks do not run for chatbridge tools.** docs/rules/bridge.md
-- **Keep --allowed-tools on the claude command in pty.rs.** docs/rules/bridge.md
+- **--allowed-tools stays on the claude command in hub/core/launch-command.ts.** docs/rules/bridge.md
 - **In the mod, pass $ only to top-level function declarations.** docs/rules/bridge.md
 - **After changing `hub/channel/**`.** Rerun build-sidecars.sh AND check-mod.sh. docs/rules/bridge.md
 - **Claude Code 2.1.296 is the minimum.** Never force tengu_plugin_hooks_modules. docs/rules/bridge.md
@@ -62,7 +62,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **One Approve per request; an edit keeps the ticket status.** The human approves a request once (L1): later tickets of it queue without a new Approve. A request of origin `human`, or with a high ticket or a feature, needs the Approve. An edit changes no status (L2). docs/rules/kinds.md
 - **Radius has a floor from the rule.** `blast_radius` is never below `radius_rule` (config `radius_rule`). The lead or the creator raises it. Only the human lowers it below the rule. docs/rules/permissions.md
 - **A checkpoint clears the lead's session.** The hub writes the note request and the summary file, and sends `/clear` as an `input` launch request to one named session. docs/rules/kinds.md
-- **Hub decides launches; Rust shell only executes.** docs/rules/kinds.md
+- **Hub decides and executes launches.** The hub runs launch, close and input itself (`hub/core/launch-executor.ts`). docs/rules/kinds.md
 - **Stage state changes only via createStageApi.** docs/rules/kinds.md
 - **system is the hub's own actor, never a caller's.** Hub returns 400 if a body names it. docs/rules/kinds.md
 - **Validator and Reviewer worktrees are read-only.** Hub refuses a writable one. docs/rules/kinds.md
@@ -79,7 +79,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Accepted risks (known, not bugs)
 
 - **blast_radius high is advisory.** docs/rules/permissions.md
-- **Launch stream has no per-role token.** docs/rules/permissions.md
 - **devtools is on in release builds.** docs/rules/core.md
 - **post_file follows symlinks.** docs/rules/bridge.md
 - **Persisted transcripts may capture secrets.** Opt-in only. docs/rules/transcripts.md

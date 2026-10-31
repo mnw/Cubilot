@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { authedFetch, openSSE, postJson, registerAgent } from "../helpers/fetch";
 import { sh } from "../helpers/pack-fixture";
+import { openLaunchStream } from "../helpers/fake-executor";
 
 const ROOM = "cpl";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -48,7 +49,7 @@ describe("the hub answers while the pack builds", () => {
 
   test("GET /agents and POST /post answer within 1 s while graphify sleeps 15 s; the launch follows with the pack", async () => {
     const launches: any[] = [];
-    const stream = openSSE(hub, "/launches/stream");
+    const stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) launches.push(e); } catch { /* closed */ } })();
     await sleep(200);
     const t = await postJson(hub, "/tickets", { by: "Orchestrator", title: "pack ticket", acceptance_criteria: "c", blast_radius: "low", role: null });

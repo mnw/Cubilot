@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type Req = { id: string; kind: string; stage_id: string; session: string; room: string; cwd: string | null; prompt: string };
@@ -46,7 +47,7 @@ describe("the same request id in two rooms", () => {
       open.push(await registerAgent(hub, `${room}-lead`, { room }));
       expect((await authedFetch(hub, `/rooms/${room}/lead`, { method: "POST", body: JSON.stringify({ by: hub.humanName, agent: `${room}-lead` }) })).status).toBe(200);
     }
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) reqs.push(e as Req); } catch { /* closed */ } })();
     await sleep(200);
   });
@@ -78,14 +79,14 @@ describe("the same request id in two rooms", () => {
     expect(a.prompt).not.toContain(tb);
 
     // Room B's review FAILs with a finding; room A's second review must not see it.
-    expect((await postJson(hub, `/launches/${b.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, b.id, { result: "spawned" })).status).toBe(200);
     open.push(await registerAgent(hub, b.session, { room: "tb" }));
     const fail = await postJson(hub, "/handoffs", {
       from: b.session, to: "tb-lead", task: "verdict",
       context: { notes: "n", stage_id: b.stage_id, review: "spec", request_id: "req-1", verdict: "FAIL", findings: [{ ticket_id: tb, severity: "blocking", text: "FINDING-OF-B" }], questions_for_human: [] },
     });
     expect(fail.status, JSON.stringify(fail.json)).toBe(201);
-    expect((await postJson(hub, `/launches/${a.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, a.id, { result: "spawned" })).status).toBe(200);
     open.push(await registerAgent(hub, a.session, { room: "ta" }));
     const pass = await postJson(hub, "/handoffs", {
       from: a.session, to: "ta-lead", task: "verdict",
@@ -101,7 +102,7 @@ describe("the same request id in two rooms", () => {
       expect((await postJson(hub, `/stages/${first.stage_id}/turn-end`, { agent: first.session })).json).toEqual({ action: "close" });
     }
     await until(() => reqs.filter((r) => r.kind === "close").length === 2);
-    for (const c of reqs.filter((r) => r.kind === "close")) expect((await postJson(hub, `/launches/${c.id}/ack`, { result: "spawned" })).status).toBe(200);
+    for (const c of reqs.filter((r) => r.kind === "close")) expect((await ackLaunch(hub, c.id, { result: "spawned" })).status).toBe(200);
     await draft("ta"); // the PASS queued room A's first ticket; a new draft is what the second review covers
     expect((await spec("ta", "SECOND-A", c2)).status).toBe(201);
     expect((await spec("tb", "SECOND-B", c2)).status).toBe(201);

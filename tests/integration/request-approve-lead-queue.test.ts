@@ -5,6 +5,7 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fakeExecutorEnv } from "../helpers/hub";
 import type { HubHandle } from "../helpers/hub";
 import { postJson, registerAgent } from "../helpers/fetch";
 
@@ -21,7 +22,7 @@ async function spawn(): Promise<HubHandle> {
       ...process.env,
       PORT: "0",
       CUBILOT_TOKEN: TOKEN,
-      CUBILOT_LEDGER_DB: ledgerPath,
+      CUBILOT_LEDGER_DB: ledgerPath, ...fakeExecutorEnv(ledgerPath),
       CUBILOT_ATTACHMENTS_DIR: attachmentsDir,
       CUBILOT_TRANSCRIPTS_DIR: join(base, "transcripts"),
       CUBILOT_DATA_DIR: join(base, "data"),

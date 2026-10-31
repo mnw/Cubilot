@@ -5,6 +5,7 @@ import { describe, test, expect } from "bun:test";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp, projectRepo } from "../helpers/repo";
 import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const git = (...a: string[]) => {
@@ -48,12 +49,12 @@ describe("a stage result without context.notes is refused (every role)", () => {
         // after: runs once the handoff is sent. The editor waits for the close ack of the writer session, so the
         // close request on the stream is acked too, and the loop ends at the launch of startRole.
         const start = async (startRole: string, after?: () => Promise<void>) => {
-          const sse = openSSE(hub, "/launches/stream");
+          const sse = openLaunchStream(hub);
           expect((await postJson(hub, "/handoffs", { from: "Orchestrator", to_role: startRole, task: "start", context: { ticket_id: ticketId } })).status).toBe(201);
           await after?.();
           let name = "";
           for await (const req of sse.events) {
-            expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+            expect((await ackLaunch(hub, req.id, { result: "spawned" })).status).toBe(200);
             if (req.kind === "close") continue;
             name = req.session;
             break;
@@ -105,7 +106,7 @@ describe("a stage result without context.notes is refused (every role)", () => {
 
   test("spec review: a result without notes gets 400 with the field name; no handoff; stage running; valid notes pass", async () => {
     await withHub(async (hub, open) => {
-      const stream = openSSE(hub, "/launches/stream");
+      const stream = openLaunchStream(hub);
       const launches: any[] = [];
       void (async () => { try { for await (const e of stream.events) launches.push(e); } catch { /* closed */ } })();
       await sleep(200);
@@ -115,7 +116,7 @@ describe("a stage result without context.notes is refused (every role)", () => {
       await sleep(500);
       const req = launches.at(-1);
       open.push(await registerAgent(hub, req.session, { room: "r1" }));
-      expect((await authedFetch(hub, `/launches/${req.id}/ack`, { method: "POST", body: JSON.stringify({ result: "spawned" }) })).status).toBe(200);
+      expect((await ackLaunch(hub, req.id, { result: "spawned" })).status).toBe(200);
       const stageId = ((await getJson(hub, "/stages?status=all")).json as any[]).find((s) => s.review === "spec").id;
       const send = (notes?: unknown) =>
         postJson(hub, "/handoffs", {
@@ -141,9 +142,9 @@ describe("a stage result without context.notes is refused (every role)", () => {
     await withHub(async (hub, open) => {
       const t = await postJson(hub, "/tickets", { by: "Orchestrator", title: "T", acceptance_criteria: "c", blast_radius: "low", priority: "medium", role: "tester" });
       expect(t.status).toBe(201);
-      const sse = openSSE(hub, "/launches/stream");
+      const sse = openLaunchStream(hub);
       for await (const req of sse.events) {
-        expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+        expect((await ackLaunch(hub, req.id, { result: "spawned" })).status).toBe(200);
         open.push(await registerAgent(hub, req.session, { room: "r1" }));
         const r = await postJson(hub, "/post", { from: req.session, to: "Orchestrator", text: "blocked: unclear criteria" });
         expect(r.status).toBe(200);

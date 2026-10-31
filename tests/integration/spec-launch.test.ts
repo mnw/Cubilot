@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type Launch = { id: string; kind: string; harness: string; stage_id: string; session: string; role: string; room: string; cwd: string | null; env: Record<string, string> };
@@ -25,7 +26,7 @@ describe("spec stage launch", () => {
     open.push(await registerAgent(hub, "sl-alice", { room: "sl" }));
     // The result of a spec review goes to the room lead (spec-review 4.1b): the default lead is "Orchestrator".
     open.push(await registerAgent(hub, "Orchestrator", { room: "sl" }));
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) launches.push(e as Launch); } catch { /* closed */ } })();
     await sleep(200);
   });
@@ -50,7 +51,7 @@ describe("spec stage launch", () => {
     expect((await postJson(hub, `/stages/${stageId}/turn-end`, { agent: session })).json).toEqual({ action: "close" });
     for (let i = 0; i < 60 && launches.filter((l) => l.kind === "close").length === n; i++) await sleep(50);
     const close = launches.filter((l) => l.kind === "close").at(-1)!;
-    expect((await postJson(hub, `/launches/${close.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, close.id, { result: "spawned" })).status).toBe(200);
   };
   const stages = async () => (await getJson(hub, "/stages?status=all")).json as Array<{ id: string; status: string; role: string; review: string | null; ticket_id: string | null; request_id: string | null; session: string | null }>;
 
@@ -67,7 +68,7 @@ describe("spec stage launch", () => {
     // no ticket was assigned: nobody owns a ticket for this stage
     expect((await stages())[0]).toMatchObject({ review: "spec", ticket_id: null, status: "launching" });
     first = l.stage_id;
-    expect((await postJson(hub, `/launches/${l.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, l.id, { result: "spawned" })).status).toBe(200);
     open.push(await registerAgent(hub, "validator-1", { room: "sl" }));
     expect((await stages())[0].status).toBe("running");
   });

@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream } from "../helpers/fake-executor";
 
 const ROOT = join(import.meta.dir, "../..");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -87,9 +88,12 @@ describe("every mutating route queues no launch for a ticket with no ready stage
   test("the derivation finds the known route families", () => {
     const found = routerRoutes();
     const paths = found.map((r) => `${r.method} ${r.path}`);
-    for (const p of ["POST /tickets", "POST /handoffs", "POST /interrupts", "POST /post", "PUT /rooms/:id/settings", "POST /rooms/:id/lead", "POST /launches/:id/ack"]) {
+    for (const p of ["POST /tickets", "POST /handoffs", "POST /interrupts", "POST /post", "PUT /rooms/:id/settings", "POST /rooms/:id/lead"]) {
       expect(paths).toContain(p);
     }
+    // The hub runs its own launch queue: no route takes a launch ack any more.
+    expect(paths).not.toContain("POST /launches/:id/ack");
+    expect(paths).not.toContain(`GET ${["/launches", "stream"].join("/")}`);
     expect(found.length).toBeGreaterThanOrEqual(25);
   });
 
@@ -101,7 +105,7 @@ describe("every mutating route queues no launch for a ticket with no ready stage
   });
 
   test("a POST or PUT to every route, with launch fields in the body, queues no launch and creates no stage", async () => {
-    const sse = openSSE(hub, "/launches/stream");
+    const sse = openLaunchStream(hub);
     const got: unknown[] = [];
     void (async () => { try { for await (const e of sse.events) got.push(e); } catch { /* closed */ } })();
     await sleep(150);
@@ -141,7 +145,7 @@ describe("every mutating route queues no launch for a ticket with no ready stage
   });
 
   test("control: a route that makes a ready stage queues exactly one launch (the evaluator, not the route, decides)", async () => {
-    const sse = openSSE(hub, "/launches/stream");
+    const sse = openLaunchStream(hub);
     const got: any[] = [];
     void (async () => { try { for await (const e of sse.events) got.push(e); } catch { /* closed */ } })();
     await sleep(150);

@@ -5,6 +5,7 @@ import { Database } from "bun:sqlite";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type Req = { id: string; kind: string; stage_id?: string; session: string };
@@ -19,7 +20,7 @@ describe("a result for a completed stage", () => {
     hub = await spawnHub();
     await giveProjectHttp(hub, "cs");
     open.push(await registerAgent(hub, "Orchestrator", { room: "cs" }));
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) reqs.push(e as Req); } catch { /* closed */ } })();
     await sleep(200);
   });
@@ -40,7 +41,7 @@ describe("a result for a completed stage", () => {
     expect((await postJson(hub, "/handoffs", { from: "Orchestrator", to_role: "validator", review: "spec", request_id: "req-1", task: "review", context: { request_text: "X" } })).status).toBe(201);
     for (let i = 0; i < 60 && reqs.length < 1; i++) await sleep(50);
     const launch = reqs[0];
-    expect((await postJson(hub, `/launches/${launch.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, launch.id, { result: "spawned" })).status).toBe(200);
     open.push(await registerAgent(hub, launch.session, { room: "cs" }));
     const events: Array<{ kind?: string }> = [];
     const agentStream = openSSE(hub, `/agent-stream?agent=${launch.session}&room=cs`);

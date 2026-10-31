@@ -17,6 +17,7 @@ import { createRequestKind } from "../../hub/kinds/request";
 import { createStageRuntime } from "../../hub/kinds/stage";
 import { createTicketKind } from "../../hub/kinds/ticket";
 import type { Entry, HubCapabilities, Scope } from "../../hub/core/types";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const git = (...a: string[]) => {
   const r = Bun.spawnSync(["git", "-C", projectRepo(), ...a], { stdout: "pipe", stderr: "pipe" });
@@ -324,7 +325,7 @@ describe("real hub", () => {
     open.push(await registerAgent(hub, "wph-lead", { room: ROOM }));
     const put = await authedFetch(hub, `/rooms/${ROOM}/settings`, { method: "PUT", body: JSON.stringify({ role_limits: { worker: 10, tester: 10, validator: 10, writer: 10 } }) });
     expect(put.status).toBe(200);
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) launches.push(e); } catch { /* closed */ } })();
     await sleep(200);
   });
@@ -350,7 +351,7 @@ describe("real hub", () => {
     let req: any;
     for (let i = 0; i < 100 && !(req = launches.find((r) => r.kind === "launch" && r.stage_id === stageId)); i++) await sleep(50);
     expect(req).toBeDefined();
-    expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, req.id, { result: "spawned" })).status).toBe(200);
     open.push(await registerAgent(hub, req.session, { room: ROOM }));
     return req.session as string;
   };
@@ -360,7 +361,7 @@ describe("real hub", () => {
     for (let i = 0; i < 100 && !(req = launches.find((r) => r.kind === "close" && r.session === session && !r.seen)); i++) await sleep(50);
     expect(req).toBeDefined();
     req.seen = true;
-    expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, req.id, { result: "spawned" })).status).toBe(200);
     await sleep(300);
   };
   const pass = (session: string, stage: Stage, ticket: string) =>

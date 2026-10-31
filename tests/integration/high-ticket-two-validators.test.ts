@@ -14,6 +14,7 @@ import { createTicketKind } from "../../hub/kinds/ticket";
 import { createStageRuntime } from "../../hub/kinds/stage";
 import type { LaunchRequest } from "../../hub/core/launch-queue";
 import type { Entry, HubCapabilities, Scope } from "../../hub/core/types";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const git = (...a: string[]) => {
   const r = Bun.spawnSync(["git", "-C", projectRepo(), ...a], { stdout: "pipe", stderr: "pipe" });
@@ -254,7 +255,7 @@ describe("high ticket through POST /handoffs", () => {
     open.push(await registerAgent(hub, "l4h-alice", { room: ROOM }));
     const put = await authedFetch(hub, `/rooms/${ROOM}/settings`, { method: "PUT", body: JSON.stringify({ role_limits: { worker: 10, tester: 10, validator: 10, writer: 10 } }) });
     expect(put.status).toBe(200);
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) launches.push(e); } catch { /* closed */ } })();
     await sleep(200);
   });
@@ -279,7 +280,7 @@ describe("high ticket through POST /handoffs", () => {
     let req: any;
     for (let i = 0; i < 100 && !(req = launches.find((r) => r.kind === "launch" && r.stage_id === stageId)); i++) await sleep(50);
     expect(req).toBeDefined();
-    expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, req.id, { result: "spawned" })).status).toBe(200);
     open.push(await registerAgent(hub, req.session, { room: ROOM }));
     return req.session as string;
   };
@@ -289,7 +290,7 @@ describe("high ticket through POST /handoffs", () => {
     let req: any;
     for (let i = 0; i < 100 && !(req = launches.find((r) => r.kind === "close" && r.session === session)); i++) await sleep(50);
     expect(req).toBeDefined();
-    expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, req.id, { result: "spawned" })).status).toBe(200);
     await sleep(300);
   };
   const result = (from: string, stage: Stage, ticket: string, verdict: "PASS" | "FAIL", commit: string, to: Record<string, string>) =>

@@ -1991,7 +1991,7 @@ mod spawn_argv_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    // 6.1, brief test 7: a session the hub starts is a role launch (launches.rs passes the role to pty_spawn), so its
+    // 6.1, brief test 7: a session the hub starts is a role launch (the launch executor passes the role to prepareLaunch), so its
     // command carries the role's blocks: no sub-agents (Task, Agent) and no ack_permission, with the first message
     // appended after them.
     #[test]
