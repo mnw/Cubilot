@@ -34,6 +34,12 @@ async function until(f: () => Promise<boolean> | boolean, ms = 5000) {
 }
 
 describe("hub tmux", () => {
+  test("a dot in a session name is refused and no session is made", async () => {
+    const tmux = createTmux({ bin, socket });
+    await expect(tmux.newSession({ name: "a.b", cwd: "/tmp", command: "sleep 30" })).rejects.toThrow(/dot is not allowed/);
+    expect(await tmux.listSessions()).toEqual([]);
+  });
+
   test("Blank locale: the new-session call carries a UTF-8 LANG and LC_ALL", async () => {
     const tmux = createTmux({ bin, socket, env: { ...process.env, LANG: "", LC_ALL: "" } });
     const argv = tmux.newSessionArgv({ name: "w1", cwd: "/tmp", command: "sleep 30" });
