@@ -1429,6 +1429,8 @@ Read-auth. Each route reads `config.yml` at each call, so an edit shows at the n
 | GET | `/settings/paths` | `{ config, skills, mcp }`; with `?agent=<name>` also `agent_cwd` (live pane path or `null`). A browser shows these with a Copy button. 400 on an invalid agent name. |
 | GET | `/roles` | `{ roles, pills }`. `roles`: the single-agent roles of the staged version (`name`, `harness`, `provider`, `model`, `thinking`, `effort`), sorted. `pills`: `{ <agent>: { role, model, provider, effort, harness } }` of the running tmux sessions. |
 | GET | `/agents/<name>/harness` | `{ harness: "claude" \| "pi" }` of a roster agent or a tmux session. 404 for an unknown agent. |
+| GET | `/models` | `?harness=claude\|pi` (default `claude`). `{ models: [{ provider, model, thinking, ready }] }`. `claude`: the four fixed models. `pi`: rows of `pi --list-models` (10 s limit, `CUBILOT_PI_LIST_LIMIT_MS` overrides), `ready` from `pi auth check` (cached 5 min). Pi that fails or does not end in time: `{ models: [], warning }`. 400 `invalid harness: <h>`. |
+| GET | `/agents/<name>/slash-commands` | `{ commands: [{ name, description }] }` from the agent's pane folder and the home folder (commands, skills, global MCP `prompts`; Pi: `skill:<name>` and commands). Built-ins not included. 404 for an unknown agent. |
 
 `reload_settings` and the native open commands stay in the shell. In a browser the Reload control shows "Restart the hub to apply these settings".
 
