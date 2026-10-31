@@ -375,7 +375,7 @@ pub(crate) fn staged_version_or_log(staged: Result<String, String>, what: &str) 
 
 pub(crate) fn materialize_factory() -> Result<String, String> {
     let version = stage_factory(&resolve_factory_src()?, &factory_dir(), &super::app_data_dir().join("factory-user"))?;
-    for line in cleanup_versions(&factory_dir(), super::pty::live_tmux_state(), std::time::SystemTime::now()) {
+    for line in cleanup_versions(&factory_dir(), super::tmux::live_tmux_state(), std::time::SystemTime::now()) {
         eprintln!("{line}");
     }
     Ok(version)
@@ -1318,7 +1318,7 @@ mod tests {
     }
 
     #[test]
-    fn an_existing_empty_folder_is_preserved_not_replaced_by_the_publish_step() {
+    fn an_existing_folder_with_nothing_in_it_is_preserved_not_replaced_by_the_publish_step() {
         let root = tmp_root("seed-empty");
         let src = make_src(&root);
         let (dest, user) = (root.join("out"), root.join("user"));

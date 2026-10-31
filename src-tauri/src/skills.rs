@@ -595,7 +595,7 @@ mod tests {
     }
 
     #[test]
-    fn set_refuses_an_unknown_id_deletes_the_file_for_an_empty_list_and_writes_mode_0600() {
+    fn set_refuses_an_unknown_id_deletes_the_file_for_a_list_with_no_id_and_writes_mode_0600() {
         let root = tmp("set");
         let (dest, v) = staged(&root);
         let path = rec(&dest, "ag", ".skills-off");
@@ -634,7 +634,7 @@ mod tests {
     }
 
     #[test]
-    fn a_launch_with_an_empty_choice_is_unchanged_and_writes_the_empty_records() {
+    fn a_launch_with_no_choice_is_unchanged_and_writes_the_blank_records() {
         let root = tmp("launch-empty");
         let (dest, v) = staged(&root);
         assert_eq!(launch_in(&dest, &v, "ag", "worker", "v-0000000000000001").unwrap(), None);

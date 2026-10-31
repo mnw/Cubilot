@@ -56,7 +56,7 @@ Hub state-machine kinds, tickets, stages, launches, rooms and ledger transaction
 
 ## `CUBILOT_STAGE_ID` marks a hub-launched session
 
-- **`CUBILOT_STAGE_ID` marks a hub-launched session.** The hub puts the stage id in the launch request. `pty.rs` passes it as `-e CUBILOT_STAGE_ID=<id>` on `tmux new-session`, only for a stage launch. The bridge reads it through `Host.stageId()`. It reports each end of turn to `POST /stages/<id>/turn-end`. A session without the variable is an ordinary agent and reports nothing. Do not set it by hand on a normal spawn.
+- **`CUBILOT_STAGE_ID` marks a hub-launched session.** The hub puts the stage id in the launch request. `hub/core/launch-command.ts` passes it as `-e CUBILOT_STAGE_ID=<id>` on `tmux new-session`, only for a stage launch. The bridge reads it through `Host.stageId()`. It reports each end of turn to `POST /stages/<id>/turn-end`. A session without the variable is an ordinary agent and reports nothing. Do not set it by hand on a normal spawn.
 
 ## Nutshell is not a kind — it's a document
 
