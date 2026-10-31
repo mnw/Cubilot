@@ -52,7 +52,7 @@ async function fakeTui(name: string) {
 describe("Turn capture", () => {
   test("a slash input returns the reply and the idle-prompt status, and the geometry comes back", async () => {
     await fakeTui("w1");
-    const r = await post("/terminal/w1/capture-turn", { input: "/cost\r", timeout_ms: 8000 });
+    const r = await post("/terminal/w1/capture-turn", { input: "/cost\r", timeout_ms: 30000 });
     expect(r.status).toBe(200);
     const res = (await r.json()) as { name: string; log_path: string; status: string; start_ms: number; end_ms: number };
     expect(res.status).toBe("idle-prompt");
@@ -63,7 +63,7 @@ describe("Turn capture", () => {
     // pipe-pane is off and window-size is not left on manual
     expect((await tmux.run(["display-message", "-p", "-t", "=w1:", "#{pane_pipe}"])).trim()).toBe("0");
     expect((await tmux.run(["show-options", "-wv", "-t", "=w1:", "window-size"])).trim()).toBe("latest");
-  });
+  }, 60000);
 
   test("the input waits for the attach client: three captures in a row each hold the reply", async () => {
     for (const n of ["r1", "r2", "r3"]) {

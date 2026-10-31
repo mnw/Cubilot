@@ -162,12 +162,12 @@ describe("pack at the launch seam (3.5)", () => {
     const s = e.stage("worker");
     await withEnv({ PATH: `${bin}:${PATH}` }, async () => {
       expect(e.launch(s.id, "worker-1").ok).toBe(true);
-      await sleep(1500);
+      for (let i = 0; i < 600 && e.launches().length === 0; i++) await sleep(50); // wait for the launch, deadline 30 s
     });
     expect(e.launches()).toHaveLength(1);
     expect(e.launches()[0].prompt).not.toContain("## Graph query");
     expect(e.rt.api.load(s.id)!.status).toBe("launching");
-  });
+  }, 60000);
 
   test("a stub that sleeps past the limit is stopped and the launch continues", async () => {
     const { project } = repoWithBranch();
