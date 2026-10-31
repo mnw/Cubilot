@@ -48,7 +48,7 @@ The `get_hub_url` Tauri command SHALL return a JSON object of shape `{ url: stri
 
 ### Requirement: The human token is in one Keychain item for the Terminal command
 
-At every app start the shell SHALL store the human token in one macOS Keychain item (service `Cubilot`, account `human-token`) with user presence (Touch ID or the login password), replacing the item of the previous launch. No file and no environment variable holds the token. `cubilot hub <METHOD> <path> [json-body]` SHALL send that request to the URL in `hub.url` with the token as bearer, print the status and body, and never print the token.
+At every app start the shell SHALL store the human token in one macOS Keychain item (service `Cubilot`, account `human-token`) with the user presence access control flag, replacing the item of the previous launch. No file and no environment variable holds the token. `cubilot hub <METHOD> <path> [json-body]` SHALL first require a LocalAuthentication check (Touch ID or the login password) and read the Keychain item only after that check passes, because the file-based keychain does not enforce the flag. The command SHALL send that request to the URL in `hub.url` with the token as bearer, print the status and body, and never print the token.
 
 #### Scenario: Terminal command with the human token
 
@@ -63,3 +63,10 @@ At every app start the shell SHALL store the human token in one macOS Keychain i
 - **WHEN** the human runs `cubilot hub GET /agents`
 - **THEN** the command exits not 0 with one line that says there is no Keychain item
 - **AND** a refused prompt or a hub that does not answer also gives one cause line and exit not 0
+
+#### Scenario: Presence check refused
+
+- **GIVEN** the Keychain has the item `Cubilot` / `human-token`
+- **WHEN** the human runs `cubilot hub GET /agents` and refuses the Touch ID or password prompt
+- **THEN** the command does not read the Keychain item
+- **AND** it exits not 0 with one line that says the prompt was refused

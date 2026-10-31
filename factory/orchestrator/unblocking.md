@@ -45,7 +45,7 @@ When the work moves again, ask: will this block come back? If yes, open one low 
 
 The hub accepts these moves from the human. Give the command when the board is slow to use. The human runs it in Terminal on the Mac.
 
-The command is the app binary: `/Applications/Cubilot.app/Contents/MacOS/cubilot hub <METHOD> <path> [json-body]`. It reads the human token from the Keychain (item "Cubilot" / "human-token") after Touch ID. Add this line to `~/.zshrc` once, so that `cubilot` works: `export PATH="/Applications/Cubilot.app/Contents/MacOS:$PATH"`. The command prints the HTTP status and the body.
+The command is the app binary: `/Applications/Cubilot.app/Contents/MacOS/cubilot hub <METHOD> <path> [json-body]`. It reads the human token from the Keychain (item "Cubilot" / "human-token") after a Touch ID or login password prompt of the command itself. Add this line to `~/.zshrc` once, so that `cubilot` works: `export PATH="/Applications/Cubilot.app/Contents/MacOS:$PATH"`. The command prints the HTTP status and the body.
 
 ```bash
 D="$HOME/Library/Application Support/Cubilot"

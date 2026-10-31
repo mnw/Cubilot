@@ -1,5 +1,6 @@
-// The human token of one app launch, in one macOS Keychain item behind user presence (Touch ID, or the login password
-// when Touch ID is not available). The shell stores it at start; `cubilot hub` reads it. No file and no env holds it.
+// The human token of one app launch, in one macOS Keychain item with the user presence access control flag. The item is in
+// the file-based keychain, which does not enforce that flag: presence.rs gates the read in `cubilot hub` (Touch ID or the
+// login password). The shell stores the item at start. No file and no env holds the token.
 // Raw Security.framework calls through the core-foundation crate (already in Cargo.lock): no new dependency.
 
 use core_foundation::base::{CFType, TCFType};
@@ -143,7 +144,7 @@ pub(crate) fn store_with(service: &str, token: &str) -> Result<(), KeychainError
     Ok(())
 }
 
-// Shows the Touch ID prompt (macOS) and returns the token.
+// Returns the token. The caller must pass the presence gate first (cli.rs does); this read shows no prompt by itself.
 pub(crate) fn read_with(service: &str) -> Result<String, KeychainError> {
     let spec = item_spec(service);
     let mut pairs = identity_query(&spec.service, &spec.account);

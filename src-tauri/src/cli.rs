@@ -130,6 +130,7 @@ fn send(host_port: &str, request: &str) -> Result<Vec<u8>, String> {
 pub(crate) fn run(
     args: &[String],
     data_dir: &Path,
+    presence_gate: &dyn Fn() -> Result<(), String>,
     token_source: &dyn Fn() -> Result<String, String>,
     out: &mut dyn Write,
     err: &mut dyn Write,
@@ -154,6 +155,11 @@ pub(crate) fn run(
             return 3;
         }
     };
+    // The presence gate runs BEFORE the Keychain read: the file keychain alone shows no prompt to its own app.
+    if let Err(e) = presence_gate() {
+        let _ = writeln!(err, "cubilot hub: {}", e.lines().next().unwrap_or("presence check refused"));
+        return 3;
+    }
     let token = match token_source() {
         Ok(t) => t,
         Err(e) => {
@@ -189,9 +195,11 @@ pub(crate) fn run(
 // Entry for main.rs: the real Keychain and the real app data folder.
 pub fn run_from_env(args: &[String]) -> i32 {
     let source = || crate::keychain::read_human_token().map_err(|e| e.describe());
+    let gate = || crate::presence::require_presence("read the Cubilot human token");
     run(
         args,
         &crate::app_data_dir(),
+        &gate,
         &source,
         &mut std::io::stdout(),
         &mut std::io::stderr(),
@@ -284,7 +292,7 @@ mod tests {
     fn run_prints_status_and_body_and_sends_the_bearer() {
         let (dir, h) = fake_hub("HTTP/1.1 200 OK", "[{\"name\":\"a\"}]");
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let code = run(&v(&["GET", "/agents"]), &dir, &|| Ok(FAKE.to_string()), &mut out, &mut err);
+        let code = run(&v(&["GET", "/agents"]), &dir, &|| Ok(()), &|| Ok(FAKE.to_string()), &mut out, &mut err);
         let seen = h.join().unwrap();
         assert_eq!(code, 0);
         assert_eq!(String::from_utf8(out).unwrap(), "HTTP 200\n[{\"name\":\"a\"}]\n");
@@ -297,7 +305,7 @@ mod tests {
     fn a_non_2xx_status_exits_1_and_an_echoed_token_is_redacted() {
         let (dir, h) = fake_hub("HTTP/1.1 403 Forbidden", &format!("{{\"error\":\"bad {FAKE}\"}}"));
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let code = run(&v(&["GET", "/x"]), &dir, &|| Ok(FAKE.to_string()), &mut out, &mut err);
+        let code = run(&v(&["GET", "/x"]), &dir, &|| Ok(()), &|| Ok(FAKE.to_string()), &mut out, &mut err);
         h.join().unwrap();
         assert_eq!(code, 1);
         let text = String::from_utf8(out).unwrap();
@@ -311,14 +319,14 @@ mod tests {
         let empty = std::env::temp_dir().join(format!("cubilot-cli-empty-{}", std::process::id()));
         std::fs::create_dir_all(&empty).unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        assert_eq!(run(&v(&["GET", "/a"]), &empty, &|| Ok(FAKE.into()), &mut out, &mut err), 3);
+        assert_eq!(run(&v(&["GET", "/a"]), &empty, &|| Ok(()), &|| Ok(FAKE.into()), &mut out, &mut err), 3);
         let e = String::from_utf8(err).unwrap();
         assert!(e.contains("no hub.url") && e.lines().count() == 1 && !e.contains(FAKE));
         // No Keychain item, then a refused prompt.
         let (dir, _h) = fake_hub("HTTP/1.1 200 OK", "");
         for cause in ["no Keychain item for the human token", "Touch ID or password prompt refused"] {
             let (mut out, mut err) = (Vec::new(), Vec::new());
-            assert_eq!(run(&v(&["GET", "/a"]), &dir, &|| Err(cause.to_string()), &mut out, &mut err), 3);
+            assert_eq!(run(&v(&["GET", "/a"]), &dir, &|| Ok(()), &|| Err(cause.to_string()), &mut out, &mut err), 3);
             let e = String::from_utf8(err).unwrap();
             assert!(e.contains(cause) && e.lines().count() == 1);
             assert!(out.is_empty());
@@ -329,7 +337,7 @@ mod tests {
         let port = { TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port() };
         std::fs::write(dead.join("hub.url"), format!("http://127.0.0.1:{port}")).unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        assert_eq!(run(&v(&["GET", "/a"]), &dead, &|| Ok(FAKE.into()), &mut out, &mut err), 3);
+        assert_eq!(run(&v(&["GET", "/a"]), &dead, &|| Ok(()), &|| Ok(FAKE.into()), &mut out, &mut err), 3);
         let e = String::from_utf8(err).unwrap();
         assert!(e.contains("hub does not answer") && e.lines().count() == 1 && !e.contains(FAKE));
         let _ = std::fs::remove_dir_all(&empty);
@@ -337,9 +345,39 @@ mod tests {
     }
 
     #[test]
+    fn the_presence_gate_runs_before_the_token_source_and_a_refusal_exits_3() {
+        let (dir, _h) = fake_hub("HTTP/1.1 200 OK", "");
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = run(
+            &v(&["GET", "/a"]),
+            &dir,
+            &|| Err("Touch ID or password prompt refused".to_string()),
+            &|| panic!("token read before the presence gate"),
+            &mut out,
+            &mut err,
+        );
+        assert_eq!(code, 3);
+        let e = String::from_utf8(err).unwrap();
+        assert!(e.contains("refused") && e.lines().count() == 1 && out.is_empty());
+        // Order: gate first, then token source.
+        let order = std::cell::RefCell::new(Vec::new());
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        run(
+            &v(&["GET", "/a"]),
+            &dir,
+            &|| { order.borrow_mut().push("gate"); Ok(()) },
+            &|| { order.borrow_mut().push("token"); Err("no Keychain item".to_string()) },
+            &mut out,
+            &mut err,
+        );
+        assert_eq!(*order.borrow(), vec!["gate", "token"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn usage_errors_exit_2_before_any_token_read() {
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let code = run(&v(&["GET"]), Path::new("/nonexistent"), &|| panic!("token read"), &mut out, &mut err);
+        let code = run(&v(&["GET"]), Path::new("/nonexistent"), &|| Ok(()), &|| panic!("token read"), &mut out, &mut err);
         assert_eq!(code, 2);
     }
 }

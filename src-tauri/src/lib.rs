@@ -4,6 +4,7 @@ mod keychain;
 mod launches;
 mod login_path;
 mod skills;
+mod presence;
 mod pty;
 
 use std::{
