@@ -95,3 +95,10 @@ Hub state-machine kinds, tickets, stages, launches, rooms and ledger transaction
 ## The checkpoint `/clear` goes to one named session
 
 - **The checkpoint `/clear` goes to one named session.** The hub queues an `input {session, text}` request through `sendInput` of the stage runtime (the only owner of the launch queue). The shell writes one line to the PTY of that session only (`pty::write_input`, raw PTY). A change to that path needs `tests/integration/pty-plumbing.test.ts` "text reaches the named session and no other". The summary file is mode `0600` and the lead's `SessionStart` hook removes it. docs/PROTOCOL.md "Checkpoints".
+
+## A stage holds its session through a lease
+
+- **A launching or running stage holds a lease on its session.** Memory only (`leases` in `hub/kinds/stage.ts`). Default 120 s; `CUBILOT_STAGE_LEASE_MS` or `leaseMs` changes it. A renewal writes no event and no row.
+- **The renewal source is the heartbeat of the session's agent stream.** `makeSSE` calls `onHeartbeat` after each 15 s heartbeat frame it accepted; `handleAgentStream` passes it on as `onAgentBeat` of every kind, and on connect. A foreground tool call does not stop the beat.
+- **An expired lease is a stop.** The sweep calls `stopStage`: one close, then `retrying`, or `failed` at the second attempt (`MAX_ATTEMPT`). A session with no lease (no stage row holds it) is never closed.
+- **A launch never takes a name in use.** `nextSessionName` skips a name with a launching or running stage row, a live tmux session on the hub socket (`liveSessionNames`, `listSessionsSync` in `hub/core/tmux.ts`) and a roster agent.

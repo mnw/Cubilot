@@ -22,7 +22,8 @@ function makeEnv(agents: string[] = [], o: { workerLimit?: number; closeGraceMs?
       JSON.stringify({ worker: o.workerLimit, tester: 1, validator: 1, reviewer: 1, editor: 1, writer: 1 }),
     ]);
   }
-  const roster = new Set(agents);
+  // The fake sessions join the roster after the launch: a roster agent with a name keeps that name from a launch (stage leases).
+  const roster = new Set<string>();
   const cap = {
     db,
     sse: { emit: (_e: Entry, _s: Scope) => {} },
@@ -40,6 +41,7 @@ function makeEnv(agents: string[] = [], o: { workerLimit?: number; closeGraceMs?
   );
   rt.evaluateStages(tid, cap, [], { launch: true });
   const stageId = db.query<{ id: string }, []>("SELECT id FROM stage").get()!.id;
+  for (const a of agents) roster.add(a);
   const spawn = (id: string) => {
     const l = [...sent].reverse().find((r) => r.kind === "launch" && r.stage_id === id)!;
     expect(rt.queue.ack(l.id, { result: "spawned" }, cap).status).toBe("ok");

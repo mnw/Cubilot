@@ -104,6 +104,8 @@ export type SSESend = (obj: unknown, id?: number | string) => boolean;
 
 export function makeSSE(
   setup: (send: SSESend, signal: AbortSignal) => void | Promise<void>,
+  /** Called after each heartbeat frame the stream accepted (not after one that found the stream closed). */
+  onHeartbeat?: () => void,
 ): Response {
   const encoder = new TextEncoder();
   const ac = new AbortController();
@@ -134,6 +136,12 @@ export function makeSSE(
           controller.enqueue(encoder.encode(`: hb ${Date.now()}\n\n`));
         } catch {
           closed = true;
+          return;
+        }
+        try {
+          onHeartbeat?.();
+        } catch (e) {
+          console.error("[sse] heartbeat hook failed:", e);
         }
       }, HEARTBEAT_MS);
       ac.signal.addEventListener("abort", () => clearInterval(heartbeat), {

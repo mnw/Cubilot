@@ -34,6 +34,15 @@ async function until(f: () => Promise<boolean> | boolean, ms = 5000) {
 }
 
 describe("hub tmux", () => {
+  test("listSessionsSync lists the sessions of the socket, and nothing when no server runs", async () => {
+    const tmux = createTmux({ bin, socket });
+    expect(tmux.listSessionsSync()).toEqual([]);
+    await tmux.newSession({ name: "tester-1", cwd: "/tmp", command: "sleep 30" });
+    await tmux.newSession({ name: "tester-2", cwd: "/tmp", command: "sleep 30" });
+    expect(tmux.listSessionsSync().sort()).toEqual(["tester-1", "tester-2"]);
+    expect(tmux.listSessionsSync().sort()).toEqual((await tmux.listSessions()).sort());
+  });
+
   test("a dot in a session name is refused and no session is made", async () => {
     const tmux = createTmux({ bin, socket });
     await expect(tmux.newSession({ name: "a.b", cwd: "/tmp", command: "sleep 30" })).rejects.toThrow(/dot is not allowed/);

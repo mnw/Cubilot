@@ -185,6 +185,13 @@ export function createTmux({ bin, socket, env = process.env }: TmuxOpts) {
     return r.stdout.split("\n").filter(Boolean);
   }
 
+  /** Same as listSessions, blocking: for a caller that picks a free session name in one synchronous step. */
+  function listSessionsSync(): string[] {
+    const r = Bun.spawnSync([bin, "-S", socket, "list-sessions", "-F", "#{session_name}"], { env: clientEnv(), stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+    if (r.exitCode !== 0) return []; // no server: no sessions
+    return r.stdout.toString().split("\n").filter(Boolean);
+  }
+
   /** true: killed. false: there was no such session. Throws: tmux failed, the session may live. */
   async function killSession(name: string): Promise<boolean> {
     if (!(await hasSession(name))) return false;
@@ -301,7 +308,7 @@ export function createTmux({ bin, socket, env = process.env }: TmuxOpts) {
     }
   }
 
-  return { bin, socket, lang, clientEnv, exec, run, newSessionArgv, newSession, hasSession, listSessions, killSession, reconfigure, ensureRgb, healGeometry, tapRead, captureTurn };
+  return { bin, socket, lang, clientEnv, exec, run, newSessionArgv, newSession, hasSession, listSessions, listSessionsSync, killSession, reconfigure, ensureRgb, healGeometry, tapRead, captureTurn };
 }
 
 export type Tmux = ReturnType<typeof createTmux>;

@@ -266,4 +266,6 @@ export type KindModule = HubFeature & {
   start?: (cap: HubCapabilities) => void;
   /** Called after the commit of a room settings change that can free role slots (role_limits). It never throws. */
   onRoomLimitsChanged?: (room: string, cap: HubCapabilities) => void;
+  /** The agent stream of `agent` is alive: the hub wrote its heartbeat or the agent connected. Memory only; it never writes an event. */
+  onAgentBeat?: (agent: string) => void;
 };

@@ -15,12 +15,24 @@ import { createRequestKind } from "./request";
 import { buildPack } from "../core/context-pack";
 import type { LaunchRecord } from "../core/launch-record";
 import { startExecutor } from "../core/launch-executor";
+import { createTmux, tmuxFromEnv } from "../core/tmux";
 import { createStageRuntime } from "./stage";
 import { createTicketKind } from "./ticket";
 
 /** The lead of a room: its ticket_room_lead row, else "Orchestrator". */
 export function roomLeadOf(db: Database, room: string): string {
   return db.query<{ agent: string }, [string]>("SELECT agent FROM ticket_room_lead WHERE room = ?").get(room)?.agent ?? "Orchestrator";
+}
+
+/** The reader of the live tmux session names on the hub socket. Null tmux (no CUBILOT_TMUX): an empty list. A list failure is an empty list too. */
+function liveTmuxSessions(env: Record<string, string | undefined> = process.env): () => string[] {
+  let tmux: ReturnType<typeof createTmux> | null = null;
+  try {
+    tmux = createTmux(tmuxFromEnv(env));
+  } catch {
+    tmux = null;
+  }
+  return () => tmux?.listSessionsSync() ?? [];
 }
 
 export type KindFactory = (db: Database) => KindModule;
@@ -35,6 +47,9 @@ export function buildKinds(db: Database | null, launchRecord?: LaunchRecord): re
     startExecutor: (host) => startExecutor(host),
     ackMs: Number(process.env.CUBILOT_LAUNCH_ACK_MS) || undefined,
     sweepMs: Number(process.env.CUBILOT_STAGE_SWEEP_MS) || undefined,
+    // The stage lease time in ms (default 120000) and the live tmux sessions of the hub socket (a launch never takes one).
+    leaseMs: Number(process.env.CUBILOT_STAGE_LEASE_MS) || undefined,
+    liveSessionNames: liveTmuxSessions(),
     // A failed stage cancel or sweep leaves a row for the human (cancel-trace).
     traceFailure: (input, cap) => cancelTrace.record(input, cap),
     // The context pack is built before each launch is queued (context-pack 3.5).

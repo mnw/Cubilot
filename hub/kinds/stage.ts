@@ -146,6 +146,8 @@ const MOVES: Record<StageStatus, readonly StageStatus[]> = {
   cancelled: [],
 };
 const MAX_ATTEMPT = 2;
+/** The default lease time of a stage session. The agent stream beats every 15 s, so 120 s is eight missed beats. */
+export const DEFAULT_LEASE_MS = 120_000;
 const TERMINAL = new Set<StageStatus>(["passed", "failed", "cancelled"]);
 
 export type StageCreateInput = {
@@ -489,6 +491,13 @@ export type StageRuntime = {
    * stop. Time counts from the first check that saw the stage running. The timer calls it; tests call it with their own clock.
    */
   sweep(cap: HubCapabilities, now?: number): void;
+  /**
+   * Renews the lease of the stage that holds this session. Writes no event and no row (memory only). True when a lease
+   * was renewed. The hub calls it for each heartbeat of the agent stream of the session; tests call it with their own clock.
+   */
+  renewLease(session: string, now?: number): boolean;
+  /** The lease of a stage (launching or running) or null. For tests and the dashboard. */
+  leaseOf(stageId: string): { session: string; expires_at_ms: number } | null;
   /**
    * Queues text for the PTY of one named session (P6-15, the checkpoint `/clear`). Returns the request id. The text is
    * written once, never sent again after a reconnect, and never to another session.
@@ -844,6 +853,13 @@ export function createStageRuntime(
     recordMetrics?: typeof recordStageMetrics;
     /** Replaces the start repair's selection query (tests only). */
     findMissingMetrics?: typeof stagesMissingMetrics;
+    /** How long a stage session may go without a renewal before its lease expires (default 120 s). */
+    leaseMs?: number;
+    /**
+     * Names of the tmux sessions that live now on the hub socket, read in one synchronous step. A launch never takes one of them.
+     * Unset: only the roster and the stage rows tell which names are used. A throw counts as an empty list.
+     */
+    liveSessionNames?: () => string[];
     /** The hub's record of launched stage sessions: bound at a launch, released at the close ack (P6-10). */
     launchRecord?: LaunchRecord;
     /** Starts the consumer of the launch queue when the hub starts (the hub passes startExecutor). Unset: nothing consumes it (unit tests attach their own). */
@@ -853,6 +869,7 @@ export function createStageRuntime(
   const entity = createLedgerEntity({ decl: stageDecl, db });
   const pendingMetrics = new Set<Promise<void>>();
   const api = createStageApi(db, (freed, cap) => {
+    leases.delete(freed.id); // the stage left launching or running: its lease ends with it
     if (freed.status === "passed" || freed.status === "failed") {
       // After the commit of stage.passed/failed, outside its transaction and after this call returns: the reads must not delay the result.
       // recordStageMetrics logs its own failures; the catch guards the rest.
@@ -1096,6 +1113,23 @@ export function createStageRuntime(
       return undefined;
     }
   };
+  // Stage leases (memory only): a launching or running stage holds its session through a lease with an expiry. The
+  // heartbeat of the session's agent stream renews it (renewLease). A running stage whose lease runs out is stopped by
+  // the sweep: the session is closed and the attempt ends (retry, then the existing final failure). A renewal writes nothing.
+  const leases = new Map<string, { session: string; expiresAt: number }>();
+  const leaseTime = (): number => opts.leaseMs ?? DEFAULT_LEASE_MS;
+  const startLease = (stageId: string, session: string, now: number = Date.now()): void => {
+    leases.set(stageId, { session, expiresAt: now + leaseTime() });
+  };
+  function renewLease(session: string, now: number = Date.now()): boolean {
+    let renewed = false;
+    for (const l of leases.values()) {
+      if (l.session !== session) continue;
+      l.expiresAt = now + leaseTime();
+      renewed = true;
+    }
+    return renewed;
+  }
   // A passed stage whose close is not queued yet: since when a sweep first saw it (5.3b: a lost turn-end report).
   const awaitingSince = new Map<string, number>();
   // When a sweep first saw a stage running (the time-out clock). Memory only: a hub restart starts the clock again.
@@ -1322,6 +1356,15 @@ export function createStageRuntime(
     const running = db.query<{ id: string }, []>("SELECT id FROM stage WHERE status = 'running' AND session IS NOT NULL").all();
     const ids = new Set(running.map((r) => r.id));
     for (const id of runningSeen.keys()) if (!ids.has(id)) runningSeen.delete(id);
+    // A lease belongs to a launching or running stage only. A stage that restarted with the hub gets a fresh lease.
+    const held = new Set(
+      db.query<{ id: string; session: string }, []>("SELECT id, session FROM stage WHERE status IN ('launching', 'running') AND session IS NOT NULL").all().map((r) => {
+        const l = leases.get(r.id);
+        if (!l || l.session !== r.session) startLease(r.id, r.session, now);
+        return r.id;
+      }),
+    );
+    for (const id of [...leases.keys()]) if (!held.has(id)) leases.delete(id);
     for (const { id } of running) {
       try {
         const stage = api.load(id);
@@ -1332,6 +1375,7 @@ export function createStageRuntime(
         const limitMin = (room ? getRoomSettings(db, room)?.stage_timeout_min : null) ?? DEFAULT_STAGE_TIMEOUT_MIN;
         if (now - since >= limitMin * 60_000) stopStage(stage, `the session ran past the time-out of ${limitMin} minutes`, cap);
         else if (now - since >= (opts.bootGraceMs ?? 90_000) && !cap.agents.get(stage.session!)) stopStage(stage, "the session left the room", cap);
+        else if ((leases.get(id)?.expiresAt ?? Infinity) <= now) stopStage(stage, `the session lease expired (no renewal for ${Math.round(leaseTime() / 1000)} s)`, cap);
       } catch (e) {
         console.error(`[stage] sweep of ${id} failed:`, e);
         traceFailure(id, "sweep", "sweep", "running", e, cap);
@@ -1445,7 +1489,7 @@ export function createStageRuntime(
   }
 
   /** `<role>-<n>` with the lowest n that no live session (launching or running, in any room) of the role uses. */
-  function nextSessionName(role: string, stageId?: string): string {
+  function nextSessionName(role: string, stageId?: string, cap?: HubCapabilities): string {
     // A name whose close has no ack is not free: the old session may still exist.
     const reserved = queue.pendingCloses();
     const used = new Set(
@@ -1468,6 +1512,20 @@ export function createStageRuntime(
       for (const r of db.query<{ session: string }, [string]>("SELECT session FROM stage WHERE role = 'retrospective' AND session IS NOT NULL AND id != ?").all(stageId ?? "")) used.add(r.session);
     }
     for (const name of cancelHolds.keys()) used.add(name);
+    // A name with a live lease (a launching or running stage row, above), a live tmux session on the hub socket or a
+    // connected roster agent is in use, whatever the stage rows say: an orphan session with no stage row keeps its name
+    // (it is not closed, only avoided).
+    try {
+      for (const name of opts.liveSessionNames?.() ?? []) used.add(name);
+    } catch (e) {
+      console.error("[stage] reading the live tmux sessions failed:", (e as Error).message);
+    }
+    if (cap) {
+      for (let n = 1; n <= 64; n++) {
+        const name = `${role}-${n}`;
+        if (!used.has(name) && cap.agents?.get(name)) used.add(name);
+      }
+    }
     // A passed stage keeps its session until its turn ends: the name is not free yet.
     for (const name of awaitingClose) if (name.startsWith(`${role}-`)) used.add(name);
     let n = 1;
@@ -1567,7 +1625,7 @@ export function createStageRuntime(
         .all(role, room);
       for (const { id } of waiting) {
         const r = enqueueLaunch(
-          { stage_id: id, session: nextSessionName(role, id), room, harness: roleHarness(role), cwd: null, prompt: "", reason: api.load(id)?.status === "retrying" ? reasonOf(id) : undefined },
+          { stage_id: id, session: nextSessionName(role, id, cap), room, harness: roleHarness(role), cwd: null, prompt: "", reason: api.load(id)?.status === "retrying" ? reasonOf(id) : undefined },
           cap,
         );
         if (!r.ok) console.log(`[stage] ${id} stays queued: ${r.reason}`);
@@ -1732,6 +1790,8 @@ export function createStageRuntime(
       if (e instanceof LedgerConflict) return { ok: false, reason: e.message };
       throw e;
     }
+    // The stage is launching: it holds a lease on the session name from now (renewed by the stream beats, checked by the sweep).
+    startLease(input.stage_id, input.session);
     if ("error" in models) {
       endLaunchAttempt(api, input.stage_id, cap, models.error);
       reportFinalFailure(input.stage_id, `the launch did not start: ${models.error}`, cap);
@@ -2083,6 +2143,7 @@ export function createStageRuntime(
     // A stage is the hub's own bookkeeping: agents never get a stage replayed on reconnect.
     pendingFor: (_agent: AgentCtx, _cap: HubCapabilities) => [],
     toolNames: [],
+    onAgentBeat: (agent) => void renewLease(agent),
     dispose: () => {
       if (sweepTimer) clearInterval(sweepTimer);
       queue.dispose();
@@ -2579,7 +2640,7 @@ export function createStageRuntime(
             const second = api.create({ ticket_id: ticketId!, role: "validator" }, "system", cap);
             const room = roomOfStage(second.id);
             // The first session keeps its name until its close is acked, so the second stage gets another name and waits for the slot.
-            const r = room ? enqueueLaunch({ stage_id: second.id, session: nextSessionName("validator", second.id), room, harness: roleHarness("validator"), cwd: null, prompt: "" }, cap) : { ok: false as const, reason: "no room" };
+            const r = room ? enqueueLaunch({ stage_id: second.id, session: nextSessionName("validator", second.id, cap), room, harness: roleHarness("validator"), cwd: null, prompt: "" }, cap) : { ok: false as const, reason: "no room" };
             if (!r.ok) console.log(`[stage] ${second.id} stays queued: ${r.reason}`);
           }
         }
@@ -2637,7 +2698,7 @@ export function createStageRuntime(
     queue.push({ id, kind: "input", session, text });
     return id;
   };
-  return { module, api, evaluateStages, hooks, enqueueLaunch, queue, passSpecStage, sweep, sendInput, dropInput: (id: string) => queue.drop(id), pendingRoleModelLaunches: () => roleModelLaunches.size, pendingRerenders: () => rerender.size, metricsIdle: async () => void (await Promise.all([...pendingMetrics])) };
+  return { module, api, renewLease, leaseOf: (id: string) => { const l = leases.get(id); return l ? { session: l.session, expires_at_ms: l.expiresAt } : null; }, evaluateStages, hooks, enqueueLaunch, queue, passSpecStage, sweep, sendInput, dropInput: (id: string) => queue.drop(id), pendingRoleModelLaunches: () => roleModelLaunches.size, pendingRerenders: () => rerender.size, metricsIdle: async () => void (await Promise.all([...pendingMetrics])) };
 }
 
 export function createStageKind(db: Database): KindModule {
