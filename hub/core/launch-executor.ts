@@ -51,6 +51,7 @@ export type ExecutorDeps = {
   inputEchoMs?: number;
   /** The input client must show the session within this time, else the input is an error (default 5 s). */
   inputAttachMs?: number;
+  inputSettleMs?: number;
   /** Test seam: the terminal that attaches the input client. */
   terminal?: Terminal;
   /** Test hook: awaited after a launch has its outcome and before it removes its map entry. */
@@ -67,6 +68,7 @@ export function startLaunchExecutor(host: ExecutorHost, deps: ExecutorDeps): { s
   const retryMs = deps.closeRetryMs ?? 5000;
   const echoMs = deps.inputEchoMs ?? 2000;
   const attachMs = deps.inputAttachMs ?? 5000;
+  const settleMs = deps.inputSettleMs ?? 150;
   const ac = new AbortController();
 
   /** Session names with a launch in progress. A close for the name waits until the launch ends (no "no such session" before new-session). */
@@ -154,17 +156,23 @@ export function startLaunchExecutor(host: ExecutorHost, deps: ExecutorDeps): { s
       const attached = new Promise<void>((r) => (ready = r));
       let seen = "";
       let writing = false;
+      let lastData = 0;
       const decoder = new TextDecoder();
       const viewer = await (deps.terminal ?? createTerminal(deps.tmux)).attach(req.session, {
         ignoreSize: true,
         onData: (chunk) => {
           ready();
+          lastData = Date.now();
           if (writing) seen += decoder.decode(chunk, { stream: true });
         },
       });
       try {
         const first = await Promise.race([attached.then(() => true), viewer.exited.then(() => false), sleep(attachMs).then(() => false)]);
         if (!first) throw new Error(`could not attach to the session: ${req.session}`);
+        // Wait until the first screen is fully drawn (output quiet for `settleMs`, at most `attachMs`). Only output
+        // after the write counts as proof, so an equal text already on the screen cannot satisfy the check.
+        const settleEnd = Date.now() + attachMs;
+        while (Date.now() - lastData < settleMs && Date.now() < settleEnd) await sleep(10);
         const bytes = Buffer.from(line);
         writing = true;
         seen = "";

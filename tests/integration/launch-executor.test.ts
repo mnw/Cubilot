@@ -351,6 +351,15 @@ describe("Input to one session", () => {
     expect(t.acks[0].outcome).toEqual({ result: "error", error: "no echo of the input from the session: mute" });
   });
 
+  test("the same text already on the screen before the input is not proof of delivery", async () => {
+    const t = host();
+    run(t.h, { inputEchoMs: 400 });
+    await tmux.newSession({ name: "old", cwd: root, command: "stty -echo; echo /clear; sleep 30" });
+    t.push({ id: "l_00000000000000c6", kind: "input", session: "old", text: "/clear" });
+    expect(await until(() => t.acks.length === 1)).toBe(true);
+    expect(t.acks[0].outcome).toEqual({ result: "error", error: "no echo of the input from the session: old" });
+  });
+
   test("an unknown session and a bad text are acked as errors", async () => {
     const t = host();
     run(t.h);
