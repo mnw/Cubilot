@@ -7,6 +7,7 @@ import { Database } from "bun:sqlite";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp, projectRepo } from "../helpers/repo";
 import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const ROOM = "tsf";
 const LEAD = "tsf-lead";
@@ -30,10 +31,10 @@ describe("ticket status follows its stages", () => {
     open.push(await registerAgent(hub, LEAD, { room: ROOM }));
     expect((await postJson(hub, `/rooms/${ROOM}/lead`, { by: hub.humanName, agent: LEAD })).status).toBe(200);
     // The shell stand-in acks every launch.
-    const sse = openSSE(hub, "/launches/stream");
+    const sse = openLaunchStream(hub);
     open.push(sse);
     void (async () => {
-      try { for await (const req of sse.events) await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" }); } catch { /* closed */ }
+      try { for await (const req of sse.events) await ackLaunch(hub, req.id, { result: "spawned" }); } catch { /* closed */ }
     })();
   });
   afterAll(async () => {

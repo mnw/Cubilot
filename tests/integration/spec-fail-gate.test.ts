@@ -5,6 +5,7 @@ import { Database } from "bun:sqlite";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type Req = { id: string; kind: string; stage_id?: string; session: string; prompt?: string; room?: string };
@@ -87,7 +88,7 @@ describe("spec FAIL gate", () => {
   /** The launch the hub made last: acked, and its session connected (so it is running). */
   const startLaunch = async (room: string) => {
     const l = reqs.filter((r) => r.kind === "launch").at(-1)!;
-    expect((await postJson(hub, `/launches/${l.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, l.id, { result: "spawned" })).status).toBe(200);
     open.push(await registerAgent(hub, l.session, { room }));
     return l;
   };
@@ -106,7 +107,7 @@ describe("spec FAIL gate", () => {
     expect((await postJson(hub, `/stages/${l.stage_id}/turn-end`, { agent: l.session })).json).toEqual({ action: "close" });
     await until(() => reqs.filter((r) => r.kind === "close").length > n);
     const close = reqs.filter((r) => r.kind === "close").at(-1)!;
-    expect((await postJson(hub, `/launches/${close.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, close.id, { result: "spawned" })).status).toBe(200);
   };
   /** One whole review of the request, sent by `from`: a new draft ticket, the launch, the verdict, the close. */
   const review = async (room: string, from: string, request: string, verdict: "PASS" | "FAIL", extra: Record<string, unknown> = {}) => {
@@ -130,7 +131,7 @@ describe("spec FAIL gate", () => {
     const ui = openSSE(hub, "/stream");
     streams.push(ui);
     void (async () => { try { for await (const e of ui.events) uiEntries.push(e); } catch { /* closed */ } })();
-    const launches = openSSE(hub, "/launches/stream");
+    const launches = openLaunchStream(hub);
     streams.push(launches);
     void (async () => { try { for await (const e of launches.events) reqs.push(e as Req); } catch { /* closed */ } })();
     open.push(await registerAgent(hub, "obs-gh", { room: "gh" }));

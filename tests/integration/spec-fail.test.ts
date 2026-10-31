@@ -4,6 +4,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type Req = { id: string; kind: string; stage_id?: string; session: string; prompt?: string };
@@ -20,7 +21,7 @@ describe("spec FAIL", () => {
     hub = await spawnHub();
     await giveProjectHttp(hub, "sf");
     open.push(await registerAgent(hub, "Orchestrator", { room: "sf" }));
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) reqs.push(e as Req); } catch { /* closed */ } })();
     await sleep(200);
   });
@@ -40,7 +41,7 @@ describe("spec FAIL", () => {
     for (let i = 0; i < 60 && reqs.length < 1; i++) await sleep(50);
     const launch = reqs[0];
     expect(launch.kind).toBe("launch");
-    expect((await postJson(hub, `/launches/${launch.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, launch.id, { result: "spawned" })).status).toBe(200);
     open.push(await registerAgent(hub, launch.session, { room: "sf" }));
 
     const fail = await postJson(hub, "/handoffs", {
@@ -71,7 +72,7 @@ describe("spec FAIL", () => {
   test("a second spec review of the request gets the FAIL findings of the first in its first message", async () => {
     const first = reqs[0];
     const close = reqs.find((r) => r.kind === "close")!;
-    expect((await postJson(hub, `/launches/${close.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, close.id, { result: "spawned" })).status).toBe(200);
     expect((await postJson(hub, "/handoffs", { from: "Orchestrator", to_role: "validator", review: "spec", request_id: "req-1", task: "review again", context: { request_text: "X again" } })).status).toBe(201);
     for (let i = 0; i < 60 && reqs.filter((r) => r.kind === "launch").length < 2; i++) await sleep(50);
     const second = reqs.filter((r) => r.kind === "launch")[1];

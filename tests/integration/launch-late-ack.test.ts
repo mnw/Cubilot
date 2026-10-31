@@ -1,4 +1,4 @@
-// A late launch ack after a launch time-out (G4 follow-up). Real hub, fake shell: the test reads /launches/stream and
+// A late launch ack after a launch time-out (G4 follow-up). Real hub, fake shell: the test reads the fake executor stream and
 // sends the acks itself. The time-out is lowered only through CUBILOT_LAUNCH_ACK_MS (hub/kinds/index.ts).
 
 import { describe, test, expect, afterEach } from "bun:test";
@@ -6,6 +6,7 @@ import { Database } from "bun:sqlite";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const ACK_MS = 400;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -31,13 +32,13 @@ async function boot(room: string) {
   const orch = await registerAgent(hub, "Orchestrator", { room });
   cleanup.push(() => orch.close());
   const reqs: Req[] = [];
-  const sse = openSSE(hub, "/launches/stream");
+  const sse = openLaunchStream(hub);
   cleanup.push(() => sse.close());
   void (async () => { try { for await (const e of sse.events) reqs.push(e as Req); } catch { /* closed */ } })();
   await sleep(100);
   const closes = (session: string) => reqs.filter((r) => r.kind === "close" && r.session === session);
   const launches = () => reqs.filter((r) => r.kind === "launch");
-  const ack = async (id: string, body: Record<string, unknown>) => (await postJson(hub, `/launches/${id}/ack`, body)).status;
+  const ack = async (id: string, body: Record<string, unknown>) => (await ackLaunch(hub, id, body)).status;
   return { hub, closes, launches, ack };
 }
 

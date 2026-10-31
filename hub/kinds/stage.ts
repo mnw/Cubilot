@@ -21,7 +21,7 @@ import type {
   StateMachineDecl,
   VerbDecl,
 } from "../core/types";
-import { createLedgerEntity, ledgerConflictResponse, withLedgerRequired } from "../core/ledger-entity";
+import { createLedgerEntity, withLedgerRequired } from "../core/ledger-entity";
 import { validName, validRoomLabel } from "../core/ids";
 import { deliveriesNotInMain } from "../core/delivery-report";
 import { openBlockerIds } from "./ticket-blockers";
@@ -31,11 +31,11 @@ import { getRoomSettings, DEFAULT_ROLE_LIMITS, DEFAULT_STAGE_TIMEOUT_MIN, STAGE_
 import { LedgerConflict } from "../core/types";
 import type { LaunchRecord } from "../core/launch-record";
 import { createRequestBySystem, heldForApprove, requestFacts, scopeChange, type ScopeChange } from "./request";
+import type { ExecutorHost } from "../core/launch-executor";
 import { createLaunchQueue, type LaunchEnd, type LaunchQueue, type LaunchRequest } from "../core/launch-queue";
 import { roleHarness } from "../core/role-harness";
 import { roleModelFor, secondReviewModel, type RoleModel } from "../core/role-models";
 import { metricsByRole, recordStageMetrics, stagesMissingMetrics, type Launch } from "../core/stage-metrics";
-import { makeSSE } from "../core/sse";
 import { assignBySystemInTx, closeReviewedBySystemInTx, createDraftBySystem, queueBySystemInTx, reviewBySystem } from "./ticket";
 import type { CancelTraceCaller, CancelTraceInput } from "./cancel-trace";
 
@@ -321,7 +321,6 @@ export function createStageApi(db: Database, onSlotFree?: (freed: StageSnapshot,
 
 // ---------- Launches ----------
 
-const LAUNCH_ID_RE = /^l_[0-9a-f]{16}$/;
 /** The reason of a queued spec stage that the FAIL limit stops (spec-fail-gate 2). */
 export const SPEC_FAIL_LIMIT_REASON = "spec FAIL limit: the human must send this review";
 
@@ -847,6 +846,8 @@ export function createStageRuntime(
     findMissingMetrics?: typeof stagesMissingMetrics;
     /** The hub's record of launched stage sessions: bound at a launch, released at the close ack (P6-10). */
     launchRecord?: LaunchRecord;
+    /** Starts the consumer of the launch queue when the hub starts (the hub passes startExecutor). Unset: nothing consumes it (unit tests attach their own). */
+    startExecutor?: (host: ExecutorHost) => void | Promise<void>;
   } = {},
 ): StageRuntime {
   const entity = createLedgerEntity({ decl: stageDecl, db });
@@ -2062,51 +2063,6 @@ export function createStageRuntime(
         return Response.json({ action: turnEnd(stage, cap) });
       },
     },
-    {
-      method: "GET",
-      path: "/launches/stream",
-      auth: "read",
-      caller: "human",
-      handler: (_req, cap) =>
-        makeSSE(async (send, signal) => {
-          queue.attach((r) => send(r, r.id), signal, cap);
-          await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
-        }),
-    },
-    {
-      method: "POST",
-      path: /^\/launches\/([^/]+)\/ack$/,
-      auth: "mutating",
-      caller: "human",
-      handler: async (req, cap, params) => {
-        if (!LAUNCH_ID_RE.test(params.id)) return Response.json({ error: "invalid launch id" }, { status: 400 });
-        const raw: unknown = await req.json().catch(() => null);
-        if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-          return Response.json({ error: "the body must be a JSON object" }, { status: 400 });
-        }
-        const body = raw as { result?: unknown; error?: unknown; absent?: unknown };
-        if (body.absent !== undefined && (typeof body.absent !== "boolean" || body.result !== "error")) {
-          return Response.json({ error: "absent must be a boolean and goes with result error" }, { status: 400 });
-        }
-        if (body.result !== "spawned" && body.result !== "error") {
-          return Response.json({ error: "result must be spawned or error" }, { status: 400 });
-        }
-        const error = typeof body.error === "string" ? body.error.slice(0, 500) : "";
-        if (body.result === "error" && !error) return Response.json({ error: "an error ack needs error text" }, { status: 400 });
-        let r;
-        try {
-          r = queue.ack(params.id, body.result === "spawned" ? { result: "spawned" } : { result: "error", error, ...(body.absent === true ? { absent: true } : {}) }, cap);
-        } catch (e) {
-          if (e instanceof LedgerConflict) return ledgerConflictResponse(e);
-          throw e;
-        }
-        if (r.status === "error") return Response.json({ error: r.message }, { status: 500 });
-        if (r.status === "pending") return Response.json({ ok: true, pending: true, message: r.message }, { status: 200 });
-        if (r.status === "unknown") return Response.json({ error: "not found" }, { status: 404 });
-        if (r.status === "conflict") return Response.json({ error: r.message }, { status: 409 });
-        return Response.json(r.status === "idempotent" ? { idempotent: true } : { ok: true }, { status: 200 });
-      },
-    },
   );
 
   const module: KindModule = {
@@ -2134,6 +2090,14 @@ export function createStageRuntime(
     // The launch queue lives in memory. A launch the hub had sent, or queued, before a restart is gone, so each stage
     // still `launching` counts as a launch with no ack (attempt 1 -> retrying, attempt 2 -> failed; 5.3 relaunches).
     start: (cap) => {
+      if (opts.startExecutor) {
+        const host: ExecutorHost = {
+          attach: (send, signal) => queue.attach(send, signal, cap),
+          ack: (id, outcome) => queue.ack(id, outcome, cap),
+          resendCloses: () => queue.resendCloses(),
+        };
+        Promise.resolve(opts.startExecutor(host)).catch((e) => console.error("[stage] the launch executor did not start:", e));
+      }
       // G4: the open stages of a cancelled ticket are cancelled first, so the sweep below skips them (no retry, no failure).
       const ofCancelled = db
         .query<{ id: string }, []>(

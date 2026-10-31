@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const NO_CHAIN = ["writer", "editor", "reviewer"];
@@ -64,7 +65,7 @@ describe("writing roles queue", () => {
     ui = openSSE(hub, "/stream");
     open.push(ui);
     void (async () => { try { for await (const e of ui.events) if (typeof e.kind === "string" && e.kind.startsWith("ticket.")) seen.push(e); } catch { /* closed */ } })();
-    launchStream = openSSE(hub, "/launches/stream");
+    launchStream = openLaunchStream(hub);
     void (async () => { try { for await (const e of launchStream.events) launches.push(e); } catch { /* closed */ } })();
     expect((await postJson(hub, "/rooms/rc/lead", { by: hub.humanName, agent: LEAD })).status).toBe(200);
     await sleep(300);
@@ -141,7 +142,7 @@ describe("writing roles queue", () => {
     };
     const l = await launch();
     expect(l).toBeTruthy();
-    expect((await postJson(hub, `/launches/${l.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, l.id, { result: "spawned" })).status).toBe(200);
     open.push(await registerAgent(hub, l.session, { room: "rc" }));
     const pass = await postJson(hub, "/handoffs", {
       from: l.session, to: LEAD, task: "result",

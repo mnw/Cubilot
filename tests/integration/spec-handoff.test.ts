@@ -5,6 +5,7 @@ import { Database } from "bun:sqlite";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream } from "../helpers/fake-executor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -18,7 +19,7 @@ describe("spec-review handoff over HTTP", () => {
     hub = await spawnHub();
     await giveProjectHttp(hub, "sp", "sp2");
     open.push(await registerAgent(hub, "sp-alice", { room: "sp" }));
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) launches.push(e); } catch { /* closed */ } })();
     await sleep(200);
   });
