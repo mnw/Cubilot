@@ -63,6 +63,11 @@ bun run tauri:build
 
 The images above are screenshots of [`docs/factory-map.html`](docs/factory-map.html), in a light and a dark version. To update them after a change to the map, see [`docs/readme/README.md`](docs/readme/README.md).
 
-## Licence
+## License
 
-See [`LICENSE`](LICENSE). Third-party skills and suites keep their own licences, listed in [`factory/licenses/`](factory/licenses/).
+Cubilot is under the Business Source License 1.1 (BSL 1.1). See [`LICENSE`](LICENSE).
+
+- You may use Cubilot for your own purposes and for the internal purposes of your organization. This includes client work.
+- You may not sell Cubilot or host it for third parties without a separate agreement with the licensor.
+- From 2030-11-01 Cubilot is under the Apache License, Version 2.0.
+- Third-party parts keep their own licenses. See [`NOTICE`](NOTICE) and [`factory/licenses/`](factory/licenses/).
