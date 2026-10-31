@@ -467,12 +467,12 @@ export function checkClaudeVersion(path: string, found: [number, number, number]
 }
 
 // Runs `bin args` with a time limit: its output (stdout, then stderr) and exit code, or null on a timeout (killed).
-async function runLimited(bin: string, args: string[], limitMs: number, env?: Env): Promise<{ out: string; code: number } | null> {
+async function runLimited(bin: string, args: string[], limitMs: number, env?: Env, stdoutOnly = false): Promise<{ out: string; code: number } | null> {
   const p = Bun.spawn([bin, ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe", env: env as Record<string, string> | undefined });
   const done = (async () => {
     const [so, se] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
     const code = await p.exited;
-    return { out: so && se ? `${so}\n${se}` : so || se, code };
+    return { out: stdoutOnly ? so : so && se ? `${so}\n${se}` : so || se, code };
   })();
   done.catch(() => {});
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -523,7 +523,7 @@ export async function piAuthCheck(pi: string, provider: string, path?: string, l
   const env = path ? { ...process.env, PATH: path } : process.env;
   let r: Awaited<ReturnType<typeof runLimited>>;
   try {
-    r = await runLimited(pi, ["auth", "check", "--provider", provider, "--json"], limitMs, env);
+    r = await runLimited(pi, ["auth", "check", "--provider", provider, "--json"], limitMs, env, true); // stdout only, as pty.rs
   } catch (e) {
     throw new Error(`Could not run \`pi auth check\` for ${provider} (${errMsg(e)}). Nothing was started.`);
   }
@@ -609,7 +609,8 @@ export async function prepareLaunch(i: LaunchInput, env: Env = process.env, deps
   if (spec) checkRoleHarness(spec, i.harness, choice);
   const bins = launchBins(env);
 
-  const path = await deps.loginPath();
+  // As pty.rs wants_login_path: Pi always, Claude only for a hub-launched stage.
+  const path = i.harness === "pi" || i.stageId != null ? await deps.loginPath() : undefined;
   const provider = piProviderToCheck(i.harness, spec, choice);
   if (provider) await deps.piAuthCheck(bins.piBin, provider, path);
   if (!isPi) await deps.ensureClaudeVersion(bins.claudeBin);

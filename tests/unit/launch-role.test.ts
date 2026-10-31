@@ -416,6 +416,14 @@ describe("Pi sign-in check", () => {
     await expect(piAuthCheck(slow, "x", "/usr/bin:/bin", 300)).rejects.toThrow("The Pi sign-in check for x took more than 0 seconds. Run `pi` and /login x. Nothing was started.");
     await expect(piAuthCheck(join(root, "missing"), "x")).rejects.toThrow("Could not run `pi auth check` for x");
   });
+
+  test("parses stdout only: a warning on stderr does not change a ready answer", async () => {
+    const root = tmp("pi-err");
+    const pi = join(root, "pi");
+    writeFileSync(pi, `#!/bin/sh\necho '{"status":"ready"}'\necho 'warning: something' >&2\n`);
+    chmodSync(pi, 0o755);
+    await piAuthCheck(pi, "ok", "/usr/bin:/bin");
+  });
 });
 
 describe("prepareLaunch", () => {
@@ -452,7 +460,10 @@ describe("prepareLaunch", () => {
 
   test("a manual Claude launch has no role, no login PATH and no stage id; the choice is appended", async () => {
     const { f, deps, env } = setup();
-    const plan = await prepareLaunch({ agent: "bob", room: "r", role: " ", cwd: f.root, harness: "claude", model: "opus", sessionMode: "resume" }, env, deps);
+    let loginCalls = 0;
+    const counting: LaunchDeps = { ...deps, loginPath: async () => { loginCalls++; return "/x"; } };
+    const plan = await prepareLaunch({ agent: "bob", room: "r", role: " ", cwd: f.root, harness: "claude", model: "opus", sessionMode: "resume" }, env, counting);
+    expect(loginCalls).toBe(0); // Rust wants_login_path: Pi or a stage only
     expect(plan.command).toBe("CHATBRIDGE_AGENT='bob' CHATBRIDGE_ROOM='r' '/bin/claude' --resume --plugin-dir '/staged/mod' --allowed-tools 'mcp__chatbridge__ack_permission,mcp__chatbridge__post,mcp__chatbridge__post_file' --model 'opus'");
     expect(plan.env).toEqual([`CUBILOT_DATA_DIR=${f.data}`]);
     expect(existsSync(join(f.data, "mcp-configs"))).toBe(false); // no global servers: no file, no flag
