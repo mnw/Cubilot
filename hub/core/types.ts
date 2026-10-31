@@ -206,6 +206,8 @@ export type HubCapabilities = {
     get(name: string): AgentCtx | null;
     isPermanent(name: string): boolean;
     isPaused(name: string): boolean;
+    /** Open agent streams of a name. Optional: a fake without it falls back to `get`. */
+    connectionCount?(name: string): number;
     all(): AgentCtx[];
     // `room` defaults to DEFAULT_ROOM; pass null for permanent member (human).
     ensure(name: string, room?: string | null): AgentCtx | null;

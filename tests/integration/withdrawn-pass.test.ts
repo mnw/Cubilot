@@ -317,6 +317,7 @@ describe("real hub", () => {
   let stream: ReturnType<typeof openSSE>;
   const launches: any[] = [];
   const open: Array<{ close: () => void }> = [];
+  const streams: Record<string, { close: () => void }> = {};
   type Stage = { id: string; role: string; status: string; verdict: string | null; session: string | null };
 
   beforeAll(async () => {
@@ -352,7 +353,7 @@ describe("real hub", () => {
     for (let i = 0; i < 100 && !(req = launches.find((r) => r.kind === "launch" && r.stage_id === stageId)); i++) await sleep(50);
     expect(req).toBeDefined();
     expect((await ackLaunch(hub, req.id, { result: "spawned" })).status).toBe(200);
-    open.push(await registerAgent(hub, req.session, { room: ROOM }));
+    open.push((streams[req.session] = await registerAgent(hub, req.session, { room: ROOM })));
     return req.session as string;
   };
   const closeSession = async (stageId: string, session: string) => {
@@ -362,6 +363,7 @@ describe("real hub", () => {
     expect(req).toBeDefined();
     req.seen = true;
     expect((await ackLaunch(hub, req.id, { result: "spawned" })).status).toBe(200);
+    streams[session]?.close(); // the closed session drops its agent stream, as a real one does
     await sleep(300);
   };
   const pass = (session: string, stage: Stage, ticket: string) =>

@@ -15,6 +15,7 @@ type Launch = { id: string; kind: string; harness: string; stage_id: string; ses
 describe("spec stage launch", () => {
   let hub: HubHandle;
   const open: Array<{ close: () => void }> = [];
+  const streams: Record<string, { close: () => void }> = {};
   const launches: Launch[] = [];
   let stream: ReturnType<typeof openSSE>;
   let first = "";
@@ -51,6 +52,8 @@ describe("spec stage launch", () => {
     expect((await postJson(hub, `/stages/${stageId}/turn-end`, { agent: session })).json).toEqual({ action: "close" });
     for (let i = 0; i < 60 && launches.filter((l) => l.kind === "close").length === n; i++) await sleep(50);
     const close = launches.filter((l) => l.kind === "close").at(-1)!;
+    streams[session]?.close(); // the shell kills the session first: its agent stream drops, as a real one does
+    await sleep(100);
     expect((await ackLaunch(hub, close.id, { result: "spawned" })).status).toBe(200);
   };
   const stages = async () => (await getJson(hub, "/stages?status=all")).json as Array<{ id: string; status: string; role: string; review: string | null; ticket_id: string | null; request_id: string | null; session: string | null }>;
@@ -69,7 +72,7 @@ describe("spec stage launch", () => {
     expect((await stages())[0]).toMatchObject({ review: "spec", ticket_id: null, status: "launching" });
     first = l.stage_id;
     expect((await ackLaunch(hub, l.id, { result: "spawned" })).status).toBe(200);
-    open.push(await registerAgent(hub, "validator-1", { room: "sl" }));
+    open.push((streams["validator-1"] = await registerAgent(hub, "validator-1", { room: "sl" })));
     expect((await stages())[0].status).toBe("running");
   });
 

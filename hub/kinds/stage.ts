@@ -1523,7 +1523,7 @@ export function createStageRuntime(
     if (cap) {
       for (let n = 1; n <= 64; n++) {
         const name = `${role}-${n}`;
-        if (!used.has(name) && cap.agents?.get(name)) used.add(name);
+        if (!used.has(name) && (cap.agents?.connectionCount ? cap.agents.connectionCount(name) > 0 : !!cap.agents?.get(name))) used.add(name);
       }
     }
     // A passed stage keeps its session until its turn ends: the name is not free yet.
