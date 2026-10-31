@@ -4,7 +4,7 @@
 
 import { join } from "node:path";
 import { validName } from "../core/ids";
-import { CapturePathError, capturesDir, readCapture, type Tmux } from "../core/tmux";
+import { CAPTURE, CapturePathError, capturesDir, readCapture, type Tmux } from "../core/tmux";
 import { createTerminal, type Viewer } from "../core/terminal";
 import type { AgentRegistry } from "../core/agents";
 import type { Caller } from "../core/auth";
@@ -52,7 +52,9 @@ export function createTerminalFeature({ tmux, capturesRoot }: TerminalDeps): Hub
     let agent: string;
     try { agent = decodeURIComponent(raw); } catch { return bad("invalid agent"); }
     if (!validName(agent)) return bad("invalid agent");
-    if (!(await tmux.hasSession(agent).catch(() => false))) return bad(`no session: ${agent}`, 404);
+    let exists: boolean;
+    try { exists = await tmux.hasSession(agent); } catch (e) { return bad(e instanceof Error ? e.message : String(e), 500); }
+    if (!exists) return bad(`no session: ${agent}`, 404);
     return { agent, tmux };
   }
 
@@ -64,6 +66,7 @@ export function createTerminalFeature({ tmux, capturesRoot }: TerminalDeps): Hub
         method: "POST",
         path: CAPTURE_TURN_RE,
         auth: "mutating",
+        caller: "human",
         handler: async (req, _cap, params) => {
           const t = await target(params.id);
           if (t instanceof Response) return t;
@@ -132,6 +135,7 @@ export function createTerminalFeature({ tmux, capturesRoot }: TerminalDeps): Hub
         method: "GET",
         path: TAP_RE,
         auth: "read",
+        caller: "human",
         handler: async (req, _cap, params) => {
           const t = await target(params.id);
           if (t instanceof Response) return t;
@@ -144,6 +148,7 @@ export function createTerminalFeature({ tmux, capturesRoot }: TerminalDeps): Hub
         method: "GET",
         path: CAPTURE_RE,
         auth: "read",
+        caller: "human",
         handler: async (req, _cap, params) => {
           // A log outlives its session, so this route checks the name only.
           let agent: string;
@@ -153,8 +158,9 @@ export function createTerminalFeature({ tmux, capturesRoot }: TerminalDeps): Hub
           const name = q.get("name");
           if (!name) return bad("name is required");
           const max = q.get("max_bytes");
+          const maxBytes = max ? Math.min(Number(max), CAPTURE.readMaxBytes) : undefined;
           try {
-            const text = readCapture(capturesDir(capturesRoot, agent), name, max ? Number(max) : undefined);
+            const text = readCapture(capturesDir(capturesRoot, agent), name, maxBytes);
             return new Response(text, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
           } catch (e) {
             if (e instanceof CapturePathError) return bad(e.message);
@@ -167,6 +173,7 @@ export function createTerminalFeature({ tmux, capturesRoot }: TerminalDeps): Hub
         method: "POST",
         path: HEAL_RE,
         auth: "mutating",
+        caller: "human",
         handler: async (_req, _cap, params) => {
           const t = await target(params.id);
           if (t instanceof Response) return t;

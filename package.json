@@ -2,6 +2,7 @@
   "name": "cubilot",
   "version": "0.12.0",
   "private": true,
+  "license": "BUSL-1.1",
   "type": "module",
   "scripts": {
     "dev": "bun run hub/hub.ts",

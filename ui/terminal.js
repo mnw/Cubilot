@@ -1928,7 +1928,7 @@
   }
 
   setInterval(() => { if (paneEnabled()) reconcile(); }, 5000);
-  setTimeout(reconcile, 500);
+  setTimeout(() => { if (paneEnabled()) reconcile(); }, 500);
 
   // Startup restore: only when the human turned the pane on before (localStorage); it is never opened for them.
   if (_paneEnabled) {

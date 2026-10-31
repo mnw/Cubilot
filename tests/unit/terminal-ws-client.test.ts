@@ -79,6 +79,18 @@ describe("the pane is opt-in", () => {
   });
 });
 
+describe("nothing connects while the pane is off", () => {
+  test("every timer path to reconcile checks paneEnabled", () => {
+    for (const m of TERM_SRC.matchAll(/set(?:Timeout|Interval)\(([^\n]*reconcile[^\n]*)\);?\n/g)) {
+      expect(m[1]).toContain("paneEnabled()");
+    }
+    expect(TERM_SRC).not.toMatch(/setTimeout\(reconcile,/);
+  });
+  test("the startup reconcile runs only inside the stored-choice branch", () => {
+    expect(TERM_SRC).toMatch(/if \(_paneEnabled\) \{\s*reconcile\(\);/);
+  });
+});
+
 describe("tabs", () => {
   test("sorted by agent name", () => {
     const ctx: any = vm.createContext({});
