@@ -425,22 +425,6 @@ fn harness_from_command(cmd: &str) -> Harness {
     }
 }
 
-pub fn pane_harness(agent: &str) -> Harness {
-    if !valid_agent_name(agent) {
-        return Harness::Claude;
-    }
-    if let Some(h) = tmux_run(&["show-options", "-v", "-t", &tmux_pane(agent), "@cubilot_harness"])
-        .ok()
-        .and_then(|v| harness_from_option(&v))
-    {
-        return h;
-    }
-    match tmux_run(&["list-panes", "-t", &tmux_pane(agent), "-F", "#{pane_start_command}"]) {
-        Ok(cmd) => harness_from_command(&cmd),
-        _ => Harness::Claude,
-    }
-}
-
 // ---- Roster pill: role, model and (Pi) provider of a running agent (task 5.4) ----
 // Recorded as tmux session options at spawn, like @cubilot_harness, because sessions outlive the app and the hub
 // does not know the role. Read back with one list-sessions call.
@@ -513,54 +497,6 @@ pub(crate) fn agent_role_and_command(agent: &str) -> (Option<String>, Option<Str
 pub fn pty_roles() -> std::collections::HashMap<String, PillInfo> {
     // "no server running" is an error here too: no sessions, no pills.
     tmux_run(&["list-sessions", "-F", PILL_FORMAT]).map(|o| parse_role_pills(&o)).unwrap_or_default()
-}
-
-/// Skill roots a pi agent actually sees: the same `--skill` paths
-/// `claude_resource_flags` passes, plus pi's own package and project roots.
-/// Kept next to that function so the two can't drift apart.
-pub fn pi_skill_roots(cwd: &str) -> Vec<PathBuf> {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
-    let cwd_path = PathBuf::from(cwd);
-    let mut roots = vec![
-        cwd_path.join(".claude/skills"),
-        home.join(".claude/skills"),
-        cwd_path.join(".pi/skills"),
-        home.join(".pi/agent/skills"),
-    ];
-    for key in SHARED_CLAUDE_PLUGINS {
-        if let Some(p) = claude_plugin_skills_dir(key) {
-            roots.push(p);
-        }
-    }
-    // Installed pi packages ship skills under <pkg>/skills.
-    for base in [home.join(".pi/agent/npm/node_modules"), home.join(".pi/agent/git")] {
-        collect_package_skill_dirs(&base, &mut roots, 0);
-    }
-    roots.retain(|p| p.is_dir());
-    roots
-}
-
-// Package layouts differ (npm is flat-ish, git clones nest by host/org/repo),
-// so walk a bounded depth looking for a `skills` dir rather than guessing.
-fn collect_package_skill_dirs(dir: &PathBuf, out: &mut Vec<PathBuf>, depth: usize) {
-    if depth > 3 {
-        return;
-    }
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-    for e in entries.flatten() {
-        let p = e.path();
-        if !p.is_dir() {
-            continue;
-        }
-        let skills = p.join("skills");
-        if skills.is_dir() {
-            out.push(skills);
-        }
-        collect_package_skill_dirs(&p, out, depth + 1);
-    }
 }
 
 /// Resolve a Claude plugin's ACTIVE skills dir via `installed_plugins.json`.

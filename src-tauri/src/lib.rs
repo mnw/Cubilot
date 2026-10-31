@@ -2,7 +2,6 @@ mod factory;
 mod launches;
 mod login_path;
 mod skills;
-mod models;
 mod pty;
 
 use std::{
@@ -1208,136 +1207,6 @@ fn open_in_editor(agent: String) -> Result<String, String> {
     Ok(cwd.to_string_lossy().to_string())
 }
 
-#[derive(Serialize, Clone)]
-struct SlashCommandEntry {
-    name: String,
-    description: String,
-}
-
-// Scans cwd + ~/.claude commands/skills + global MCP `prompts: []` annotations. Built-ins not included.
-#[tauri::command]
-fn slash_discover_for_agent(agent: String) -> Vec<SlashCommandEntry> {
-    let mut out: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
-    let cwd = pty::pane_current_path(&agent).ok();
-    let home = dirs::home_dir();
-
-    // pi addresses skills as `/skill:<name>` and has no MCP prompts; its prompt
-    // templates are the same `~/.claude/commands` files the spawn passes through.
-    if matches!(pty::pane_harness(&agent), pty::Harness::Pi) {
-        let cwd_str = cwd.as_deref().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-        let mut skills: std::collections::BTreeMap<String, String> = Default::default();
-        for root in pty::pi_skill_roots(&cwd_str) {
-            scan_skills_dir(&root, &mut skills);
-        }
-        for (name, desc) in skills {
-            out.insert(format!("skill:{name}"), desc);
-        }
-        for root in [cwd.as_deref(), home.as_deref()].into_iter().flatten() {
-            scan_commands_dir(&root.join(".claude/commands"), &mut out);
-        }
-        return out
-            .into_iter()
-            .map(|(name, description)| SlashCommandEntry { name, description })
-            .collect();
-    }
-
-    let roots: Vec<PathBuf> = [cwd.as_deref(), home.as_deref()]
-        .into_iter()
-        .flatten()
-        .map(|p| p.join(".claude"))
-        .collect();
-    for root in &roots {
-        scan_commands_dir(&root.join("commands"), &mut out);
-        scan_skills_dir(&root.join("skills"), &mut out);
-    }
-    let global_servers = pty::read_global_mcp_servers();
-    for (server_name, server_cfg) in global_servers.iter() {
-        let prompts = server_cfg.get("prompts").and_then(|v| v.as_array());
-        let description = server_cfg
-            .get("description")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        if let Some(arr) = prompts {
-            for p in arr {
-                if let Some(prompt_name) = p.as_str() {
-                    let full = format!("mcp__{server_name}__{prompt_name}");
-                    out.entry(full).or_insert_with(|| description.clone());
-                }
-            }
-        }
-    }
-    out.into_iter()
-        .map(|(name, description)| SlashCommandEntry { name, description })
-        .collect()
-}
-
-fn scan_commands_dir(dir: &Path, out: &mut std::collections::BTreeMap<String, String>) {
-    let entries = match fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("md") {
-            continue;
-        }
-        let stem = match path.file_stem().and_then(|s| s.to_str()) {
-            Some(s) => s.to_string(),
-            None => continue,
-        };
-        let desc = read_frontmatter_description(&path).unwrap_or_default();
-        out.entry(stem).or_insert(desc);
-    }
-}
-
-fn scan_skills_dir(dir: &Path, out: &mut std::collections::BTreeMap<String, String>) {
-    let entries = match fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let skill_md = path.join("SKILL.md");
-        if !skill_md.is_file() {
-            continue;
-        }
-        let name = match path.file_name().and_then(|s| s.to_str()) {
-            Some(s) => s.to_string(),
-            None => continue,
-        };
-        let desc = read_frontmatter_description(&skill_md).unwrap_or_default();
-        out.entry(name).or_insert(desc);
-    }
-}
-
-// Tolerant: handles Claude Code's single-line, optionally-quoted value shape only.
-fn read_frontmatter_description(path: &Path) -> Option<String> {
-    let raw = fs::read_to_string(path).ok()?;
-    let mut lines = raw.lines();
-    if lines.next()?.trim() != "---" {
-        return None;
-    }
-    for line in lines {
-        let trimmed = line.trim();
-        if trimmed == "---" {
-            break;
-        }
-        if let Some(rest) = trimmed.strip_prefix("description:") {
-            let v = rest.trim().trim_matches(|c: char| c == '"' || c == '\'');
-            if !v.is_empty() {
-                // ~120 char cap keeps the picker compact.
-                let truncated: String = v.chars().take(120).collect();
-                return Some(truncated);
-            }
-        }
-    }
-    None
-}
-
 pub fn run() {
     // Wipe WKWebView disk cache before webview creation; otherwise stale assets persist.
     if let Some(cache_root) = dirs::cache_dir() {
@@ -1357,10 +1226,8 @@ pub fn run() {
         .manage(pty::PtyRegistry::default())
         .invoke_handler(tauri::generate_handler![
             get_hub_url,
-            slash_discover_for_agent,
             open_config_file,
             open_skills_folder,
-            models::list_models,
             skills::agent_skills,
             skills::agent_skills_set,
             skills::agent_skills_apply,

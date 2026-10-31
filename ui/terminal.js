@@ -1346,7 +1346,7 @@
   }
 
   // ---- The model x effort grid (task 5.5): it replaces the model field of 5.2. ----
-  let gridModels = {};      // harness -> rows from list_models, for this opening of the modal
+  let gridModels = {};      // harness -> rows from GET /models, for this opening of the modal
   let gridSelected = null;  // { rowKey, effort }
   const spawnRole = () => spawnRoles.get(spawnRoleEl?.value || '') || null;
   // The radios decide the launch harness; a role only preselects it (task 9.5).
@@ -1357,7 +1357,7 @@
     return modelGrid.gridModel({ harness, models: gridModels[harness] || [], filter: spawnGridFilterEl?.value || '', role: spawnRole() });
   }
 
-  const gridLoads = {};   // harness -> pending list_models request, so one opening asks once
+  const gridLoads = {};   // harness -> pending GET /models request, so one opening asks once
   function loadGridModels(harness) {
     if (gridModels[harness]) return Promise.resolve();
     return (gridLoads[harness] ||= fetchGridModels(harness).finally(() => { delete gridLoads[harness]; }));
@@ -1367,7 +1367,7 @@
     try {
       gridModels[harness] = await listModels(harness);
     } catch (e) {
-      console.warn('[terminal] list_models failed:', e);
+      console.warn('[terminal] listing models failed:', e);
       gridModels[harness] = [];
       if (spawnGridNoteEl) spawnGridNoteEl.textContent = `Could not list ${harness} models: ${e?.message ?? e}`;
       return;

@@ -11,7 +11,7 @@
   const rowKey = (provider, model) => `${provider || ''}/${model}`;
   const rowLabel = (harness, r) => (harness === 'pi' ? `${r.model} [${r.provider}]` : r.model);
 
-  // harness: 'claude' | 'pi'; models: [{provider, model, thinking, ready}] from list_models;
+  // harness: 'claude' | 'pi'; models: [{provider, model, thinking, ready}] from GET /models;
   // filter: type-to-filter text (Pi); role: {harness, model, provider, thinking} from list_roles, or null.
   function gridModel({ harness, models, filter = '', role = null }) {
     const h = harness === 'pi' ? 'pi' : 'claude';
