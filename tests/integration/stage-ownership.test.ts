@@ -8,6 +8,7 @@ import { Database } from "bun:sqlite";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const ROOM = "so";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -22,7 +23,7 @@ describe("a worker launch owns the ticket for the launched session", () => {
     hub = await spawnHub();
     await giveProjectHttp(hub, ROOM);
     open.push(await registerAgent(hub, "so-alice", { room: ROOM }));
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) launches.push(e); } catch { /* closed */ } })();
     await sleep(200);
   });
@@ -81,7 +82,7 @@ describe("a worker launch owns the ticket for the launched session", () => {
     const id = (made.json as { snapshot: { id: string } }).snapshot.id;
     await waitFor(() => launches.length > 1, "first launch");
     const first = (await launchesOf(id))[0];
-    const ack = await postJson(hub, `/launches/${first.id}/ack`, { result: "error", error: "tmux down" });
+    const ack = await ackLaunch(hub, first.id, { result: "error", error: "tmux down" });
     expect(ack.status).toBe(200);
     await waitFor(() => launches.some((l) => l.kind === "launch" && l.stage_id === first.stage_id && l.id !== first.id), "relaunch");
     const second = launches.filter((l) => l.kind === "launch" && l.stage_id === first.stage_id).at(-1);

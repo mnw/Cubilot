@@ -634,7 +634,7 @@ A written trace adds no log line: the existing `[stage] cancelling <id> failed:`
 
 ## The `stage` kind
 
-A stage is the work of one role on one ticket. The hub creates the stage, starts one session for it, checks its result and closes the session. Source: `hub/kinds/stage.ts`, `hub/core/launch-queue.ts`, `src-tauri/src/launches.rs`. Spec: `openspec/changes/stage-sessions`.
+A stage is the work of one role on one ticket. The hub creates the stage, starts one session for it, checks its result and closes the session. Source: `hub/kinds/stage.ts`, `hub/core/launch-queue.ts`, `hub/core/launch-executor.ts`. Spec: `openspec/changes/stage-sessions`.
 
 The roles are `worker`, `tester`, `validator`, `writer`, `editor` and `reviewer` (`STAGE_ROLES` in `hub/core/ledger.ts`). The `stage` table also holds request-level spec-review stages (`review = 'spec'`, `ticket_id` NULL). This section describes ticket stages first. "Spec-review stages" below gives the differences.
 
@@ -736,14 +736,9 @@ A slot is a stage of the role in the room that is `launching` or `running`. A se
 
 The session name is `<role>-<n>`. `n` is the lowest number of 1 or more that no live session of the role uses, in all rooms. All rooms count because all sessions share one tmux socket. A name whose close has no acknowledgement is not free. The limits stay per room.
 
-### The launch stream
+### The launch queue
 
-The hub does not start or stop an agent session. It queues requests, and the Rust shell does the work. (The hub itself runs `git` subprocesses for the worktrees.)
-
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| GET | `/launches/stream` | Bearer (human token) header OR `?token=` | SSE stream of launch and close requests. Each event has `id: <request id>` and `data: <request JSON>`. |
-| POST | `/launches/{id}/ack` | Bearer (human token) header | The shell's answer to one request. |
+The hub starts, closes and feeds the agent sessions itself. (It also runs `git` subprocesses for the worktrees.) `hub/kinds/stage.ts` queues `launch`, `close` and `input` requests in `hub/core/launch-queue.ts`. `hub/core/launch-executor.ts` runs each request with `hub/core/launch-role.ts`, `hub/core/launch-command.ts` and `hub/core/tmux.ts`, and answers it with an ack record: `spawned`, or `error` (a close of a missing session adds `absent`). There is no HTTP route for the queue: the former launch stream and launch ack routes are removed and answer 404.
 
 ### Terminal routes
 
@@ -1089,7 +1084,7 @@ The spec-review PASS queues the scope tickets in the same way, whatever their ro
 | GET | `/requests?room=` | Bearer header OR `?token=` | The requests of the room with `scope_change`. |
 | GET | `/rooms/{room}/requests` | Bearer header OR `?token=` | One row for each request of the room: `{room, requests: [{request_id, origin, status, tickets_done, tickets_total, high_radius_count, last_event_ms}]}`. `status` is `draft` (no ticket, or a draft ticket with no Approve), `waiting_for_approve`, `building`, `ready_for_test`, `merged` (each done ticket's staging merge commit is an ancestor of `main`) or `cancelled` (tickets, all cancelled). `tickets_total` and `high_radius_count` skip cancelled tickets. `last_event_ms` is the newest event of the request or of one of its tickets. 400 for a bad room, 200 with an empty list for a room with no request. Read only: no event. |
 
-No endpoint directly accepts a stage-create or arbitrary-transition command. A `to_role` handoff (`POST /handoffs`) can create a stage through the evaluator. Some routes cause fixed moves as a result of their input. `POST /launches/{id}/ack` moves `launching` to `running` (or to `retrying` or `failed` on an error). `POST /stages/{id}/turn-end` can move `running` to `retrying` or `failed` (a stop). A valid result handoff moves `running` to `passed`.
+No endpoint directly accepts a stage-create or arbitrary-transition command. A `to_role` handoff (`POST /handoffs`) can create a stage through the evaluator. Some routes cause fixed moves as a result of their input. The launch executor's ack moves `launching` to `running` (or to `retrying` or `failed` on an error). `POST /stages/{id}/turn-end` can move `running` to `retrying` or `failed` (a stop). A valid result handoff moves `running` to `passed`.
 
 ### SSE events
 
@@ -1304,7 +1299,7 @@ Each request has a **caller**: `human` (human token), `agent` (agent token) or n
 
 - An `agent` caller whose JSON body names the human name in `by`, `from`, `actor`, `voter`, `requester`, `agent` or `creator` (case and surrounding spaces ignored) gets `403 {"error":"the human acts only from the UI"}`.
 - For a `human` caller the hub uses the human name as the acting name of `by` and `from`. A field that names a target (`agent` on `/remove`) keeps its value.
-- A route with `RouteDef.caller: "human"` gives `403 {"error":"only the human may call this route"}` to an `agent` caller. On staging these are: `POST /requests/{room}/{request_id}/approve`, `POST /decisions/{id}/answer`, `POST /checkpoints`, `PUT /rooms/{room}/settings`, `POST /agents/{name}/pause`, `POST /remove`, `GET /launches/stream`, `POST /launches/{id}/ack`, `POST /permissions/{id}/verdict`, `PUT /agents/{name}/skills`, `POST /agents/{name}/skills/apply`. The permission dismiss route stays open to agents (the relay hook dismisses its own request as the agent).
+- A route with `RouteDef.caller: "human"` gives `403 {"error":"only the human may call this route"}` to an `agent` caller. On staging these are: `POST /requests/{room}/{request_id}/approve`, `POST /decisions/{id}/answer`, `POST /checkpoints`, `PUT /rooms/{room}/settings`, `POST /agents/{name}/pause`, `POST /remove`, `POST /permissions/{id}/verdict`, `PUT /agents/{name}/skills`, `POST /agents/{name}/skills/apply`. The permission dismiss route stays open to agents (the relay hook dismisses its own request as the agent).
 - `GET /stream` gives 403 to the `agent` caller. `GET /agent-stream` gives 403 to the `human` caller.
 
 **Trust-on-self-assertion (agents).** The `by` and `from` fields of an agent are validated against the expected actor for each route but are **not** cryptographically bound to the agent token. Any process holding `hub.token` can claim any agent identity. The human identity is bound to the human token. Accepted risk: an agent with an unrestricted shell runs as the human's OS user, so the guard stops a forged `by` over HTTP, not a hostile local process.

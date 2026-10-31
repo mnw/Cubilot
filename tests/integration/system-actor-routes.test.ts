@@ -67,7 +67,7 @@ describe("every mutating route refuses the actor system", () => {
 
   test("the derived list is not empty and holds every verb family", () => {
     expect(ROUTES.length).toBeGreaterThan(25);
-    for (const p of ["/handoffs", "/interrupts", "/permissions", "/tickets", "/launches/x1/ack", "/stages/x1/turn-end", "/rooms/x1/settings", "/send"]) {
+    for (const p of ["/handoffs", "/interrupts", "/permissions", "/tickets", "/stages/x1/turn-end", "/rooms/x1/settings", "/send"]) {
       expect(ROUTES.map((r) => r.path)).toContain(p);
     }
   });

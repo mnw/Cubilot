@@ -5,7 +5,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, mkdirSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnHub, type HubHandle } from "../helpers/hub";
+import { spawnHub, type HubHandle, fakeExecutorEnv } from "../helpers/hub";
 import { postJson, registerAgent, authedFetch } from "../helpers/fetch";
 
 async function putJson(
@@ -127,7 +127,7 @@ describe("room transcript persistence: hub restart hydration", () => {
           ...process.env,
           PORT: "0",
           CUBILOT_TOKEN: token,
-          CUBILOT_LEDGER_DB: ledgerPath,
+          CUBILOT_LEDGER_DB: ledgerPath, ...fakeExecutorEnv(ledgerPath),
           CUBILOT_ATTACHMENTS_DIR: attachmentsDir,
           CUBILOT_HUMAN_NAME: "human",
           CUBILOT_DEFAULT_ROOM: "default",

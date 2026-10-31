@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { authedFetch, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type Launch = { id: string; kind: string; stage_id: string; session: string; cwd: string | null };
@@ -26,7 +27,7 @@ describe("spec stage commit", () => {
     expect((await postJson(hub, `/stages/${stageId}/turn-end`, { agent: session })).json).toEqual({ action: "close" });
     for (let i = 0; i < 60 && launches.filter((l) => l.kind === "close").length === n; i++) await sleep(50);
     const close = launches.filter((l) => l.kind === "close").at(-1)!;
-    expect((await postJson(hub, `/launches/${close.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, close.id, { result: "spawned" })).status).toBe(200);
   };
 
   const git = (cwd: string, ...a: string[]) => {
@@ -53,7 +54,7 @@ describe("spec stage commit", () => {
     open.push(await registerAgent(hub, "sc-alice", { room: "sc" }));
     // The result of a spec review goes to the room lead (spec-review 4.1b): the default lead is "Orchestrator".
     open.push(await registerAgent(hub, "Orchestrator", { room: "sc" }));
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) launches.push(e as Launch); } catch { /* closed */ } })();
     await sleep(200);
   });
@@ -75,7 +76,7 @@ describe("spec stage commit", () => {
     expect(git(launchesOnly()[0].cwd!, "rev-parse", "HEAD")).toBe(c1);
 
     // The first review ends (spawned, then a valid result), so the queued one starts.
-    expect((await postJson(hub, `/launches/${launchesOnly()[0].id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, launchesOnly()[0].id, { result: "spawned" })).status).toBe(200);
     open.push(await registerAgent(hub, launchesOnly()[0].session, { room: "sc" }));
     const pass = await postJson(hub, "/handoffs", {
       from: launchesOnly()[0].session, to: "Orchestrator", task: "result",
@@ -104,7 +105,7 @@ describe("spec stage commit", () => {
     expect(launchesOnly()).toHaveLength(2); // still queued
     const second = launchesOnly()[1];
     open.push(await registerAgent(hub, second.session, { room: "sc" }));
-    expect((await postJson(hub, `/launches/${second.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, second.id, { result: "spawned" })).status).toBe(200);
     const pass = await postJson(hub, "/handoffs", {
       from: second.session, to: "Orchestrator", task: "result",
       context: { notes: "n", stage_id: second.stage_id, review: "spec", request_id: "req-1", verdict: "PASS", findings: [], suggestions: [], questions_for_human: [] },

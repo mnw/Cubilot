@@ -161,8 +161,11 @@ export function createTmux({ bin, socket, env = process.env }: TmuxOpts) {
 
   async function newSession(s: NewSession): Promise<void> {
     checkName(s.name);
+    // tmux changes "." to "_" in a session name, so has-session on the given name would miss. Same refusal as pty.rs.
+    if (s.name.includes(".")) throw new Error("a dot is not allowed in a terminal agent name: tmux changes it");
     await run(newSessionArgv(s));
-    await ensureRgb();
+    // The session exists now: a failed RGB feature must not fail the launch (best effort, like attach).
+    await ensureRgb().catch((e) => console.error(`[tmux] ensureRgb after new-session ${s.name} (best effort): ${e}`));
     await exec(["set-option", "-t", paneTarget(s.name), "status", "off"]); // best effort, like pty.rs
   }
 

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { authedFetch, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream } from "../helpers/fake-executor";
 
 const ROOM = "hc";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -37,7 +38,7 @@ describe("the handoff commit reaches the worktree", () => {
     hub = await spawnHub();
     expect((await authedFetch(hub, `/rooms/${ROOM}/settings`, { method: "PUT", body: JSON.stringify({ project_folder: repo }) })).status).toBe(200);
     open.push(await registerAgent(hub, "hc-alice", { room: ROOM }));
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) launches.push(e); } catch { /* closed */ } })();
     await sleep(200);
   });

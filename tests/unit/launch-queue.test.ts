@@ -229,18 +229,22 @@ describe("a failed stage change keeps the request pending (4.1 review)", () => {
     e.stop();
   });
 
-  test("the ack route answers 500 for a failed record and 200 after recovery", async () => {
+  test("the ack answers error for a failed record and ok after recovery (the executor sends it again)", () => {
     const e = makeEnv();
     e.connect();
     const s = e.stageFor(e.ticket());
     e.rt.enqueueLaunch(e.input(s.id), e.cap);
-    const ack = e.rt.module.routes.find((r) => r.method === "POST" && String(r.path).includes("ack"))!;
-    const post = (body: unknown) =>
-      ack.handler(new Request("http://x", { method: "POST", body: JSON.stringify(body) }), e.cap, { id: e.sent[0].id }) as Promise<Response>;
+    const orig = console.error;
+    console.error = () => {};
     failRunning(e.db);
-    expect((await post({ result: "spawned" })).status).toBe(500);
+    try {
+      expect(e.rt.queue.ack(e.sent[0].id, { result: "spawned" }, e.cap).status).toBe("error");
+    } finally {
+      console.error = orig;
+    }
+    expect(e.rt.api.load(s.id)!.status).toBe("launching");
     healRunning(e.db);
-    expect((await post({ result: "spawned" })).status).toBe(200);
+    expect(e.rt.queue.ack(e.sent[0].id, { result: "spawned" }, e.cap).status).toBe("ok");
     expect(e.rt.api.load(s.id)!.status).toBe("running");
     e.stop();
   });
@@ -400,25 +404,19 @@ describe("close requests (4.1 review)", () => {
     e.stop();
   });
 
-  test("the ack route reads absent: a boolean that goes with result error", async () => {
+  test("a close ack reads absent: an error without absent stays pending, an error with absent completes the close", () => {
     const e = makeEnv();
     e.connect();
     e.rt.queue.push(closeReq());
-    const ack = e.rt.module.routes.find((r) => r.method === "POST" && String(r.path).includes("ack"))!;
-    const post = async (body: unknown) =>
-      (await ack.handler(new Request("http://x", { method: "POST", body: JSON.stringify(body) }), e.cap, { id: closeReq().id })) as Response;
-    expect((await post({ result: "spawned", absent: true })).status).toBe(400);
-    expect((await post({ result: "error", error: "x", absent: "yes" })).status).toBe(400);
     const orig = console.error;
     console.error = () => {};
     try {
-      const pending = await post({ result: "error", error: "tmux unavailable" });
-      expect(pending.status).toBe(200);
-      expect(await pending.json()).toMatchObject({ ok: true, pending: true });
+      expect(e.rt.queue.ack(closeReq().id, { result: "error", error: "tmux unavailable" }, e.cap).status).toBe("pending");
     } finally {
       console.error = orig;
     }
-    expect((await post({ result: "error", error: "gone", absent: true })).status).toBe(200);
+    expect(e.rt.queue.pendingCloses()).toEqual([closeReq().session]);
+    expect(e.rt.queue.ack(closeReq().id, { result: "error", error: "gone", absent: true }, e.cap).status).toBe("ok");
     expect(e.rt.queue.pendingCloses()).toEqual([]);
     e.stop();
   });
@@ -562,45 +560,43 @@ describe("teardown", () => {
   });
 });
 
-describe("stream and ack routes", () => {
-  test("a launch is written to the SSE stream; the ack route moves the stage; a dropped shell does not lose the request", async () => {
+describe("consumer and ack", () => {
+  test("a launch reaches the attached consumer; the ack moves the stage; a repeated ack is idempotent; another answer is a conflict", () => {
     const e = makeEnv();
-    const route = (method: string, re: string) => e.rt.module.routes.find((r) => r.method === method && String(r.path).includes(re))!;
     const s = e.stageFor(e.ticket());
-    e.rt.enqueueLaunch(e.input(s.id), e.cap); // no shell yet: waits
-
-    const ac = new AbortController();
-    const res = (await route("GET", "stream").handler(new Request("http://x/launches/stream", { signal: ac.signal }), e.cap, {})) as Response;
-    expect(res.headers.get("content-type")).toBe("text/event-stream");
-    const reader = res.body!.getReader();
-    const dec = new TextDecoder();
-    let buf = "";
-    let frame: { id: string; kind: string; stage_id: string } | null = null;
-    while (!frame) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value);
-      const line = buf.split("\n").find((l) => l.startsWith("data: "));
-      if (line) frame = JSON.parse(line.slice(6));
-    }
-    expect(frame).toMatchObject({ kind: "launch", stage_id: s.id });
-
-    const ack = route("POST", "ack");
-    const post = (body: unknown) =>
-      ack.handler(new Request("http://x", { method: "POST", body: JSON.stringify(body) }), e.cap, { id: frame!.id }) as Promise<Response>;
-    expect((await post({ result: "spawned" })).status).toBe(200);
+    e.rt.enqueueLaunch(e.input(s.id), e.cap); // no consumer yet: waits
+    expect(e.sent).toHaveLength(0);
+    expect(e.rt.module.routes.some((r) => String(r.path).includes("launches"))).toBe(false); // the hub runs its own queue: no stream and no ack route
+    e.connect();
+    expect(e.sent[0]).toMatchObject({ kind: "launch", stage_id: s.id });
+    const id = e.sent[0].id;
+    expect(e.rt.queue.ack(id, { result: "spawned" }, e.cap)).toEqual({ status: "ok" });
     expect(e.rt.api.load(s.id)!.status).toBe("running");
-    expect((await post({ result: "spawned" })).status).toBe(200); // idempotent
-    expect((await post({ result: "error", error: "late" })).status).toBe(409);
-    // the body must be a JSON object
-    for (const bad of [null, [], "x", 5, true]) {
-      const r = (await ack.handler(new Request("http://x", { method: "POST", body: JSON.stringify(bad) }), e.cap, { id: frame!.id })) as Response;
-      expect(r.status).toBe(400);
-    }
-    const garbage = (await ack.handler(new Request("http://x", { method: "POST", body: "not json" }), e.cap, { id: frame!.id })) as Response;
-    expect(garbage.status).toBe(400);
-    ac.abort();
-    try { await reader.cancel(); } catch { /* closed */ }
+    expect(e.rt.queue.ack(id, { result: "spawned" }, e.cap)).toEqual({ status: "idempotent" });
+    expect(e.rt.queue.ack(id, { result: "error", error: "late" }, e.cap).status).toBe("conflict");
+    expect(e.rt.queue.ack("l_00000000000000ee", { result: "spawned" }, e.cap)).toEqual({ status: "unknown" });
+    expect(e.rt.api.load(s.id)!.status).toBe("running");
+    e.stop();
+  });
+
+  test("the executor host given to startExecutor attaches, acks and sends failed closes again", async () => {
+    const e = makeEnv();
+    let host: import("../../hub/core/launch-executor").ExecutorHost | null = null;
+    const rt = createStageRuntime(e.db, { ackMs: 60_000, startExecutor: (h) => { host = h; } });
+    rt.module.start?.(e.cap);
+    expect(host).not.toBeNull();
+    const got: any[] = [];
+    host!.attach((r) => got.push(r), new AbortController().signal);
+    rt.queue.push({ id: "l_00000000000000d1", kind: "close", session: "worker-7" });
+    expect(got).toHaveLength(1);
+    expect(host!.ack("l_00000000000000d1", { result: "error", error: "tmux down" })).toMatchObject({ status: "pending" });
+    host!.resendCloses();
+    expect(got).toHaveLength(2);
+    expect(got[1]).toEqual(got[0]);
+    expect(host!.ack("l_00000000000000d1", { result: "spawned" })).toEqual({ status: "ok" });
+    host!.resendCloses();
+    expect(got).toHaveLength(2); // a closed request is not sent again
+    rt.module.dispose!();
     e.stop();
   });
 });

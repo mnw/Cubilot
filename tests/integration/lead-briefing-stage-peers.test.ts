@@ -1,11 +1,12 @@
 // P6-10: the room lead's briefing ignores stage sessions. The hub knows a stage session from its own launch record,
-// never from what a session sends. Real hub, a fake shell client on GET /launches/stream.
+// never from what a session sends. Real hub, a fake executor client (tests/helpers/fake-executor.ts).
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { Database } from "bun:sqlite";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { ackLaunch, openLaunchStream } from "../helpers/fake-executor";
 
 const ROOM = "lb";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -28,6 +29,13 @@ function join(hub: HubHandle, path: string, into: any[] = []) {
   return sse;
 }
 
+// Attaches to the fake executor and drains its requests.
+function joinLaunches(hub: HubHandle, into: any[] = []) {
+  const sse = openLaunchStream(hub);
+  void (async () => { try { for await (const e of sse.events) into.push(e); } catch { /* closed */ } })();
+  return sse;
+}
+
 describe("lead briefing and stage sessions", () => {
   let hub: HubHandle;
   const open: Array<{ close: () => void }> = [];
@@ -41,7 +49,7 @@ describe("lead briefing and stage sessions", () => {
     hub = await spawnHub();
     await giveProjectHttp(hub, ROOM);
     open.push(join(hub, `/agent-stream?agent=Orchestrator&room=${ROOM}`, leadEvents));
-    open.push(join(hub, "/launches/stream", launches));
+    open.push(joinLaunches(hub, launches));
     await until(() => (leadBriefings().length > 0 ? true : undefined));
 
     const t = await postJson(hub, "/tickets", { by: "Orchestrator", title: "Lead ticket", acceptance_criteria: "c", blast_radius: "low", priority: "high" });
@@ -51,7 +59,7 @@ describe("lead briefing and stage sessions", () => {
     const req = await until(() => launches.find((l) => l.kind === "launch"));
     session = req.session;
     stageId = req.stage_id;
-    expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, req.id, { result: "spawned" })).status).toBe(200);
     await until(() => (leadBriefings().length > 0 ? true : undefined));
     await sleep(PAST_DEBOUNCE_MS);
   });
@@ -91,13 +99,13 @@ describe("lead briefing and stage sessions across a hub restart", () => {
     const launches: any[] = [];
     const leadSeen: any[] = [];
     const lead = join(hub, `/agent-stream?agent=Orchestrator&room=${RROOM}`, leadSeen);
-    const s = join(hub, "/launches/stream", launches);
+    const s = joinLaunches(hub, launches);
     await until(() => (leadSeen.some((e) => e.type === "briefing") ? true : undefined));
     const t = await postJson(hub, "/tickets", { by: "Orchestrator", title: "Restart ticket", acceptance_criteria: "c", blast_radius: "low", priority: "high" });
     const ticket = (t.json as any).snapshot.id;
     await postJson(hub, "/handoffs", { from: "Orchestrator", to_role: "worker", task: `work ${ticket}`, context: { ticket_id: ticket } });
     const req = await until(() => launches.find((l) => l.kind === "launch"));
-    if (ack) expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+    if (ack) expect((await ackLaunch(hub, req.id, { result: "spawned" })).status).toBe(200);
     lead.close();
     s.close();
     return { hub, session: req.session, stageId: req.stage_id };
@@ -154,7 +162,7 @@ describe("the release mark in the ledger", () => {
   test("a final launch-error ack sets it with the stage change; a bind clears it", async () => {
     const hub = await spawnHub();
     const launches: any[] = [];
-    const s = join(hub, "/launches/stream", launches);
+    const s = joinLaunches(hub, launches);
     const leadSeen: any[] = [];
     const lead = join(hub, "/agent-stream?agent=Orchestrator&room=lbm", leadSeen);
     try {
@@ -170,11 +178,11 @@ describe("the release mark in the ledger", () => {
       };
       expect(mark().m).toBeNull();
       // Attempt 1 fails: the retry launches again and the bind clears the mark. Attempt 2 fails: the stage ends, the mark stays.
-      expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "error", error: "no tmux" })).status).toBe(200);
+      expect((await ackLaunch(hub, req.id, { result: "error", error: "no tmux" })).status).toBe(200);
       const second = await until(() => launches.filter((l) => l.kind === "launch")[1]);
       await until(() => (mark().st === "launching" ? true : undefined));
       expect(mark().m).toBeNull();
-      expect((await postJson(hub, `/launches/${second.id}/ack`, { result: "error", error: "no tmux" })).status).toBe(200);
+      expect((await ackLaunch(hub, second.id, { result: "error", error: "no tmux" })).status).toBe(200);
       const end = await until(() => { const r = mark(); return r.st === "failed" ? r : undefined; });
       expect(end.m).not.toBeNull();
     } finally {

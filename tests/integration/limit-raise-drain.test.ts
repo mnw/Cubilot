@@ -5,6 +5,7 @@ import { Database } from "bun:sqlite";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp, projectRepo } from "../helpers/repo";
 import { authedFetch, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const ROOM = "lrd";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -44,7 +45,7 @@ describe("role limit change drains the waiting stages", () => {
     }
     open.push(await registerAgent(hub, "Orchestrator", { room: ROOM }));
     open.push(await registerAgent(hub, "lrd-alice", { room: ROOM }));
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) launches.push(e); } catch { /* closed */ } })();
     await sleep(200);
   });
@@ -76,7 +77,7 @@ describe("role limit change drains the waiting stages", () => {
     // the limit drops to 0 before the launch fails, so the relaunch has to wait
     await limits({ validator: 0 });
     const req = requestsOf(first.id)[0];
-    await postJson(hub, `/launches/${req.id}/ack`, { result: "error", error: "tmux failed" });
+    await ackLaunch(hub, req.id, { result: "error", error: "tmux failed" });
     await settle();
     expect(stageOf(a)[0].status).toBe("retrying");
     // a later stage of the same role also waits

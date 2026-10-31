@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fakeExecutorEnv } from "../helpers/hub";
 
 async function bootHubAgainstLedger(ledgerPath: string, baseDir: string): Promise<void> {
   const proc = Bun.spawn(["bun", "run", "hub/hub.ts"], {
@@ -10,7 +11,7 @@ async function bootHubAgainstLedger(ledgerPath: string, baseDir: string): Promis
       ...process.env,
       PORT: "0",
       CUBILOT_TOKEN: "testmig",
-      CUBILOT_LEDGER_DB: ledgerPath,
+      CUBILOT_LEDGER_DB: ledgerPath, ...fakeExecutorEnv(ledgerPath),
       CUBILOT_ATTACHMENTS_DIR: baseDir,
       CUBILOT_HUMAN_NAME: "human",
       CUBILOT_DEFAULT_ROOM: "default",

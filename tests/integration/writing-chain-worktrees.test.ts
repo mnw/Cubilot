@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp, projectRepo } from "../helpers/repo";
 import { authedFetch, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const ROOM = "wcw";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -30,7 +31,7 @@ describe("writing chain worktrees", () => {
     expect((await authedFetch(hub, `/rooms/${ROOM}/settings`, { method: "PUT", body: JSON.stringify({ role_limits: { writer: 3, editor: 3, reviewer: 3 } }) })).status).toBe(200);
     open.push(await registerAgent(hub, "Orchestrator", { room: ROOM }));
     open.push(await registerAgent(hub, "wcw-alice", { room: ROOM }));
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) reqs.push(e); } catch { /* closed */ } })();
     await sleep(200);
   });
@@ -59,7 +60,7 @@ describe("writing chain worktrees", () => {
   const closeOf = (session: string) => reqs.findLast((r) => r.kind === "close" && r.session === session);
   // The fake shell: ack the launch, then register the session as an agent.
   const spawn = async (req: any) => {
-    expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, req.id, { result: "spawned" })).status).toBe(200);
     open.push(await registerAgent(hub, req.session, { room: ROOM }));
   };
   const commit = (cwd: string, file: string) => {
@@ -89,7 +90,7 @@ describe("writing chain worktrees", () => {
   };
   const ackClose = async (session: string) => {
     for (let i = 0; i < 60 && !closeOf(session); i++) await sleep(50);
-    expect((await postJson(hub, `/launches/${closeOf(session).id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, closeOf(session).id, { result: "spawned" })).status).toBe(200);
   };
 
   test("editor on the writer branch", async () => {

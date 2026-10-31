@@ -14,6 +14,7 @@ import { createPermissionKind } from "./permission";
 import { createRequestKind } from "./request";
 import { buildPack } from "../core/context-pack";
 import type { LaunchRecord } from "../core/launch-record";
+import { startExecutor } from "../core/launch-executor";
 import { createStageRuntime } from "./stage";
 import { createTicketKind } from "./ticket";
 
@@ -31,6 +32,7 @@ export function buildKinds(db: Database | null, launchRecord?: LaunchRecord): re
   // The handoff kind calls the stage runtime when a handoff names a role, so the two share one runtime.
   const stage = createStageRuntime(db, {
     launchRecord,
+    startExecutor: (host) => startExecutor(host),
     ackMs: Number(process.env.CUBILOT_LAUNCH_ACK_MS) || undefined,
     // A failed stage cancel or sweep leaves a row for the human (cancel-trace).
     traceFailure: (input, cap) => cancelTrace.record(input, cap),

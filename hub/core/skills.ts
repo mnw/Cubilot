@@ -76,7 +76,7 @@ export function inventory(versionDir: string, role: string): string[] {
   return [...skillFolders(versionDir, role).map((f) => `${role}/${f}`), ...skillFolders(versionDir, "shared").map((f) => `shared/${f}`)].sort();
 }
 
-const readOff = (dest: string, agent: string): string[] => strings(readJson(rec(dest, agent, ".skills-off")));
+export const readOff = (dest: string, agent: string): string[] => strings(readJson(rec(dest, agent, ".skills-off")));
 
 // ---- Mode: proven from the real launch flags, never from a substring ----
 // Splits like a shell: single quotes, double quotes (backslash before " \ $ `), backslash. No expansion.
@@ -198,7 +198,7 @@ const recordGen = (dest: string, agent: string, suffix: string): number | null =
 };
 
 // One more than the highest generation seen in a record or a view folder.
-function nextGen(dest: string, agent: string): number {
+export function nextGen(dest: string, agent: string): number {
   const seen = [".skills-prepared", ".skills-published", ".skills-pending", ".skills-applied"].map((s) => recordGen(dest, agent, s)).filter((g): g is number => g !== null);
   const all = [...seen, ...viewGens(dest, agent)];
   return all.length ? Math.max(...all) + 1 : 1;
@@ -251,7 +251,7 @@ export function buildView(dest: string, versionDir: string, agent: string, role:
 
 // Deletes the builds that no record names, except the one generation below the published one (a lazy read through
 // the old path still works for one more generation). Never touches a named build. Runs under the lock.
-function cleanupViews(dest: string, agent: string): void {
+export function cleanupViews(dest: string, agent: string): void {
   const named = [".skills-prepared", ".skills-published", ".skills-pending"].map((s) => recordGen(dest, agent, s)).filter((g): g is number => g !== null);
   const published = recordGen(dest, agent, ".skills-published");
   const gens = viewGens(dest, agent);

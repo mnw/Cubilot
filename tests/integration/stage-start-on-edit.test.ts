@@ -4,6 +4,7 @@ import { describe, test, expect, afterEach } from "bun:test";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream } from "../helpers/fake-executor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type Req = { id: string; kind: "launch" | "close"; stage_id?: string; session: string };
@@ -20,7 +21,7 @@ async function boot(room: string) {
   const orch = await registerAgent(hub, "Orchestrator", { room });
   cleanup.push(() => orch.close());
   const reqs: Req[] = [];
-  const sse = openSSE(hub, "/launches/stream");
+  const sse = openLaunchStream(hub);
   cleanup.push(() => sse.close());
   void (async () => { try { for await (const e of sse.events) reqs.push(e as Req); } catch { /* closed */ } })();
   await sleep(100);

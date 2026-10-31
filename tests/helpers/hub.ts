@@ -2,7 +2,7 @@
 // against a temp ledger. Tests interact via HTTP + SSE exactly like the UI and
 // channel-bin do in production — no mocks, no in-process imports.
 
-import { mkdtempSync, mkdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -22,6 +22,16 @@ export type HubHandle = {
   dataDir: string;
   kill: () => Promise<void>;
 };
+
+/**
+ * Env that makes a hub run the fake launch executor (tests/helpers/fake-executor-module.ts), never tmux. A test that
+ * boots `hub/hub.ts` itself adds this to the env. The port file of an earlier hub on the same ledger is removed.
+ */
+export function fakeExecutorEnv(ledgerPath: string): Record<string, string> {
+  const portFile = join(dirname(ledgerPath), "fake-executor.port");
+  rmSync(portFile, { force: true });
+  return { CUBILOT_LAUNCH_EXECUTOR: join(import.meta.dir, "fake-executor-module.ts"), CUBILOT_FAKE_EXECUTOR_PORT_FILE: portFile };
+}
 
 export async function spawnHub(opts?: {
   humanName?: string;
@@ -49,6 +59,9 @@ export async function spawnHub(opts?: {
   const humanName = opts?.humanName ?? "human";
   const defaultRoom = opts?.defaultRoom ?? "default";
 
+  // Every test hub runs the fake launch executor, never tmux. A restart must not read the port of the hub it replaces.
+  const executorEnv = fakeExecutorEnv(ledgerPath);
+
   const proc = Bun.spawn(["bun", "run", "hub/hub.ts"], {
     env: {
       ...process.env,
@@ -62,6 +75,7 @@ export async function spawnHub(opts?: {
       CUBILOT_HUMAN_NAME: humanName,
       CUBILOT_DEFAULT_ROOM: defaultRoom,
       CUBILOT_ALLOWED_EXTENSIONS: opts?.allowedExtensions ?? "jpg,jpeg,png,pdf,md,txt,json",
+      ...executorEnv,
       ...opts?.env,
     },
     stdin: "pipe",

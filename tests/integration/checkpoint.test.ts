@@ -10,6 +10,7 @@ import { findTool } from "../../hub/channel/tools";
 import type { Host } from "../../hub/channel/host";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const HOOKS = join(import.meta.dir, "../../factory/orchestrator/hooks");
@@ -46,13 +47,13 @@ async function boot(env: Record<string, string> = {}) {
   const leadGot: any[] = [];
   void (async () => { try { for await (const e of leadSse.events) leadGot.push(e); } catch { /* closed */ } })();
   // The fake shell: reads the launch stream, acks every request, keeps what it got.
-  const shellSse = openSSE(hub, "/launches/stream");
+  const shellSse = openLaunchStream(hub);
   const shellGot: any[] = [];
   void (async () => {
     try {
       for await (const r of shellSse.events) {
         shellGot.push(r);
-        await postJson(hub, `/launches/${r.id}/ack`, { result: "spawned" });
+        await ackLaunch(hub, r.id, { result: "spawned" });
       }
     } catch { /* closed */ }
   })();

@@ -1,5 +1,5 @@
 // Stage-sessions 6.5: a hub-launched stage session receives its briefing on connect. Real hub, a fake shell client on
-// GET /launches/stream, the ack, then /agent-stream as the launched session name with the stage's room.
+// the fake executor stream, the ack, then /agent-stream as the launched session name with the stage's room.
 // Current behaviour kept: every connect sends a briefing and seeds the signature (hub/features/streams.ts);
 // the dispatcher dedups only the scheduled fanout (hub/core/briefing-dispatcher.ts). Reconnect dedup is not asserted.
 
@@ -8,6 +8,7 @@ import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { openSSE, postJson, registerAgent } from "../helpers/fetch";
 import { modeFor, renderBriefing } from "../../hub/channel/core";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const ROOM = "sb";
 const NUTSHELL = "Stage briefing test project: nutshell marker.";
@@ -48,7 +49,7 @@ describe("stage session briefing on connect", () => {
     expect(acc.status).toBe(200);
 
     // Fake shell client.
-    const ls = openSSE(hub, "/launches/stream");
+    const ls = openLaunchStream(hub);
     open.push(ls);
     void (async () => { try { for await (const e of ls.events) launches.push(e); } catch { /* closed */ } })();
     await sleep(200);
@@ -71,7 +72,7 @@ describe("stage session briefing on connect", () => {
     const req = await until(() => launches.find((l) => l.kind === "launch"));
     session = req.session;
     expect(req).toMatchObject({ role: "worker", room: ROOM });
-    expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+    expect((await ackLaunch(hub, req.id, { result: "spawned" })).status).toBe(200);
 
     // The launched session connects with the stage's room.
     const sse = openSSE(hub, `/agent-stream?agent=${encodeURIComponent(session)}&room=${ROOM}`);

@@ -5,7 +5,7 @@ import { describe, test, expect, afterAll } from "bun:test";
 import { mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnHub, type HubHandle } from "../helpers/hub";
+import { spawnHub, type HubHandle, fakeExecutorEnv } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { getJson, postJson, registerAgent } from "../helpers/fetch";
 
@@ -17,7 +17,7 @@ async function bootOn(ledgerPath: string, token: string): Promise<{ hub: HubHand
   mkdirSync(join(base, "att"), { recursive: true });
   const proc = Bun.spawn(["bun", "run", "hub/hub.ts"], {
     env: {
-      ...process.env, PORT: "0", CUBILOT_TOKEN: token, CUBILOT_LEDGER_DB: ledgerPath,
+      ...process.env, PORT: "0", CUBILOT_TOKEN: token, CUBILOT_LEDGER_DB: ledgerPath, ...fakeExecutorEnv(ledgerPath),
       CUBILOT_ATTACHMENTS_DIR: join(base, "att"), CUBILOT_HUMAN_NAME: "human", CUBILOT_DEFAULT_ROOM: "default",
     },
     stdin: "pipe", stdout: "pipe", stderr: "pipe",

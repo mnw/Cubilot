@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 describe("worker result base check", () => {
   let hub: HubHandle;
@@ -34,12 +35,12 @@ describe("worker result base check", () => {
     const t = await postJson(hub, "/tickets", { by: `${room}-lead`, title: "T", acceptance_criteria: "c", blast_radius: "low", priority: "medium", role: "worker" });
     const ticketId = (t.json as { snapshot: { id: string } }).snapshot.id;
     let worker = "";
-    const sse = openSSE(hub, "/launches/stream");
+    const sse = openLaunchStream(hub);
     for await (const req of sse.events) {
       // The stream replays earlier launches (a tester from a former test): ack only the worker we wait for.
       if (!String(req.session).startsWith("worker-")) continue;
       worker = req.session;
-      expect((await postJson(hub, `/launches/${req.id}/ack`, { result: "spawned" })).status).toBe(200);
+      expect((await ackLaunch(hub, req.id, { result: "spawned" })).status).toBe(200);
       break;
     }
     sse.close();
