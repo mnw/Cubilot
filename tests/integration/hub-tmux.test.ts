@@ -159,6 +159,7 @@ describe("hub tmux", () => {
     const tmux = createTmux({ bin, socket });
     expect(attachArgv(tmux, "w1", true)).toEqual([bin, "-S", socket, "attach", "-f", "read-only,ignore-size", "-t", "=w1"]);
     expect(attachArgv(tmux, "w1")).toEqual([bin, "-S", socket, "attach", "-t", "=w1"]);
+    expect(attachArgv(tmux, "w1", false, true)).toEqual([bin, "-S", socket, "attach", "-f", "ignore-size", "-t", "=w1"]);
     await tmux.newSession({ name: "w1", cwd: "/tmp", command: "cat" });
     const term = createTerminal(tmux);
     const size = async () => (await tmux.run(["display-message", "-p", "-t", "=w1:", "#{window_width}x#{window_height}"])).trim();

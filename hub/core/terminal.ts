@@ -6,6 +6,8 @@ import { sessionTarget, type Tmux } from "./tmux";
 
 export type AttachOpts = {
   readOnly?: boolean;
+  /** A client that can type but never sets the session size (`-f ignore-size`). Input requests use it. */
+  ignoreSize?: boolean;
   cols?: number;
   rows?: number;
   /** Raw PTY bytes. */
@@ -15,14 +17,15 @@ export type AttachOpts = {
 };
 
 export type Viewer = {
-  write: (data: string | Uint8Array) => void;
+  /** Returns the number of bytes the PTY accepted (a PTY may take less than all of it). */
+  write: (data: string | Uint8Array) => number;
   resize: (cols: number, rows: number) => void;
   close: () => void;
   exited: Promise<number>;
 };
 
-export function attachArgv(tmux: Pick<Tmux, "bin" | "socket">, agent: string, readOnly = false): string[] {
-  const flags = readOnly ? ["-f", "read-only,ignore-size"] : [];
+export function attachArgv(tmux: Pick<Tmux, "bin" | "socket">, agent: string, readOnly = false, ignoreSize = false): string[] {
+  const flags = readOnly ? ["-f", "read-only,ignore-size"] : ignoreSize ? ["-f", "ignore-size"] : [];
   return [tmux.bin, "-S", tmux.socket, "attach", ...flags, "-t", sessionTarget(agent)];
 }
 
@@ -31,7 +34,7 @@ export function createTerminal(tmux: Tmux) {
     if (!(await tmux.hasSession(agent))) throw new Error(`no session: ${agent}`); // validates the name first
     await tmux.ensureRgb().catch(() => {});
     const readOnly = opts.readOnly ?? false;
-    const proc = Bun.spawn(attachArgv(tmux, agent, readOnly), {
+    const proc = Bun.spawn(attachArgv(tmux, agent, readOnly, opts.ignoreSize ?? false), {
       env: tmux.clientEnv({ TERM: "xterm-256color", COLORTERM: "truecolor" }),
       terminal: {
         cols: opts.cols ?? 80,
@@ -42,7 +45,10 @@ export function createTerminal(tmux: Tmux) {
     });
     proc.exited.then(() => opts.onExit?.());
     return {
-      write: (d) => proc.terminal!.write(d),
+      write: (d) => {
+        const n = proc.terminal!.write(d) as unknown;
+        return typeof n === "number" ? n : typeof d === "string" ? Buffer.byteLength(d) : d.length;
+      },
       resize: (c, r) => proc.terminal!.resize(c, r),
       close: () => {
         try { proc.kill(); proc.terminal?.close(); } catch { /* gone */ }

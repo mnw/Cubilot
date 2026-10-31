@@ -9,7 +9,7 @@
 
 import { prepareLaunch, type LaunchDeps } from "./launch-role";
 import { startAgentSession } from "./session-create";
-import { createTerminal } from "./terminal";
+import { createTerminal, type Terminal } from "./terminal";
 import { createTmux, tmuxFromEnv, type Tmux } from "./tmux";
 import type { AckOutcome, AckStatus, LaunchRequest } from "./launch-types";
 
@@ -48,8 +48,13 @@ export type ExecutorDeps = {
   ackPauseMs?: number;
   /** A close that failed stays pending; it is sent again after this time (default 5 s). */
   closeRetryMs?: number;
-  /** The input session stays attached this long after the write (default 150 ms). */
-  inputHoldMs?: number;
+  /** After the write, the client output must show the input text within this time, else the input is an error (default 2 s). */
+  inputEchoMs?: number;
+  /** The input client must show the session within this time, else the input is an error (default 5 s). */
+  inputAttachMs?: number;
+  inputSettleMs?: number;
+  /** Test seam: the terminal that attaches the input client. */
+  terminal?: Terminal;
   /** Test hook: awaited after a launch has its outcome and before it removes its map entry. */
   beforeLaunchCleanup?: (req: LaunchRequest) => void | Promise<void>;
 };
@@ -62,7 +67,9 @@ export function startLaunchExecutor(host: ExecutorHost, deps: ExecutorDeps): { s
   const tries = deps.ackTries ?? 10;
   const pause = deps.ackPauseMs ?? 1000;
   const retryMs = deps.closeRetryMs ?? 5000;
-  const hold = deps.inputHoldMs ?? 150;
+  const echoMs = deps.inputEchoMs ?? 2000;
+  const attachMs = deps.inputAttachMs ?? 5000;
+  const settleMs = deps.inputSettleMs ?? 150;
   const ac = new AbortController();
 
   /** Session names with a launch in progress. A close for the name waits until the launch ends (no "no such session" before new-session). */
@@ -141,11 +148,47 @@ export function startLaunchExecutor(host: ExecutorHost, deps: ExecutorDeps): { s
       if (!line) throw new Error("the input is empty, too long or holds a control character");
       if (!deps.tmux) throw new Error("tmux is not available");
       if (!(await deps.tmux.hasSession(req.session))) throw new Error(`unknown session: ${req.session}`);
-      // Raw PTY write to a client of that one session; never `tmux send-keys`.
-      const viewer = await createTerminal(deps.tmux).attach(req.session, { onData: () => {} });
+      // Raw PTY write to a client of that one session; never `tmux send-keys`. The client has `ignore-size`, so it
+      // never resizes the session. It writes only after tmux drew the session to it (the client is attached), writes
+      // all bytes, then waits until the client output shows the text (tmux took the bytes and the session echoed or
+      // redrew them). No echo within `echoMs` (2 s) is an error, never `spawned`. Bun's `drain` does not fire for a PTY write
+      // (probed on the pinned Bun), so the echo is the delivery proof.
+      let ready!: () => void;
+      const attached = new Promise<void>((r) => (ready = r));
+      let seen = "";
+      let writing = false;
+      let lastData = 0;
+      const decoder = new TextDecoder();
+      const viewer = await (deps.terminal ?? createTerminal(deps.tmux)).attach(req.session, {
+        ignoreSize: true,
+        onData: (chunk) => {
+          ready();
+          lastData = Date.now();
+          if (writing) seen += decoder.decode(chunk, { stream: true });
+        },
+      });
       try {
-        viewer.write(line);
-        await sleep(hold);
+        const first = await Promise.race([attached.then(() => true), viewer.exited.then(() => false), sleep(attachMs).then(() => false)]);
+        if (!first) throw new Error(`could not attach to the session: ${req.session}`);
+        // Wait until the first screen is fully drawn (output quiet for `settleMs`, at most `attachMs`). Only output
+        // after the write counts as proof, so an equal text already on the screen cannot satisfy the check.
+        const settleEnd = Date.now() + attachMs;
+        while (Date.now() - lastData < settleMs && Date.now() < settleEnd) await sleep(10);
+        const bytes = Buffer.from(line);
+        writing = true;
+        seen = "";
+        for (let off = 0; off < bytes.length; ) {
+          const n = viewer.write(bytes.subarray(off));
+          if (n <= 0) await sleep(10);
+          off += Math.max(n, 0);
+        }
+        const needle = line.replace(/[\r\n]+$/, "");
+        const strip = (t: string) => t.replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, "").replace(/\x1b[()][A-Za-z0-9]/g, "");
+        const end = Date.now() + echoMs;
+        while (!strip(seen).includes(needle)) {
+          if (Date.now() >= end) throw new Error(`no echo of the input from the session: ${req.session}`);
+          await sleep(10);
+        }
       } finally {
         viewer.close();
       }

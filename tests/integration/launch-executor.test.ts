@@ -10,6 +10,7 @@ import { startLaunchExecutor, inputLine, type ExecutorHost } from "../../hub/cor
 import type { AckOutcome, AckStatus, LaunchRequest } from "../../hub/core/launch-queue";
 import { prepareLaunch } from "../../hub/core/launch-role";
 import { createTmux } from "../../hub/core/tmux";
+import { createTerminal } from "../../hub/core/terminal";
 import { Database } from "bun:sqlite";
 import { giveProject } from "../helpers/repo";
 import { migrateLedger } from "../../hub/core/ledger";
@@ -101,7 +102,7 @@ const launchReq = (over: Partial<Extract<LaunchRequest, { kind: "launch" }>> = {
 });
 
 function run(h: ExecutorHost, extra: Record<string, unknown> = {}) {
-  const ex = startLaunchExecutor(h, { tmux, env, ackPauseMs: 10, closeRetryMs: 30, inputHoldMs: 100, ...extra });
+  const ex = startLaunchExecutor(h, { tmux, env, ackPauseMs: 10, closeRetryMs: 30, inputEchoMs: 1500, ...extra });
   stops.push(ex.stop);
   return ex;
 }
@@ -223,7 +224,7 @@ describe("One launch of a session at a time, through the real stage runtime", ()
     };
     const rt = createStageRuntime(db, {
       ackMs: ACK_MS,
-      startExecutor: (h) => { stops.push(startLaunchExecutor(h, { tmux: counted, env, prepare, ackPauseMs: 10, closeRetryMs: 30, inputHoldMs: 100 }).stop); },
+      startExecutor: (h) => { stops.push(startLaunchExecutor(h, { tmux: counted, env, prepare, ackPauseMs: 10, closeRetryMs: 30, inputEchoMs: 1500 }).stop); },
     });
     rt.module.migrate(db);
     const cap = { db, sse: { emit: (_e: Entry, _s: Scope) => {} }, briefing: { refresh: () => {} } } as unknown as HubCapabilities;
@@ -293,6 +294,70 @@ describe("Input to one session", () => {
     expect(t.acks[0].outcome).toEqual({ result: "spawned" });
     expect(await until(() => existsSync(join(root, "orch.txt")) && readFileSync(join(root, "orch.txt"), "utf8").includes("/clear"))).toBe(true);
     expect(readFileSync(join(root, "other.txt"), "utf8")).toBe("");
+  });
+
+  test("the ack comes after the line reached the session, also when the attach and the echo are slow, and the size stays 200x50", async () => {
+    const t = host();
+    const real = createTerminal(tmux);
+    let attachedAt = 0;
+    let echoReleasedAt = 0;
+    // A slow fake terminal: the attach takes 400 ms, and the output after the write reaches the executor 600 ms late.
+    const slow = {
+      attach: async (a: string, o: Parameters<typeof real.attach>[1]) => {
+        await sleep(400);
+        attachedAt = Date.now();
+        let wrote = false;
+        const v = await real.attach(a, {
+          ...o,
+          onData: (c) => (wrote ? void setTimeout(() => { echoReleasedAt = Date.now(); o.onData(c); }, 600) : o.onData(c)),
+        });
+        return { ...v, write: (d: string | Uint8Array) => { wrote = true; return v.write(d); } };
+      },
+    };
+    run(t.h, { terminal: slow });
+    const out = join(root, "echo.txt");
+    await tmux.newSession({ name: "lead", cwd: root, command: `cat > '${out}'` });
+    const size = async () => (await tmux.run(["display-message", "-p", "-t", "=lead:", "#{window_width}x#{window_height}"])).trim();
+    const big = await real.attach("lead", { cols: 200, rows: 50, onData() {} });
+    try {
+      expect(await until(async () => (await size()) === "200x50")).toBe(true);
+      let ackAt = 0;
+      let seenAtAck = "";
+      const h2 = t.h.ack;
+      t.h.ack = (id, o) => { ackAt = Date.now(); seenAtAck = existsSync(out) ? readFileSync(out, "utf8") : ""; return h2(id, o); };
+      t.push({ id: "l_00000000000000c4", kind: "input", session: "lead", text: "/clear" });
+      expect(await until(() => t.acks.length === 1)).toBe(true);
+      expect(t.acks[0].outcome).toEqual({ result: "spawned" });
+      expect(attachedAt).toBeGreaterThan(0);
+      expect(seenAtAck).toContain("/clear");
+      expect(echoReleasedAt).toBeGreaterThan(0);
+      expect(ackAt).toBeGreaterThanOrEqual(echoReleasedAt); // never before the echo reached the executor
+      // Sample the size for a bounded window after the ack: it never changes.
+      const sizes = new Set<string>();
+      const stop = Date.now() + 300;
+      while (Date.now() < stop) { sizes.add(await size()); await sleep(20); }
+      expect([...sizes]).toEqual(["200x50"]);
+    } finally {
+      big.close();
+    }
+  });
+
+  test("a session that never shows the input is acked as an error, not spawned", async () => {
+    const t = host();
+    run(t.h, { inputEchoMs: 300 });
+    await tmux.newSession({ name: "mute", cwd: root, command: "stty -echo; sleep 30" });
+    t.push({ id: "l_00000000000000c5", kind: "input", session: "mute", text: "/clear" });
+    expect(await until(() => t.acks.length === 1)).toBe(true);
+    expect(t.acks[0].outcome).toEqual({ result: "error", error: "no echo of the input from the session: mute" });
+  });
+
+  test("the same text already on the screen before the input is not proof of delivery", async () => {
+    const t = host();
+    run(t.h, { inputEchoMs: 400 });
+    await tmux.newSession({ name: "old", cwd: root, command: "stty -echo; echo /clear; sleep 30" });
+    t.push({ id: "l_00000000000000c6", kind: "input", session: "old", text: "/clear" });
+    expect(await until(() => t.acks.length === 1)).toBe(true);
+    expect(t.acks[0].outcome).toEqual({ result: "error", error: "no echo of the input from the session: old" });
   });
 
   test("an unknown session and a bad text are acked as errors", async () => {
