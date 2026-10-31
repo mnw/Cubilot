@@ -19,7 +19,7 @@ type TicketRow = { id: string; title: string; status: string; blast_radius: "low
 
 export type TicketFail = { handoff_id: string; findings: { severity: string; text: string }[]; fix_commit: string | null };
 
-/** One check of a delivery (H3): a numbered line of a ticket's acceptance criteria (only the lines of the "Acceptance criteria" block when that heading exists). check_id is `<ticket_id>#<n>`; a ticket with no numbered line has one check, #1, with the whole text. */
+/** One check of a delivery (H3): a numbered line of a ticket's acceptance criteria (only the lines of the "Acceptance criteria" block when that heading exists). check_id is `<ticket_id>#<n>`; a headed block with no numbered line has no check; criteria with no heading and no numbered line have one check, #1, with the whole text. */
 export type CheckRow = { check_id: string; ticket_id: string; text: string };
 
 export function checkRows(ticketId: string, criteria: string): CheckRow[] {
@@ -37,6 +37,7 @@ export function checkRows(ticketId: string, criteria: string): CheckRow[] {
   } else {
     for (const m of criteria.matchAll(/^\s*(\d+)\.\s+(.*)$/gm)) add(m[1], m[2]);
   }
+  if (start >= 0) return rows;
   return rows.length ? rows : [{ check_id: `${ticketId}#1`, ticket_id: ticketId, text: criteria.trim() }];
 }
 

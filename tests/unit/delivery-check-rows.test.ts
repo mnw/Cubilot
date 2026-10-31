@@ -35,10 +35,13 @@ describe("checkRows with an Acceptance criteria heading", () => {
     expect(ids("acceptance criteria\n1. A\n2. B\nSomething else:\n3. C")).toEqual([`${T}#1`, `${T}#2`]);
   });
 
-  test("a heading with no numbered line under it gives one check with the whole text", () => {
-    expect(checkRows(T, "Acceptance criteria:\nVerify:\n  1. x")).toEqual([
-      { check_id: `${T}#1`, ticket_id: T, text: "Acceptance criteria:\nVerify:\n  1. x" },
-    ]);
+  test("a heading with no numbered line under it gives no check", () => {
+    expect(checkRows(T, "Acceptance criteria:\nVerify:\n  1. x")).toEqual([]);
+  });
+
+  test("Out of scope directly after the criteria ends the block", () => {
+    const got = ids("Acceptance criteria:\n  1. A\n  2. B\nOut of scope:\n  1. X\n  2. Y");
+    expect(got).toEqual([`${T}#1`, `${T}#2`]);
   });
 });
 
