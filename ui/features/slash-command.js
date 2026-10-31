@@ -623,10 +623,10 @@ async function sendSlash({ slashCommand, target, args }) {
     (async () => {
       try {
         const result = await pty.ptyCaptureTurn(agent, payload, _CAPTURE_TIMEOUT_MS);
-        if (!result || !result.log_path) return;
+        if (!result || !result.name) return;
         let raw = '';
         try {
-          raw = await pty.ptyReadCapture(result.log_path, null);
+          raw = await pty.ptyReadCapture(agent, result.name, null);
         } catch (e) {
           console.error(`[slash-command] read capture for ${agent}:`, e);
           return;

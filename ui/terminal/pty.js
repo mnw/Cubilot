@@ -56,27 +56,39 @@
     try { return await _invoke()('pty_list'); }
     catch { return []; }
   }
-  // status ∈ { "alt-exit" | "idle-prompt" | "quiescence" | "timeout" }.
-  async function ptyCaptureTurn(agent, input, timeoutMs) {
-    return _invoke()('pty_capture_turn', {
-      agent, input, timeoutMs: timeoutMs ?? null,
-    });
+  // The hub runs these four (hub/features/terminal.ts); the webview calls its routes, not the shell.
+  async function _terminal(path, init) {
+    const r = await window.authedFetch(path, init);
+    if (!r.ok) throw new Error(await parseErrorBody(r));
+    return r;
   }
-  // Path must start with /tmp/cubilot/; maxBytes defaults to 256 KiB.
-  async function ptyReadCapture(logPath, maxBytes) {
-    return _invoke()('pty_read_capture', {
-      logPath, maxBytes: maxBytes ?? null,
+  const _agentPath = (agent) => `/terminal/${encodeURIComponent(agent)}`;
+  // status ∈ { "alt-exit" | "idle-prompt" | "quiescence" | "timeout" }. Resolves to {name, log_path, start_ms, end_ms, status}.
+  async function ptyCaptureTurn(agent, input, timeoutMs) {
+    const r = await _terminal(`${_agentPath(agent)}/capture-turn`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input, timeout_ms: timeoutMs ?? undefined }),
     });
+    return r.json();
+  }
+  // `name` is the capture's file name (result.name). The hub refuses a path outside the agent's capture folder.
+  async function ptyReadCapture(agent, name, maxBytes) {
+    const q = new URLSearchParams({ name });
+    if (maxBytes) q.set('max_bytes', String(maxBytes));
+    return (await _terminal(`${_agentPath(agent)}/capture?${q}`)).text();
   }
   // Idempotent; safe to call on every slash-send.
   async function ptyHealGeometry(agent) {
-    try { return await _invoke()('pty_heal_geometry', { agent }); }
+    try { await _terminal(`${_agentPath(agent)}/heal`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); }
     catch (e) { console.warn('[pty] heal failed for', agent, e); }
   }
-  // Short post-keypress footer reads (no geometry forcing); duration_ms clamped [50, 5000].
+  // Short post-keypress footer reads (no geometry forcing); the hub clamps ms to [0, 2000].
   async function ptyTapRead(agent, durationMs) {
-    try { return await _invoke()('pty_tap_read', { agent, durationMs: durationMs ?? null }); }
-    catch (e) { console.warn('[pty] tap-read failed for', agent, e); return ''; }
+    try {
+      const q = durationMs == null ? '' : `?ms=${encodeURIComponent(durationMs)}`;
+      return await (await _terminal(`${_agentPath(agent)}/tap${q}`)).text();
+    } catch (e) { console.warn('[pty] tap-read failed for', agent, e); return ''; }
   }
   const encoder = new TextEncoder();
   function strToB64(str) {
