@@ -436,12 +436,12 @@ function slashPickerClose() {
 }
 
 // =============================================================================
-// SEND — fan parsed slash sends to Agent PTYs via pty_capture_turn / pty_write
+// SEND — fan parsed slash sends to Agent PTYs via the hub's capture-turn and input routes
 // =============================================================================
 
 function _ptyBridge() {
   const pty = window.__CUBILOT_TERM__?.pty;
-  if (!pty?.ptyCaptureTurn || !pty?.ptyReadCapture || !pty?.ptyWrite || !pty?.strToB64) {
+  if (!pty?.ptyCaptureTurn || !pty?.ptyReadCapture || !pty?.ptyInput) {
     throw new Error('PTY bridge not available');
   }
   return pty;
@@ -583,9 +583,9 @@ async function sendSlash({ slashCommand, target, args }) {
 
   // Split write so the lone \r registers as Enter, not as a newline inside a buffered paste.
   async function _writeAsTyped(agent) {
-    await pty.ptyWrite(agent, pty.strToB64(cmdText));
+    await pty.ptyInput(agent, cmdText);
     await new Promise((r) => setTimeout(r, 60));
-    await pty.ptyWrite(agent, pty.strToB64('\r'));
+    await pty.ptyInput(agent, '\r');
   }
 
   if (!captureable) {
@@ -680,10 +680,9 @@ async function sendShiftTab({ target }) {
   if (pty.ptyHealGeometry) {
     await Promise.all(resolved.map((a) => pty.ptyHealGeometry(a).catch(() => {})));
   }
-  const b64 = pty.strToB64('\x1B[Z');
   const failures = [];
   await Promise.all(resolved.map(async (agent) => {
-    try { await pty.ptyWrite(agent, b64); }
+    try { await pty.ptyInput(agent, '\x1B[Z'); }
     catch (e) { failures.push({ name: agent, reason: e?.message || String(e) }); }
   }));
   const finalResolved = resolved.filter((n) => !failures.find((f) => f.name === n));
