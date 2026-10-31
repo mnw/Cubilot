@@ -6,7 +6,8 @@ import { Database } from "bun:sqlite";
 import { giveProject } from "../helpers/repo";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createTicketKind } from "../../hub/kinds/ticket";
-import { createStageRuntime, DEFAULT_LEASE_MS } from "../../hub/kinds/stage";
+import { DEFAULT_LEASE_MS } from "../../hub/kinds/stage";
+import { disposeRuntimes, trackedRuntime } from "../helpers/stage-runtimes";
 import { makeSSE } from "../../hub/core/sse";
 import type { Entry, HubCapabilities, Scope } from "../../hub/core/types";
 import type { LaunchRequest } from "../../hub/core/launch-queue";
@@ -19,7 +20,7 @@ function makeEnv(o: { role?: string; roster?: string[]; live?: string[] } = {}) 
   createTicketKind(db).migrate(db);
   const failures: string[] = [];
   const live = o.live ?? [];
-  const rt = createStageRuntime(db, {
+  const rt = trackedRuntime(db, {
     ackMs: 60_000, bootGraceMs: 1000, leaseMs: LEASE, liveSessionNames: () => live,
     onFinalFailure: (i) => failures.push(i.reason),
   });
@@ -57,7 +58,7 @@ function makeEnv(o: { role?: string; roster?: string[]; live?: string[] } = {}) 
   return { db, rt, cap, roster, live, sent, stageId, spawn, ackCloses, stage, launches, closes, events, failures };
 }
 
-afterEach(() => {});
+afterEach(disposeRuntimes);
 
 describe("the lease", () => {
   test("the default lease time is 120 s", () => {
