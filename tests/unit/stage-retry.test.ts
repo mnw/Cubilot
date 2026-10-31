@@ -265,3 +265,15 @@ describe("the relaunch waits for the close of the previous session, with a free 
     expect(e.launches()[1].stage_id).not.toBe(e.stageId);
   });
 });
+
+describe("a launch name never collides with a connected roster agent (stage leases)", () => {
+  test("connected roster names 1 to 65 push the relaunch to 66: no fixed upper bound", async () => {
+    const e = makeEnv();
+    e.spawn(e.stageId);
+    for (let n = 1; n <= 65; n++) e.roster.add(`worker-${n}`);
+    expect(await e.turnEnd("worker-1")).toBe("reminder");
+    expect(await e.turnEnd("worker-1")).toBe("stop");
+    e.ackCloses();
+    expect(e.stage()).toMatchObject({ status: "launching", session: "worker-66" });
+  });
+});

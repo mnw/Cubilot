@@ -1520,16 +1520,12 @@ export function createStageRuntime(
     } catch (e) {
       console.error("[stage] reading the live tmux sessions failed:", (e as Error).message);
     }
-    if (cap) {
-      for (let n = 1; n <= 64; n++) {
-        const name = `${role}-${n}`;
-        if (!used.has(name) && (cap.agents?.connectionCount ? cap.agents.connectionCount(name) > 0 : !!cap.agents?.get(name))) used.add(name);
-      }
-    }
     // A passed stage keeps its session until its turn ends: the name is not free yet.
     for (const name of awaitingClose) if (name.startsWith(`${role}-`)) used.add(name);
+    // A roster agent is in use only while it has an open agent stream. Check each candidate: no fixed upper bound.
+    const connected = (name: string): boolean => (cap?.agents?.connectionCount ? cap.agents.connectionCount(name) > 0 : !!cap?.agents?.get(name));
     let n = 1;
-    while (used.has(`${role}-${n}`)) n++;
+    while (used.has(`${role}-${n}`) || (cap && connected(`${role}-${n}`))) n++;
     return `${role}-${n}`;
   }
 
