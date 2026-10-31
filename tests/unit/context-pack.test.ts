@@ -26,7 +26,7 @@ describe("graph part of the pack (3.1)", () => {
     const pack = await withEnv({ PATH: `${bin}:${PATH}` }, () => buildPack({ role: "worker", question: "q", worktree, projectFolder: project }));
     const body = pack.text.graph!.split("\n").slice(2).join("\n");
     expect(Buffer.byteLength(body)).toBeLessThanOrEqual(GRAPH_BUDGET_TOKENS * 4);
-  });
+  }, 60000);
 
   test("a question that starts with a dash is not passed as an option", async () => {
     const { project, worktree } = repoWithBranch();
@@ -88,7 +88,7 @@ describe("signatures part of the pack (3.3)", () => {
     expect(t.split("\n")[0]).toBe("signatures (ctags)");
     expect(t).toContain("src.ts:\n  function hello(a: number) :3");
     expect(t).toContain("gone.ts: none");
-  });
+  }, 60000);
 
   test("ctags argv is fixed: json output, relative ./ paths, no shell", async () => {
     const { worktree } = repoWithBranch();

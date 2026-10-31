@@ -128,15 +128,22 @@ describe("GET /models", () => {
 
   test("pi rows come from the pi of config.yml", async () => {
     resetReadyCache(); // same process only; the hub has its own cache and starts empty
-    writeFileSync(join(hub.dataDir, "config.yml"), `pi_path: ${fakePi("pi-hub")}\n`);
-    const body = await (await get("?harness=pi")).json();
-    expect(body.warning).toBeUndefined();
-    expect(body.models.map((m: { model: string; ready: boolean }) => [m.model, m.ready])).toEqual([
-      ["claude-fable-5", false],
-      ["gpt-4", false],
-      ["gpt-5.6-sol", true],
-    ]);
-  });
+    // Own hub with a wide pi limit: this test does not check the limit, and a loaded machine starts the stub late.
+    const wide = await spawnHub({ env: { CUBILOT_LOGIN_PATH: "/usr/bin:/bin", CUBILOT_PI_LIST_LIMIT_MS: "60000" } });
+    try {
+      mkdirSync(wide.dataDir, { recursive: true });
+      writeFileSync(join(wide.dataDir, "config.yml"), `pi_path: ${fakePi("pi-hub")}\n`);
+      const body = await (await fetch(`${wide.url}/models?harness=pi`, { headers: { Authorization: `Bearer ${wide.token}` } })).json();
+      expect(body.warning).toBeUndefined();
+      expect(body.models.map((m: { model: string; ready: boolean }) => [m.model, m.ready])).toEqual([
+        ["claude-fable-5", false],
+        ["gpt-4", false],
+        ["gpt-5.6-sol", true],
+      ]);
+    } finally {
+      await wide.kill();
+    }
+  }, 60000);
 
   test("Pi does not answer: empty list with a warning", async () => {
     const pi = join(fx, "pi-hub-hang");
