@@ -15,7 +15,10 @@ export type TerminalDeps = {
   capturesRoot: string;
 };
 
-const route = (suffix: string) => new RegExp(`^/terminal/([^/]+)/${suffix}$`);
+const CAPTURE_TURN_RE = /^\/terminal\/([^/]+)\/capture-turn$/;
+const TAP_RE = /^\/terminal\/([^/]+)\/tap$/;
+const CAPTURE_RE = /^\/terminal\/([^/]+)\/capture$/;
+const HEAL_RE = /^\/terminal\/([^/]+)\/heal$/;
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 
 export function createTerminalFeature({ tmux, capturesRoot }: TerminalDeps): HubFeature {
@@ -35,7 +38,7 @@ export function createTerminalFeature({ tmux, capturesRoot }: TerminalDeps): Hub
     routes: [
       {
         method: "POST",
-        path: route("capture-turn"),
+        path: CAPTURE_TURN_RE,
         auth: "mutating",
         handler: async (req, _cap, params) => {
           const t = await target(params.id);
@@ -63,7 +66,7 @@ export function createTerminalFeature({ tmux, capturesRoot }: TerminalDeps): Hub
       },
       {
         method: "GET",
-        path: route("tap"),
+        path: TAP_RE,
         auth: "read",
         handler: async (req, _cap, params) => {
           const t = await target(params.id);
@@ -75,7 +78,7 @@ export function createTerminalFeature({ tmux, capturesRoot }: TerminalDeps): Hub
       },
       {
         method: "GET",
-        path: route("capture"),
+        path: CAPTURE_RE,
         auth: "read",
         handler: async (req, _cap, params) => {
           // A log outlives its session, so this route checks the name only.
@@ -98,7 +101,7 @@ export function createTerminalFeature({ tmux, capturesRoot }: TerminalDeps): Hub
       },
       {
         method: "POST",
-        path: route("heal"),
+        path: HEAL_RE,
         auth: "mutating",
         handler: async (_req, _cap, params) => {
           const t = await target(params.id);
