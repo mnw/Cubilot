@@ -49,6 +49,8 @@ export type ExecutorDeps = {
   closeRetryMs?: number;
   /** The input session stays attached this long after the write (default 150 ms). */
   inputHoldMs?: number;
+  /** Test hook: awaited after a launch has its outcome and before it removes its map entry. */
+  beforeLaunchCleanup?: (req: LaunchRequest) => void | Promise<void>;
 };
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -63,7 +65,8 @@ export function startLaunchExecutor(host: ExecutorHost, deps: ExecutorDeps): { s
   const ac = new AbortController();
 
   /** Session names with a launch in progress. A close for the name waits until the launch ends (no "no such session" before new-session). */
-  const launching = new Map<string, Promise<void>>();
+  type Launch = { work: Promise<AckOutcome>; wait: Promise<void>; finished: boolean };
+  const launching = new Map<string, Launch>();
   /** Close ids that ended for good (killed, or absent): a repeated id only sends the stored ack again. */
   const closed = new Map<string, AckOutcome>();
   const closing = new Set<string>();
@@ -116,7 +119,7 @@ export function startLaunchExecutor(host: ExecutorHost, deps: ExecutorDeps): { s
     closing.add(req.id);
     try {
       const wait = launching.get(req.session);
-      if (wait) await wait;
+      if (wait) await wait.wait;
       let outcome: AckOutcome;
       try {
         if (!deps.tmux) throw new Error("tmux is not available");
@@ -157,10 +160,24 @@ export function startLaunchExecutor(host: ExecutorHost, deps: ExecutorDeps): { s
     } else if (req.kind === "input") {
       void runInput(req).then((o) => reply(req.id, o));
     } else {
+      // One launch of a session at a time: a later request (a retry after the ack time-out) waits for the running
+      // launch and gets its outcome. Only a launch whose work is not finished is joined.
+      const running = launching.get(req.session);
+      if (running && !running.finished) {
+        void running.work.then((o) => reply(req.id, o));
+        return;
+      }
       const work = runLaunch(req);
-      launching.set(req.session, work.then(() => {}));
+      const entry: Launch = { work, wait: work.then(() => {}), finished: false };
+      void work.then(() => { entry.finished = true; });
+      launching.set(req.session, entry);
       void work.then(async (o) => {
-        launching.delete(req.session);
+        try {
+          await deps.beforeLaunchCleanup?.(req);
+        } finally {
+          // Only the launch that set the entry removes it.
+          if (launching.get(req.session) === entry) launching.delete(req.session);
+        }
         await reply(req.id, o);
       });
     }

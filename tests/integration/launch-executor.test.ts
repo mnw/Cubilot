@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startLaunchExecutor, inputLine, type ExecutorHost } from "../../hub/core/launch-executor";
 import type { AckOutcome, AckStatus, LaunchRequest } from "../../hub/core/launch-queue";
+import { prepareLaunch } from "../../hub/core/launch-role";
 import { createTmux } from "../../hub/core/tmux";
 import { resolveTmuxBin } from "../helpers/tmux";
 
@@ -139,6 +140,62 @@ describe("Stage launch", () => {
     expect(await until(() => t.acks.length === 3)).toBe(true);
     expect(t.acks.map((a) => a.outcome)).toEqual([{ result: "spawned" }, { result: "spawned" }, { result: "spawned" }]);
     expect(await tmux.listSessions()).toEqual(["validator-1"]);
+  });
+});
+
+describe("One launch of a session at a time", () => {
+  /** A prepare that waits for its own gate, then does the real work. */
+  function gated(n: number) {
+    const opens: Array<() => void> = [];
+    const gates = Array.from({ length: n }, () => new Promise<void>((r) => opens.push(r)));
+    let calls = 0;
+    const prepare: typeof prepareLaunch = async (...a) => {
+      await gates[calls++];
+      return prepareLaunch(...a);
+    };
+    return { prepare, open: (i: number) => opens[i](), calls: () => calls };
+  }
+
+  test("a retry while the first launch still runs starts no second launch and gets the outcome of the first", async () => {
+    const t = host();
+    const g = gated(2);
+    let newSessions = 0;
+    const counted = { ...tmux, newSession: (o: Parameters<typeof tmux.newSession>[0]) => { newSessions++; return tmux.newSession(o); } };
+    run(t.h, { tmux: counted, prepare: g.prepare });
+    t.push(launchReq());
+    t.push(launchReq({ id: "l_00000000000000a5" })); // the retry after the ack time-out
+    await sleep(50);
+    expect(g.calls()).toBe(1);
+    g.open(0);
+    expect(await until(() => t.acks.length === 2)).toBe(true);
+    expect(t.acks.map((a) => a.outcome)).toEqual([{ result: "spawned" }, { result: "spawned" }]);
+    expect(t.acks.map((a) => a.id).sort()).toEqual(["l_00000000000000a1", "l_00000000000000a5"]);
+    expect(g.calls()).toBe(1);
+    expect(newSessions).toBe(1);
+    expect(await tmux.listSessions()).toEqual(["validator-1"]);
+  });
+
+  test("the cleanup of launch 1 does not remove the map entry of launch 2: a close still waits for launch 2", async () => {
+    const t = host();
+    const g = gated(2);
+    let release: () => void = () => {};
+    const held = new Promise<void>((r) => { release = r; });
+    let cleanups = 0;
+    run(t.h, { prepare: g.prepare, beforeLaunchCleanup: () => (cleanups++ === 0 ? held : undefined) });
+    t.push(launchReq());
+    g.open(0);
+    expect(await until(async () => await tmux.hasSession("validator-1"))).toBe(true); // launch 1 has done its work
+    await sleep(50); // work finished; its cleanup is held
+    t.push(launchReq({ id: "l_00000000000000a6" })); // launch 2 starts: prepare is gated
+    expect(await until(() => g.calls() === 2)).toBe(true);
+    release(); // cleanup of launch 1 runs now
+    expect(await until(() => t.acks.length === 1)).toBe(true);
+    t.push({ id: "l_00000000000000b4", kind: "close", session: "validator-1" });
+    await sleep(150);
+    expect(t.acks.some((a) => a.id === "l_00000000000000b4")).toBe(false);
+    g.open(1);
+    expect(await until(() => t.acks.some((a) => a.id === "l_00000000000000b4"))).toBe(true);
+    expect(await tmux.hasSession("validator-1")).toBe(false);
   });
 });
 
