@@ -17,7 +17,8 @@ import { insertEvent } from "../core/events";
 import { mintHandoffId, ts, validName, validRoomLabel } from "../core/ids";
 import { pausedRefusal } from "../core/auth";
 import { getRoomSettings, STAGE_ROLES } from "../core/ledger";
-import { ROLE_RECIPIENT_PREFIX, type StageHooks } from "./stage";
+import { ROLE_RECIPIENT_PREFIX, specFailState, type StageHooks } from "./stage";
+import { roomLead } from "./ticket";
 import {
   writeNutshellInTx,
   nutshellEntry,
@@ -160,6 +161,7 @@ export function handoffEntry(
   snapshot: HandoffSnapshot,
   eventKind: "handoff.new" | "handoff.update",
   replay = false,
+  lead: string | null = null,
 ): Entry {
   return {
     from: snapshot.from_agent,
@@ -174,6 +176,8 @@ export function handoffEntry(
     expires_at_ms: snapshot.expires_at_ms,
     replay,
     snapshot,
+    // The room lead: the bridge of the lead shows a result as a summary (human-touchpoints-checkpoint 13.1).
+    ...(lead ? { lead } : {}),
   };
 }
 
@@ -187,6 +191,7 @@ type CreateInput = {
   context?: unknown;
   ttl_seconds: number;
   room: string;
+  lead?: string | null;
 };
 
 const createHandoffVerb: VerbDecl<HandoffSnapshot, CreateInput> = {
@@ -222,7 +227,7 @@ const createHandoffVerb: VerbDecl<HandoffSnapshot, CreateInput> = {
         context: payload.context ?? null,
         ttl_seconds: payload.ttl_seconds,
       }),
-      entry: (post) => handoffEntry(post, "handoff.new"),
+      entry: (post) => handoffEntry(post, "handoff.new", false, payload.lead ?? null),
     };
   },
   scope: (post) => ({ kind: "to-agents", agents: [post.to_agent] }),
@@ -366,7 +371,7 @@ const SPEC_REQUEST_TEXT_MAX = 20_000;
 export function createSystemHandoff(db: Database, cap: HubCapabilities, h: { to: string; task: string; context: unknown; room: string }): HandoffSnapshot {
   const entity = createLedgerEntity({ decl: handoffDecl, db });
   const id = mintHandoffId();
-  return entity.apply(id, createHandoffVerb, { id, from: "system", to: h.to, task: h.task, context: h.context, ttl_seconds: HANDOFF_TTL_DEFAULT_SECONDS, room: h.room }, "system", cap).snapshot;
+  return entity.apply(id, createHandoffVerb, { id, from: "system", to: h.to, task: h.task, context: h.context, ttl_seconds: HANDOFF_TTL_DEFAULT_SECONDS, room: h.room, lead: roomLead(cap, h.room) }, "system", cap).snapshot;
 }
 
 export function createHandoffKind(db: Database, stage?: StageHooks): KindModule {
@@ -403,8 +408,10 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
         if (!validName(from)) return Response.json({ error: "invalid from" }, { status: 400 });
         if (cap.agents.isPaused(from)) return pausedRefusal();
         if (toRole !== "") {
-          if (!(STAGE_ROLES as readonly string[]).includes(toRole)) {
-            return Response.json({ error: `invalid to_role (one of ${STAGE_ROLES.join(", ")})` }, { status: 400 });
+          // `retrospective` is a stage role that only the hub starts: no handoff names it.
+          const handoffRoles = STAGE_ROLES.filter((r) => r !== "retrospective");
+          if (!(handoffRoles as readonly string[]).includes(toRole)) {
+            return Response.json({ error: `invalid to_role (one of ${handoffRoles.join(", ")})` }, { status: 400 });
           }
         } else if (!validName(to)) return Response.json({ error: "invalid to" }, { status: 400 });
         if (!task) return Response.json({ error: "task required" }, { status: 400 });
@@ -435,6 +442,13 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
           return Response.json({ error: `unknown sender ${from}: connect /agent-stream first` }, { status: 409 });
         }
         const fromAgent = cap.agents.get(from)!;
+        // G2: a handoff with the stage_id of a running worker stage is checked first, so a missing or wrong ticket_id
+        // gets the worker refusal and stage.rejected, not a generic 400 or 404.
+        let workerResult: string[] | null = null;
+        if (stage?.isWorkerResult?.(from, body.context)) {
+          workerResult = stage.checkResult(from, body.context, cap, to);
+          if (workerResult?.length) return Response.json({ error: "result rejected", errors: workerResult }, { status: 400 });
+        }
         let handoffRoom: string;
         let ticketId: string | null = null;
         // A spec review (spec-review-stage 2.1): to_role validator + review "spec" + request_id; it names a request, not a ticket.
@@ -467,6 +481,32 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
             return Response.json({ error: "context.commit must be a commit hash" }, { status: 400 });
           }
           handoffRoom = fromAgent.room ?? cap.config.defaultRoom;
+          const humanRows = new Map<string, { status: string; request_id: string | null; room: string }>();
+          // The human has no room: the review takes the room of its named tickets (spec-fail-gate 1). They must exist and share one room.
+          if (from === cap.config.humanName) {
+            const ids = c.ticket_ids as string[] | undefined;
+            if (!ids?.length) return Response.json({ error: "a spec review from the human needs context.ticket_ids" }, { status: 400 });
+            // One query loads every named ticket; the scope check below reuses these rows.
+            const uniq = [...new Set(ids)];
+            const found = db
+              .query<{ id: string; status: string; request_id: string | null; room: string }, string[]>(
+                `SELECT id, status, request_id, room FROM tickets WHERE id IN (${uniq.map(() => "?").join(",")})`,
+              )
+              .all(...uniq);
+            for (const t of found) humanRows.set(t.id, t);
+            const missing = uniq.find((id) => !humanRows.has(id));
+            if (missing) return Response.json({ error: `unknown ticket ${missing}` }, { status: 400 });
+            const rooms = new Set(found.map((t) => t.room));
+            if (rooms.size !== 1) return Response.json({ error: `context.ticket_ids must be in one room, found: ${[...rooms].sort().join(", ")}` }, { status: 400 });
+            handoffRoom = [...rooms][0];
+          }
+          // The FAIL limit (spec-fail-gate 1): after two FAILs since the last PASS only the human sends this review.
+          if (from !== cap.config.humanName) {
+            const { fails } = specFailState(db, handoffRoom, specRequestId);
+            if (fails >= 2) {
+              return Response.json({ error: `request ${specRequestId} has ${fails} spec FAILs since its last PASS: the human must send this review` }, { status: 409 });
+            }
+          }
           // The stored context names the request, so the launch finds the commit of this review (spec-review 2.4).
           // No commit named: pin HEAD of the room's project as it is now, so a later commit does not move this review (2.4b).
           let commit = c.commit;
@@ -481,7 +521,7 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
           const named = c.ticket_ids as string[] | undefined;
           if (named) {
             for (const id of new Set(named)) {
-              const t = db.query<{ status: string; request_id: string | null; room: string }, [string]>("SELECT status, request_id, room FROM tickets WHERE id = ?").get(id);
+              const t = humanRows.get(id) ?? db.query<{ status: string; request_id: string | null; room: string }, [string]>("SELECT status, request_id, room FROM tickets WHERE id = ?").get(id);
               if (!t || t.room !== handoffRoom) return Response.json({ error: `unknown ticket ${id} in room ${handoffRoom}` }, { status: 400 });
               if (t.status !== "draft") return Response.json({ error: `ticket ${id} is ${t.status}, not draft` }, { status: 400 });
               if (t.request_id !== specRequestId) return Response.json({ error: `ticket ${id} is not in request ${specRequestId}` }, { status: 400 });
@@ -501,7 +541,8 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
             return Response.json({ error: "a to_role handoff needs context.ticket_id" }, { status: 400 });
           }
           // The commit a Tester, Validator, Editor or Reviewer worktree is detached at (stage-sessions 4.5).
-          if (ctx.commit !== undefined && (typeof ctx.commit !== "string" || !/^[0-9a-f]{7,64}$/i.test(ctx.commit))) {
+          // A worker result with a bad hash goes to the worker check below, which gives the worker refusal and stage.rejected (G2).
+          if (ctx.commit !== undefined && !stage?.isWorkerResult?.(from, body.context) && (typeof ctx.commit !== "string" || !/^[0-9a-f]{7,64}$/i.test(ctx.commit))) {
             return Response.json({ error: "context.commit must be a commit hash" }, { status: 400 });
           }
           const t = db.query<{ room: string }, [string]>("SELECT room FROM tickets WHERE id = ?").get(ctx.ticket_id);
@@ -532,20 +573,22 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
         if (done) return Response.json({ error: done }, { status: 409 });
 
         // A result handoff of a stage session must pass the schema check; a failing one records nothing (stage-sessions 5.1).
-        const resultErrors = stage?.checkResult(from, body.context, cap, to) ?? null;
+        const resultErrors = workerResult ?? stage?.checkResult(from, body.context, cap, to) ?? null;
         if (resultErrors?.length) return Response.json({ error: "result rejected", errors: resultErrors }, { status: 400 });
 
         const id = mintHandoffId();
         try {
+          // The stamp computes the spec FAIL count once; the stage result below reads it from the stamped context.
+          const storedContext = resultErrors ? (stage?.stampResult(from, body.context) ?? body.context) : body.context;
           const r = entity.apply(
             id,
             createHandoffVerb,
-            { id, from, to, task, context: body.context, ttl_seconds: ttl, room: handoffRoom },
+            { id, from, to, task, context: storedContext, ttl_seconds: ttl, room: handoffRoom, lead: roomLead(cap, handoffRoom) },
             from,
             cap,
           );
           // A valid result passes the stage of the sender (stage-sessions 5.2); the session closes at its next end of turn.
-          if (resultErrors) stage?.onResult(from, body.context, cap);
+          if (resultErrors) stage?.onResult(from, storedContext, cap);
           // The evaluator runs in the same request, after the handoff is recorded (stage.ts logs its own failure).
           if (isSpec) stage?.onSpecHandoff({ request_id: specRequestId, scope: specScope }, cap);
           else if (toRole !== "" && ticketId && stage) {
@@ -711,6 +754,28 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
     },
 
     {
+      // The full handoff, for the `read_handoff` tool. Room-scoped: the human reads every room, an agent only its own.
+      // `agent` is self-asserted like every `by`; the bearer token is the hub's auth.
+      method: "GET",
+      path: /^\/handoffs\/([^/]+)$/,
+      auth: "read",
+      handler: (req, cap, params) => {
+        const id = params.id;
+        if (!HANDOFF_ID_RE.test(id)) return Response.json({ error: "invalid handoff id" }, { status: 400 });
+        const name = (new URL(req.url).searchParams.get("agent") ?? "").trim();
+        if (!validName(name)) return Response.json({ error: "invalid agent" }, { status: 400 });
+        const caller = cap.agents.get(name);
+        if (!caller) return Response.json({ error: `unknown agent: ${name}` }, { status: 400 });
+        const snap = entity.load(id);
+        if (!snap) return Response.json({ error: "not found" }, { status: 404 });
+        if (name !== cap.config.humanName && caller.room !== snap.room) {
+          return Response.json({ error: "handoff is in another room" }, { status: 403 });
+        }
+        return Response.json(snap);
+      },
+    },
+
+    {
       method: "GET",
       path: "/handoffs",
       auth: "read",
@@ -753,7 +818,7 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
     return entity
       .listByStatus({ status: "pending", limit: 1000 })
       .filter((s) => s.from_agent === agent.name || s.to_agent === agent.name)
-      .map((s) => handoffEntry(s, "handoff.new", true));
+      .map((s) => handoffEntry(s, "handoff.new", true, roomLead(_cap, s.room)));
   }
 
   return {
@@ -761,7 +826,7 @@ export function createHandoffKind(db: Database, stage?: StageHooks): KindModule 
     migrate: (d: Database) => entity.migrate(d),
     routes: withLedgerRequired(routes),
     pendingFor,
-    toolNames: ["send_handoff", "accept_handoff", "decline_handoff", "cancel_handoff"],
+    toolNames: ["send_handoff", "accept_handoff", "decline_handoff", "cancel_handoff", "read_handoff"],
   };
 }
 

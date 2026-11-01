@@ -4,7 +4,7 @@
 import type { Database } from "bun:sqlite";
 import { existsSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import type { HubFeature, Entry } from "../core/types";
+import type { HubFeature, HubCapabilities, Entry } from "../core/types";
 import { validRoomLabel } from "../core/ids";
 import {
   DEFAULT_ROLE_LIMITS,
@@ -21,6 +21,8 @@ export type TranscriptDeps = {
   db: Database;
   chatLog: Entry[];
   roomSummariser: RoomSummariser | null;
+  /** Called after a saved change of role_limits, so the stages that wait for a slot can start. */
+  onRoleLimitsChanged?: (room: string, cap: HubCapabilities) => void;
 };
 
 const ROOM_SETTINGS_RE = /^\/rooms\/([^/]+)\/settings$/;
@@ -92,8 +94,9 @@ export function createTranscriptFeature(deps: TranscriptDeps): HubFeature {
         method: "PUT",
         path: ROOM_SETTINGS_RE,
         auth: "mutating",
+        caller: "human",
         requiresLedger: true,
-        handler: async (req, _cap, params) => {
+        handler: async (req, cap, params) => {
           const room = decodeRoom(params.id);
           if (!room) return Response.json({ error: "invalid room label" }, { status: 400 });
           type Body = {
@@ -180,6 +183,13 @@ export function createTranscriptFeature(deps: TranscriptDeps): HubFeature {
             partial.room_summary_enabled = body.room_summary_enabled;
           }
           setRoomSettings(deps.db, room, partial);
+          if ("role_limits" in partial) {
+            try {
+              deps.onRoleLimitsChanged?.(room, cap);
+            } catch (e) {
+              console.error(`[settings] starting waiting stages of ${room} failed:`, e);
+            }
+          }
           if (partial.room_summary_enabled === true && deps.roomSummariser) {
             deps.roomSummariser
               .maybeBackfill(room)

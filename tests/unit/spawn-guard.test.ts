@@ -12,6 +12,7 @@ describe("spawnRoleMismatch", () => {
     const ctx: any = vm.createContext({
       spawnRoleEl: { value }, spawnRoles: new Map(staged.map((n) => [n, {}])),
       roleList: shown === null ? null : { shown: () => shown },
+      modelGrid: { ROLE_PROMPT: "Pick a role" },
     });
     vm.runInContext(block + ";this.r = spawnRoleMismatch();", ctx);
     return ctx.r;
@@ -19,13 +20,13 @@ describe("spawnRoleMismatch", () => {
 
   test("window and value agree: no mismatch", () => {
     expect(run("reviewer", "reviewer", ["reviewer"])).toBe("");
-    expect(run("", "None", ["reviewer"])).toBe("");
+    expect(run("", "Pick a role", ["reviewer"])).toBe("");
   });
-  test("the window shows a role but the value is None: refused", () => {
-    expect(run("", "reviewer", ["reviewer"])).toContain('shows "reviewer" but the role is "None"');
+  test("the window shows a role but the value is empty: refused", () => {
+    expect(run("", "reviewer", ["reviewer"])).toContain('shows "reviewer" but the role is "Pick a role"');
   });
-  test("the window shows None but the value is a role: refused", () => {
-    expect(run("worker", "None", ["worker"])).toContain('role is "worker"');
+  test("the window shows the prompt but the value is a role: refused", () => {
+    expect(run("worker", "Pick a role", ["worker"])).toContain('role is "worker"');
   });
   test("a value that is not a staged role is refused", () => {
     expect(run("ghost", "ghost", ["worker"])).toContain("not in the role list");
@@ -126,13 +127,17 @@ describe("ptySpawn and the launch alert", () => {
     new Function("window", "TextEncoder", readFileSync("ui/terminal/pty.js", "utf8"))(win, TextEncoder);
     return win.__CUBILOT_TERM__.pty;
   };
-  test("attachOnly is sent only when true", async () => {
+  test("attachOnly creates nothing; otherwise the hub creates the session; no Tauri command", async () => {
     const seen: any[] = [];
-    const pty = load(async (_c: string, a: any) => { seen.push(a); });
+    const posts: string[] = [];
+    const win: any = { __TAURI__: { core: { invoke: async (c: string, a: any) => { seen.push([c, a]); } } }, authedFetch: async (p: string) => { posts.push(p); return { ok: true }; } };
+    new Function("window", "TextEncoder", readFileSync("ui/terminal/pty.js", "utf8"))(win, TextEncoder);
+    const pty = win.__CUBILOT_TERM__.pty;
     await pty.ptySpawn("a", "/tmp", null, null, null, null, null, null, null, true);
+    expect(posts).toEqual([]);
     await pty.ptySpawn("b", "/tmp");
-    expect(seen[0].attachOnly).toBe(true);
-    expect("attachOnly" in seen[1]).toBe(false);
+    expect(posts).toEqual(["/sessions"]);
+    expect(seen).toEqual([]);
   });
   test("a Rust error (a string) reaches the Launch failed alert unchanged", async () => {
     const block = between("  async function handleLaunch(", "  async function handleOpenEditor(");

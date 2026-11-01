@@ -4,7 +4,10 @@
 // and the launch queue (4.1) are added by their own tickets; no route here writes a stage.
 
 import { join } from "node:path";
-import { renderFirstMessage, renderSpecFirstMessage } from "../core/first-message";
+import { renderFirstMessage, renderRetroFirstMessage, renderSpecFirstMessage, type PackText } from "../core/first-message";
+import { namedPaths, packCommandCount, type Pack, type PackInput } from "../core/context-pack";
+import { renderStable } from "../core/primer";
+import { readNutshell } from "../nutshell";
 import { createWorktree, removeWorktree, worktreesRoot } from "../core/worktrees";
 import type { Database } from "bun:sqlite";
 import type {
@@ -18,33 +21,44 @@ import type {
   StateMachineDecl,
   VerbDecl,
 } from "../core/types";
-import { createLedgerEntity, ledgerConflictResponse, withLedgerRequired } from "../core/ledger-entity";
+import { createLedgerEntity, withLedgerRequired } from "../core/ledger-entity";
 import { validName, validRoomLabel } from "../core/ids";
+import { deliveriesNotInMain } from "../core/delivery-report";
+import { openBlockerIds } from "./ticket-blockers";
+import { flowReport } from "../core/flow";
+import { checkRetroResult, localDate, previousProposalTitles, retroDrafts, retroWeekAt, retroWeekWindow, roomsWithTicketEvents, savedDoneImprovements, writeEvidenceFile } from "../core/retro";
 import { getRoomSettings, DEFAULT_ROLE_LIMITS, DEFAULT_STAGE_TIMEOUT_MIN, STAGE_ROLES, type StageRole } from "../core/ledger";
 import { LedgerConflict } from "../core/types";
+import type { LaunchRecord } from "../core/launch-record";
+import { createRequestBySystem, heldForApprove, requestFacts, scopeChange, type ScopeChange } from "./request";
+import type { ExecutorHost } from "../core/launch-executor";
 import { createLaunchQueue, type LaunchEnd, type LaunchQueue, type LaunchRequest } from "../core/launch-queue";
 import { roleHarness } from "../core/role-harness";
-import { makeSSE } from "../core/sse";
-import { assignBySystemInTx, closeReviewedBySystemInTx, queueBySystemInTx } from "./ticket";
+import { roleModelFor, secondReviewModel, type RoleModel } from "../core/role-models";
+import { metricsByRole, recordStageMetrics, stagesMissingMetrics, type Launch } from "../core/stage-metrics";
+import { assignBySystemInTx, closeReviewedBySystemInTx, createDraftBySystem, queueBySystemInTx, reviewBySystem } from "./ticket";
+import type { CancelTraceCaller, CancelTraceInput } from "./cancel-trace";
 
-export type StageStatus = "queued" | "launching" | "running" | "retrying" | "passed" | "failed";
+export type StageStatus = "queued" | "launching" | "running" | "retrying" | "passed" | "failed" | "cancelled";
 
 export type StageSnapshot = {
   id: string;
   ticket_id: string | null;
   request_id: string | null;
-  review: "spec" | null;
+  review: "spec" | "retro" | null;
   verdict: string | null;
   role: string;
   attempt: number;
   status: StageStatus;
   session: string | null;
   slot_seq: number | null;
+  /** Why a stage was cancelled: the reason of its last `stage.cancelled` event (no column). Null for any other status. */
+  reason: string | null;
   version: number;
 };
 
 const STAGE_ID_RE = /^s_[0-9a-f]{16}$/;
-const STAGE_STATUSES = new Set<string>(["queued", "launching", "running", "retrying", "passed", "failed"]);
+const STAGE_STATUSES = new Set<string>(["queued", "launching", "running", "retrying", "passed", "failed", "cancelled"]);
 
 // created_seq and updated_seq live in the table (the queue order and the audit) but not in the
 // snapshot: updated_seq is `version`, and the transitions set created_seq in 2.2.
@@ -64,18 +78,19 @@ const stageDecl: StateMachineDecl<StageSnapshot> = {
     slot_seq: "INTEGER_NULL",
   },
   forColumn: "role",
-  terminalStatuses: new Set(["passed", "failed"]),
+  terminalStatuses: new Set(["passed", "failed", "cancelled"]),
   rowToSnapshot: (row) => ({
     id: row.id as string,
     ticket_id: (row.ticket_id as string | null) ?? null,
     request_id: (row.request_id as string | null) ?? null,
-    review: (row.review as "spec" | null) ?? null,
+    review: (row.review as "spec" | "retro" | null) ?? null,
     verdict: (row.verdict as string | null) ?? null,
     role: row.role as string,
     attempt: Number(row.attempt),
     status: row.status as StageStatus,
     session: (row.session as string | null) ?? null,
     slot_seq: row.slot_seq == null ? null : Number(row.slot_seq),
+    reason: null,
     version: Number(row.version ?? 0),
   }),
   snapshotToRow: (snap) => {
@@ -102,25 +117,47 @@ export function stageEntry(snapshot: StageSnapshot, eventKind: string, room: str
   };
 }
 
+/** The reason of the last `stage.cancelled` event of a cancelled stage (one event read); any other snapshot is returned as it is. */
+function withReason(db: Database, snap: StageSnapshot): StageSnapshot;
+function withReason(db: Database, snap: StageSnapshot | null): StageSnapshot | null;
+function withReason(db: Database, snap: StageSnapshot | null): StageSnapshot | null {
+  if (!snap || snap.status !== "cancelled") return snap;
+  const row = db
+    .query<{ payload_json: string }, [string]>("SELECT payload_json FROM events WHERE entity_id = ? AND kind = 'stage.cancelled' ORDER BY seq DESC LIMIT 1")
+    .get(snap.id);
+  let reason: string | null = null;
+  try {
+    reason = (JSON.parse(row?.payload_json ?? "{}") as { reason?: string | null }).reason ?? null;
+  } catch { /* an unreadable payload gives no reason */ }
+  return { ...snap, reason };
+}
+
 // ---------- Transitions ----------
 
 // The only moves a stage makes. `queued → failed` and `launching → failed` carry the launch errors that
 // count no attempt (no project folder). `retrying → launching` is the relaunch and raises the attempt.
 const MOVES: Record<StageStatus, readonly StageStatus[]> = {
-  queued: ["launching", "failed"],
-  launching: ["running", "retrying", "failed"],
-  running: ["passed", "retrying", "failed"],
-  retrying: ["launching", "failed"],
+  queued: ["launching", "failed", "cancelled"],
+  launching: ["running", "retrying", "failed", "cancelled"],
+  running: ["passed", "retrying", "failed", "cancelled"],
+  retrying: ["launching", "failed", "cancelled"],
   passed: [],
   failed: [],
+  cancelled: [],
 };
 const MAX_ATTEMPT = 2;
-const TERMINAL = new Set<StageStatus>(["passed", "failed"]);
+/** The default lease time of a stage session. The agent stream beats every 15 s, so 120 s is eight missed beats. */
+export const DEFAULT_LEASE_MS = 120_000;
+const TERMINAL = new Set<StageStatus>(["passed", "failed", "cancelled"]);
 
 export type StageCreateInput = {
   ticket_id?: string | null;
   request_id?: string | null;
-  review?: "spec" | null;
+  review?: "spec" | "retro" | null;
+  /** The room of a retro stage: it has no ticket and no scope tickets to tell it. Ignored for any other stage. */
+  room?: string;
+  /** The ISO week (`YYYY-Www`) of a retro stage. The unique index allows one stage that is not cancelled for each room and week. */
+  retro_week?: string;
   role: string;
 };
 
@@ -133,6 +170,8 @@ export type StageMoveInput = {
   verdict?: string | null;
   /** Why an attempt ended (`retrying`, `failed`): kept in the event, so a restart can still give it to the relaunch (5.3b). */
   reason?: string;
+  /** Set on `launching`: what the metrics row of this attempt needs. It goes into the event payload (context-pack 5.1). */
+  launch?: Launch;
 };
 
 function mintStageId(): string {
@@ -149,6 +188,11 @@ const createVerb: VerbDecl<StageSnapshot, StageCreateInput & { id: string }> = {
   decide(prior, p): Decision<StageSnapshot> {
     if (prior) return { kind: "conflict", httpStatus: 409, message: `stage ${p.id} already exists` };
     const review = p.review ?? null;
+    if (review === "retro") {
+      if (p.role !== "retrospective" || p.ticket_id || !p.room) return { kind: "conflict", httpStatus: 400, message: "a retro stage is role retrospective, has a room and no ticket" };
+    } else if (p.role === "retrospective") {
+      return { kind: "conflict", httpStatus: 400, message: "role retrospective needs review retro" };
+    }
     if (review === null && !p.ticket_id) {
       return { kind: "conflict", httpStatus: 400, message: "a ticket stage needs ticket_id" };
     }
@@ -166,6 +210,7 @@ const createVerb: VerbDecl<StageSnapshot, StageCreateInput & { id: string }> = {
       status: "queued",
       session: null,
       slot_seq: null,
+      reason: null,
       version: 0,
     };
     return {
@@ -204,8 +249,8 @@ const moveVerb: VerbDecl<StageSnapshot, StageMoveInput & { id: string }> = {
       kind: "transition",
       next,
       eventKind,
-      payload: (post) => ({ from: prior.status, to: post.status, attempt: post.attempt, session: post.session, verdict: post.verdict, reason: p.reason ?? null }),
-      entry: (post) => stageEntry(post, eventKind, null),
+      payload: (post) => ({ from: prior.status, to: post.status, attempt: post.attempt, session: post.session, verdict: post.verdict, reason: p.reason ?? null, ...(p.to === "launching" && p.launch ? { launch: p.launch } : {}) }),
+      entry: (post) => stageEntry(p.to === "cancelled" ? { ...post, reason: p.reason ?? null } : post, eventKind, null),
     };
   },
   scope: stageScope,
@@ -247,12 +292,13 @@ export function createStageApi(db: Database, onSlotFree?: (freed: StageSnapshot,
       first ? [ctx.seq, ctx.seq, ctx.next.id] : [ctx.seq, ctx.next.id],
     );
   return {
-    load: (id) => entity.load(id),
-    listByStatus: (f) => entity.listByStatus(f),
+    load: (id) => withReason(db, entity.load(id)),
+    listByStatus: (f) => entity.listByStatus(f).map((s) => withReason(db, s)),
     create(input, actor, cap, extra) {
       const id = mintStageId();
       return entity.applyWithSideEffect(id, createVerb, { ...input, id }, actor, cap, (ctx) => {
         stamp(ctx, true);
+        if (input.review === "retro") ctx.tx.run("UPDATE stage SET room = ?, retro_week = ? WHERE id = ?", [input.room ?? null, input.retro_week ?? null, ctx.next.id]);
         extra?.(ctx);
       }).snapshot;
     },
@@ -262,19 +308,24 @@ export function createStageApi(db: Database, onSlotFree?: (freed: StageSnapshot,
         stamp(ctx, false);
         return extra?.(ctx);
       });
+      const snapshot = withReason(db, r.snapshot);
       afterCommit?.(r.sideEffectResult);
       // A stage that leaves launching/running frees a slot of its role: the queue may start the oldest waiting stage.
-      if ((was === "launching" || was === "running") && r.snapshot.status !== "launching" && r.snapshot.status !== "running") {
+      // G9: a ticket stage that ends from queued or retrying (no project folder, final failure) frees its ticket too.
+      const ended = r.snapshot.status === "passed" || r.snapshot.status === "failed";
+      if (((was === "launching" || was === "running") && r.snapshot.status !== "launching" && r.snapshot.status !== "running") || (ended && was !== r.snapshot.status)) {
         onSlotFree?.(r.snapshot, cap);
       }
-      return r.snapshot;
+      return snapshot;
     },
   };
 }
 
 // ---------- Launches ----------
 
-const LAUNCH_ID_RE = /^l_[0-9a-f]{16}$/;
+/** The reason of a queued spec stage that the FAIL limit stops (spec-fail-gate 2). */
+export const SPEC_FAIL_LIMIT_REASON = "spec FAIL limit: the human must send this review";
+
 export const DEFAULT_LAUNCH_ACK_MS = 15_000;
 
 function mintLaunchId(): string {
@@ -318,6 +369,12 @@ export type StageHooks = {
    * as queued, a blocker done. It evaluates the ticket and starts the stages it creates. It never throws.
    */
   onTicketChanged(ticketId: string, cap: HubCapabilities): void;
+  /** The ticket kind calls this after the commit of `ticket.cancelled`: every open stage of the ticket is cancelled (G4). It never throws. */
+  onTicketCancelled(ticketId: string, cap: HubCapabilities): void;
+  /** G10: the ticket kind calls this after the commit of a move to draft or done: each queued stage of the ticket is cancelled. It never throws. */
+  onTicketParked(ticketId: string, to: "draft" | "done", cap: HubCapabilities): void;
+  /** L2: the ticket kind calls this after the commit of a criteria edit: a launch of the ticket that the shell has not received gets the new criteria. It never throws. */
+  onTicketEdited?(ticketId: string): void;
   /**
    * The schema check of a result handoff (5.1; spec stages 3.1). A handoff from the session of a `running` stage is a result.
    * Returns null when `from` is no such session, else the list of errors (empty = valid). Errors also go to the same
@@ -329,6 +386,8 @@ export type StageHooks = {
    * that is running, the text names it: the sender probably copied a stage id from a handoff.
    */
   completedStage(from: string, context: unknown): string | null;
+  /** True when `context.stage_id` is the running worker stage of `from`: its commit is checked by checkResult (G2), not by the shared hash check. */
+  isWorkerResult?(from: string, context: unknown): boolean;
   /** `to` is the recipient of the handoff: a spec result must go to the room lead (spec-review 4.1b). */
   checkResult(from: string, context: unknown, cap: HubCapabilities, to?: string): string[] | null;
   /**
@@ -336,30 +395,78 @@ export type StageHooks = {
    * stays open until its next end of turn (POST /stages/<id>/turn-end), which queues the close. It never throws.
    */
   onResult(from: string, context: unknown, cap: HubCapabilities): void;
+  /**
+   * The context that is stored for a valid result. A spec FAIL gets `fail_count`, the hub count after this FAIL, over any value
+   * the sender wrote (spec-fail-gate 3). Any other result is returned as it is.
+   */
+  stampResult(from: string, context: unknown): unknown;
 };
 
 const VERDICTS = new Set(["PASS", "FAIL"]);
 const REVIEW_ROLES = new Set(["validator", "reviewer"]);
+const NOTES_WORD_LIMIT = 400;
+
+/** Error for `context.notes` of a stage result (context-pack 1.3): required, non-empty, at most 400 words. */
+export function notesError(notes: unknown): string | null {
+  if (typeof notes !== "string" || !notes.trim()) return "context.notes must be a non-empty string (target 300 words, limit 400)";
+  const words = notes.trim().split(/\s+/).length;
+  return words > NOTES_WORD_LIMIT ? `context.notes has ${words} words; the limit is ${NOTES_WORD_LIMIT}` : null;
+}
+
+export type EarlierNote = { source: "planning" | "spec" | "stage"; stage_id: string | null; role: string | null; notes: string };
+
+/** Earlier notes of a ticket (context-pack 1.4): the planning note, then spec-result notes through stage_scope, then stage result notes, each by stage created_seq. */
+export function earlierNotes(db: Database, ticketId: string): EarlierNote[] {
+  const out: EarlierNote[] = [];
+  const planning = db.query<{ n: string | null }, [string]>("SELECT planning_note AS n FROM tickets WHERE id = ?").get(ticketId)?.n;
+  if (planning) out.push({ source: "planning", stage_id: null, role: null, notes: planning });
+  const fromResults = (source: "spec" | "stage", sql: string) => {
+    for (const r of db.query<{ id: string; role: string; c: string | null }, [string]>(sql).all(ticketId)) {
+      let notes: unknown;
+      try { notes = r.c ? (JSON.parse(r.c) as { notes?: unknown }).notes : undefined; } catch { /* an unreadable result has no notes */ }
+      if (typeof notes === "string" && notes.trim()) out.push({ source, stage_id: r.id, role: r.role, notes });
+    }
+  };
+  // A stage result is the handoff its own session sent; a named-agent handoff that only quotes the stage_id is not one.
+  const join = `JOIN handoffs h ON json_extract(h.context_json, '$.stage_id') = s.id AND h.from_agent = s.session`;
+  fromResults("spec", `SELECT s.id, s.role, h.context_json AS c FROM stage s ${join} WHERE s.review = 'spec' AND s.id IN (SELECT stage_id FROM stage_scope WHERE ticket_id = ?) ORDER BY s.created_seq, h.rowid`);
+  fromResults("stage", `SELECT s.id, s.role, h.context_json AS c FROM stage s ${join} WHERE s.review IS NULL AND s.ticket_id = ? ORDER BY s.created_seq, h.rowid`);
+  return out;
+}
 
 /** The recipient name stored for a handoff to a role. validName() refuses ':', so no agent can ever have it. */
 export const ROLE_RECIPIENT_PREFIX = "role:";
+const FULL_SHA_RE = /^[0-9a-f]{40}$/;
+const WORKER_GIT_TIMEOUT_MS = 10_000;
+const workerRefusal = (ticketId: string) =>
+  `A worker result needs to_role tester and a new commit on ticket/${ticketId}. To report a block, post to the Orchestrator without stage_id.`;
+/** Writing chain: the next role of a result, and the roles whose passed results give the base of a new-work check. */
+const CHAIN_NEXT: Record<string, string> = { worker: "tester", writer: "editor", editor: "reviewer" };
 
 export type StageRuntime = {
   module: KindModule;
+  /** How many launch requests wait with values from role_models (tests: the set empties when a launch ends). */
+  pendingRoleModelLaunches(): number;
+  /** Test count: stages with a prompt kept for a re-render. */
+  pendingRerenders(): number;
+  /** Resolves when the deferred metrics writes of ended stages are done (tests). */
+  metricsIdle(): Promise<void>;
   api: StageApi;
   /**
    * Creates the stages a ticket is ready for (each as `queued`, one `stage.queued` event each) and returns them.
-   * A stage is created for a role when the ticket is not draft/done/cancelled, no blocker is open, no stage of that
-   * role for the ticket is live (queued, launching, running or retrying), and either the role is `ticket.role` with
-   * no stage of that role yet, or a `to_role` handoff for the role is newer than the last stage of that role.
-   * `ticket.role` selects only the first stage. It does not start a session: launching is enqueueLaunch.
+   * G9, one live stage per ticket of any role. Nothing is created when the ticket is draft/done/cancelled, a blocker is
+   * open, or a stage of the ticket is live (queued, launching, running or retrying). Spec-review stages have no ticket
+   * and are not counted. 1) A `to_role` handoff is spent when a stage of its ticket and role was created after it, or
+   * was live when it was recorded. 2) Otherwise the ready items are the unspent handoffs and the ticket's own role,
+   * the latter only while no stage of that role exists. 3) The oldest ready item (by seq) gets the one new stage.
+   * It does not start a session: launching is enqueueLaunch.
    * `handoffs` are the role handoffs of the current dispatch (the handoff route passes the new one); the ones stored
    * earlier come from the `roleHandoffs` reader of createStageRuntime (by default: the stored `to_role` handoffs).
    * With `launch: true` it then tries to start each stage it created (the launch conditions and the role limit
    * decide; a stage that cannot start stays `queued`). This is the only caller of enqueueLaunch besides the retry
    * path (5.3).
    */
-  evaluateStages(ticketId: string, cap: HubCapabilities, handoffs?: RoleHandoff[], opts?: { launch?: boolean }): StageSnapshot[];
+  evaluateStages(ticketId: string, cap: HubCapabilities, handoffs?: RoleHandoff[], opts?: { launch?: boolean; fresh?: boolean }): StageSnapshot[];
   /** The hook the handoff kind calls for a `to_role` handoff: evaluates the ticket and starts the new stages. */
   hooks: StageHooks;
   /**
@@ -384,25 +491,95 @@ export type StageRuntime = {
    * stop. Time counts from the first check that saw the stage running. The timer calls it; tests call it with their own clock.
    */
   sweep(cap: HubCapabilities, now?: number): void;
+  /**
+   * Renews the lease of the stage that holds this session. Writes no event and no row (memory only). True when a lease
+   * was renewed. The hub calls it for each heartbeat of the agent stream of the session; tests call it with their own clock.
+   */
+  renewLease(session: string, now?: number): boolean;
+  /** The lease of a stage (launching or running) or null. For tests and the dashboard. */
+  leaseOf(stageId: string): { session: string; expires_at_ms: number } | null;
+  /**
+   * Queues text for the PTY of one named session (P6-15, the checkpoint `/clear`). Returns the request id. The text is
+   * written once, never sent again after a reconnect, and never to another session.
+   */
+  sendInput(session: string, text: string): string;
+  /** Removes an input the shell never received. True when it was dropped. */
+  dropInput(id: string): boolean;
 };
 
 export const NO_PROJECT_FOLDER = "room has no project folder: set it in New factory room";
-const BRANCH_ROLES = new Set(["worker", "writer"]);
+const BRANCH_ROLES = new Set(["worker", "writer", "editor"]);
 const pathSegment = (x: string) => x.replace(/[^A-Za-z0-9_.-]/g, "_");
 
 /**
- * The room of a stage: the room of its ticket, or for a spec stage (no ticket) the room of its scope tickets. A spec handoff
- * checks that all of them are in the sender's room, so the first one tells. Used by the role limit and the free-slot start.
+ * The room of a stage: the room of its ticket, or for a retro stage its own `room` column, or for a spec stage (no ticket) the room of its scope tickets. A spec handoff
+ * checks that all of them are in one room (the agent's room, or for a human sender the room of the named tickets), so the first one tells. Used by the role limit and the free-slot start.
  */
-const STAGE_ROOM_SQL = `COALESCE(
+export const STAGE_ROOM_SQL = `COALESCE(
   (SELECT room FROM tickets WHERE id = s.ticket_id),
-  (SELECT t.room FROM stage_scope sc JOIN tickets t ON t.id = sc.ticket_id WHERE sc.stage_id = s.id ORDER BY sc.ticket_id LIMIT 1))`;
+  (SELECT t.room FROM stage_scope sc JOIN tickets t ON t.id = sc.ticket_id WHERE sc.stage_id = s.id ORDER BY sc.ticket_id LIMIT 1),
+  s.room)`;
 
 /** The path segment under the room that holds the worktree of a stage: the ticket, or the request of a spec stage. */
-const worktreeKey = (s: { ticket_id: string | null; request_id: string | null; review: string | null }): string | null =>
-  s.ticket_id ?? (s.review === "spec" && s.request_id ? `request-${s.request_id}` : null);
+const worktreeKey = (s: { id: string; ticket_id: string | null; request_id: string | null; review: string | null }): string | null =>
+  s.ticket_id ?? (s.review === "spec" && s.request_id ? `request-${s.request_id}` : s.review === "retro" ? `retro-${s.id}` : null);
 
 const isRole = (r: string): r is StageRole => (STAGE_ROLES as readonly string[]).includes(r);
+
+/** `start_commit`: the ticket/<id> head when a writer stage first started (the writer base). Nullable; added here. */
+function migrateStartCommit(db: Database): void {
+  const has = db.query<{ name: string }, []>("PRAGMA table_info(stage)").all().some((c) => c.name === "start_commit");
+  if (!has) db.exec("ALTER TABLE stage ADD COLUMN start_commit TEXT");
+}
+
+/** `room`: the room of a retro stage, which has no ticket. Null for every other stage. Added here, not in `stageDecl`. */
+function migrateRoom(db: Database): void {
+  const has = db.query<{ name: string }, []>("PRAGMA table_info(stage)").all().some((c) => c.name === "room");
+  if (!has) db.exec("ALTER TABLE stage ADD COLUMN room TEXT");
+}
+
+/**
+ * `retro_week`: the ISO week of a retro stage (Part 21 group 4). The unique partial index allows one retro stage that is not
+ * `cancelled` for each room and week. Both steps are guarded, so a second run changes nothing. Runs after `migrateRoom`.
+ */
+function migrateRetroWeek(db: Database): void {
+  const has = db.query<{ name: string }, []>("PRAGMA table_info(stage)").all().some((c) => c.name === "retro_week");
+  if (!has) db.exec("ALTER TABLE stage ADD COLUMN retro_week TEXT");
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_stage_retro_week ON stage(room, retro_week) WHERE review = 'retro' AND status != 'cancelled'",
+  );
+}
+
+/**
+ * `session_released_at_ms`: set when the hub saw the session closed (close ack) or never started (final launch-error ack);
+ * cleared by the move to `launching`. The one nullable column is added here (not in `stageDecl`: the snapshot does not carry it).
+ * Rows that exist when the column is added get a release time, so no old row counts as bound. A second run changes nothing.
+ */
+function migrateSessionReleased(db: Database): void {
+  const has = db.query<{ name: string }, []>("PRAGMA table_info(stage)").all().some((c) => c.name === "session_released_at_ms");
+  if (has) return;
+  db.transaction(() => {
+    db.exec("ALTER TABLE stage ADD COLUMN session_released_at_ms INTEGER");
+    db.run("UPDATE stage SET session_released_at_ms = ?", [Date.now()]);
+  })();
+}
+
+/** The retrospective runs on Claude: default opus, effort high. A Pi value is refused with one log line and the default is used. */
+const RETRO_DEFAULT_MODEL: RoleModel = { harness: "claude", model: "opus", effort: "high" };
+function retroModel(found: ReturnType<typeof roleModelFor>): ReturnType<typeof roleModelFor> {
+  if ("error" in found) return found;
+  if (found.entry?.harness === "pi") {
+    console.log("[role-models] role_models.retrospective: the retrospective runs on claude, pi refused, default used");
+    return { entry: RETRO_DEFAULT_MODEL };
+  }
+  return { entry: { ...RETRO_DEFAULT_MODEL, ...found.entry } };
+}
+
+/** The staging head of the project, else HEAD (a project without a staging branch). */
+function stagingHead(project: string): string {
+  const r = Bun.spawnSync(["git", "-C", project, "rev-parse", "--verify", "--quiet", "refs/heads/staging^{commit}"], { stdout: "pipe", stderr: "pipe" });
+  return r.exitCode === 0 ? r.stdout.toString().trim() : "HEAD";
+}
 
 /** A launch that did not start a session: attempt 1 goes to `retrying` (5.3 relaunches), attempt 2 is final. */
 function endLaunchAttempt(api: StageApi, stageId: string, cap: HubCapabilities, why: string): void {
@@ -414,20 +591,19 @@ function endLaunchAttempt(api: StageApi, stageId: string, cap: HubCapabilities, 
 
 /**
  * "Waiting for approval" (spec-review-stage 3.4), derived from the tables, never stored: the request has a spec stage with
- * `verdict = 'PASS'`, one of its scope tickets is still `draft` (in this request and room), and the request holds a
- * non-terminal `high` ticket. The spec PASS then left the tickets for the human (3.2); the approve route (3.3) ends it.
+ * `verdict = 'PASS'` and one of its scope tickets is still `draft` (in this request and room). `waitingForApproval` adds the
+ * Approve rule of the request (`heldForApprove`): the request needs the human's Approve and has none, or its scope changed.
+ * The spec PASS then left the tickets for the human (3.2); the approve route (3.3) ends it.
  */
 export const WAITING_FOR_APPROVAL_SQL = `
   SELECT s.id FROM stage s
    WHERE s.request_id = ?1 AND s.review = 'spec' AND s.verdict = 'PASS'
      AND EXISTS (SELECT 1 FROM stage_scope sc JOIN tickets t ON t.id = sc.ticket_id
                   WHERE sc.stage_id = s.id AND t.status = 'draft' AND t.request_id = ?1 AND t.room = ?2)
-     AND EXISTS (SELECT 1 FROM tickets h
-                  WHERE h.request_id = ?1 AND h.room = ?2 AND h.blast_radius = 'high' AND h.status NOT IN ('done', 'cancelled'))
    LIMIT 1`;
 
 export function waitingForApproval(db: Database, room: string, requestId: string): boolean {
-  return db.query<{ id: string }, [string, string]>(WAITING_FOR_APPROVAL_SQL).get(requestId, room) !== null;
+  return db.query<{ id: string }, [string, string]>(WAITING_FOR_APPROVAL_SQL).get(requestId, room) !== null && heldForApprove(db, room, requestId);
 }
 
 export type WaitingRequest = {
@@ -438,6 +614,12 @@ export type WaitingRequest = {
   high_tickets: Array<{ id: string; title: string; status: string }>;
   /** The scope tickets of the PASS stage that are still draft. */
   draft_tickets: string[];
+  origin: "human" | "factory";
+  features: string[];
+  /** Each ticket of the request that is not cancelled. `source` and `reasons` stay empty until the radius rule (P6-03) stores them. */
+  tickets: Array<{ id: string; title: string; status: string; radius: "low" | "high"; source: string | null; reasons: string[] }>;
+  /** The changes since the newest Approve (empty lists before the first one). */
+  scope_change: ScopeChange;
 };
 
 export type NeedsYouFinding = { ticket_id: string; title: string | null; severity: "blocking" | "suggestion"; text: string };
@@ -445,6 +627,8 @@ export type NeedsYouRequest = {
   request_id: string;
   /** Spec FAIL verdicts since the last PASS of the request (always 2 or more here). */
   fail_count: number;
+  /** The newest FAIL stage of the request. The board keys Clear and Collapse on it: a newer FAIL changes it. */
+  latest_fail_stage_id: string;
   /** The findings of the latest FAIL, blocking first. */
   findings: NeedsYouFinding[];
 };
@@ -452,9 +636,10 @@ export type NeedsYouRequest = {
 /**
  * The requests of one room that need the human because their spec review failed twice or more since its last PASS
  * (spec-review-stage 4.3). The open findings are the findings of the latest FAIL result. A PASS ends it: the count restarts.
+ * A newer open spec review of the request does not hide it: the human sent it, and the request stays listed until a PASS.
  */
 /**
- * The spec FAIL state of one request IN ONE ROOM: the FAIL stages created after the newest PASS stage, all read by room.
+ * The spec FAIL state of one request IN ONE ROOM: the FAIL stages created after the newest PASS stage or the human's Approve, all read by room.
  * A request id is a label the Orchestrator chooses, so two rooms may use the same one: a count or a PASS of another room
  * must never count here. `latest` is the newest of those FAIL stages (by created_seq), or null.
  */
@@ -465,12 +650,20 @@ export function specFailState(db: Database, room: string, requestId: string): { 
         `SELECT MAX(s.created_seq) AS n FROM stage s WHERE s.review = 'spec' AND s.request_id = ?1 AND s.verdict = 'PASS' AND ${STAGE_ROOM_SQL} = ?2`,
       )
       .get(requestId, room)?.n ?? 0;
+  // The human's Approve of the request in this room starts the count again, like a PASS: the later of the two ends the old run.
+  const lastApprove =
+    db
+      .query<{ n: number | null }, [string, string]>(
+        "SELECT MAX(e.seq) AS n FROM events e JOIN requests r ON r.id = e.entity_id WHERE r.room = ?1 AND r.request_id = ?2 AND e.kind = 'request.approved'",
+      )
+      .get(room, requestId)?.n ?? 0;
+  const since = Math.max(lastPass, lastApprove);
   const fails = db
     .query<{ id: string }, [string, string, number]>(
       `SELECT s.id FROM stage s WHERE s.review = 'spec' AND s.request_id = ?1 AND s.verdict = 'FAIL' AND s.created_seq > ?3 AND ${STAGE_ROOM_SQL} = ?2
         ORDER BY s.created_seq DESC, s.rowid DESC`,
     )
-    .all(requestId, room, lastPass);
+    .all(requestId, room, since);
   return { fails: fails.length, latest: fails[0]?.id ?? null };
 }
 
@@ -499,13 +692,95 @@ export function needsYouRequests(db: Database, room: string): NeedsYouRequest[] 
     const findings: NeedsYouFinding[] = raw.flatMap((f) => {
       const o = f && typeof f === "object" ? (f as Record<string, unknown>) : null;
       if (!o || typeof o.ticket_id !== "string" || typeof o.text !== "string") return [];
-      const title = db.query<{ title: string }, [string]>("SELECT title FROM tickets WHERE id = ?").get(o.ticket_id)?.title ?? null;
-      return [{ ticket_id: o.ticket_id, title, severity: o.severity === "suggestion" ? ("suggestion" as const) : ("blocking" as const), text: o.text }];
+      return [{ ticket_id: o.ticket_id, title: null, severity: o.severity === "suggestion" ? ("suggestion" as const) : ("blocking" as const), text: o.text }];
     });
     findings.sort((a, b) => Number(b.severity === "blocking") - Number(a.severity === "blocking"));
-    out.push({ request_id, fail_count: fails, findings });
+    // One room-scoped read: the finding tickets and every ticket of the request. Tickets of another room never count.
+    const ids = JSON.stringify(findings.map((f) => f.ticket_id));
+    const tickets = db
+      .query<{ id: string; title: string; status: string; request_id: string | null }, [string, string, string]>(
+        `SELECT id, title, status, request_id FROM tickets WHERE room = ?1 AND (request_id = ?2 OR id IN (SELECT value FROM json_each(?3)))`,
+      )
+      .all(room, request_id, ids);
+    const byId = new Map(tickets.map((t) => [t.id, t]));
+    // An answer event after the FAIL stage ended: done, cancelled, or an edit of the criteria or the title. Nothing else counts.
+    const answered = new Set(
+      db
+        .query<{ entity_id: string }, [string, string]>(
+          `SELECT DISTINCT e.entity_id FROM events e
+            WHERE e.entity_id IN (SELECT value FROM json_each(?2))
+              AND e.seq > COALESCE((SELECT MAX(p.seq) FROM events p WHERE p.entity_id = ?1 AND p.kind = 'stage.passed'), 9223372036854775807)
+              AND (e.kind IN ('ticket.done', 'ticket.cancelled')
+                OR (e.kind = 'ticket.edited' AND EXISTS (SELECT 1 FROM json_each(e.payload_json, '$.fields') f WHERE f.value IN ('acceptance_criteria', 'title'))))`,
+        )
+        .all(latestStage, ids)
+        .map((r) => r.entity_id),
+    );
+    const isClosed = (status: string) => status === "done" || status === "cancelled";
+    const listed = findings.filter((f) => {
+      const t = byId.get(f.ticket_id);
+      return !(answered.has(f.ticket_id) || (t && isClosed(t.status)));
+    });
+    // Every finding answered hides the block. A FAIL that listed no finding keeps its block (it shows its own note).
+    if (findings.length > 0 && listed.length === 0) continue;
+    // A request with tickets in this room that are all done or cancelled is finished. A request with no ticket left stays.
+    const inRequest = tickets.filter((t) => t.request_id === request_id);
+    if (inRequest.length > 0 && inRequest.every((t) => isClosed(t.status))) continue;
+    out.push({
+      request_id,
+      fail_count: fails,
+      latest_fail_stage_id: latestStage,
+      findings: listed.map((f) => ({ ...f, title: byId.get(f.ticket_id)?.title ?? null })),
+    });
   }
   return out;
+}
+
+/** One ticket that waits for the human (P6-15c). */
+export type WaitsForYou = {
+  ticket_id: string;
+  title: string;
+  request_id: string | null;
+  case: "approve";
+  /** The commit of the newest tester PASS result of the ticket, else null. */
+  commit: string | null;
+  /** Always null: the Allow step for done is gone (P6-04). */
+  permission_id: string | null;
+  question: string;
+};
+
+/**
+ * The tickets of one room that wait for the human: a draft ticket of a request that holds a non-terminal high ticket
+ * (approve). Derived from the tables.
+ */
+export function waitsForYou(db: Database, room: string): WaitsForYou[] {
+  type Row = { id: string; title: string; request_id: string | null; permission_id?: string | null };
+  const commitOf = db.query<{ c: string | null }, [string]>(
+    `SELECT json_extract(h.context_json, '$.commit') AS c FROM handoffs h
+      WHERE json_extract(h.context_json, '$.verdict') = 'PASS'
+        AND json_extract(h.context_json, '$.stage_id') IN (SELECT s.id FROM stage s WHERE s.ticket_id = ?1 AND s.role = 'tester')
+      ORDER BY h.created_at_ms DESC, h.rowid DESC LIMIT 1`,
+  );
+  const commit = (id: string) => commitOf.get(id)?.c ?? null;
+  const approve = db
+    .query<Row, [string]>(
+      `SELECT t.id, t.title, t.request_id FROM tickets t
+        WHERE t.room = ?1 AND t.status = 'draft' AND t.request_id IS NOT NULL
+          AND EXISTS (SELECT 1 FROM tickets h WHERE h.request_id = t.request_id AND h.room = ?1 AND h.blast_radius = 'high' AND h.status NOT IN ('done', 'cancelled'))
+        ORDER BY t.created_at_ms, t.id`,
+    )
+    .all(room)
+    .map((t): WaitsForYou => ({ ticket_id: t.id, title: t.title, request_id: t.request_id, case: "approve", commit: commit(t.id), permission_id: null, question: `Approve request ${t.request_id}?` }));
+  return approve;
+}
+
+function parseReasons(v: string | null): string[] {
+  try {
+    const a = JSON.parse(v ?? "[]");
+    return Array.isArray(a) ? a.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 /** The requests of one room that wait for the human's approval, each with the stage and the tickets behind it. */
@@ -516,10 +791,20 @@ export function waitingRequests(db: Database, room: string): WaitingRequest[] {
   const out: WaitingRequest[] = [];
   for (const { request_id } of requests) {
     const hit = db.query<{ id: string }, [string, string]>(WAITING_FOR_APPROVAL_SQL).get(request_id, room);
-    if (!hit) continue;
+    if (!hit || !heldForApprove(db, room, request_id)) continue;
+    const facts = requestFacts(db, room, request_id);
     out.push({
       request_id,
       stage_id: hit.id,
+      origin: facts?.origin ?? "human",
+      features: facts?.features ?? [],
+      tickets: db
+        .query<{ id: string; title: string; status: string; blast_radius: "low" | "high"; radius_source: string | null; radius_reasons: string | null }, [string, string]>(
+          "SELECT id, title, status, blast_radius, radius_source, radius_reasons FROM tickets WHERE request_id = ? AND room = ? AND status != 'cancelled' ORDER BY created_at_ms, id",
+        )
+        .all(request_id, room)
+        .map((t) => ({ id: t.id, title: t.title, status: t.status, radius: t.blast_radius, source: t.radius_source, reasons: parseReasons(t.radius_reasons) })),
+      scope_change: scopeChange(db, room, request_id),
       high_tickets: db
         .query<{ id: string; title: string; status: string }, [string, string]>(
           "SELECT id, title, status FROM tickets WHERE request_id = ? AND room = ? AND blast_radius = 'high' AND status NOT IN ('done', 'cancelled') ORDER BY created_at_ms, id",
@@ -536,6 +821,9 @@ export function waitingRequests(db: Database, room: string): WaitingRequest[] {
   return out;
 }
 
+/** The texts of the checks in `launch_choice` and `check_role_harness` (src-tauri/src/factory.rs). Cargo tests pin them. */
+const VALUE_REFUSAL = /^(invalid (model|provider|effort|thinking level)\b|a provider \(|role '.*' runs on \S+ by default; to launch it on)/;
+
 export function createStageRuntime(
   db: Database,
   opts: {
@@ -546,43 +834,156 @@ export function createStageRuntime(
     roleHandoffs?: (ticketId: string) => RoleHandoff[];
     /** Tells the room's Orchestrator that a stage failed for good (second failure). index.ts wires the handoff kind in. */
     onFinalFailure?: (info: { stage: StageSnapshot; room: string | null; reason: string }, cap: HubCapabilities) => void;
+    /** Leaves a visible trace of a failed cancel or sweep (cancel-trace). It may throw: the stage runtime logs it and goes on. */
+    traceFailure?: (input: CancelTraceInput, cap: HubCapabilities) => void;
     /** How often the hub checks running stages for a time-out or a gone agent (default 30 s; tests call sweep). */
     sweepMs?: number;
     /** A passed stage whose session sent no turn-end report is closed after this time (default 120 s). */
     closeGraceMs?: number;
+    /**
+     * Builds the context pack of a launch (context-pack 3.5). Unset: no pack, and the launch is queued at once. The hub
+     * passes the real `buildPack`; a test passes it or a stub.
+     */
+    buildPack?: (i: PackInput) => Promise<Pack>;
     /** A session younger than this is not "gone" yet: its bridge may still be starting (default 90 s). */
     bootGraceMs?: number;
+    /** Where Claude Code writes its transcripts (default `~/.claude/projects`). Tests point it at a temp folder. */
+    claudeProjectsDir?: string;
+    /** Replaces the metrics writer (tests only). */
+    recordMetrics?: typeof recordStageMetrics;
+    /** Replaces the start repair's selection query (tests only). */
+    findMissingMetrics?: typeof stagesMissingMetrics;
+    /** How long a stage session may go without a renewal before its lease expires (default 120 s). */
+    leaseMs?: number;
+    /**
+     * Names of the tmux sessions that live now on the hub socket, read in one synchronous step. A launch never takes one of them.
+     * Unset: only the roster and the stage rows tell which names are used. A throw counts as an empty list.
+     */
+    liveSessionNames?: () => string[];
+    /** The hub's record of launched stage sessions: bound at a launch, released at the close ack (P6-10). */
+    launchRecord?: LaunchRecord;
+    /** Starts the consumer of the launch queue when the hub starts (the hub passes startExecutor). Unset: nothing consumes it (unit tests attach their own). */
+    startExecutor?: (host: ExecutorHost) => void | Promise<void>;
   } = {},
 ): StageRuntime {
   const entity = createLedgerEntity({ decl: stageDecl, db });
-  const api = createStageApi(db, (freed, cap) => drainQueue(freed, cap));
+  const pendingMetrics = new Set<Promise<void>>();
+  const api = createStageApi(db, (freed, cap) => {
+    leases.delete(freed.id); // the stage left launching or running: its lease ends with it
+    if (freed.status === "passed" || freed.status === "failed") {
+      // After the commit of stage.passed/failed, outside its transaction and after this call returns: the reads must not delay the result.
+      // recordStageMetrics logs its own failures; the catch guards the rest.
+      const run = new Promise<void>((resolve) =>
+        setImmediate(() => {
+          (opts.recordMetrics ?? recordStageMetrics)(db, freed.id, freed.version, console.error, opts.claudeProjectsDir)
+            .catch((e) => console.error(`[stage-metrics] ${freed.id}: ${(e as Error).message}`))
+            .finally(resolve);
+        }),
+      );
+      pendingMetrics.add(run);
+      void run.then(() => pendingMetrics.delete(run));
+    }
+    drainQueue(freed, cap);
+  });
+
+  /** Launch ids whose request carries role_models values: a refusal of the shell is stored with the prefix. */
+  const roleModelLaunches = new Set<string>();
+  /** Launches that have no end yet (queued, delivered, not acked, not timed out), by stage. Memory only. */
+  const inflight = new Map<string, { id: string; session: string }>();
+  /** Launches whose context pack is being built (stage -> request id): launching, not queued yet. Memory only. */
+  const building = new Map<string, string>();
+  /** L2: how to render the first message again for a launch (stage -> request id and render), so an edit reaches a launch the shell has not received. Memory only. */
+  const rerender = new Map<string, { id: string; render: () => string }>();
+  /**
+   * G4: a stage cancelled while its launch is in flight. Its session name, slot and worktree stay reserved until a close ack
+   * arrives with no launch in flight (and, once a late launch end queued the last close, only that close's ack). A launch that
+   * timed out (`timedOut`) is still in flight for the shell: nothing is released until its late ack queues the last close.
+   */
+  const cancelHolds = new Map<string, { stageId: string; lastCloseId: string | null; timedOut: boolean }>();
+
+  /** The launch of a cancelled stage ended (ack, or its late ack after a time-out): one more close; only its ack releases. */
+  function queueLastClose(hold: { lastCloseId: string | null }, session: string): void {
+    hold.lastCloseId = mintLaunchId();
+    queue.push({ id: hold.lastCloseId, kind: "close", session });
+  }
 
   const queue = createLaunchQueue({
     ackMs: opts.ackMs ?? DEFAULT_LAUNCH_ACK_MS,
     retainMs: opts.retainMs,
-    onCloseEnd(session, cap) {
+    onCloseEnd(session, cap, closeId) {
+      const hold = cancelHolds.get(session);
+      if (hold) {
+        // A close ack (absent included) while the launch is in flight releases nothing: the session may appear after it.
+        if (inflight.has(hold.stageId) || hold.timedOut) return;
+        if (hold.lastCloseId !== null && hold.lastCloseId !== closeId) return;
+        if (queue.pendingCloses().includes(session)) return;
+        cancelHolds.delete(session);
+      }
       // The session is gone: its role slot is free. Start what waits for it (a relaunch of a retrying stage first).
+      // The durable release goes first: when it throws, nothing else changed and the close ack can be sent again.
+      db.run("UPDATE stage SET session_released_at_ms = ? WHERE session = ? AND session_released_at_ms IS NULL", [Date.now(), session]);
       const held = closing.get(session);
       closing.delete(session);
+      opts.launchRecord?.release(session);
       // 6.5 fix: the session is closed, so its temporary worktree can go. A stage that ended (passed, retrying, failed) stays
       // in its old session's worktree until here: the close is only queued when the stage moves, and the session may still run.
       try {
         const done = held && api.load(held.stageId);
-        if (done && (done.status === "passed" || done.status === "retrying" || done.status === "failed") && held.room) removeTemporaryWorktree(done, held.room);
+        if (done && (done.status === "passed" || done.status === "retrying" || done.status === "failed" || done.status === "cancelled") && held.room) removeTemporaryWorktree(done, held.room);
       } catch (e) {
         console.error(`[stage] removing the worktree of ${session} failed:`, e);
       }
-      if (held?.room) startWaiting(held.role, held.room, cap);
+      if (held?.room) {
+        startWaiting(held.role, held.room, cap);
+        // The next branch-role stage of the same ticket (Writer -> Editor) waited for this close.
+        if (BRANCH_ROLES.has(held.role)) for (const r of BRANCH_ROLES) if (r !== held.role) startWaiting(r, held.room, cap);
+      }
+    },
+    onLateAck(req) {
+      // Only a cancelled stage that waits for its late launch takes a late ack; any other late ack is refused.
+      const hold = cancelHolds.get(req.session);
+      if (!hold || hold.stageId !== req.stage_id || !hold.timedOut || api.load(req.stage_id)?.status !== "cancelled") return false;
+      hold.timedOut = false;
+      queueLastClose(hold, req.session);
+      return true;
     },
     onLaunchEnd(req, end: LaunchEnd, cap) {
       if (req.kind !== "launch") return;
+      const fromRoleModels = roleModelLaunches.delete(req.id);
+      if (inflight.get(req.stage_id)?.id === req.id) inflight.delete(req.stage_id);
+      if (rerender.get(req.stage_id)?.id === req.id) rerender.delete(req.stage_id);
       try {
+        const cancelled = api.load(req.stage_id);
+        if (cancelled?.status === "cancelled") {
+          // G4: a launch of a cancelled stage ended (spawned, error or no ack). The session may exist, so one more close is queued
+          // and only its ack releases the reservation. No running move, no retry, no final failure.
+          const hold = cancelHolds.get(req.session);
+          if (hold?.stageId === req.stage_id) {
+            if (end.by === "timeout") {
+              // No ack in time: the session may still appear. The first close is not enough, so the hold stays until the late ack.
+              hold.timedOut = true;
+            } else queueLastClose(hold, req.session);
+          }
+          return;
+        }
         if (end.by === "ack" && end.outcome.result === "spawned") {
           const stage = api.load(req.stage_id);
           if (stage?.status === "launching") api.move(req.stage_id, { to: "running" }, "system", cap);
         } else {
-          const why = end.by === "timeout" ? "no ack in time" : (end.outcome as { error: string }).error;
-          endLaunchAttempt(api, req.stage_id, cap, why);
+          const raw = end.by === "timeout" ? "no ack in time" : (end.outcome as { error: string }).error;
+          // A value that came from role_models and was refused by pty_spawn names its source (role-models 4). A later
+          // tmux or filesystem error does not: the value was fine.
+          const why = end.by === "ack" && fromRoleModels && VALUE_REFUSAL.test(raw) ? `role_models.${req.role}: ${raw}` : raw;
+          if (end.by === "ack") {
+            // The shell says no session started: the release mark and the stage move commit together.
+            db.transaction(() => {
+              db.run("UPDATE stage SET session_released_at_ms = ? WHERE id = ?", [Date.now(), req.stage_id]);
+              endLaunchAttempt(api, req.stage_id, cap, why);
+            })();
+            // A retry the move started has bound the session again: only a session with no launch in flight is released.
+            // A waiting stage may hold the name now: only a binding of this stage is released.
+            if (!inflight.has(req.stage_id)) opts.launchRecord?.release(req.session, req.stage_id);
+          } else endLaunchAttempt(api, req.stage_id, cap, why);
           reportFinalFailure(req.stage_id, `the launch did not start: ${why}`, cap);
         }
       } catch (e) {
@@ -610,8 +1011,21 @@ export function createStageRuntime(
    * is judged by its state when the stage was created: a cancel or decline after that does not take it away from a retry.
    * A later handoff has its own stage, so a retry never switches to it. Same rule as the spec stage's `specCommit`.
    */
-  const startingHandoffRow = (stageId: string, ticketId: string, role: string) =>
-    db
+  const startingHandoffRow = (stageId: string, ticketId: string, role: string) => {
+    // L4: the second Validator stage reviews the commit of the first one, so it takes the handoff that started the first.
+    if (role === "validator") {
+      const first = db
+        .query<{ id: string }, [string, string, string]>(
+          `SELECT p.id FROM stage p
+            WHERE p.ticket_id = ?1 AND p.role = 'validator' AND p.review IS NULL AND p.status = 'passed' AND p.verdict = 'PASS'
+              AND p.created_seq < (SELECT created_seq FROM stage WHERE id = ?2)
+              AND p.created_seq > COALESCE((SELECT MAX(w.created_seq) FROM stage w WHERE w.ticket_id = ?3 AND w.role = 'worker'), 0)
+            ORDER BY p.created_seq LIMIT 1`,
+        )
+        .get(ticketId, stageId, ticketId);
+      if (first) stageId = first.id;
+    }
+    return db
       .query<{ id: string; from_agent: string; task: string; context_json: string | null }, [string, string, string]>(
         `SELECT h.id, h.from_agent, h.task, h.context_json
            FROM handoffs h
@@ -625,6 +1039,7 @@ export function createStageRuntime(
           ORDER BY (SELECT MIN(e.seq) FROM events e WHERE e.entity_id = h.id) DESC LIMIT 1`,
       )
       .get(`${ROLE_RECIPIENT_PREFIX}${role}`, ticketId, stageId);
+  };
 
   /** The commit of the handoff that started this stage (context.commit), else null (the ticket branch, else HEAD). */
   const handoffCommit = (stageId: string, ticketId: string, role: string): string | null => {
@@ -644,6 +1059,38 @@ export function createStageRuntime(
     try { context = r.context_json ? JSON.parse(r.context_json) : null; } catch { /* kept as null */ }
     return { id: r.id, from: r.from_agent, task: r.task, context };
   };
+
+  /**
+   * L4: Validator PASS stages of a code ticket since its latest worker stage. A high ticket closes on the second one.
+   * A rework starts a new worker stage, so the count restarts there.
+   */
+  const validatorPasses = (ticketId: string): number =>
+    db
+      .query<{ n: number }, [string, string]>(
+        `SELECT COUNT(*) AS n FROM stage
+          WHERE ticket_id = ?1 AND role = 'validator' AND review IS NULL AND status = 'passed' AND verdict = 'PASS'
+            AND created_seq > COALESCE((SELECT MAX(created_seq) FROM stage WHERE ticket_id = ?2 AND role = 'worker'), 0)`,
+      )
+      .get(ticketId, ticketId)!.n;
+  /** The full_suite and commit of the newest Tester result of a ticket since its latest worker stage, else null. */
+  const lastFullSuite = (ticketId: string): { full_suite: unknown; commit: unknown } | null => {
+    const r = db
+      .query<{ c: string | null }, [string, string]>(
+        `SELECT h.context_json AS c FROM stage s
+           JOIN handoffs h ON json_extract(h.context_json, '$.stage_id') = s.id AND h.from_agent = s.session
+          WHERE s.ticket_id = ?1 AND s.role = 'tester' AND s.review IS NULL
+            AND s.created_seq > COALESCE((SELECT MAX(created_seq) FROM stage WHERE ticket_id = ?2 AND role = 'worker'), 0)
+          ORDER BY s.created_seq DESC, h.rowid DESC LIMIT 1`,
+      )
+      .get(ticketId, ticketId);
+    try {
+      if (!r?.c) return null;
+      const c = JSON.parse(r.c) as { full_suite?: unknown; commit?: unknown };
+      return { full_suite: c.full_suite, commit: c.commit };
+    } catch { return null; }
+  };
+  const isHighTicket = (ticketId: string): boolean =>
+    db.query<{ b: string }, [string]>("SELECT blast_radius AS b FROM tickets WHERE id = ?").get(ticketId)?.b === "high";
 
   // Sessions of passed stages whose close is not queued yet (memory only: a hub restart forgets them).
   const awaitingClose = new Set<string>();
@@ -666,6 +1113,23 @@ export function createStageRuntime(
       return undefined;
     }
   };
+  // Stage leases (memory only): a launching or running stage holds its session through a lease with an expiry. The
+  // heartbeat of the session's agent stream renews it (renewLease). A running stage whose lease runs out is stopped by
+  // the sweep: the session is closed and the attempt ends (retry, then the existing final failure). A renewal writes nothing.
+  const leases = new Map<string, { session: string; expiresAt: number }>();
+  const leaseTime = (): number => opts.leaseMs ?? DEFAULT_LEASE_MS;
+  const startLease = (stageId: string, session: string, now: number = Date.now()): void => {
+    leases.set(stageId, { session, expiresAt: now + leaseTime() });
+  };
+  function renewLease(session: string, now: number = Date.now()): boolean {
+    let renewed = false;
+    for (const l of leases.values()) {
+      if (l.session !== session) continue;
+      l.expiresAt = now + leaseTime();
+      renewed = true;
+    }
+    return renewed;
+  }
   // A passed stage whose close is not queued yet: since when a sweep first saw it (5.3b: a lost turn-end report).
   const awaitingSince = new Map<string, number>();
   // When a sweep first saw a stage running (the time-out clock). Memory only: a hub restart starts the clock again.
@@ -704,6 +1168,161 @@ export function createStageRuntime(
     reportFinalFailure(stage.id, reason, cap);
   }
 
+  /** Writes the trace row of a failed cancel or sweep. A failure here is logged and goes no further. */
+  function traceFailure(stageId: string, site: "cancel" | "sweep", caller: CancelTraceCaller, statusAtFailure: string, e: unknown, cap: HubCapabilities): void {
+    if (!opts.traceFailure) return;
+    try {
+      const ticketId = db.query<{ ticket_id: string | null }, [string]>("SELECT ticket_id FROM stage WHERE id = ?").get(stageId)?.ticket_id ?? null;
+      opts.traceFailure(
+        {
+          room: roomOfStage(stageId) ?? cap.config.defaultRoom,
+          stage_id: stageId,
+          ticket_id: ticketId,
+          site,
+          caller,
+          status_at_failure: statusAtFailure,
+          error: e instanceof Error ? e.message : String(e),
+        },
+        cap,
+      );
+    } catch (t) {
+      console.error(`[stage] trace for ${stageId} failed: ${t instanceof Error ? t.message : String(t)}`);
+    }
+  }
+
+  /**
+   * G4: cancels one open stage of a cancelled ticket (queued, launching, running or retrying). A live one gets one close queued
+   * before the mark and keeps its name, slot and worktree until a close ack arrives with no launch in flight (onCloseEnd). A launch
+   * the shell never received is dropped and releases at once. It never retries and never reports a failure. It never throws.
+   */
+  function cancelStage(stageId: string, reason: string, cap: HubCapabilities, caller: CancelTraceCaller, atStart = false): void {
+    let statusAtFailure = "unknown";
+    try {
+      const stage = api.load(stageId);
+      if (stage) statusAtFailure = stage.status;
+      if (!stage || !["queued", "launching", "running", "retrying"].includes(stage.status)) return;
+      turnEnds.delete(stageId);
+      refused.delete(stageId);
+      runningSeen.delete(stageId);
+      rerender.delete(stageId);
+      const session = stage.session;
+      let releaseAtOnce = false;
+      if (stage.status === "launching" && building.has(stageId)) {
+        // The pack is still being built: nothing was queued, so there is no session to close. The build ends without a push.
+        building.delete(stageId);
+        releaseAtOnce = true;
+      } else if (stage.status === "launching" && inflight.has(stageId) && queue.drop(inflight.get(stageId)!.id)) {
+        // Never delivered: no session exists, nothing to close.
+        roleModelLaunches.delete(inflight.get(stageId)!.id);
+        inflight.delete(stageId);
+        releaseAtOnce = true;
+      } else if (session && stage.status !== "queued") {
+        // A retrying stage has its own close already (its stop queued it): one close per stage. At hub start the close queue is gone,
+        // so one is queued unless another live stage uses the name.
+        const ownClose = stage.status === "retrying" && !atStart;
+        const taken = atStart && !!db.query("SELECT 1 FROM stage WHERE session = ? AND id != ? AND status IN ('launching', 'running') LIMIT 1").get(session, stageId);
+        if (!ownClose && !taken) {
+          if (!closing.has(session)) closing.set(session, { role: stage.role, room: roomOfStage(stageId), stageId });
+          if (stage.status === "launching" && inflight.has(stageId)) cancelHolds.set(session, { stageId, lastCloseId: null, timedOut: false });
+          queue.push({ id: mintLaunchId(), kind: "close", session });
+        }
+      }
+      api.move(stageId, { to: "cancelled", reason }, "system", cap);
+      if (releaseAtOnce) {
+        const room = roomOfStage(stageId);
+        if (room) removeTemporaryWorktree(stage, room);
+      }
+    } catch (e) {
+      console.error(`[stage] cancelling ${stageId} failed:`, e);
+      traceFailure(stageId, "cancel", caller, statusAtFailure, e, cap);
+    }
+  }
+
+  function cancelStagesOfTicket(ticketId: string, cap: HubCapabilities, atStart = false): void {
+    const open = db
+      .query<{ id: string }, [string]>("SELECT id FROM stage WHERE ticket_id = ? AND status IN ('queued', 'launching', 'running', 'retrying') ORDER BY rowid")
+      .all(ticketId);
+    for (const { id } of open) cancelStage(id, "ticket cancelled", cap, atStart ? "start_sweep" : "ticket_cancel", atStart);
+  }
+
+  /** G10: cancels the queued stages of a ticket that is draft or done. Launching, running and retrying stages do not change. */
+  function cancelQueuedStagesOfTicket(ticketId: string, to: "draft" | "done", cap: HubCapabilities, atStart = false): void {
+    const queued = db.query<{ id: string }, [string]>("SELECT id FROM stage WHERE ticket_id = ? AND status = 'queued' ORDER BY rowid").all(ticketId);
+    for (const { id } of queued) cancelStage(id, `ticket moved to ${to}`, cap, atStart ? "start_sweep" : to === "draft" ? "ticket_draft" : "ticket_done", atStart);
+  }
+
+  // The retrospective week that the sweep has fully handled (memory only: a restart looks again, and the unique index stops a second stage).
+  let retroDoneWeek: string | null = null;
+
+  /**
+   * Part 21 group 4: from Monday 06:00 local the sweep creates one retro stage for each room with a ticket event in the 7 days
+   * before that Monday 06:00. The evidence file is written first. No model. A week that was missed is not built later: only the week of `now` counts.
+   */
+  function startRetrospectives(cap: HubCapabilities, now: number): void {
+    try {
+      const w = retroWeekAt(now);
+      const ledgerDb = (process.env.CUBILOT_LEDGER_DB ?? "").trim();
+      if (!w || w.week === retroDoneWeek || !ledgerDb) return;
+      let failed = false;
+      for (const room of roomsWithTicketEvents(db, w.since, w.until)) {
+        try {
+          const live = db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM stage WHERE review = 'retro' AND room = ? AND retro_week = ? AND status != 'cancelled'").get(room, w.week)!.n;
+          if (live) continue;
+          writeEvidenceFile(db, ledgerDb, room, w);
+          api.create({ review: "retro", role: "retrospective", room, retro_week: w.week }, "system", cap);
+          startWaiting("retrospective", room, cap);
+        } catch (e) {
+          failed = true;
+          console.error(`[stage] retrospective of room ${room} for ${w.week} failed:`, e);
+        }
+      }
+      if (!failed) retroDoneWeek = w.week;
+    } catch (e) {
+      console.error("[stage] retrospective schedule failed:", e);
+    }
+  }
+
+  /** The first message of a retro stage: the evidence file of its week and the proposal titles of the previous retrospective of the room. */
+  function retroFirstMessage(stage: { id: string }, room: string, worktree: string, reason?: string): string | null {
+    const row = db.query<{ retro_week: string | null }, [string]>("SELECT retro_week FROM stage WHERE id = ?").get(stage.id);
+    const w = row?.retro_week ? retroWeekWindow(row.retro_week) : null;
+    const ledgerDb = (process.env.CUBILOT_LEDGER_DB ?? "").trim();
+    if (!w || !ledgerDb) return null;
+    // Written again from the ledger window: the same bytes as the file of the sweep, so a relaunch gets the same message.
+    const file = writeEvidenceFile(db, ledgerDb, room, w);
+    return renderRetroFirstMessage({
+      stable: stableFor(room),
+      role: "retrospective",
+      stageId: stage.id,
+      worktree,
+      evidencePath: file.path,
+      evidence: file.text,
+      previousWeekTitles: previousProposalTitles(db, room, w.week),
+      reason,
+    });
+  }
+
+  /** A passed retro stage whose draft tickets or spec review are missing (a stop after the pass): run the idempotent steps again from its stored result. */
+  function resumeRetroRequests(cap: HubCapabilities): void {
+    try {
+      const retros = db.query<{ id: string }, []>("SELECT id FROM stage WHERE review = 'retro' AND status = 'passed' AND retro_week IS NOT NULL ORDER BY created_seq").all();
+      for (const { id } of retros) {
+        if (retroMaterialised.has(id)) continue;
+        try {
+          const rows = db.query<{ context_json: string | null }, [string]>("SELECT context_json FROM handoffs WHERE json_extract(context_json, '$.stage_id') = ? ORDER BY created_at_ms DESC, id DESC").all(id);
+          const c = rows.map((r) => (r.context_json ? (JSON.parse(r.context_json) as Record<string, unknown>) : {})).find((x) => Array.isArray(x.proposals) || Array.isArray(x.verdicts));
+          if (c) createRetroRequest(id, c, cap);
+          retroMaterialised.add(id);
+        } catch (e) {
+          console.error(`[stage] the draft tickets of retrospective ${id} failed, the sweep retries:`, e);
+        }
+      }
+    } catch (e) {
+      console.error("[stage] retrospective resume failed:", e);
+    }
+  }
+  const retroMaterialised = new Set<string>();
+
   function sweep(cap: HubCapabilities, now: number = Date.now()): void {
     // A passed stage whose turn-end report never came (5.3b): after the grace, queue its close anyway.
     for (const session of [...awaitingClose]) {
@@ -714,9 +1333,38 @@ export function createStageRuntime(
       awaitingSince.delete(session);
       queue.push({ id: mintLaunchId(), kind: "close", session });
     }
+    // L3: staging may have moved. A ticket that waits for a blocker is checked again, with no ticket event.
+    try {
+      const waiting = db
+        .query<{ id: string }, []>(
+          `SELECT DISTINCT b.ticket_id AS id FROM ticket_blockers b JOIN tickets t ON t.id = b.ticket_id
+            WHERE t.status IN ('queued', 'claimed', 'in_progress', 'in_review') ORDER BY b.ticket_id`,
+        )
+        .all();
+      for (const { id } of waiting) {
+        if (openBlockerIds(db, id, { now, fresh: true }).length > 0) continue;
+        const queued = db.query<{ id: string; role: string }, [string]>("SELECT id, role FROM stage WHERE ticket_id = ? AND status = 'queued'").all(id);
+        const room = db.query<{ room: string }, [string]>("SELECT room FROM tickets WHERE id = ?").get(id)?.room;
+        if (queued.length && room) for (const role of new Set(queued.map((q) => q.role))) startWaiting(role, room, cap);
+        else evaluateStages(id, cap, [], { launch: true });
+      }
+    } catch (e) {
+      console.error("[stage] blocker re-check failed:", e);
+    }
+    startRetrospectives(cap, now);
+    resumeRetroRequests(cap);
     const running = db.query<{ id: string }, []>("SELECT id FROM stage WHERE status = 'running' AND session IS NOT NULL").all();
     const ids = new Set(running.map((r) => r.id));
     for (const id of runningSeen.keys()) if (!ids.has(id)) runningSeen.delete(id);
+    // A lease belongs to a launching or running stage only. A stage that restarted with the hub gets a fresh lease.
+    const held = new Set(
+      db.query<{ id: string; session: string }, []>("SELECT id, session FROM stage WHERE status IN ('launching', 'running') AND session IS NOT NULL").all().map((r) => {
+        const l = leases.get(r.id);
+        if (!l || l.session !== r.session) startLease(r.id, r.session, now);
+        return r.id;
+      }),
+    );
+    for (const id of [...leases.keys()]) if (!held.has(id)) leases.delete(id);
     for (const { id } of running) {
       try {
         const stage = api.load(id);
@@ -727,8 +1375,10 @@ export function createStageRuntime(
         const limitMin = (room ? getRoomSettings(db, room)?.stage_timeout_min : null) ?? DEFAULT_STAGE_TIMEOUT_MIN;
         if (now - since >= limitMin * 60_000) stopStage(stage, `the session ran past the time-out of ${limitMin} minutes`, cap);
         else if (now - since >= (opts.bootGraceMs ?? 90_000) && !cap.agents.get(stage.session!)) stopStage(stage, "the session left the room", cap);
+        else if ((leases.get(id)?.expiresAt ?? Infinity) <= now) stopStage(stage, `the session lease expired (no renewal for ${Math.round(leaseTime() / 1000)} s)`, cap);
       } catch (e) {
         console.error(`[stage] sweep of ${id} failed:`, e);
+        traceFailure(id, "sweep", "sweep", "running", e, cap);
       }
     }
   }
@@ -750,25 +1400,47 @@ export function createStageRuntime(
       .get(requestId, stageSeq, room)?.c ?? null;
 
   /** The room lead: where a spec result goes. Same default as the ticket kind. */
+  /** The stable block of a room (context-pack 2.1): docs/PRIMER.md of its project folder plus its Nutshell. One file read per launch. */
+  const stableFor = (room: string): string =>
+    renderStable({ projectFolder: getRoomSettings(db, room)?.project_folder ?? null, nutshell: readNutshell(db, room).text });
   const leadOfRoom = (room: string | null): string =>
     (room ? db.query<{ agent: string }, [string]>("SELECT agent FROM ticket_room_lead WHERE room = ?").get(room)?.agent : undefined) ?? "Orchestrator";
 
-  /** The request text, spec paths and scope tickets of a spec stage, from its handoff and its scope. */
-  function specFirstMessage(stage: { id: string; request_id: string | null }, room: string, worktree: string, reason?: string): string | null {
-    const seq = db.query<{ n: number }, [string]>("SELECT created_seq AS n FROM stage WHERE id = ?").get(stage.id)?.n ?? 0;
-    const ctx = db
+  /**
+   * The context_json of the latest spec-review handoff (to role:validator) of a request that began before the stage.
+   * `needPaths`: only a handoff that carries spec_paths (a ticket stage takes its spec paths from it, context-pack 3.3).
+   */
+  function specHandoffContext(stageId: string, requestId: string | null, room: string, needPaths: boolean): string | null | undefined {
+    const seq = db.query<{ n: number }, [string]>("SELECT created_seq AS n FROM stage WHERE id = ?").get(stageId)?.n ?? 0;
+    return db
       .query<{ c: string | null }, [string, number, string]>(
         `SELECT h.context_json AS c FROM handoffs h
           WHERE h.to_agent = 'role:validator' AND json_extract(h.context_json, '$.request_id') = ?1 AND h.room = ?3
+            ${needPaths ? "AND json_extract(h.context_json, '$.spec_paths') IS NOT NULL" : ""}
             AND (SELECT MIN(e.seq) FROM events e WHERE e.entity_id = h.id) < ?2
           ORDER BY (SELECT MIN(e.seq) FROM events e WHERE e.entity_id = h.id) DESC LIMIT 1`,
       )
-      .get(stage.request_id ?? "", seq, room)?.c;
+      .get(requestId ?? "", seq, room)?.c;
+  }
+
+  /** Spec paths of a request: strings of context.spec_paths in its latest spec-review handoff. Empty when there is none. */
+  function specPathsOf(stageId: string, requestId: string | null, room: string): string[] {
+    if (!requestId) return [];
+    try {
+      const c = JSON.parse(specHandoffContext(stageId, requestId, room, true) ?? "null") as { spec_paths?: unknown } | null;
+      return Array.isArray(c?.spec_paths) ? c!.spec_paths.filter((x): x is string => typeof x === "string") : [];
+    } catch { return []; }
+  }
+
+  /** The request text, spec paths and scope tickets of a spec stage, from its handoff and its scope. */
+  function specFirstMessage(stage: { id: string; request_id: string | null }, room: string, worktree: string, reason?: string, pack?: PackText): string | null {
+    const seq = db.query<{ n: number }, [string]>("SELECT created_seq AS n FROM stage WHERE id = ?").get(stage.id)?.n ?? 0;
+    const ctx = specHandoffContext(stage.id, stage.request_id, room, false);
     let c: { request_text?: unknown; spec_paths?: unknown; commit?: unknown } = {};
     try { c = ctx ? JSON.parse(ctx) : {}; } catch { /* no context: an empty request text */ }
     const scope = db
-      .query<{ id: string; title: string; acceptance_criteria: string; role: string | null; blast_radius: string }, [string]>(
-        "SELECT t.id, t.title, t.acceptance_criteria, t.role, t.blast_radius FROM stage_scope s JOIN tickets t ON t.id = s.ticket_id WHERE s.stage_id = ? ORDER BY t.id",
+      .query<{ id: string; title: string; acceptance_criteria: string; planning_note: string | null; role: string | null; blast_radius: string }, [string]>(
+        "SELECT t.id, t.title, t.acceptance_criteria, t.planning_note, t.role, t.blast_radius FROM stage_scope s JOIN tickets t ON t.id = s.ticket_id WHERE s.stage_id = ? ORDER BY t.id",
       )
       .all(stage.id)
       .map((t) => ({
@@ -800,21 +1472,24 @@ export function createStageRuntime(
       } catch { /* an unreadable result adds no finding */ }
     }
     return renderSpecFirstMessage({
+      stable: stableFor(room),
       stageId: stage.id,
       requestId: stage.request_id ?? "",
       worktree,
       commit: typeof c.commit === "string" ? c.commit : null,
       earlierFindings,
+      reviewNumber: specFailState(db, room, stage.request_id ?? "").fails + 1,
       recipient: leadOfRoom(room),
       requestText: typeof c.request_text === "string" ? c.request_text : "",
       specPaths: Array.isArray(c.spec_paths) ? c.spec_paths.filter((x): x is string => typeof x === "string") : [],
       scope,
       reason,
+      pack,
     });
   }
 
   /** `<role>-<n>` with the lowest n that no live session (launching or running, in any room) of the role uses. */
-  function nextSessionName(role: string): string {
+  function nextSessionName(role: string, stageId?: string, cap?: HubCapabilities): string {
     // A name whose close has no ack is not free: the old session may still exist.
     const reserved = queue.pendingCloses();
     const used = new Set(
@@ -824,53 +1499,88 @@ export function createStageRuntime(
         .map((r) => r.session),
     );
     for (const name of reserved) used.add(name);
+    // A later stage of the same ticket and role (the second Validator) never reuses the session name of an earlier one.
+    if (stageId) {
+      for (const r of db
+        .query<{ session: string }, [string, string, string]>(
+          "SELECT s.session FROM stage s WHERE s.role = ? AND s.session IS NOT NULL AND s.id != ? AND s.review IS NULL AND s.ticket_id = (SELECT ticket_id FROM stage WHERE id = ?)",
+        )
+        .all(role, stageId, stageId)) used.add(r.session);
+    }
+    // Each retrospective launch is a new session: the name of an earlier retrospective stage is never reused.
+    if (role === "retrospective") {
+      for (const r of db.query<{ session: string }, [string]>("SELECT session FROM stage WHERE role = 'retrospective' AND session IS NOT NULL AND id != ?").all(stageId ?? "")) used.add(r.session);
+    }
+    for (const name of cancelHolds.keys()) used.add(name);
+    // A name with a live lease (a launching or running stage row, above), a live tmux session on the hub socket or a
+    // connected roster agent is in use, whatever the stage rows say: an orphan session with no stage row keeps its name
+    // (it is not closed, only avoided).
+    try {
+      for (const name of opts.liveSessionNames?.() ?? []) used.add(name);
+    } catch (e) {
+      console.error("[stage] reading the live tmux sessions failed:", (e as Error).message);
+    }
     // A passed stage keeps its session until its turn ends: the name is not free yet.
     for (const name of awaitingClose) if (name.startsWith(`${role}-`)) used.add(name);
+    // A roster agent is in use only while it has an open agent stream. Check each candidate: no fixed upper bound.
+    const connected = (name: string): boolean => (cap?.agents?.connectionCount ? cap.agents.connectionCount(name) > 0 : !!cap?.agents?.get(name));
     let n = 1;
-    while (used.has(`${role}-${n}`)) n++;
+    while (used.has(`${role}-${n}`) || (cap && connected(`${role}-${n}`))) n++;
     return `${role}-${n}`;
   }
 
-  function evaluateStages(ticketId: string, cap: HubCapabilities, handoffs: RoleHandoff[] = [], eopts: { launch?: boolean } = {}): StageSnapshot[] {
+  function evaluateStages(ticketId: string, cap: HubCapabilities, handoffs: RoleHandoff[] = [], eopts: { launch?: boolean; fresh?: boolean } = {}): StageSnapshot[] {
     const t = db.query<{ status: string; role: string | null }, [string]>("SELECT status, role FROM tickets WHERE id = ?").get(ticketId);
     if (!t || t.status === "draft" || t.status === "done" || t.status === "cancelled") return [];
-    const openBlocker = db
-      .query<{ blocker_id: string }, [string]>(
-        "SELECT b.blocker_id FROM ticket_blockers b LEFT JOIN tickets x ON x.id = b.blocker_id WHERE b.ticket_id = ? AND COALESCE(x.status, '') != 'done' LIMIT 1",
-      )
-      .get(ticketId);
+    const openBlocker = openBlockerIds(db, ticketId, { fresh: eopts.fresh })[0];
     if (openBlocker) return [];
 
-    const all = [...(opts.roleHandoffs ?? storedRoleHandoffs)(ticketId), ...handoffs].filter((h) => isRole(h.role));
-    const roles = new Set<string>(all.map((h) => h.role));
-    if (t.role && isRole(t.role)) roles.add(t.role);
+    // G9: one live stage per ticket, of any role. Spec-review stages have no ticket_id and never count here.
+    const live = db
+      .query<{ id: string }, [string]>("SELECT id FROM stage WHERE ticket_id = ? AND status IN ('queued', 'launching', 'running', 'retrying') LIMIT 1")
+      .get(ticketId);
+    if (live) return [];
+
+    // A role handoff is spent by a stage of its ticket and role that was created after it, or that was live when it was
+    // recorded. Both come from the stage rows: no extra column. One query reads the ticket's stages for all handoffs.
+    const stages = db
+      .query<{ role: string; created_seq: number; updated_seq: number; status: string }, [string]>(
+        "SELECT role, created_seq, updated_seq, status FROM stage WHERE ticket_id = ?",
+      )
+      .all(ticketId);
+    const spent = (h: RoleHandoff): boolean =>
+      stages.some(
+        (s) => s.role === h.role && (s.created_seq > h.seq || (s.created_seq < h.seq && (s.status !== "passed" && s.status !== "failed" && s.status !== "cancelled" || s.updated_seq > h.seq))),
+      );
+    const ready: RoleHandoff[] = [...(opts.roleHandoffs ?? storedRoleHandoffs)(ticketId), ...handoffs]
+      .filter((h) => isRole(h.role) && !spent(h))
+      .sort((x, y) => x.seq - y.seq);
+    // The ticket's own role starts once per ready seq: its ready seq is the newest ticket.queued event, else the
+    // ticket.created event of a ticket created as queued. A stage of the role that is not cancelled spends it, unless
+    // the stage was created and last changed before a later ticket.queued event (the human moved the ticket back).
+    if (t.role && isRole(t.role)) {
+      const q = db
+        .query<{ seq: number | null }, [string]>("SELECT MAX(seq) AS seq FROM events WHERE entity_id = ? AND kind = 'ticket.queued'")
+        .get(ticketId)!.seq;
+      // A delivery-check problem (H3) reopens the ticket: it needs a new stage of its role after that move, so old PASS evidence is not reused.
+      const reopenedByCheck =
+        q !== null &&
+        db
+          .query<{ n: number }, [number]>("SELECT COUNT(*) AS n FROM events WHERE seq = ? AND json_extract(payload_json, '$.reason') = 'delivery check problem'")
+          .get(q)!.n > 0;
+      if (!stages.some((s) => s.role === t.role && s.status !== "cancelled" && (q === null || s.created_seq > q || (!reopenedByCheck && s.updated_seq > q)))) {
+        const c = q ?? db.query<{ seq: number | null }, [string]>("SELECT MIN(seq) AS seq FROM events WHERE entity_id = ? AND kind = 'ticket.created'").get(ticketId)!.seq;
+        ready.push({ role: t.role, seq: c ?? 0 });
+        ready.sort((x, y) => x.seq - y.seq);
+      }
+    }
 
     const created: StageSnapshot[] = [];
-    for (const role of roles) {
-      const live = db
-        .query<{ id: string }, [string, string]>(
-          "SELECT id FROM stage WHERE ticket_id = ? AND role = ? AND status IN ('queued', 'launching', 'running', 'retrying') LIMIT 1",
-        )
-        .get(ticketId, role);
-      if (live) continue;
-      const last = db
-        .query<{ seq: number | null }, [string, string]>("SELECT MAX(created_seq) AS seq FROM stage WHERE ticket_id = ? AND role = ?")
-        .get(ticketId, role)!.seq;
-      const first = role === t.role && last === null;
-      const handed = all.some((h) => h.role === role && (last === null || h.seq > last));
-      if (!first && !handed) continue;
-      created.push(api.create({ ticket_id: ticketId, role }, "system", cap));
-    }
+    if (ready.length > 0) created.push(api.create({ ticket_id: ticketId, role: ready[0].role }, "system", cap));
     if (eopts.launch) {
       const room = db.query<{ room: string }, [string]>("SELECT room FROM tickets WHERE id = ?").get(ticketId)!.room;
-      for (const stage of created) {
-        // TODO(4.3, 4.5): the real first message and the worktree path. Until then the launch has no prompt and no cwd.
-        const r = enqueueLaunch(
-          { stage_id: stage.id, session: nextSessionName(stage.role), room, harness: roleHarness(stage.role), cwd: null, prompt: "" },
-          cap,
-        );
-        if (!r.ok) console.log(`[stage] ${stage.id} stays queued: ${r.reason}`);
-      }
+      // A retrying or older queued stage of the role goes before the new one (startWaiting order), inside the limit.
+      for (const role of new Set(created.map((c) => c.role))) startWaiting(role, room, cap);
     }
     return created;
   }
@@ -898,6 +1608,8 @@ export function createStageRuntime(
       // stopped stage), the session may still run: the worktree goes at the close ack, in onCloseEnd (6.5 fix).
       if ((freed.status === "failed" || freed.status === "retrying") && !(freed.session && closing.has(freed.session))) removeTemporaryWorktree(freed, room);
       startWaiting(freed.role, room, cap);
+      // G9: the ticket's next waiting item (a handoff that came during this stage) starts when its stage ends.
+      if (freed.ticket_id && (freed.status === "passed" || freed.status === "failed")) evaluateStages(freed.ticket_id, cap, [], { launch: true });
     } catch (e) {
       console.error(`[stage] starting queued ${freed.role} stages failed:`, e);
     }
@@ -915,7 +1627,7 @@ export function createStageRuntime(
         .all(role, room);
       for (const { id } of waiting) {
         const r = enqueueLaunch(
-          { stage_id: id, session: nextSessionName(role), room, harness: roleHarness(role), cwd: null, prompt: "", reason: api.load(id)?.status === "retrying" ? reasonOf(id) : undefined },
+          { stage_id: id, session: nextSessionName(role, id, cap), room, harness: roleHarness(role), cwd: null, prompt: "", reason: api.load(id)?.status === "retrying" ? reasonOf(id) : undefined },
           cap,
         );
         if (!r.ok) console.log(`[stage] ${id} stays queued: ${r.reason}`);
@@ -929,19 +1641,15 @@ export function createStageRuntime(
     const stage = api.load(input.stage_id);
     if (!stage) return { ok: false, reason: "no such stage" };
     if (stage.status !== "queued" && stage.status !== "retrying") return { ok: false, reason: `stage is ${stage.status}` };
-    if (queue.pendingCloses().includes(input.session)) {
+    if (queue.pendingCloses().includes(input.session) || cancelHolds.has(input.session)) {
       return { ok: false, reason: `session name ${input.session} is reserved until its close is acked` };
     }
     if (stage.ticket_id) {
       const t = db.query<{ status: string }, [string]>("SELECT status FROM tickets WHERE id = ?").get(stage.ticket_id);
       if (!t) return { ok: false, reason: "no such ticket" };
       if (t.status === "draft" || t.status === "done" || t.status === "cancelled") return { ok: false, reason: `ticket is ${t.status}` };
-      const open = db
-        .query<{ blocker_id: string }, [string]>(
-          "SELECT b.blocker_id FROM ticket_blockers b LEFT JOIN tickets t ON t.id = b.blocker_id WHERE b.ticket_id = ? AND COALESCE(t.status, '') != 'done' LIMIT 1",
-        )
-        .get(stage.ticket_id);
-      if (open) return { ok: false, reason: `blocked by ${open.blocker_id}` };
+      const open = openBlockerIds(db, stage.ticket_id)[0];
+      if (open) return { ok: false, reason: `blocked by ${open}` };
     }
     // One live spec stage per request (spec-review-stage 2.3): a later one stays queued until the live one ends.
     if (stage.review === "spec") {
@@ -964,16 +1672,33 @@ export function createStageRuntime(
     for (const [session, c] of closing) {
       if (c.stageId === stage.id) return { ok: false, reason: `the close of ${session} is not acked yet` };
     }
+    // A branch role shares the ticket worktree with the earlier branch-role session of the same ticket (the Editor continues
+    // on the Writer's work): it waits for that session's close ack, whatever slot is free.
+    if (stage.ticket_id && BRANCH_ROLES.has(stage.role)) {
+      for (const [session, c] of closing) {
+        if (c.stageId === stage.id || !BRANCH_ROLES.has(c.role)) continue;
+        const same = db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM stage WHERE id = ? AND ticket_id = ?").get(c.stageId, stage.ticket_id)!.n;
+        if (same) return { ok: false, reason: `the close of ${session} (same ticket) is not acked yet` };
+      }
+    }
     // A session that ended but is not closed yet still holds its slot and its worktree (5.3b).
     const closingNow = [...closing.values()].filter((c) => c.role === stage.role && c.room === input.room).length;
     if (live + closingNow >= limit) return { ok: false, reason: `role ${stage.role} is at its limit (${limit}) in room ${input.room}` };
+
+    // role_models in config.yml, read now so an edit applies to this launch. A shape error of this role fails the attempt
+    // below, after the stage is `launching`, through the same path as a refused ack (retry, then final failure).
+    // The second Validator review of a high ticket uses second_review instead (a bad value gives the default, never an error).
+    const secondReview = stage.role === "validator" && !!stage.ticket_id && stage.review === null && isHighTicket(stage.ticket_id) && validatorPasses(stage.ticket_id) >= 1;
+    const models: ReturnType<typeof roleModelFor> = secondReview
+      ? { entry: secondReviewModel() }
+      : stage.role === "retrospective" ? retroModel(roleModelFor(stage.role, STAGE_ROLES)) : roleModelFor(stage.role, STAGE_ROLES);
 
     // 4.5: the hub makes the worktree; the shell only starts in it. A spec stage gets a detached read-only one at the
     // commit of its handoff, or HEAD (spec-review 2.4), under the request instead of a ticket.
     let cwd = input.cwd;
     let branch: string | null = null;
     const wtKey = worktreeKey(stage);
-    if (wtKey && cwd === null) {
+    if (wtKey && cwd === null && !("error" in models)) {
       const project = getRoomSettings(db, input.room)?.project_folder;
       if (!project) {
         // No attempt is counted: queued -> failed without going through launching.
@@ -986,22 +1711,71 @@ export function createStageRuntime(
           project, room: input.room, ticketId: wtKey, session: input.session, role: stage.role,
           commit: stage.ticket_id
             ? handoffCommit(stage.id, stage.ticket_id, stage.role)
+            : stage.review === "retro" ? stagingHead(project)
             : specCommit(stage.request_id ?? "", input.room, db.query<{ n: number }, [string]>("SELECT created_seq AS n FROM stage WHERE id = ?").get(stage.id)?.n ?? 0),
         });
         cwd = wt.path;
         branch = wt.branch;
+        // The writer base: the ticket/<id> head when the stage first starts. A relaunch keeps it.
+        if (stage.ticket_id && stage.role === "writer") {
+          const head = Bun.spawnSync(["git", "-C", project, "rev-parse", "--verify", "--quiet", `refs/heads/ticket/${stage.ticket_id}^{commit}`], { stdout: "pipe", stderr: "pipe" });
+          const sha = head.stdout.toString().trim();
+          if (head.exitCode === 0 && FULL_SHA_RE.test(sha)) db.run("UPDATE stage SET start_commit = ? WHERE id = ? AND start_commit IS NULL", [sha, stage.id]);
+        }
       } catch (e) {
         return { ok: false, reason: `worktree: ${(e as Error).message}` };
       }
     }
 
+    // 4.3 (computed before the move: its size goes into the stage.launching payload, 5.1): the ticket part of the first message; the role prompt is a separate file passed by the launch command.
+    let prompt = input.prompt;
+    // The same render with the pack text, run once the pack is built (context-pack 3.5). Null: nothing to add.
+    let renderWithPack: ((pack: PackText) => string) | null = null;
+    let packQuestion = "";
+    let packFiles: string[] = [];
+    if (prompt === "" && stage.ticket_id && cwd) {
+      const t = db
+        .query<{ id: string; title: string; acceptance_criteria: string; blast_radius: string; request_id: string | null }, [string]>(
+          "SELECT id, title, acceptance_criteria, blast_radius, request_id FROM tickets WHERE id = ?",
+        )
+        .get(stage.ticket_id);
+      if (t) {
+        const fm = { stable: stableFor(input.room), notes: earlierNotes(db, t.id).filter((n) => !secondReview || n.role !== "validator"), stageId: input.stage_id, role: stage.role, ticket: t, branch, worktree: cwd, reason: input.reason, recipient: leadOfRoom(input.room), handoff: startingHandoff(stage.id, stage.ticket_id, stage.role) ?? undefined };
+        prompt = renderFirstMessage(fm);
+        // The ticket row is read again at each render: an edit between the launch request and the delivery is not lost (L2).
+        renderWithPack = (pack) => {
+          const now = db
+            .query<{ id: string; title: string; acceptance_criteria: string; blast_radius: string; request_id: string | null }, [string]>(
+              "SELECT id, title, acceptance_criteria, blast_radius, request_id FROM tickets WHERE id = ?",
+            )
+            .get(t.id);
+          return renderFirstMessage({ ...fm, ticket: now ?? t, pack });
+        };
+        packQuestion = `${t.title} ${t.acceptance_criteria}`;
+        // Named files: paths in the criteria, then the spec paths of the request (context-pack design item 4). Once each; containment is in buildPack.
+        packFiles = [...new Set([...namedPaths(t.acceptance_criteria), ...specPathsOf(stage.id, t.request_id, input.room)])];
+      }
+    } else if (prompt === "" && stage.review === "spec" && cwd) {
+      const wt = cwd;
+      prompt = specFirstMessage(stage, input.room, wt, input.reason) ?? "";
+      renderWithPack = (pack) => specFirstMessage(stage, input.room, wt, input.reason, pack) ?? "";
+      packQuestion = db.query<{ title: string }, [string]>("SELECT t.title FROM stage_scope s JOIN tickets t ON t.id = s.ticket_id WHERE s.stage_id = ? ORDER BY t.id").all(stage.id).map((r) => r.title).join(" ");
+    }
+    else if (prompt === "" && stage.review === "retro" && cwd) {
+      prompt = retroFirstMessage(stage, input.room, cwd, input.reason) ?? "";
+    }
+    // The pack runs only in a worktree that the hub made for this launch.
+    const packWorktree = renderWithPack && wtKey && input.cwd === null && cwd && packCommandCount(stage.role, stage.review) > 0 ? cwd : null;
+    const harness = "error" in models ? input.harness : (models.entry?.harness ?? input.harness);
     try {
       api.move(
         input.stage_id,
-        { to: "launching", session: input.session, slot_seq: input.slot_seq ?? null },
+        { to: "launching", session: input.session, slot_seq: input.slot_seq ?? null, launch: { role: stage.role, harness, cwd, bytes: Buffer.byteLength(prompt) } },
         "system",
         cap,
         (ctx) => {
+          // The bind: the same transaction as stage.launching clears the release mark.
+          ctx.tx.run("UPDATE stage SET session_released_at_ms = NULL WHERE id = ?", [input.stage_id]);
           input.extra?.(ctx);
           // stage.launching and ticket.assigned (actor system) commit together: the one cross-kind transaction.
           // A spec-review stage has no ticket and skips this. A failure here rolls the launch back.
@@ -1018,26 +1792,24 @@ export function createStageRuntime(
       if (e instanceof LedgerConflict) return { ok: false, reason: e.message };
       throw e;
     }
-    // 4.3: the ticket part of the first message; the role prompt is a separate file passed by the launch command.
-    let prompt = input.prompt;
-    if (prompt === "" && stage.ticket_id && cwd) {
-      const t = db
-        .query<{ id: string; title: string; acceptance_criteria: string; blast_radius: string; request_id: string | null }, [string]>(
-          "SELECT id, title, acceptance_criteria, blast_radius, request_id FROM tickets WHERE id = ?",
-        )
-        .get(stage.ticket_id);
-      if (t) prompt = renderFirstMessage({ stageId: input.stage_id, role: stage.role, ticket: t, branch, worktree: cwd, reason: input.reason, recipient: leadOfRoom(input.room), handoff: startingHandoff(stage.id, stage.ticket_id, stage.role) ?? undefined });
-    } else if (prompt === "" && stage.review === "spec" && cwd) {
-      prompt = specFirstMessage(stage, input.room, cwd, input.reason) ?? "";
+    // The stage is launching: it holds a lease on the session name from now (renewed by the stream beats, checked by the sweep).
+    startLease(input.stage_id, input.session);
+    if ("error" in models) {
+      endLaunchAttempt(api, input.stage_id, cap, models.error);
+      reportFinalFailure(input.stage_id, `the launch did not start: ${models.error}`, cap);
+      return { ok: false, reason: models.error };
     }
-    const req: LaunchRequest = {
+    const req: Extract<LaunchRequest, { kind: "launch" }> = {
       id: mintLaunchId(),
       kind: "launch",
       stage_id: input.stage_id,
       session: input.session,
       role: stage.role,
       room: input.room,
-      harness: input.harness,
+      harness,
+      ...(models.entry?.model ? { model: models.entry.model } : {}),
+      ...(models.entry?.provider ? { provider: models.entry.provider } : {}),
+      ...(models.entry?.effort ? { effort: models.entry.effort } : {}),
       cwd,
       prompt,
       env: {
@@ -1047,7 +1819,56 @@ export function createStageRuntime(
         CUBILOT_STAGE_ID: input.stage_id,
       },
     };
-    queue.push(req);
+    if (models.entry) roleModelLaunches.add(req.id);
+    const push = (pack?: PackText) => {
+      queue.push(req);
+      if (renderWithPack) {
+        const r = renderWithPack;
+        rerender.set(req.stage_id, { id: req.id, render: () => r(pack as PackText) });
+      }
+      opts.launchRecord?.bind(req.session, req.stage_id);
+      inflight.set(req.stage_id, { id: req.id, session: req.session });
+    };
+    const buildPackFor = opts.buildPack;
+    if (!packWorktree || !renderWithPack || !buildPackFor) {
+      push();
+      return { ok: true, request_id: req.id };
+    }
+    // context-pack 3.5: the stage is `launching`, the worktree exists. The pack runs without blocking the hub (async
+    // commands, one after another). The render and the push follow when it resolves; the ack time-out starts at the push.
+    building.set(req.stage_id, req.id);
+    const render = renderWithPack;
+    void (async () => {
+      let pack: Pack = { text: {}, graphStatus: "missing" };
+      try {
+        pack = await buildPackFor({ role: stage.role, review: stage.review, question: packQuestion, files: packFiles, worktree: packWorktree, projectFolder: getRoomSettings(db, input.room)?.project_folder ?? null });
+      } catch (e) {
+        console.error(`[stage] pack of ${req.stage_id} failed, launching without it:`, e);
+      }
+      try {
+        if (building.get(req.stage_id) !== req.id) return; // cancelled during the build: released by cancelStage
+        building.delete(req.stage_id);
+        const now = api.load(req.stage_id);
+        if (!now || now.status !== "launching" || now.session !== req.session) {
+          // The stage ended while the pack was built. Nothing was queued, so no session exists: free the temporary worktree.
+          roleModelLaunches.delete(req.id);
+          removeTemporaryWorktree(stage, input.room);
+          return;
+        }
+        req.prompt = render(pack.text);
+        push(pack.text);
+      } catch (e) {
+        building.delete(req.stage_id);
+        roleModelLaunches.delete(req.id);
+        console.error(`[stage] queueing the launch of ${req.stage_id} failed:`, e);
+        try {
+          endLaunchAttempt(api, req.stage_id, cap, (e as Error).message);
+          reportFinalFailure(req.stage_id, `the launch did not start: ${(e as Error).message}`, cap);
+        } catch (e2) {
+          console.error(`[stage] ending the launch of ${req.stage_id} failed:`, e2);
+        }
+      }
+    })();
     return { ok: true, request_id: req.id };
   }
 
@@ -1056,14 +1877,13 @@ export function createStageRuntime(
    * findings of THIS FAIL (spec-review-stage 4.2). The count is read from the spec stages of the request: the FAIL
    * stages created after the newest PASS stage. A PASS in between resets it. It never throws: the result is recorded.
    */
-  function noticeRepeatedFail(stageId: string, result: Record<string, unknown>, cap: HubCapabilities): void {
+  function noticeRepeatedFail(stageId: string, result: Record<string, unknown>, fails: number, cap: HubCapabilities): void {
     try {
       const stage = api.load(stageId);
       if (!stage || stage.review !== "spec" || !stage.request_id) return;
       // The count is the room's own: the same request id in another room is another request (4.3 review).
       const room = roomOfStage(stageId);
       if (!room) return;
-      const { fails } = specFailState(db, room, stage.request_id);
       if (fails < 2) return;
       const titles = new Map(
         db
@@ -1082,12 +1902,42 @@ export function createStageRuntime(
         `Spec review of ${stage.request_id} failed ${fails} times since its last PASS. Findings of the latest FAIL:`,
         ...(findings.length ? findings.map((f) => `- [${f.severity}] ${f.ticket_id}${titles.has(f.ticket_id) ? ` (${titles.get(f.ticket_id)})` : ""}: ${f.text}`) : ["- (no findings listed)"]),
       ];
-      cap.sse.emit(
-        { from: "system", to: cap.config.humanName, text: lines.join("\n"), ts: new Date().toISOString(), image: null, room } as Entry,
-        { kind: "ui-only" },
-      );
+      const text = lines.join("\n");
+      const ts = new Date().toISOString();
+      cap.sse.emit({ from: "system", to: cap.config.humanName, text, ts, image: null, room } as Entry, { kind: "ui-only" });
+      // The room lead gets the same text. One copy only when the lead is the human (spec-fail-gate 4).
+      const lead = leadOfRoom(room);
+      if (lead !== cap.config.humanName) {
+        cap.sse.emit({ from: "system", to: lead, text, ts, image: null, room } as Entry, { kind: "agents-ambient", agents: [lead] });
+      }
     } catch (e) {
       console.error(`[stage] the second-FAIL notice of ${stageId} failed:`, e);
+    }
+  }
+
+  /**
+   * The count reached 2 (spec-fail-gate 2): each queued spec stage of the request, made by a handoff of a non-human sender,
+   * fails and never launches. A stage from the human stays queued. The sender is read from the handoff that made the stage,
+   * found as specFirstMessage finds it: the newest one of the request before the stage's `created_seq`.
+   */
+  function failQueuedSpecStages(requestId: string, room: string, cap: HubCapabilities): void {
+    const queued = db
+      .query<{ id: string; seq: number }, [string, string]>(
+        `SELECT s.id, s.created_seq AS seq FROM stage s WHERE s.review = 'spec' AND s.request_id = ?1 AND s.status = 'queued' AND ${STAGE_ROOM_SQL} = ?2
+          ORDER BY s.created_seq`,
+      )
+      .all(requestId, room);
+    for (const q of queued) {
+      const sender = db
+        .query<{ f: string }, [string, number, string]>(
+          `SELECT h.from_agent AS f FROM handoffs h
+            WHERE h.to_agent = 'role:validator' AND json_extract(h.context_json, '$.request_id') = ?1 AND h.room = ?3
+              AND (SELECT MIN(e.seq) FROM events e WHERE e.entity_id = h.id) < ?2
+            ORDER BY (SELECT MIN(e.seq) FROM events e WHERE e.entity_id = h.id) DESC LIMIT 1`,
+        )
+        .get(requestId, q.seq, room)?.f;
+      if (sender === cap.config.humanName) continue;
+      api.move(q.id, { to: "failed", reason: SPEC_FAIL_LIMIT_REASON }, "system", cap);
     }
   }
 
@@ -1102,11 +1952,8 @@ export function createStageRuntime(
     // after the review began was not reviewed as it stands now.
     const scope = all.filter((t) => t.status === "draft" && t.request_id === prior.request_id);
     const room = all[0]?.room;
-    const high = room
-      ? db.query<{ n: number }, [string, string]>(
-          "SELECT COUNT(*) AS n FROM tickets WHERE request_id = ? AND room = ? AND blast_radius = 'high' AND status NOT IN ('done', 'cancelled')",
-        ).get(prior.request_id ?? "", room)!.n > 0
-      : false;
+    // The Approve rule (plan-approval): a request that needs the human's Approve and has none, or whose scope changed, keeps its drafts.
+    const high = room && prior.request_id ? heldForApprove(db, room, prior.request_id) : false;
     const queuedNow: Array<NonNullable<ReturnType<typeof queueBySystemInTx>>> = [];
     const stage = api.move(
       stageId,
@@ -1114,7 +1961,7 @@ export function createStageRuntime(
       "system",
       cap,
       () => {
-        // A ticket that left `draft` meanwhile is skipped. With a high ticket in the request nothing moves.
+        // A ticket that left `draft` meanwhile is skipped. When the request is held for the human's Approve nothing moves.
         if (high) return;
         for (const { ticket_id } of scope) {
           const q = queueBySystemInTx(db, cap, ticket_id, prior.request_id);
@@ -1194,7 +2041,7 @@ export function createStageRuntime(
           return Response.json({ error: "invalid limit" }, { status: 400 });
         }
         const statuses = status === "all" ? [...STAGE_STATUSES] : [status];
-        const list = statuses.flatMap((s) => entity.listByStatus({ status: s, for: role, limit })).slice(0, limit);
+        const list = statuses.flatMap((s) => entity.listByStatus({ status: s, for: role, limit })).slice(0, limit).map((s) => withReason(db, s));
         return Response.json(list);
       },
     },
@@ -1217,7 +2064,36 @@ export function createStageRuntime(
       handler: (_req, _cap, params) => {
         const room = decodeURIComponent(params.id);
         if (!validRoomLabel(room)) return Response.json({ error: "invalid room" }, { status: 400 });
-        return Response.json({ room, requests: needsYouRequests(db, room) });
+        return Response.json({ room, requests: needsYouRequests(db, room), waiting: waitsForYou(db, room), deliveries: deliveriesNotInMain(db, room) });
+      },
+    },
+    {
+      // Start-up numbers of the stage sessions of one room, grouped by role (context-pack 5.2). Read only.
+      method: "GET",
+      path: /^\/rooms\/([^/]+)\/stage-metrics$/,
+      auth: "read",
+      handler: (_req, _cap, params) => {
+        const room = decodeURIComponent(params.id);
+        if (!validRoomLabel(room)) return Response.json({ error: "invalid room" }, { status: 400 });
+        return Response.json({ room, roles: metricsByRole(db, room, STAGE_ROOM_SQL) });
+      },
+    },
+    {
+      // The flow of one room over a window, from the ledger and git (Part 18 flow measure). Read only.
+      method: "GET",
+      path: /^\/rooms\/([^/]+)\/flow$/,
+      auth: "read",
+      handler: (req, _cap, params) => {
+        const room = decodeURIComponent(params.id);
+        if (!validRoomLabel(room)) return Response.json({ error: "invalid room" }, { status: 400 });
+        const q = new URL(req.url).searchParams;
+        const now = Date.now();
+        const until = q.has("until") ? Number(q.get("until")) : now;
+        const since = q.has("since") ? Number(q.get("since")) : until - 24 * 3_600_000;
+        if (!Number.isInteger(since) || !Number.isInteger(until) || since < 0 || since >= until) {
+          return Response.json({ error: "since and until must be integer ms with since < until" }, { status: 400 });
+        }
+        return Response.json(flowReport(db, room, since, until, now));
       },
     },
     {
@@ -1226,7 +2102,7 @@ export function createStageRuntime(
       auth: "read",
       handler: (_req, _cap, params) => {
         if (!STAGE_ID_RE.test(params.id)) return Response.json({ error: "invalid stage id" }, { status: 400 });
-        const snap = entity.load(params.id);
+        const snap = withReason(db, entity.load(params.id));
         return snap ? Response.json(snap) : Response.json({ error: "not found" }, { status: 404 });
       },
     },
@@ -1249,58 +2125,27 @@ export function createStageRuntime(
         return Response.json({ action: turnEnd(stage, cap) });
       },
     },
-    {
-      method: "GET",
-      path: "/launches/stream",
-      auth: "read",
-      handler: (_req, cap) =>
-        makeSSE(async (send, signal) => {
-          queue.attach((r) => send(r, r.id), signal, cap);
-          await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
-        }),
-    },
-    {
-      method: "POST",
-      path: /^\/launches\/([^/]+)\/ack$/,
-      auth: "mutating",
-      handler: async (req, cap, params) => {
-        if (!LAUNCH_ID_RE.test(params.id)) return Response.json({ error: "invalid launch id" }, { status: 400 });
-        const raw: unknown = await req.json().catch(() => null);
-        if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-          return Response.json({ error: "the body must be a JSON object" }, { status: 400 });
-        }
-        const body = raw as { result?: unknown; error?: unknown; absent?: unknown };
-        if (body.absent !== undefined && (typeof body.absent !== "boolean" || body.result !== "error")) {
-          return Response.json({ error: "absent must be a boolean and goes with result error" }, { status: 400 });
-        }
-        if (body.result !== "spawned" && body.result !== "error") {
-          return Response.json({ error: "result must be spawned or error" }, { status: 400 });
-        }
-        const error = typeof body.error === "string" ? body.error.slice(0, 500) : "";
-        if (body.result === "error" && !error) return Response.json({ error: "an error ack needs error text" }, { status: 400 });
-        let r;
-        try {
-          r = queue.ack(params.id, body.result === "spawned" ? { result: "spawned" } : { result: "error", error, ...(body.absent === true ? { absent: true } : {}) }, cap);
-        } catch (e) {
-          if (e instanceof LedgerConflict) return ledgerConflictResponse(e);
-          throw e;
-        }
-        if (r.status === "error") return Response.json({ error: r.message }, { status: 500 });
-        if (r.status === "pending") return Response.json({ ok: true, pending: true, message: r.message }, { status: 200 });
-        if (r.status === "unknown") return Response.json({ error: "not found" }, { status: 404 });
-        if (r.status === "conflict") return Response.json({ error: r.message }, { status: 409 });
-        return Response.json(r.status === "idempotent" ? { idempotent: true } : { ok: true }, { status: 200 });
-      },
-    },
   );
 
   const module: KindModule = {
     kind: "stage",
-    migrate: (d: Database) => entity.migrate(d),
+    // The human saved the limits of a room: start the waiting stages of every role that has a free slot now. A lowered limit
+    // starts nothing and stops nothing: enqueueLaunch checks the limit again.
+    onRoomLimitsChanged(room, cap) {
+      for (const role of STAGE_ROLES) startWaiting(role, room, cap);
+    },
+    migrate: (d: Database) => {
+      entity.migrate(d);
+      migrateSessionReleased(d);
+      migrateStartCommit(d);
+      migrateRoom(d);
+      migrateRetroWeek(d);
+    },
     routes: withLedgerRequired(routes),
     // A stage is the hub's own bookkeeping: agents never get a stage replayed on reconnect.
     pendingFor: (_agent: AgentCtx, _cap: HubCapabilities) => [],
     toolNames: [],
+    onAgentBeat: (agent) => void renewLease(agent),
     dispose: () => {
       if (sweepTimer) clearInterval(sweepTimer);
       queue.dispose();
@@ -1308,6 +2153,28 @@ export function createStageRuntime(
     // The launch queue lives in memory. A launch the hub had sent, or queued, before a restart is gone, so each stage
     // still `launching` counts as a launch with no ack (attempt 1 -> retrying, attempt 2 -> failed; 5.3 relaunches).
     start: (cap) => {
+      if (opts.startExecutor) {
+        const host: ExecutorHost = {
+          attach: (send, signal) => queue.attach(send, signal, cap),
+          ack: (id, outcome) => queue.ack(id, outcome, cap),
+          resendCloses: () => queue.resendCloses(),
+        };
+        Promise.resolve(opts.startExecutor(host)).catch((e) => console.error("[stage] the launch executor did not start:", e));
+      }
+      // G4: the open stages of a cancelled ticket are cancelled first, so the sweep below skips them (no retry, no failure).
+      const ofCancelled = db
+        .query<{ id: string }, []>(
+          "SELECT s.id FROM stage s JOIN tickets t ON t.id = s.ticket_id WHERE t.status = 'cancelled' AND s.status IN ('queued', 'launching', 'running', 'retrying') ORDER BY s.rowid",
+        )
+        .all();
+      for (const { id } of ofCancelled) cancelStage(id, "ticket cancelled", cap, "start_sweep", true);
+      // G10: the queued stages of a draft or done ticket, the same way.
+      const ofParked = db
+        .query<{ id: string; status: string }, []>(
+          "SELECT s.id, t.status FROM stage s JOIN tickets t ON t.id = s.ticket_id WHERE t.status IN ('draft', 'done') AND s.status = 'queued' ORDER BY s.rowid",
+        )
+        .all();
+      for (const { id, status } of ofParked) cancelStage(id, `ticket moved to ${status}`, cap, "start_sweep", true);
       const stuck = db.query<{ id: string }, []>("SELECT id FROM stage WHERE status = 'launching' ORDER BY rowid").all();
       for (const { id } of stuck) {
         try {
@@ -1339,20 +2206,237 @@ export function createStageRuntime(
         const [role, room] = w.split("\u0000");
         if (room) startWaiting(role, room, cap);
       }
+      // A hub exit between the commit of stage.passed/failed and the deferred metrics write lost that row: write it now, after start returns.
+      // The selection query and the writer both run in the deferred step. The same writer; it skips attempts that have a row or no
+      // launch metadata. A failure logs and changes nothing else.
+      const repair = new Promise<void>((resolve) =>
+        setImmediate(async () => {
+          let missing: Array<{ id: string; seq: number }> = [];
+          try {
+            missing = (opts.findMissingMetrics ?? stagesMissingMetrics)(db);
+          } catch (e) {
+            console.error(`[stage-metrics] finding the missing rows at start failed: ${(e as Error).message}`);
+          }
+          for (const m of missing) {
+            try {
+              await (opts.recordMetrics ?? recordStageMetrics)(db, m.id, m.seq, console.error, opts.claudeProjectsDir, true);
+            } catch (e) {
+              console.error(`[stage-metrics] ${m.id}: ${(e as Error).message}`);
+            }
+          }
+          resolve();
+        }),
+      );
+      pendingMetrics.add(repair);
+      void repair.then(() => pendingMetrics.delete(repair));
       sweepTimer = setInterval(() => sweep(cap), opts.sweepMs ?? 30_000);
       (sweepTimer as { unref?: () => void }).unref?.();
     },
   };
+  /** Runs git with argv (no shell) and a time limit. Never throws. */
+  function runGit(project: string, args: string[]): { code: number | null; out: string; err: string } {
+    try {
+      const r = Bun.spawnSync(["git", "-C", project, ...args], { stdout: "pipe", stderr: "pipe", timeout: WORKER_GIT_TIMEOUT_MS });
+      const err = r.stderr.toString().trim();
+      return { code: r.exitCode, out: r.stdout.toString().trim(), err: r.exitedDueToTimeout ? `git timed out after ${WORKER_GIT_TIMEOUT_MS} ms. ${err}`.trim() : err };
+    } catch (e) {
+      return { code: null, out: "", err: String(e) };
+    }
+  }
+
+  /** Newest first: result handoffs of passed stages of `roles` on a ticket. */
+  function earlierResults(ticketId: string, roles: string[]): Array<{ context_json: string }> {
+    return db
+      .query<{ context_json: string }, string[]>(
+        `SELECT h.context_json FROM handoffs h JOIN stage s ON s.id = json_extract(h.context_json, '$.stage_id')
+         WHERE json_extract(h.context_json, '$.ticket_id') = ? AND s.ticket_id = ? AND s.role IN (${roles.map(() => "?").join(",")}) AND s.status = 'passed'
+         ORDER BY (SELECT MIN(e.seq) FROM events e WHERE e.entity_id = h.id) DESC`,
+      )
+      .all(ticketId, ticketId, ...roles);
+  }
+
+  /**
+   * G2: a worker result is a handoff to_role tester whose context.commit is new work on ticket/<id>. Returns the refusal
+   * text, or null when the result is good. The hash is checked before any git call.
+   */
+  function checkWorkerResult(stage: { id: string; ticket_id: string | null; role?: string }, c: Record<string, unknown>, to: string | undefined): string | null {
+    const ticketId = stage.ticket_id ?? "";
+    const role = stage.role ?? "worker";
+    const next = CHAIN_NEXT[role] ?? "tester";
+    // A writer or editor result: the same commit rules as a worker, with its own wording and next role.
+    const refuse = (detail?: string) =>
+      role === "worker"
+        ? `${workerRefusal(ticketId)}${detail ? ` ${detail}` : ""}`
+        : `A ${role} result needs to_role ${next} and ${role === "editor" ? "a commit on" : "a new commit on"} ticket/${ticketId}.${detail ? ` ${detail}` : ""}`;
+    const commit = c.commit;
+    if (c.ticket_id !== stage.ticket_id) return refuse();
+    if (role !== "worker" && to !== `${ROLE_RECIPIENT_PREFIX}${next}`) return `A ${role} result must go to to_role ${next}, not to ${to ?? "no recipient"}.`;
+    if (to !== `${ROLE_RECIPIENT_PREFIX}${next}` || typeof commit !== "string" || !FULL_SHA_RE.test(commit)) return refuse(role === "worker" ? undefined : "context.commit must be the full 40-character commit sha.");
+    const room = roomOfStage(stage.id);
+    const project = room ? getRoomSettings(db, room)?.project_folder : null;
+    if (!project) return refuse("The room has no project folder.");
+    // rev-parse --verify --quiet exits 1 with no output when the object is not a commit; any other failure is a git error.
+    const resolve = (sha: string): { ok: boolean; error?: string } => {
+      const r = runGit(project, ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`]);
+      if (r.code === 0) return { ok: true };
+      if (r.code === 1 && !r.err) return { ok: false };
+      return { ok: false, error: `Git: ${r.err || "rev-parse failed"}` };
+    };
+    const branch = `refs/heads/ticket/${ticketId}`;
+    const tip = runGit(project, ["rev-parse", "--verify", "--quiet", branch]);
+    if (tip.code !== 0) return refuse(`Git: branch ticket/${ticketId} not found. ${tip.err}`.trim());
+    const own = resolve(commit);
+    if (own.error) return refuse(own.error);
+    if (!own.ok) return refuse("The commit does not resolve to a commit.");
+    const onBranch = runGit(project, ["merge-base", "--is-ancestor", commit, branch]);
+    if (onBranch.code === 1) return refuse(`The commit is not on ticket/${ticketId}.`);
+    if (onBranch.code !== 0) return refuse(`Git: ${onBranch.err || "merge-base failed"}`);
+    // Editor: the commit must hold the newest passed writer commit and add to it. At most 4 git calls so far.
+    if (role === "editor") {
+      let writerCommit: string | null = null;
+      for (const row of earlierResults(ticketId, ["writer"])) {
+        const prev = (JSON.parse(row.context_json) as Record<string, unknown>).commit;
+        if (typeof prev === "string" && FULL_SHA_RE.test(prev)) {
+          writerCommit = prev;
+          break;
+        }
+      }
+      if (writerCommit === null) return refuse("The ticket has no passed writer result with a commit.");
+      if (writerCommit === commit) return refuse("The commit is not new work: it equals the writer commit.");
+      const holds = runGit(project, ["merge-base", "--is-ancestor", writerCommit, commit]);
+      if (holds.code === 1) return refuse(`The commit does not hold the writer commit ${writerCommit}.`);
+      if (holds.code !== 0) return refuse(`Git: ${holds.err || "merge-base failed"}`);
+      return null;
+    }
+    // Base: a writer's recorded start commit (the ticket/<id> head when the stage started), else the newest earlier passed result of this role with a valid commit, else the fork point from staging.
+    const earlier = earlierResults(ticketId, role === "writer" ? ["writer", "editor"] : ["worker"]);
+    let base: string | null = null;
+    const started = role === "writer" ? db.query<{ start_commit: string | null }, [string]>("SELECT start_commit FROM stage WHERE id = ?").get(stage.id)?.start_commit : null;
+    if (started) {
+      if (!FULL_SHA_RE.test(started)) return refuse("The recorded writer base is not a 40 hex commit.");
+      const r = resolve(started);
+      if (r.error) return refuse(r.error);
+      if (!r.ok) return refuse(`The recorded writer base ${started} does not resolve to a commit.`);
+      base = started;
+    }
+    for (const row of base ? [] : earlier) {
+      const prev = (JSON.parse(row.context_json) as Record<string, unknown>).commit;
+      if (typeof prev !== "string" || !FULL_SHA_RE.test(prev)) continue;
+      const r = resolve(prev);
+      if (r.error) return refuse(r.error);
+      if (r.ok) {
+        base = prev;
+        break;
+      }
+    }
+    if (base === null) {
+      const mb = runGit(project, ["merge-base", branch, "refs/heads/staging"]);
+      if (mb.code !== 0 || !FULL_SHA_RE.test(mb.out)) return refuse(`Git: no merge-base with staging. ${mb.err}`.trim());
+      base = mb.out;
+    }
+    if (base === commit) return refuse("The commit is not new work: it equals the base.");
+    const older = runGit(project, ["merge-base", "--is-ancestor", commit, base]);
+    if (older.code === 0) return refuse("The commit is not new work: it does not descend from the base: it is an ancestor of it.");
+    if (older.code !== 1) return refuse(`Git: ${older.err || "merge-base failed"}`);
+    const fromBase = runGit(project, ["merge-base", "--is-ancestor", base, commit]);
+    if (fromBase.code === 0) return null;
+    if (fromBase.code !== 1) return refuse(`Git: ${fromBase.err || "merge-base failed"}`);
+    // The base is not an ancestor: a rebase or a reset. A rebase moves the fork point to newer staging, or keeps the patches of the base; a reset does neither.
+    const forkOf = (sha: string): { sha?: string; refusal?: string } => {
+      const f = runGit(project, ["merge-base", sha, "refs/heads/staging"]);
+      if (f.code !== 0 || !FULL_SHA_RE.test(f.out)) return { refusal: `Git: no merge-base with staging. ${f.err}`.trim() };
+      return { sha: f.out };
+    };
+    const forkNew = forkOf(commit);
+    if (forkNew.refusal) return refuse(forkNew.refusal);
+    const forkOld = forkOf(base);
+    if (forkOld.refusal) return refuse(forkOld.refusal);
+    if (forkNew.sha === commit) return refuse("The commit is not new work: it holds no commit beyond staging.");
+    if (forkNew.sha !== forkOld.sha) {
+      const newer = runGit(project, ["merge-base", "--is-ancestor", forkOld.sha!, forkNew.sha!]);
+      if (newer.code === 0) return null;
+      if (newer.code !== 1) return refuse(`Git: ${newer.err || "merge-base failed"}`);
+    }
+    // Same or older fork point: accept only a rewrite that keeps a patch of the base ("- ") and adds new work ("+ ").
+    const cherry = runGit(project, ["cherry", base, commit]);
+    if (cherry.code !== 0) return refuse(`Git: ${cherry.err || "cherry failed"}`);
+    const marks = cherry.out.split("\n");
+    if (marks.some((l) => l.startsWith("- ")) && marks.some((l) => l.startsWith("+ "))) return null;
+    return refuse("The commit is not new work: it does not descend from the base.");
+  }
+
+  /** Part 21 group 5: the schema, human-gate, replaces and verdict checks of a retro result (hub/core/retro.ts). */
+  function retroResultErrors(stage: { id: string; review: string | null; ticket_id: string | null; request_id: string | null }, c: Record<string, unknown>): string[] {
+    const row = db.query<{ room: string | null; retro_week: string | null; session: string | null }, [string]>("SELECT room, retro_week, session FROM stage WHERE id = ?").get(stage.id);
+    const ledgerDb = (process.env.CUBILOT_LEDGER_DB ?? "").trim();
+    // The saved evidence file is the snapshot the stage got; the ledger may have changed since the launch.
+    const done = row?.room && row.retro_week && ledgerDb ? savedDoneImprovements(ledgerDb, row.room, row.retro_week) : [];
+    const wt = row?.room && row.session ? join(worktreesRoot(), pathSegment(row.room), pathSegment(worktreeKey(stage)!), pathSegment(row.session)) : null;
+    return checkRetroResult(c, {
+      doneImprovements: done,
+      readLine: (path, line) => {
+        if (!wt) return null;
+        const r = Bun.spawnSync(["git", "-C", wt, "show", `HEAD:${path}`], { stdout: "pipe", stderr: "pipe" });
+        return r.exitCode === 0 ? (r.stdout.toString().split("\n")[line - 1] ?? null) : null;
+      },
+    });
+  }
+
+  /**
+   * Part 21 group 6: an accepted retro result becomes the request `r-<window end date>-retro` with one draft ticket for each
+   * proposal and each `revert` verdict, and its spec review as `system`. No ticket is queued: the human's Approve starts them.
+   * A result with no proposal and no revert creates nothing.
+   */
+  function createRetroRequest(stageId: string, c: Record<string, unknown>, cap: HubCapabilities): void {
+    const row = db.query<{ room: string | null; retro_week: string | null }, [string]>("SELECT room, retro_week FROM stage WHERE id = ?").get(stageId);
+    const w = row?.retro_week ? retroWeekWindow(row.retro_week) : null;
+    if (!row?.room || !w) return;
+    const room = row.room;
+    const drafts = retroDrafts(c, stageId, (id) => db.query<{ title: string }, [string, string]>("SELECT title FROM tickets WHERE id = ? AND room = ?").get(id, room)?.title ?? null);
+    if (!drafts.length) return;
+    const requestId = `r-${localDate(w.until)}-retro`;
+    // Every step checks the ledger first, so a rerun after a stop at any step adds only what is missing. A cancelled draft stays cancelled.
+    if (!db.query("SELECT 1 FROM requests WHERE room = ? AND request_id = ?").get(room, requestId)) {
+      createRequestBySystem(db, cap, { room, request_id: requestId, origin: "factory", features: ["retrospective"], parent_request_id: null, source: stageId });
+    }
+    const have = new Set(db.query<{ title: string; acceptance_criteria: string }, [string, string]>("SELECT title, acceptance_criteria FROM tickets WHERE room = ? AND request_id = ?").all(room, requestId).map((t) => `${t.title}\n${t.acceptance_criteria}`));
+    for (const d of drafts) if (!have.has(`${d.title}\n${d.acceptance_criteria}`)) createDraftBySystem(db, cap, { room, request_id: requestId, ...d });
+    if (!db.query(`SELECT 1 FROM stage s WHERE s.review = 'spec' AND s.request_id = ?1 AND ${STAGE_ROOM_SQL} = ?2`).get(requestId, room)) {
+      const ids = db.query<{ id: string }, [string, string]>("SELECT id FROM tickets WHERE room = ? AND request_id = ? ORDER BY rowid").all(room, requestId).map((t) => t.id);
+      const created = api.create({ request_id: requestId, review: "spec", role: "validator" }, "system", cap, (ctx) => {
+        for (const t of ids) ctx.tx.run("INSERT INTO stage_scope (stage_id, ticket_id) VALUES (?, ?)", [ctx.next.id, t]);
+      });
+      drainQueue(created, cap);
+    }
+    cap.briefing.refresh();
+  }
+
   const hooks: StageHooks = {
+    onTicketEdited(ticketId) {
+      try {
+        for (const s of db.query<{ id: string }, [string]>("SELECT id FROM stage WHERE ticket_id = ? AND status = 'launching'").all(ticketId)) {
+          const r = rerender.get(s.id);
+          const pending = r && queue.undelivered(r.id);
+          if (r && pending && pending.kind === "launch") pending.prompt = r.render();
+        }
+      } catch (e) {
+        console.error(`[stage] refresh of the pending launch of ${ticketId} failed:`, e);
+      }
+    },
     completedStage(from, context) {
       const id = context && typeof context === "object" && !Array.isArray(context) ? (context as Record<string, unknown>).stage_id : undefined;
       if (typeof id !== "string") return null;
-      const row = db.query<{ id: string; status: string }, [string]>("SELECT id, status FROM stage WHERE id = ? AND status IN ('passed', 'failed')").get(id);
+      const row = db.query<{ id: string; status: string }, [string]>("SELECT id, status FROM stage WHERE id = ? AND status IN ('passed', 'failed', 'cancelled')").get(id);
       if (!row) return null;
       const own = db.query<{ id: string }, [string]>("SELECT id FROM stage WHERE session = ? AND status = 'running' LIMIT 1").get(from);
       return own
         ? `stage ${row.id} is already ${row.status}. Your running stage is ${own.id}. Send your result with that stage_id.`
         : `stage ${row.id} is already ${row.status}; it takes no more results`;
+    },
+    isWorkerResult(from, context) {
+      const id = context && typeof context === "object" && !Array.isArray(context) ? (context as Record<string, unknown>).stage_id : undefined;
+      if (typeof id !== "string") return false;
+      return !!db.query("SELECT 1 FROM stage WHERE id = ? AND session = ? AND role = 'worker' AND status = 'running'").get(id, from);
     },
     checkResult(from, context, cap, to) {
       const stage = db
@@ -1365,6 +2449,8 @@ export function createStageRuntime(
       const c = context && typeof context === "object" && !Array.isArray(context) ? (context as Record<string, unknown>) : null;
       if (!c) errors.push("context must be an object");
       else if (stage.review === "spec") {
+        const notes = notesError(c.notes);
+        if (notes) errors.push(notes);
         // The result goes to the Orchestrator of the room (spec-review-stage 4.1b); the error goes back to this session.
         if (to !== undefined) {
           const lead = leadOfRoom(roomOfStage(stage.id));
@@ -1395,10 +2481,72 @@ export function createStageRuntime(
         if (c.verdict === "PASS" && blocking) errors.push("a PASS must not have a blocking finding");
       } else {
         if (c.stage_id !== stage.id) errors.push(`context.stage_id must be ${stage.id}`);
-        if (c.ticket_id !== stage.ticket_id) errors.push(`context.ticket_id must be ${stage.ticket_id}`);
+        const notes = notesError(c.notes);
+        if (notes) errors.push(notes);
+        if (stage.role === "worker") {
+          // G2: every worker result problem, a wrong ticket included, gets the one worker refusal.
+          const refusal = checkWorkerResult(stage, c, to);
+          if (refusal) errors.push(refusal);
+        } else if (stage.role === "writer" || stage.role === "editor") {
+          const refusal = checkWorkerResult(stage, c, to);
+          if (refusal) errors.push(refusal);
+        } else if (stage.review === "retro") {
+          errors.push(...retroResultErrors(stage, c));
+        } else if (c.ticket_id !== stage.ticket_id) errors.push(`context.ticket_id must be ${stage.ticket_id}`);
+        if (stage.role === "tester" && (typeof c.commit !== "string" || !FULL_SHA_RE.test(c.commit))) errors.push("context.commit must be the full 40-character commit sha");
+        if (stage.role === "tester" && stage.ticket_id && isHighTicket(stage.ticket_id)) {
+          // High radius: the Tester result carries the full suite run (command, exit_code, pass, fail, log_path) for the commit that started this stage.
+          const started = handoffCommit(stage.id, stage.ticket_id, "tester");
+          if (started && c.commit !== started) errors.push(`context.commit must be ${started}, the commit of the handoff that started this stage`);
+          const fs = c.full_suite && typeof c.full_suite === "object" && !Array.isArray(c.full_suite) ? (c.full_suite as Record<string, unknown>) : null;
+          if (!fs) errors.push("context.full_suite is required for a high-radius ticket: {command, exit_code, pass, fail, log_path}");
+          else {
+            const bad = (k: string) => (k === "command" || k === "log_path" ? typeof fs[k] !== "string" || !(fs[k] as string).trim() : !Number.isInteger(fs[k]));
+            for (const k of ["command", "exit_code", "pass", "fail", "log_path"]) if (bad(k)) errors.push(`context.full_suite.${k} is missing or invalid`);
+          }
+        }
+        if (stage.role === "tester" && stage.ticket_id && c.verdict === "PASS" && !isHighTicket(stage.ticket_id)) {
+          // Every Tester PASS says which tests ran: a full_suite object, or full_suite false with tests_run.
+          const fs = c.full_suite;
+          const obj = fs && typeof fs === "object" && !Array.isArray(fs) ? (fs as Record<string, unknown>) : null;
+          const objOk = !!obj && ["command", "log_path"].every((k) => typeof obj[k] === "string" && (obj[k] as string).trim()) && ["exit_code", "pass", "fail"].every((k) => Number.isInteger(obj[k]));
+          const listOk = fs === false && Array.isArray(c.tests_run) && c.tests_run.length > 0 && c.tests_run.every((x) => typeof x === "string" && x.trim() !== "" && !x.startsWith("/") && !x.startsWith("~") && !/^[A-Za-z]:/.test(x) && !x.split(/[\\/]/).includes(".."));
+          if (!objOk && !listOk) errors.push("a Tester PASS needs context.full_suite {command, exit_code, pass, fail, log_path} or context.full_suite false with context.tests_run, a non-empty list of test file paths relative to the repo root");
+        }
+        if (stage.role === "validator" && stage.ticket_id && c.verdict === "PASS" && isHighTicket(stage.ticket_id)) {
+          const last = lastFullSuite(stage.ticket_id);
+          const fs = last?.full_suite;
+          if (!fs || typeof fs !== "object" || (fs as Record<string, unknown>).exit_code !== 0) errors.push("a high-radius PASS needs a full suite with exit code 0");
+          else if (last!.commit !== c.commit) errors.push(`context.commit must be ${String(last!.commit)}, the commit of the full suite run`);
+        }
+        if (stage.role === "validator" && stage.ticket_id && c.verdict === "PASS" && isHighTicket(stage.ticket_id) && validatorPasses(stage.ticket_id) >= 1) {
+          // L4: the second PASS of a high ticket is for the commit of the first one.
+          const expected = handoffCommit(stage.id, stage.ticket_id, "validator");
+          if (expected && c.commit !== expected) errors.push(`context.commit must be ${expected}, the commit of the first Validator PASS`);
+        }
         if (REVIEW_ROLES.has(stage.role)) {
           if (typeof c.verdict !== "string" || !VERDICTS.has(c.verdict)) errors.push("context.verdict must be PASS or FAIL (upper case)");
-          if (!Array.isArray(c.findings)) errors.push("context.findings must be a list of {ticket_id, text}");
+          if (stage.role === "reviewer") {
+            // The Reviewer (writing chain): findings are {severity, text}; a PASS goes to the lead, a FAIL to the Writer.
+            let blocking = false;
+            if (!Array.isArray(c.findings)) errors.push("context.findings must be a list of {severity, text}");
+            else {
+              c.findings.forEach((f, i) => {
+                const o = f && typeof f === "object" ? (f as Record<string, unknown>) : null;
+                if (!o || (o.severity !== "blocking" && o.severity !== "suggestion")) errors.push(`context.findings[${i}].severity must be blocking or suggestion`);
+                if (!o || typeof o.text !== "string" || !o.text.trim()) errors.push(`context.findings[${i}].text must be a non-empty string`);
+                if (o?.severity === "blocking") blocking = true;
+              });
+            }
+            if (c.verdict === "PASS" && blocking) errors.push("a PASS must not have a blocking finding");
+            if (to !== undefined) {
+              const lead = leadOfRoom(roomOfStage(stage.id));
+              if (c.verdict === "PASS" && to !== lead) errors.push(`to: a Reviewer PASS must be sent to ${lead}, not to ${to}`);
+              // A lint FAIL (gate "ste-lint") goes back to the Editor; any other FAIL goes to the Writer.
+              if (c.verdict === "FAIL" && c.gate === "ste-lint" && to !== `${ROLE_RECIPIENT_PREFIX}editor`) errors.push(`to: a Reviewer FAIL with gate "ste-lint" must be sent with to_role "editor", not to ${to}`);
+              else if (c.verdict === "FAIL" && c.gate !== "ste-lint" && to !== `${ROLE_RECIPIENT_PREFIX}writer`) errors.push(`to: a Reviewer FAIL must be sent with to_role "writer", not to ${to}`);
+            }
+          } else if (!Array.isArray(c.findings)) errors.push("context.findings must be a list of {ticket_id, text}");
           else {
             c.findings.forEach((f, i) => {
               const o = f && typeof f === "object" ? (f as Record<string, unknown>) : null;
@@ -1444,13 +2592,31 @@ export function createStageRuntime(
           // moves and nothing is relaunched; the findings stay in the result handoff, which the Validator sent to the Orchestrator.
           if (c.verdict === "PASS") passSpecStage(stage.id, cap);
           else {
+            // The queued stages fail first: the move to passed frees the slot and the queue would start them.
+            const room = roomOfStage(stage.id);
+            const request = db.query<{ r: string | null }, [string]>("SELECT request_id AS r FROM stage WHERE id = ?").get(stage.id)?.r;
+            // The hub count was written into the result context by stampResult, once per spec result.
+            const fails = typeof c.fail_count === "number" ? c.fail_count : 0;
+            if (room && request && fails >= 2) failQueuedSpecStages(request, room, cap);
             api.move(stage.id, { to: "passed", verdict: "FAIL" }, "system", cap);
-            noticeRepeatedFail(stage.id, c, cap);
+            noticeRepeatedFail(stage.id, c, fails, cap);
           }
         } else {
-          // A final PASS of a validator or reviewer closes its ticket in the same transaction (the third cross-kind one).
+          // L4: a final PASS never closes its ticket. It hands the in_review ticket to the lead in the same transaction
+          // (the third cross-kind one). The first PASS on a high ticket also starts a second Validator stage.
           const ticketId = stage.ticket_id;
+          const highValidator = !!ticketId && c.verdict === "PASS" && stage.role === "validator" && isHighTicket(ticketId);
+          const secondPass = highValidator && validatorPasses(ticketId!) >= 1;
           const closes = !!ticketId && c.verdict === "PASS" && (stage.role === "validator" || stage.role === "reviewer");
+          // A worker result (any verdict field) or a final PASS puts a ticket that stayed queued, claimed or in_progress into
+          // in_review. This is a ticket-only transaction before stage.passed, so stage.passed adds no fourth cross-kind one.
+          if (ticketId && (stage.role === "worker" || closes)) {
+            const moved = reviewBySystem(db, ticketId);
+            if (moved) {
+              cap.sse.emit(moved.entry, { kind: "room", room: moved.snapshot.room });
+              cap.briefing.refresh();
+            }
+          }
           let closed: ReturnType<typeof closeReviewedBySystemInTx> = null;
           api.move(
             stage.id,
@@ -1464,11 +2630,20 @@ export function createStageRuntime(
               cap.briefing.refresh();
             },
           );
-          // A ticket that became done frees the tickets that wait for it.
-          const done = closed as ReturnType<typeof closeReviewedBySystemInTx>;
-          if (done?.snapshot.status === "done") {
-            const waiting = db.query<{ ticket_id: string }, [string]>("SELECT ticket_id FROM ticket_blockers WHERE blocker_id = ? ORDER BY rowid").all(done.snapshot.id);
-            for (const w of waiting) hooks.onTicketChanged(w.ticket_id, cap);
+          if (stage.review === "retro") {
+            try {
+              createRetroRequest(stage.id, c, cap);
+            } catch (e) {
+              console.error(`[stage] the draft tickets of retrospective ${stage.id} failed, the sweep retries:`, e);
+            }
+          }
+          if (highValidator && !secondPass && db.query<{ s: string }, [string]>("SELECT status AS s FROM tickets WHERE id = ?").get(ticketId!)?.s === "in_review") {
+            // Same commit: the starting handoff of the first stage is the newest one before this stage too.
+            const second = api.create({ ticket_id: ticketId!, role: "validator" }, "system", cap);
+            const room = roomOfStage(second.id);
+            // The first session keeps its name until its close is acked, so the second stage gets another name and waits for the slot.
+            const r = room ? enqueueLaunch({ stage_id: second.id, session: nextSessionName("validator", second.id, cap), room, harness: roleHarness("validator"), cwd: null, prompt: "" }, cap) : { ok: false as const, reason: "no room" };
+            if (!r.ok) console.log(`[stage] ${second.id} stays queued: ${r.reason}`);
           }
         }
       } catch (e) {
@@ -1477,6 +2652,12 @@ export function createStageRuntime(
         console.error(`[stage] recording the result of ${stage.id} failed:`, e);
       }
     },
+    onTicketCancelled(ticketId, cap) {
+      cancelStagesOfTicket(ticketId, cap);
+    },
+    onTicketParked(ticketId, to, cap) {
+      cancelQueuedStagesOfTicket(ticketId, to, cap);
+    },
     onTicketChanged(ticketId, cap) {
       try {
         evaluateStages(ticketId, cap, [], { launch: true });
@@ -1484,6 +2665,14 @@ export function createStageRuntime(
         // The ticket change is already committed. A later event (or a role handoff) evaluates the ticket again.
         console.error(`[stage] evaluating ${ticketId} after a ticket change failed:`, e);
       }
+    },
+    stampResult(from, context) {
+      const c = context as Record<string, unknown> | null;
+      if (!c || typeof c !== "object" || c.review !== "spec" || c.verdict !== "FAIL") return context;
+      const stage = db.query<{ id: string; r: string | null }, [string]>("SELECT id, request_id AS r FROM stage WHERE session = ? AND status = 'running' AND review = 'spec' LIMIT 1").get(from);
+      const room = stage ? roomOfStage(stage.id) : null;
+      if (!stage?.r || !room) return context;
+      return { ...c, fail_count: specFailState(db, room, stage.r).fails + 1 };
     },
     onSpecHandoff(h, cap) {
       try {
@@ -1506,7 +2695,12 @@ export function createStageRuntime(
       }
     },
   };
-  return { module, api, evaluateStages, hooks, enqueueLaunch, queue, passSpecStage, sweep };
+  const sendInput = (session: string, text: string): string => {
+    const id = mintLaunchId();
+    queue.push({ id, kind: "input", session, text });
+    return id;
+  };
+  return { module, api, renewLease, leaseOf: (id: string) => { const l = leases.get(id); return l ? { session: l.session, expires_at_ms: l.expiresAt } : null; }, evaluateStages, hooks, enqueueLaunch, queue, passSpecStage, sweep, sendInput, dropInput: (id: string) => queue.drop(id), pendingRoleModelLaunches: () => roleModelLaunches.size, pendingRerenders: () => rerender.size, metricsIdle: async () => void (await Promise.all([...pendingMetrics])) };
 }
 
 export function createStageKind(db: Database): KindModule {

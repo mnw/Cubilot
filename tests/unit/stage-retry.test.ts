@@ -1,20 +1,23 @@
 // Retry and final failure (stage-sessions 5.3, brief test 6).
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { giveProject } from "../helpers/repo";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createTicketKind } from "../../hub/kinds/ticket";
 import { createStageRuntime } from "../../hub/kinds/stage";
+import { disposeRuntimes, trackedRuntime } from "../helpers/stage-runtimes";
 import type { Entry, HubCapabilities, RouteDef, Scope } from "../../hub/core/types";
 import type { LaunchRequest } from "../../hub/core/launch-queue";
+
+afterEach(disposeRuntimes);
 
 function makeEnv(agents: string[] = [], o: { workerLimit?: number; closeGraceMs?: number; db?: Database } = {}) {
   const db = o.db ?? new Database(":memory:");
   migrateLedger(db);
   createTicketKind(db).migrate(db);
   const failures: Array<{ stage: string; reason: string }> = [];
-  const rt = createStageRuntime(db, { ackMs: 60_000, bootGraceMs: 1000, closeGraceMs: o.closeGraceMs, onFinalFailure: (i) => failures.push({ stage: i.stage.id, reason: i.reason }) });
+  const rt = trackedRuntime(db, { ackMs: 60_000, bootGraceMs: 1000, closeGraceMs: o.closeGraceMs, onFinalFailure: (i) => failures.push({ stage: i.stage.id, reason: i.reason }) });
   rt.module.migrate(db);
   giveProject(db, "r1");
   if (o.workerLimit !== undefined) {
@@ -22,7 +25,8 @@ function makeEnv(agents: string[] = [], o: { workerLimit?: number; closeGraceMs?
       JSON.stringify({ worker: o.workerLimit, tester: 1, validator: 1, reviewer: 1, editor: 1, writer: 1 }),
     ]);
   }
-  const roster = new Set(agents);
+  // The fake sessions join the roster after the launch: a roster agent with a name keeps that name from a launch (stage leases).
+  const roster = new Set<string>();
   const cap = {
     db,
     sse: { emit: (_e: Entry, _s: Scope) => {} },
@@ -40,6 +44,7 @@ function makeEnv(agents: string[] = [], o: { workerLimit?: number; closeGraceMs?
   );
   rt.evaluateStages(tid, cap, [], { launch: true });
   const stageId = db.query<{ id: string }, []>("SELECT id FROM stage").get()!.id;
+  for (const a of agents) roster.add(a);
   const spawn = (id: string) => {
     const l = [...sent].reverse().find((r) => r.kind === "launch" && r.stage_id === id)!;
     expect(rt.queue.ack(l.id, { result: "spawned" }, cap).status).toBe("ok");
@@ -207,6 +212,7 @@ describe("a hub restart between the retry and the relaunch (5.3b)", () => {
     expect(launches).toHaveLength(1);
     expect(launches[0].prompt).toContain("second end of turn without a result");
     expect(rt2.api.load(e.stageId)).toMatchObject({ status: "launching", attempt: 2 });
+    rt2.module.dispose!(); // a second start() would overwrite sweepTimer and leak the first interval
     rt2.module.start!(e.cap); // a second start: the launching stage counts as an unacked launch, nothing else relaunches
     rt2.module.dispose!();
   });
@@ -260,5 +266,17 @@ describe("the relaunch waits for the close of the previous session, with a free 
     e.rt.evaluateStages(t2, e.cap, [], { launch: true });
     expect(e.launches()).toHaveLength(2);
     expect(e.launches()[1].stage_id).not.toBe(e.stageId);
+  });
+});
+
+describe("a launch name never collides with a connected roster agent (stage leases)", () => {
+  test("connected roster names 1 to 65 push the relaunch to 66: no fixed upper bound", async () => {
+    const e = makeEnv();
+    e.spawn(e.stageId);
+    for (let n = 1; n <= 65; n++) e.roster.add(`worker-${n}`);
+    expect(await e.turnEnd("worker-1")).toBe("reminder");
+    expect(await e.turnEnd("worker-1")).toBe("stop");
+    e.ackCloses();
+    expect(e.stage()).toMatchObject({ status: "launching", session: "worker-66" });
   });
 });

@@ -2,28 +2,51 @@
 // against a temp ledger. Tests interact via HTTP + SSE exactly like the UI and
 // channel-bin do in production — no mocks, no in-process imports.
 
-import { mkdtempSync, mkdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 export type HubHandle = {
   url: string;
+  /** The agent token: what hub.token holds and the bridge sends. */
   token: string;
+  /** The human token: the hub gets it on stdin, as the shell gives it in the app. */
+  humanToken: string;
   ledgerPath: string;
   attachmentsDir: string;
   /** Where this hub writes room transcripts: a temp folder, never the real app data. */
   transcriptsDir: string;
   humanName: string;
+  pid: number;
+  /** The hub's data folder (CUBILOT_DATA_DIR): config.yml goes here. */
+  dataDir: string;
   kill: () => Promise<void>;
 };
+
+/**
+ * Env that makes a hub run the fake launch executor (tests/helpers/fake-executor-module.ts), never tmux. A test that
+ * boots `hub/hub.ts` itself adds this to the env. The port file of an earlier hub on the same ledger is removed.
+ */
+export function fakeExecutorEnv(ledgerPath: string): Record<string, string> {
+  const portFile = join(dirname(ledgerPath), "fake-executor.port");
+  rmSync(portFile, { force: true });
+  return { CUBILOT_LAUNCH_EXECUTOR: join(import.meta.dir, "fake-executor-module.ts"), CUBILOT_FAKE_EXECUTOR_PORT_FILE: portFile };
+}
 
 export async function spawnHub(opts?: {
   humanName?: string;
   defaultRoom?: string;
   token?: string;
+  humanToken?: string;
+  /** Gives the hub no human token (stdin closed): nobody is the human. */
+  noHumanToken?: boolean;
   allowedExtensions?: string;
+  /** Boots a new hub on the folders and token of a killed one (a restart on the same ledger). */
+  restartOf?: HubHandle;
+  /** Extra env for the hub process (settings tests set CUBILOT_APP_VERSION and the like). */
+  env?: Record<string, string>;
 }): Promise<HubHandle> {
-  const base = mkdtempSync(join(tmpdir(), "cubilot-hub-test-"));
+  const base = opts?.restartOf ? dirname(opts.restartOf.ledgerPath) : mkdtempSync(join(tmpdir(), "cubilot-hub-test-"));
   const ledgerPath = join(base, "ledger.db");
   const attachmentsDir = join(base, "attachments");
   mkdirSync(attachmentsDir, { recursive: true });
@@ -31,9 +54,13 @@ export async function spawnHub(opts?: {
   // variable itself keeps its folder; every other hub gets one next to its ledger.
   const transcriptsDir = process.env.CUBILOT_TRANSCRIPTS_DIR || join(base, "transcripts");
 
-  const token = opts?.token ?? `tst-${Math.random().toString(36).slice(2, 10)}`;
+  const token = opts?.token ?? opts?.restartOf?.token ?? `tst-${Math.random().toString(36).slice(2, 10)}`;
+  const humanToken = opts?.noHumanToken ? "" : opts?.humanToken ?? opts?.restartOf?.humanToken ?? `hum-${Math.random().toString(36).slice(2, 12)}${Math.random().toString(36).slice(2, 12)}`;
   const humanName = opts?.humanName ?? "human";
   const defaultRoom = opts?.defaultRoom ?? "default";
+
+  // Every test hub runs the fake launch executor, never tmux. A restart must not read the port of the hub it replaces.
+  const executorEnv = fakeExecutorEnv(ledgerPath);
 
   const proc = Bun.spawn(["bun", "run", "hub/hub.ts"], {
     env: {
@@ -48,10 +75,16 @@ export async function spawnHub(opts?: {
       CUBILOT_HUMAN_NAME: humanName,
       CUBILOT_DEFAULT_ROOM: defaultRoom,
       CUBILOT_ALLOWED_EXTENSIONS: opts?.allowedExtensions ?? "jpg,jpeg,png,pdf,md,txt,json",
+      ...executorEnv,
+      ...opts?.env,
     },
+    stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
   });
+  // The human token is the first line of the hub's stdin, never env or a file.
+  if (humanToken) proc.stdin.write(`${humanToken}\n`);
+  proc.stdin.end();
 
   // Tail stdout until the "listening on http://127.0.0.1:<port>" line appears,
   // then extract the port. 5-second wall-clock limit — if boot is slower than
@@ -61,10 +94,13 @@ export async function spawnHub(opts?: {
   return {
     url,
     token,
+    humanToken,
     ledgerPath,
     attachmentsDir,
     transcriptsDir,
     humanName,
+    pid: proc.pid,
+    dataDir: join(base, "data"),
     kill: async () => {
       try { proc.kill(); } catch {}
       await proc.exited;

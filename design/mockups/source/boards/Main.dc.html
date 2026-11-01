@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cubilot · Decisions</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;family=Fraunces:wght@500&amp;display=swap">
+<style>
+:root{color-scheme:dark;--bg:#1a1714;--bg-raised:#221d19;--bg-elev:#2a231e;--bg-inset:#14110f;--bg-hover:#2f2621;--line:#352c26;--line-soft:#2a231e;--line-hover:#4a3d34;--text:#f5ede2;--text-muted:#a69583;--text-meta:#978b78;--text-dim:#6b5d51;--orange:#d97757;--orange-text:#d97757;--amber:#e8a857;--green:#7fb069;--red:#d4604a;--red-strong:#e38f7a;--green-strong:#9dc285;--blue:#6b9bc9;--purple:#a788c4;--teal:#6ab5a3;--sans:Inter,-apple-system,'Segoe UI',sans-serif;--mono:'JetBrains Mono',ui-monospace,Menlo,monospace;--serif:Fraunces,Georgia,serif}
+body{margin:0;background:var(--bg)}
+a{color:var(--orange-text)}a:hover{color:#e08265}
+*{box-sizing:border-box}
+button{font:inherit}
+@media (max-width: 900px){.c-side{display:none !important}}
+</style>
+</helmet>
+<div style="min-height: 1080px; display: flex; flex-direction: column; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; line-height: 1.45">
+
+<header style="height: 52px; flex: none; position: relative; z-index: 10; display: flex; align-items: center; gap: 12px; padding: 0 16px 0 20px; border-bottom: 1px solid var(--line-soft); background: var(--bg)"><div style="display: flex; align-items: center; gap: 8px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--orange)" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 3 7v10l9 5 9-5V7z"></path><path d="m3 7 9 5 9-5"></path><path d="M12 12v10"></path></svg><span style="font-family: var(--serif); font-weight: 500; font-size: 18px">Cubilot</span></div><div style="position: relative"><button aria-haspopup="listbox" aria-expanded="false" style="height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-raised); color: var(--text); cursor: pointer; font-size: 14px; font-family: var(--mono); min-width: 150px"><span style="color: var(--text-meta)">#</span>cubilot<span style="flex: 1"></span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-meta)" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button></div><button style="height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-raised); color: var(--text); cursor: pointer; font-size: 14px; flex: 1; max-width: 420px; background: var(--bg-inset); color: var(--text-meta)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg><span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0">Find a ticket, request or agent</span><span style="flex: 1"></span><kbd style="font-family: var(--mono); font-size: 12px; padding: 1px 6px; border: 1px solid var(--line); border-radius: 4px">⌘K</kbd></button><div style="flex: 1"></div><div style="display: flex; align-items: center; gap: 8px"><span style="font-family: var(--mono); font-size: 12px; letter-spacing: .08em; color: var(--text-meta)">LEAD</span><button aria-haspopup="listbox" style="height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-raised); color: var(--text); cursor: pointer; font-size: 14px"><span style="width: 7px; height: 7px; border-radius: 50%; background: var(--green)"></span>Orchestrator<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-meta)" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button></div><div role="group" aria-label="Room run state" style="display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden"><button style="height: 30px; padding: 0 10px; border: 0; background: var(--bg-raised); color: var(--text); cursor: pointer; font-size: 14px; display: inline-flex; align-items: center; gap: 6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14"></rect><rect x="14" y="5" width="4" height="14"></rect></svg>Pause room</button><span aria-live="polite" style="height: 30px; padding: 0 10px; border-left: 1px solid var(--line); display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--green-strong)"><span style="width: 7px; height: 7px; border-radius: 50%; background: var(--green)"></span>running</span></div><button style="height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-raised); color: var(--text); cursor: pointer; font-size: 14px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add agent</button><span style="width: 1px; height: 20px; background: var(--line)"></span><div style="display: flex; align-items: center; gap: 2px"><button aria-label="Room instructions" title="Room instructions" style="width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; color: var(--text-muted); cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path><path d="M14 3v5h5M9 13h6M9 17h6"></path></svg></button><button aria-label="Factory map" title="Factory map" style="width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; color: var(--text-muted); cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="6" cy="6" r="2.5"></circle><circle cx="18" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M8 7.5 10.5 16M16 7.5 13.5 16M8.5 6h7"></path></svg></button><button aria-label="Project folder" title="Project folder" style="width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; color: var(--text-muted); cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg></button><button aria-label="Settings" title="Settings" style="width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; color: var(--text-muted); cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></button></div><button aria-label="Michel" style="width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line); background: var(--bg-elev); color: var(--text); font-weight: 600; font-size: 12px; cursor: pointer">M</button></header>
+
+<div style="flex: 1; display: flex; min-height: 0">
+
+<nav class="c-side" style="width: 248px; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--line-soft); background: var(--bg-inset)">
+<div style="padding: 14px 10px 8px; display: flex; flex-direction: column; gap: 2px">
+<a href="#" style="display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: 6px; background: var(--bg-elev); color: var(--text); text-decoration: none; font-weight: 500">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--orange)" stroke-width="1.8" aria-hidden="true"><path d="M4 12h4l2 3h4l2-3h4"></path><path d="M5.5 5.5 4 12v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6l-1.5-6.5A2 2 0 0 0 16.6 4H7.4a2 2 0 0 0-1.9 1.5z"></path></svg>
+<span style="flex: 1">Decisions</span>
+<span style="min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--orange); color: #1a1714; font-family: var(--mono); font-size: 12px; font-weight: 600; display: grid; place-items: center">4</span>
+</a>
+<a href="#" style="display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: 6px; color: var(--text-muted); text-decoration: none">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"></path><path d="M4 6h.01M4 12h.01M4 18h.01"></path></svg>
+<span style="flex: 1">Requests</span><span style="font-family: var(--mono); font-size: 12px; color: var(--text-meta)">5</span></a>
+<a href="#" style="display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: 6px; color: var(--text-muted); text-decoration: none">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 6h6v12H3zM10 6h4v8h-4zM15 6h6v5h-6z"></path></svg>
+<span style="flex: 1">Flow</span><span style="font-family: var(--mono); font-size: 12px; color: var(--amber)">1 stall</span></a>
+<a href="Dashboard.dc.html" style="display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: 6px; color: var(--text-muted); text-decoration: none">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"></path></svg>
+<span style="flex: 1">Dashboard</span><span style="font-family: var(--mono); font-size: 12px; color: var(--text-meta)">6/18</span></a>
+<a href="#" style="display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: 6px; color: var(--text-muted); text-decoration: none">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.7A8 8 0 1 1 21 12z"></path></svg>
+<span style="flex: 1">Room</span><span style="font-family: var(--mono); font-size: 12px; color: var(--text-meta)">12 new</span></a>
+<a href="#" style="display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: 6px; color: var(--text-muted); text-decoration: none">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m5 12 4 4 10-10"></path></svg>
+<span style="flex: 1">Delivery</span><span style="font-family: var(--mono); font-size: 12px; color: var(--green)">1 ready</span></a>
+</div>
+
+<div style="margin: 10px 18px 6px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-meta)">Agents</div>
+<div style="padding: 0 10px; display: flex; flex-direction: column; gap: 1px">
+<a href="#" style="display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 6px; color: var(--text); text-decoration: none">
+<span style="width: 8px; height: 8px; border-radius: 50%; background: var(--green)"></span>
+<span style="min-width: 0"><span style="display: block; font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--orange)">orchestrator</span><span style="display: block; font-size: 12px; color: var(--text-meta)">waiting for you · context 41%</span></span>
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-meta)" stroke-width="2" aria-hidden="true"><path d="M4 17 10 11 4 5"></path><path d="M12 19h8"></path></svg>
+</a>
+<a href="#" style="display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 6px; color: var(--text); text-decoration: none">
+<span style="width: 8px; height: 8px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 6px var(--amber)"></span>
+<span style="min-width: 0"><span style="display: block; font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--amber)">worker-1</span><span style="display: block; font-size: 12px; color: var(--text-meta)">t_f8e1 · rework · 6 min</span></span>
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-meta)" stroke-width="2" aria-hidden="true"><path d="M4 17 10 11 4 5"></path><path d="M12 19h8"></path></svg>
+</a>
+<a href="#" style="display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 6px; color: var(--text); text-decoration: none">
+<span style="width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--text-meta)"></span>
+<span style="min-width: 0"><span style="display: block; font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--amber)">worker-2</span><span style="display: block; font-size: 12px; color: var(--text-meta)">idle · nothing startable</span></span>
+<span></span>
+</a>
+<a href="#" style="display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 6px; color: var(--text); text-decoration: none">
+<span style="width: 8px; height: 8px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 6px var(--amber)"></span>
+<span style="min-width: 0"><span style="display: block; font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--teal)">tester-1</span><span style="display: block; font-size: 12px; color: var(--text-meta)">t_46fd · full suite · 14 min</span></span>
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-meta)" stroke-width="2" aria-hidden="true"><path d="M4 17 10 11 4 5"></path><path d="M12 19h8"></path></svg>
+</a>
+<a href="#" style="display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 6px; color: var(--text); text-decoration: none">
+<span style="width: 8px; height: 8px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 6px var(--amber)"></span>
+<span style="min-width: 0"><span style="display: block; font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--purple)">validator-1</span><span style="display: block; font-size: 12px; color: var(--text-meta)">spec review · t_ebd5</span></span>
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-meta)" stroke-width="2" aria-hidden="true"><path d="M4 17 10 11 4 5"></path><path d="M12 19h8"></path></svg>
+</a>
+<a href="#" style="display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 6px; color: var(--text); text-decoration: none">
+<span style="width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--text-meta)"></span>
+<span style="min-width: 0"><span style="display: block; font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--purple)">validator-2</span><span style="display: block; font-size: 12px; color: var(--text-meta)">idle</span></span>
+<span></span>
+</a>
+</div>
+<div style="flex: 1"></div>
+<div style="margin: 12px; padding: 12px; border: 1px solid var(--line-soft); border-radius: 6px; display: flex; flex-direction: column; gap: 6px; font-size: 12px">
+<div style="font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-meta)">Slots</div>
+<div style="display: flex; justify-content: space-between"><span style="color: var(--text-muted)">Workers</span><span style="font-family: var(--mono)">1 / 2</span></div>
+<div style="display: flex; justify-content: space-between"><span style="color: var(--text-muted)">Testers</span><span style="font-family: var(--mono)">1 / 2</span></div>
+<div style="display: flex; justify-content: space-between"><span style="color: var(--text-muted)">Validators</span><span style="font-family: var(--mono)">1 / 2</span></div>
+<div style="display: flex; justify-content: space-between"><span style="color: var(--text-muted)">Can start now</span><span style="font-family: var(--mono); color: var(--amber)">0 · chain</span></div>
+</div>
+</nav>
+
+<main style="flex: 999 1 560px; min-width: 0; padding: 28px 40px 48px; display: flex; flex-direction: column; gap: 28px">
+<div style="max-width: 980px; width: 100%; display: flex; flex-direction: column; gap: 28px">
+
+<div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap">
+<div>
+<h1 style="margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em">Decisions</h1>
+<p style="margin: 6px 0 0; color: var(--text-muted)">4 need you. The factory decided 6 more today by its rules; you can overrule them below.</p>
+</div>
+<div style="display: flex; gap: 6px" role="group" aria-label="Filter">
+<button style="height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line-hover); background: var(--bg-elev); color: var(--text); cursor: pointer">All 4</button>
+<button style="height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--text-muted); cursor: pointer">Choose 1</button>
+<button style="height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--text-muted); cursor: pointer">Approve 1</button>
+<button style="height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--text-muted); cursor: pointer">Allow 1</button>
+<button style="height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--text-muted); cursor: pointer">Review 1</button>
+</div>
+</div>
+
+<article style="border: 1px solid var(--line-hover); border-radius: 6px; background: var(--bg-raised); overflow: hidden">
+<div style="padding: 18px 20px 16px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px">
+<span style="padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--orange) 18%, transparent); color: var(--orange-text); font-weight: 600">Choose</span>
+<span style="font-family: var(--mono); color: var(--text-meta)">t_46fd</span>
+<span style="color: var(--text-meta)">·</span>
+<a href="#" style="color: var(--text-muted); text-decoration: none">context-pack 5.1–5.4 · stage metrics</a>
+<span style="padding: 2px 8px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--red-strong) 45%, transparent); color: var(--red-strong); font-size: 12px">high radius</span>
+<span style="flex: 1"></span>
+<span style="font-family: var(--mono); color: var(--text-meta)">asked 20:46 · waits 3 tickets</span>
+</div>
+<h2 style="margin: 0; font-size: 18px; font-weight: 600; line-height: 1.35">Fifth code FAIL: one more scoped rework, or accept and move the fix to a new ticket?</h2>
+<p style="margin: 0; color: var(--text-muted); max-width: 72ch">A line in a transcript that is not valid JSON is skipped, so a cut-off transcript reports too few tokens as if they were real. Same class as FAIL 1. Nothing else is open; the full suite passes.</p>
+</div>
+
+<div style="padding: 0 20px 16px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+<div style="border: 1px solid var(--orange); border-radius: 6px; padding: 14px; background: color-mix(in srgb, var(--orange) 7%, var(--bg-raised)); display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; align-items: center; gap: 8px"><span style="font-family: var(--mono); font-weight: 600; color: var(--orange-text)">A</span><span style="font-weight: 600">One more rework, this fix only</span><span style="margin-left: auto; font-size: 12px; color: var(--orange-text)">recommended</span></div>
+<div style="color: var(--text-muted); font-size: 14px">Unreadable line returns no tokens; one test. Tester and Validator check only this. Costs one cycle; no wrong counts reach staging.</div>
+<button style="align-self: flex-start; margin-top: 4px; height: 34px; padding: 0 16px; border: 0; border-radius: 6px; background: var(--orange); color: #1a1714; font-weight: 600; cursor: pointer">Choose A</button>
+</div>
+<div style="border: 1px solid var(--line); border-radius: 6px; padding: 14px; display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; align-items: center; gap: 8px"><span style="font-family: var(--mono); font-weight: 600; color: var(--text-muted)">B</span><span style="font-weight: 600">Accept now, fix in a new ticket</span></div>
+<div style="color: var(--text-muted); font-size: 14px">PASS can come now. Wrong token counts can reach staging until the new low ticket is done.</div>
+<button style="align-self: flex-start; margin-top: 4px; height: 34px; padding: 0 16px; border: 1px solid var(--line-hover); border-radius: 6px; background: var(--bg-elev); color: var(--text); font-weight: 500; cursor: pointer">Choose B</button>
+</div>
+</div>
+
+<details style="border-top: 1px solid var(--line-soft)">
+<summary style="padding: 12px 20px; cursor: pointer; color: var(--text-muted); font-size: 14px">Facts, checked by the Orchestrator (5) · FAIL history (5) · his note</summary>
+<ol style="margin: 0; padding: 0 20px 16px 40px; display: flex; flex-direction: column; gap: 6px; color: var(--text-muted); font-size: 14px">
+<li>The skip is <code style="font-family: var(--mono); color: #f0c4b0">catch { continue; }</code> at hub/core/stage-metrics.ts:141–144.</li>
+<li>The defect makes metrics wrong; it does not change the stage flow.</li>
+<li>No FAIL repeats an earlier one. FAILs 3 and 4 came from his own rulings on details.</li>
+</ol>
+</details>
+
+<div style="padding: 12px 20px; border-top: 1px solid var(--line-soft); display: flex; align-items: center; gap: 16px; flex-wrap: wrap; font-size: 14px">
+<input id="note1" placeholder="Add a note to your answer (optional)" style="flex: 1; min-width: 200px; height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-inset); color: var(--text); font: inherit">
+<a href="#">Open ticket</a>
+<a href="#">Watch tester-1</a>
+<a href="#">Ask the Orchestrator</a>
+</div>
+</article>
+
+<article style="border: 1px solid var(--line); border-radius: 6px; background: var(--bg-raised); padding: 16px 20px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 24px; align-items: center">
+<div style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px">
+<span style="padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--blue) 20%, transparent); color: #9bbfe0; font-weight: 600">Approve plan</span>
+<a href="#" style="font-family: var(--mono); color: var(--text-muted); text-decoration: none">human-touchpoints-checkpoint</a>
+<span style="font-family: var(--mono); color: var(--text-meta)">· spec review PASS · 11:02</span>
+</div>
+<div style="font-size: 16px; font-weight: 600">Part 6, items 11 and 7: you only at start and delivery; Orchestrator checkpoint</div>
+<div style="display: flex; gap: 16px; flex-wrap: wrap; color: var(--text-muted); font-size: 14px"><span><b style="color: var(--text)">18</b> tickets</span><span><b style="color: var(--red-strong)">7</b> high radius</span><span><b style="color: var(--text)">3</b> can start at once</span><span>longest chain <b style="color: var(--text)">10</b> (reason given)</span><span><b style="color: var(--text)">7</b> checks for you at delivery</span></div>
+</div>
+<div style="display: flex; gap: 8px">
+<a href="#" style="display: inline-flex; align-items: center; height: 34px; padding: 0 14px; border: 1px solid var(--line-hover); border-radius: 6px; color: var(--text); text-decoration: none">Read plan</a>
+<button style="height: 34px; padding: 0 16px; border: 0; border-radius: 6px; background: var(--orange); color: #1a1714; font-weight: 600; cursor: pointer">Approve</button>
+</div>
+</article>
+
+<article style="border: 1px solid var(--line); border-radius: 6px; background: var(--bg-raised); padding: 16px 20px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 24px; align-items: center">
+<div style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px">
+<span style="padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green-strong); font-weight: 600">Allow</span>
+<span style="font-family: var(--mono); color: var(--text-meta)">t_cc25</span>
+<span style="padding: 2px 8px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--red-strong) 45%, transparent); color: var(--red-strong); font-size: 12px">high radius</span>
+</div>
+<div style="font-size: 16px; font-weight: 600">A spec review you send takes the room of its tickets</div>
+<div style="display: flex; gap: 16px; flex-wrap: wrap; color: var(--text-muted); font-size: 14px"><span>Validator PASS h_3f21</span><span>suite 2231 pass · 0 fail</span><span>4 files · +118 −9</span><span style="color: var(--text-meta)">not merged yet</span></div>
+</div>
+<div style="display: flex; gap: 8px">
+<a href="#" style="display: inline-flex; align-items: center; height: 34px; padding: 0 14px; border: 1px solid var(--line-hover); border-radius: 6px; color: var(--text); text-decoration: none">View diff</a>
+<button style="height: 34px; padding: 0 16px; border: 0; border-radius: 6px; background: var(--green); color: #14110f; font-weight: 600; cursor: pointer">Allow merge</button>
+</div>
+</article>
+
+<article style="border: 1px solid var(--line); border-radius: 6px; background: var(--bg-raised); padding: 16px 20px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 24px; align-items: center">
+<div style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px">
+<span style="padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--purple) 22%, transparent); color: #c4abdb; font-weight: 600">Third review</span>
+<span style="font-family: var(--mono); color: var(--text-meta)">t_ebd5 · 2 spec FAILs</span>
+</div>
+<div style="font-size: 16px; font-weight: 600">Both findings are fixed; the fixes are mechanical (wording and one test assertion)</div>
+<div style="color: var(--text-muted); font-size: 14px">After two FAILs the hub needs you to send the next review, or you can queue the ticket without one.</div>
+</div>
+<div style="display: flex; gap: 8px">
+<button style="height: 34px; padding: 0 14px; border: 1px solid var(--line-hover); border-radius: 6px; background: none; color: var(--text); cursor: pointer">Queue without review</button>
+<button style="height: 34px; padding: 0 16px; border: 0; border-radius: 6px; background: var(--purple); color: #14110f; font-weight: 600; cursor: pointer">Send scoped review</button>
+</div>
+</article>
+
+<section style="display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: baseline; gap: 10px">
+<h2 style="margin: 0; font-size: 14px; font-weight: 600">Decided today without you</h2>
+<span style="font-size: 12px; color: var(--text-meta)">rulings by the Orchestrator under the interim rule · each can be overruled</span>
+</div>
+<div style="border: 1px solid var(--line-soft); border-radius: 6px; overflow: hidden">
+<div style="display: grid; grid-template-columns: 64px 76px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line-soft); font-size: 14px">
+<span style="font-family: var(--mono); color: var(--text-meta)">10:41</span><span style="font-family: var(--mono); color: var(--text-muted)">t_f49c</span><span style="min-width: 0">Archive check validates each changed spec, not the global check (standing rule)</span><a href="#">Overrule</a></div>
+<div style="display: grid; grid-template-columns: 64px 76px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line-soft); font-size: 14px">
+<span style="font-family: var(--mono); color: var(--text-meta)">09:58</span><span style="font-family: var(--mono); color: var(--text-muted)">t_9b68</span><span style="min-width: 0">Retrospective: option A, parked drafts do not block the report</span><a href="#">Overrule</a></div>
+<div style="display: grid; grid-template-columns: 64px 76px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line-soft); font-size: 14px">
+<span style="font-family: var(--mono); color: var(--text-meta)">08:12</span><span style="font-family: var(--mono); color: var(--text-muted)">t_6cb7</span><span style="min-width: 0">Accept 0.24 s as the measured cold time, note "not strictly cold"</span><a href="#">Overrule</a></div>
+<a href="#" style="display: block; padding: 10px 16px; font-size: 14px; text-decoration: none">Show 3 more</a>
+</div>
+</section>
+
+</div>
+</main>
+</div>
+<footer style="height: 28px; flex: none; display: flex; align-items: center; gap: 14px; padding: 0 16px; border-top: 1px solid var(--line-soft); background: var(--bg-inset); font-family: var(--mono); font-size: 12px; color: var(--text-meta)"><span style="display: inline-flex; align-items: center; gap: 6px"><span style="width: 7px; height: 7px; border-radius: 50%; background: var(--green)"></span>5/5 agents · hub :49286</span><span>staging <span style="color: var(--text)">5283321</span> · install <span style="color: var(--text)">28</span></span><span style="flex: 1"></span><span>Session <span style="color: var(--text)">$159</span> · resets 3h 41m</span><span>·</span><span>Weekly <span style="color: var(--text)">0%</span> · resets Oct 29 at 3 pm</span></footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1080}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

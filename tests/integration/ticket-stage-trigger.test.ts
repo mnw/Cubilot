@@ -5,6 +5,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream } from "../helpers/fake-executor";
 
 const ROOM = "ts";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -23,7 +24,7 @@ describe("ticket changes start stages", () => {
     // The default limits (2 workers, 2 testers) would keep later stages queued; this file is about the triggers.
     const put = await authedFetch(hub, `/rooms/${ROOM}/settings`, { method: "PUT", body: JSON.stringify({ role_limits: { worker: 10, tester: 10 } }) });
     expect(put.status).toBe(200);
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) launches.push(e); } catch { /* closed */ } })();
     await sleep(200);
   });
@@ -127,12 +128,12 @@ describe("ticket changes start stages", () => {
     expect(launches).toHaveLength(n);
   });
 
-  test("a role edit starts nothing by itself (the draft to queued move does)", async () => {
+  test("a role edit on a queued ticket starts its stage", async () => {
     const t = await mk({ role: null });
     const n = launches.length;
     expect((await postJson(hub, `/tickets/${t}/edit`, { by: "ts-alice", role: "worker" })).status).toBe(200);
     await settle();
-    expect(await stagesOf(t)).toEqual([]);
-    expect(launches).toHaveLength(n);
+    expect(await stagesOf(t)).toHaveLength(1);
+    expect(launches).toHaveLength(n + 1);
   });
 });

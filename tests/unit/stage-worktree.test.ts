@@ -1,11 +1,12 @@
 // 4.5: the hub makes the worktree before it queues a launch; no project folder fails the stage without an attempt.
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { existsSync, writeFileSync } from "node:fs";
 import { giveProject, projectRepo } from "../helpers/repo";
 import { migrateLedger } from "../../hub/core/ledger";
 import { createTicketKind } from "../../hub/kinds/ticket";
-import { createStageRuntime, NO_PROJECT_FOLDER } from "../../hub/kinds/stage";
+import { NO_PROJECT_FOLDER } from "../../hub/kinds/stage";
+import { trackedRuntime, disposeRuntimes } from "../helpers/stage-runtimes";
 import type { LaunchRequest } from "../../hub/core/launch-queue";
 import type { Entry, HubCapabilities, Scope } from "../../hub/core/types";
 
@@ -13,7 +14,7 @@ function makeEnv() {
   const db = new Database(":memory:");
   migrateLedger(db);
   createTicketKind(db).migrate(db);
-  const rt = createStageRuntime(db, { ackMs: 60_000 });
+  const rt = trackedRuntime(db, { ackMs: 60_000 });
   rt.module.migrate(db);
   const cap = { db, sse: { emit: (_e: Entry, _s: Scope) => {} }, briefing: { refresh: () => {} } } as unknown as HubCapabilities;
   const sent: LaunchRequest[] = [];
@@ -41,6 +42,8 @@ async function closeAndAck(e: ReturnType<typeof makeEnv>, session: string, stage
   expect(close.session).toBe(session);
   expect(e.rt.queue.ack(close.id, { result: "spawned" }, e.cap).status).toBe("ok");
 }
+
+afterEach(disposeRuntimes);
 
 describe("worktrees for launches (4.5)", () => {
   test("a room with no project folder fails the stage at once, counts no attempt and queues nothing", () => {

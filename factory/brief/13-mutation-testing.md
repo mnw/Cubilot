@@ -121,6 +121,10 @@ The Quality panel shows, for each code ticket: mutation score, threshold, and th
 4. With `mutation_triage` `on` and a Stryker report, the ticket gets `findings.json`, and the `review` verdict holds the "act", "review" and "ignore" counts.
 5. A PHP project with `mutation_triage` `on` uses the threshold only, and the Tester reports that triage does not support PHP.
 
+## Mockups (2026-10-28)
+
+Designed in `design/mockups/cubilot-prototype.html`: the Dashboard "Quality" panel with the median mutation score (`#dashboard`). The mutation result on a ticket is designed at `#mutation` (shown on the Ticket screen under Stages): score, threshold, open "act" count, review and ignore counts, run time against the budget, the blocking line in `enforce` mode, and the survivors with band, place, mutation, code and the equivalent mark. The project settings (`mutation_mode`, `mutation_threshold`, `mutation_triage`) are in `#admin`, Projects.
+
 ---
 
 Index: [00-index.md](00-index.md). This part is one file of the implementation brief. "Part N" means file `NN-*.md` in this folder.

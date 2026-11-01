@@ -1,0 +1,41 @@
+# Rules: terminal
+
+tmux, PTY, harness spawn, slash commands and TUI capture rules.
+
+## Agent harness is chosen per agent at spawn and is immutable for the session
+
+- **Agent harness is chosen per agent at spawn and is immutable for the session.** `claude` (default) or `pi` (pi.dev), picked in the spawn modal, threaded `ptySpawn` → `POST /sessions` → `prepareLaunch` in `hub/core/launch-role.ts` (`hub/features/sessions.ts`). Unknown values are rejected, never defaulted — a UI typo must surface, not silently launch the wrong binary. Changing an agent's harness means killing and respawning, same as room. Both harnesses speak the same hub protocol, so mixed-harness rooms work and nothing hub-side is harness-aware.
+
+## Terminal pane uses a raw PTY, not `tmux -C` control mode
+
+- **Terminal pane uses a raw PTY, not `tmux -C` control mode.** xterm.js consumes tmux's ANSI directly; keystrokes go to the PTY master as raw bytes. Never re-introduce `tmux -C` or `send-keys` for interactive input forwarding — that's what v0.6 broke on. `send-keys` is only allowed for one-shot commands the user invoked explicitly (none in v0.7). The v0.9.8 regression guard at `tests/integration/pty-plumbing.test.ts` asserts raw-PTY mode (no `%output` / `%begin` / `%end` control-mode framing on the attach stream). Evidence for the choice: [docs/spikes/terminal-transport.md](../spikes/terminal-transport.md) (both transports pass the same cases; truecolour needs the tmux `terminal-features` RGB option).
+
+## The hub owns the tmux plumbing in `hub/core/tmux.ts` and `hub/core/terminal.ts`
+
+- **The hub owns the tmux plumbing in `hub/core/tmux.ts` and `hub/core/terminal.ts`.** `tmux.ts` holds the tmux path (env `CUBILOT_TMUX`, set by `lib.rs`), the locale rule, `newSession`, `hasSession`, `listSessions`, `killSession` and `reconfigure`, with the behaviour of the former shell terminal code. `terminal.ts` holds `attach(agent, {readOnly})`: a `Bun.Terminal` on `tmux attach -t =<agent>`; a read-only viewer adds `-f read-only,ignore-size`. The hub sets the tmux server option `terminal-features` `xterm-256color:RGB` (raw PTY truecolour). A change to either file needs a scenario in `tests/integration/pty-plumbing.test.ts` or `tests/integration/hub-tmux.test.ts`.
+
+## Any change to the hub's tmux helpers (`hub/core/tmux.ts`, `hub/core/terminal.ts`) SHALL have an integration test scenario covering the affected plumbing before the change ships
+
+- **Any change to the hub's tmux helpers (`hub/core/tmux.ts`, `hub/core/terminal.ts`) SHALL have an integration test scenario covering the affected plumbing before the change ships.** The baseline is `tests/integration/pty-plumbing.test.ts` (7 scenarios across session lifecycle, locale env, remain-on-exit toggle, raw-PTY mode). Per-helper coverage closed the pre-v0.9.5 deferral cycle — without it, plumbing refactors keep getting pushed to "some future change with tests first". Don't repeat that.
+
+## tmux sessions need UTF-8 locale env
+
+- **tmux sessions need UTF-8 locale env.** Pass `LANG` and `LC_ALL` to both `new-session -e` and `builder.env()` on the attach client. macOS GUI apps inherit a blank / `C` locale from launchd; without UTF-8 in the locale, claude's capability probe downgrades to ASCII output and its logo renders as `____` instead of Braille/box-drawing. Use the user's `LANG` if it already contains `utf`; otherwise default to `en_US.UTF-8` (ships with every macOS install).
+
+## Terminal sessions use tmux on `~/Library/Application Support/Cubilot/tmux.sock`
+
+- **Terminal sessions use tmux on `~/Library/Application Support/Cubilot/tmux.sock`.** `new-session -d -x 80 -y 24` (dimensions are load-bearing — tmux probes the invoking TTY otherwise, and our Rust shell has no controlling terminal). Wrap every session command in `$SHELL -ic "..."` so `.zshrc` aliases resolve (Anthropic's installer creates `claude` as a `.zshrc` alias, not a PATH binary). The inner command must be passed as a SINGLE tmux argv element so /bin/sh's argv-join doesn't split the quoted `--mcp-config '/path with spaces'` into multiple tokens.
+
+## tmux sessions survive Cubilot restart
+
+- **tmux sessions survive Cubilot restart.** The Rust shell MUST NOT kill tmux sessions on app exit. The hub holds the attach clients; when they close, tmux keeps running. The pane attaches again on next launch through `GET /terminal/<agent>`. Also: on every auto-attach, force `remain-on-exit off` on the session — legacy sessions from earlier builds had it ON, which silently holds panes after claude exits and blocks the clean tab-close flow.
+
+## `captureTurn(agent, input, { dir, write, timeoutMs })` is the single primitive for deterministic single-turn TUI capture
+
+- **`captureTurn` (hub/core/tmux.ts) is the single primitive for deterministic single-turn TUI capture.** The UI calls `POST /terminal/<agent>/capture-turn {input, timeout_ms}`; `GET /terminal/<agent>/tap?ms=` (capture-pane, ms clamped 0..2000), `GET /terminal/<agent>/capture?name=` and `POST /terminal/<agent>/heal` complete it. Layers, coordinated atomically: geometry (`window-size manual` + `resize-window 240×100`), capture (`pipe-pane -o`), completion (alt-screen exit, idle prompt, or quiescence marker). The input goes through a raw PTY attach client of the hub, never `send-keys`. Cleanup runs on every exit: pipe-pane off BEFORE the geometry heal, so the redraw stays out of the log. Output lands at `<CUBILOT_CAPTURES_DIR, default /tmp/cubilot>/<agent>/captures/turn-<epoch>.log`. A timeout log is kept for forensics. Success prunes to the 10 newest logs (a `.partial` file is never pruned). `readCapture` resolves symlinks and refuses (400) any path outside the agent's capture folder. Tests use a hermetic tmux socket (tests/integration/hub-capture.test.ts).
+
+## Chat slash commands bypass the hub
+
+- **Chat slash commands bypass the hub.** A `/`-prefixed message in the composer routes through `POST /terminal/<agent>/input` (human caller, one write) to the per-agent tmux PTY — NOT through `POST /post`. Bytes go direct to the agent's terminal. The chat log gets one synthetic `system` audit entry per send (in-memory; lost on hub restart). Slash sends require a concrete room (not `All rooms`) and explicit `@agent`/`@all` targeting. The two constants `BUILTIN_SLASH_COMMANDS` and `DESTRUCTIVE_SLASH_COMMANDS` live in `ui/features/slash-discovery.js` — review on each Claude Code release because built-ins drift between versions and the destructive list gates the multi-agent confirm modal.
+
+- **The pane reads the terminal from the hub WebSocket.** `GET /terminal/<agent>` (human caller; the agent token gets 403) streams raw PTY bytes as binary frames. A viewer is read-only (`attach -f read-only,ignore-size`) until `{"t":"take"}`. One controller per agent; a second take moves control. While a controller exists, `agents.setHeld` keeps the agent's entries in an in-memory hold list (drop-oldest at the queue cap) and releases them in order at Hand back, at the controller's socket close, or at removal. The pane is opt-in (`cubilot_terminal_enabled` in localStorage). `pty_write`, `pty_resize` and the Tauri output events are gone. `GET /terminal-sessions` lists the live sessions for the tabs.

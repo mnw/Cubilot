@@ -85,13 +85,18 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
           description:
             'Recipient: "you" (human), "<agent-name>" to address a specific peer, or "all" to broadcast.',
         },
+        reply_to: {
+          type: "integer",
+          description: "Optional id of the earlier chat message in your room that this message answers.",
+        },
       },
       required: ["text", "to"],
     },
     handler: async (ctx, args) => {
       const text = String(args.text ?? "");
       const to = String(args.to ?? "");
-      const resp = await authedPost(ctx.host, ctx.hubEnv, "/post", { from: ctx.agent, to, text });
+      const replyTo = typeof args.reply_to === "number" ? { reply_to: args.reply_to } : {};
+      const resp = await authedPost(ctx.host, ctx.hubEnv, "/post", { from: ctx.agent, to, text, ...replyTo });
       if (resp.status < 200 || resp.status >= 300) toolError(resp, "post");
       return { content: [{ type: "text", text: "posted" }] };
     },
@@ -290,6 +295,22 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
     },
   },
   {
+    name: "read_handoff",
+    description:
+      "Read the full handoff of your room by its id, with its context. Use it when a result summary is not enough.",
+    inputSchema: {
+      type: "object",
+      properties: { handoff_id: { type: "string", pattern: "^h_[0-9a-f]{16}$" } },
+      required: ["handoff_id"],
+    },
+    handler: async (ctx, args) => {
+      const id = String(args.handoff_id ?? "");
+      const resp = await authedGet(ctx.host, ctx.hubEnv, `/handoffs/${encodeURIComponent(id)}?agent=${encodeURIComponent(ctx.agent)}`);
+      if (resp.status !== 200) toolError(resp, "read_handoff");
+      return { content: [{ type: "text", text: resp.body }] };
+    },
+  },
+  {
     name: "send_interrupt",
     description:
       "Send a high-visibility attention flag to another participant. The recipient's channel surfaces it prominently; they acknowledge via ack_interrupt when they've read it. Use sparingly — reserve for 'wait, re-read this before continuing' moments, not for regular chat.",
@@ -333,6 +354,80 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
       const resp = await authedPost(ctx.host, ctx.hubEnv, `/interrupts/${id}/ack`, { by: ctx.agent });
       if (resp.status !== 200) toolError(resp, "ack_interrupt");
       return { content: [{ type: "text", text: "acknowledged" }] };
+    },
+  },
+  {
+    name: "escalate",
+    description:
+      "Room lead only. Ask the human one decision, in the escalation format. Use it only when a decision changes a feature or the approved scope, an action cannot be undone, or a security finding has no fix in scope. The human sees one Needs-you line and the answer comes back to you as one message.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        reason: { type: "string", enum: ["scope", "feature", "irreversible", "security"] },
+        block: { type: "string", maxLength: 300, description: "What stops the work, in one sentence." },
+        facts: { type: "array", minItems: 1, maxItems: 20, items: { type: "string", maxLength: 500 }, description: "Numbered facts. Each names a commit hash or a hub record." },
+        options: {
+          type: "array",
+          minItems: 2,
+          maxItems: 3,
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string", maxLength: 64 },
+              label: { type: "string", maxLength: 500 },
+              effect: { type: "string", maxLength: 500 },
+              recommended: { type: "boolean", description: "True for exactly one option." },
+            },
+            required: ["id", "label", "effect"],
+          },
+        },
+        human_actions: {
+          type: "array",
+          minItems: 1,
+          maxItems: 20,
+          items: {
+            type: "object",
+            properties: {
+              ticket_id: { type: "string", pattern: "^t_[0-9a-f]{16}$" },
+              action: { type: "string", maxLength: 500 },
+            },
+            required: ["ticket_id", "action"],
+          },
+        },
+        next: { type: "string", maxLength: 500, description: "What happens after the answer." },
+        ticket_id: { type: "string", pattern: "^t_[0-9a-f]{16}$" },
+        request_id: { type: "string", maxLength: 128 },
+      },
+      required: ["reason", "block", "facts", "options", "human_actions", "next"],
+    },
+    handler: async (ctx, args) => {
+      const resp = await authedPost(ctx.host, ctx.hubEnv, "/decisions", { ...args, by: ctx.agent });
+      if (resp.status !== 201) toolError(resp, "escalate");
+      const id =
+        resp.json && typeof resp.json === "object" && "id" in resp.json
+          ? String((resp.json as { id: string }).id)
+          : "";
+      return { content: [{ type: "text", text: `decision_id=${id}` }] };
+    },
+  },
+  {
+    name: "checkpoint_note",
+    description:
+      "Room lead only. Answer a checkpoint note request from the hub: send the note for your restart, at most 200 words (the hub cuts a longer note). Call it once, after the hub asks. Then end your turn.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: { type: "string", minLength: 1, maxLength: 20000, description: "The note: open points that are not on the board." },
+      },
+      required: ["text"],
+    },
+    handler: async (ctx, args) => {
+      const resp = await authedPost(ctx.host, ctx.hubEnv, `/agents/${encodeURIComponent(ctx.agent)}/checkpoint-note`, {
+        by: ctx.agent,
+        text: String(args.text ?? ""),
+      });
+      if (resp.status !== 200) toolError(resp, "checkpoint_note");
+      return { content: [{ type: "text", text: "note stored" }] };
     },
   },
   {
@@ -382,9 +477,32 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
     },
   },
   {
+    name: "create_request",
+    description:
+      "Room lead only. Create the request that groups the tickets of one plan. Create the request before its tickets: a ticket with an unknown request_id is refused. Origin is human unless you set factory. A factory request names its source (a ticket, decision or stage id of your room) and its parent_request_id when the source belongs to a request. Only the human changes the origin later.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        request_id: { type: "string", pattern: "^[A-Za-z0-9._-]{1,64}$", description: "The label of the request." },
+        origin: { type: "string", enum: ["human", "factory"], description: "Default human." },
+        features: { type: "array", maxItems: 50, items: { type: "string", minLength: 1, maxLength: 200 }, description: "Optional list of features the request adds." },
+        source: { type: "string", description: "Required for origin factory: a ticket, decision or stage id of your room." },
+        parent_request_id: { type: "string", pattern: "^[A-Za-z0-9._-]{1,64}$", description: "The request of the source, when it has one." },
+      },
+      required: ["request_id"],
+    },
+    handler: async (ctx, args) => {
+      const body: Record<string, unknown> = { by: ctx.agent, request_id: args.request_id };
+      for (const k of ["origin", "features", "source", "parent_request_id"]) if (args[k] !== undefined) body[k] = args[k];
+      const resp = await authedPost(ctx.host, ctx.hubEnv, "/requests", body);
+      if (resp.status !== 201) toolError(resp, "create_request");
+      return { content: [{ type: "text", text: `request_id=${String(args.request_id)}` }] };
+    },
+  },
+  {
     name: "create_ticket",
     description:
-      "Create a work ticket in your room. Acceptance criteria are required: state what done means. A high blast_radius ticket needs the human's approval to reach done. Use status draft to hold a ticket back: a draft cannot be claimed and wakes no one until it moves to queued. Use request_id to group the tickets of one request, and blocked_by to list ticket ids that must be done before this ticket can be claimed. Use role to name the stage role that works the ticket first. Returns ticket_id.",
+      "Create a work ticket in your room. Acceptance criteria are required: state what done means. Use status draft to hold a ticket back: a draft cannot be claimed and wakes no one until it moves to queued. Use request_id to group the tickets of one request, and blocked_by to list ticket ids that must be done before this ticket can be claimed. Use role to name the stage role that works the ticket first. The radius is set by the radius rule from the title, criteria and planning note: the stored blast_radius is never below the rule radius, and the room lead can raise it. Returns ticket_id.",
     inputSchema: {
       type: "object",
       properties: {
@@ -399,9 +517,10 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
         external_ref: { type: "string", description: "Optional opaque key from an outside tracker." },
         assignee: { type: "string", description: "Optional agent of your room that owns the ticket; it is woken once. Omit it to leave the ticket in the queue." },
         status: { type: "string", enum: ["draft", "queued"], description: "Default queued. A draft cannot be claimed and wakes no one." },
-        request_id: { type: "string", pattern: "^[A-Za-z0-9._-]{1,64}$", description: "Optional label that groups the tickets of one request." },
+        request_id: { type: "string", pattern: "^[A-Za-z0-9._-]{1,64}$", description: "Optional label that groups the tickets of one request. The request must exist: create it with create_request first. A ticket without request_id is queued only by the human." },
         role: { type: "string", enum: TICKET_ROLES, description: "Optional stage role that works the ticket first." },
         blocked_by: { type: "array", items: TICKET_ID_SCHEMA, maxItems: 20, description: "Optional ids of tickets of your room that must be done before this ticket can be claimed." },
+        planning_note: { type: "string", minLength: 1, maxLength: 4000, description: "Optional agent notes (field planning_note): the facts a new agent session of this ticket needs. The stage start message shows them under \"## Agent notes\"." },
       },
       required: ["title", "acceptance_criteria", "blast_radius"],
     },
@@ -415,7 +534,7 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
       if (args.priority !== undefined) body.priority = args.priority;
       if (args.external_ref !== undefined) body.external_ref = args.external_ref;
       if (args.assignee !== undefined) body.assignee = args.assignee;
-      for (const k of ["status", "request_id", "role", "blocked_by"]) if (args[k] !== undefined) body[k] = args[k];
+      for (const k of ["status", "request_id", "role", "blocked_by", "planning_note"]) if (args[k] !== undefined) body[k] = args[k];
       const resp = await authedPost(ctx.host, ctx.hubEnv, "/tickets", body);
       if (resp.status !== 201) toolError(resp, "create_ticket");
       const id = (resp.json as { snapshot?: { id?: string } } | null)?.snapshot?.id ?? "";
@@ -440,7 +559,7 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
   {
     name: "transition_ticket",
     description:
-      "Move your ticket to in_progress, in_review, done or cancelled. Only the assignee moves a claimed ticket. Move a ticket to draft or queued only as the human or the room lead: queued promotes a draft, and the hub refuses any other actor. A done move on a high blast_radius ticket needs the human's Allow: the tool then requests approval and returns the request id. Moving to in_review REQUIRES `note`: say how you implemented it and how you tested it. The note goes into the ticket's audit trail; it does not replace your chatbridge messages, so still post what the room needs to know.",
+      "Move your ticket to in_progress, in_review, done or cancelled. Only the assignee moves a claimed ticket. Move a ticket to draft or queued only as the human or the room lead: queued promotes a draft, and the hub refuses any other actor. Moving to in_review REQUIRES `note`: say how you implemented it and how you tested it. The note goes into the ticket's audit trail; it does not replace your chatbridge messages, so still post what the room needs to know.",
     inputSchema: {
       type: "object",
       properties: {
@@ -465,26 +584,7 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
       const move = { by: ctx.agent, to, ...(note ? { note } : {}) };
       const resp = await authedPost(ctx.host, ctx.hubEnv, `/tickets/${encodeURIComponent(id)}/transition`, move);
       if (resp.status === 200) return { content: [{ type: "text", text: `ticket ${id} is now ${to}` }] };
-      const blocked = resp.status === 409 && to === "done" && resp.json && typeof resp.json === "object" &&
-        "approval_request_id" in resp.json;
-      if (!blocked) toolError(resp, "transition_ticket");
-      const ap = await authedPost(ctx.host, ctx.hubEnv, `/tickets/${encodeURIComponent(id)}/approval`, { by: ctx.agent });
-      if (ap.status < 200 || ap.status >= 300) toolError(ap, "transition_ticket approval");
-      const apj = ap.json as { request_id?: string; created?: boolean; status?: string } | null;
-      const reqId = apj?.request_id ?? "";
-      // The human allowed the request between the blocked move and this call: nothing is left to
-      // wait for. Retry the move once and report what it did.
-      if (apj?.created === false && apj.status === "allowed") {
-        const retry = await authedPost(ctx.host, ctx.hubEnv, `/tickets/${encodeURIComponent(id)}/transition`, move);
-        if (retry.status === 200) return { content: [{ type: "text", text: `ticket ${id} is now ${to} (the human had already allowed approval_request_id=${reqId})` }] };
-        toolError(retry, "transition_ticket retry after the human's approval");
-      }
-      return {
-        content: [{
-          type: "text",
-          text: `ticket ${id} is not done. It needs the human's approval. approval_request_id=${reqId}. Wait for the human to Allow, then call transition_ticket again.`,
-        }],
-      };
+      toolError(resp, "transition_ticket");
     },
   },
   {
@@ -510,24 +610,25 @@ export const CHATBRIDGE_TOOLS: readonly ToolDef[] = [
   {
     name: "edit_ticket",
     description:
-      "Edit an open ticket's title or acceptance criteria. Only the human, the ticket's creator and its assignee may edit. Only the human may change blast_radius: an agent that sends it is refused. A done or cancelled ticket cannot be edited. Pass only the fields you change. The human, the ticket's creator and the room lead change request_id, role and blocked_by, not the assignee, and only while the ticket is draft or queued (the human may change them at any time). blocked_by replaces the whole list, and null or [] clears it.",
+      "Edit an open ticket's title or acceptance criteria. Only the human, the ticket's creator and its assignee may edit. The radius is set by the radius rule and is never below it: the lead can raise blast_radius, and an edit below the rule radius is refused with 403. Only the human, the room lead and the creator may change blast_radius. A done or cancelled ticket cannot be edited. Pass only the fields you change. The human, the ticket's creator and the room lead change request_id, role and blocked_by, not the assignee, and only while the ticket is draft or queued (the human may change them at any time). blocked_by replaces the whole list, and null or [] clears it.",
     inputSchema: {
       type: "object",
       properties: {
         ticket_id: TICKET_ID_SCHEMA,
         title: { type: "string", maxLength: 200, description: "The new title." },
         acceptance_criteria: { type: "string", maxLength: 4000, description: "The new acceptance criteria." },
-        blast_radius: { type: "string", enum: ["low", "high"], description: "The human only." },
+        blast_radius: { type: "string", enum: ["low", "high"], description: "The radius is set by the radius rule. The lead can raise it. Below the rule radius is refused." },
         request_id: { type: ["string", "null"], pattern: "^[A-Za-z0-9._-]{1,64}$", description: "The label that groups the tickets of one request." },
         role: { type: ["string", "null"], enum: [...TICKET_ROLES, null], description: "The stage role that works the ticket first. null clears it." },
         blocked_by: { type: ["array", "null"], items: TICKET_ID_SCHEMA, maxItems: 20, description: "Replaces the whole blocker list. null or [] clears it." },
+        planning_note: { type: ["string", "null"], minLength: 1, maxLength: 4000, description: "The agent notes (field planning_note): the facts a new agent session needs. The human, the creator, the room lead and the assignee change them. null clears them." },
       },
       required: ["ticket_id"],
     },
     handler: async (ctx, args) => {
       const id = String(args.ticket_id ?? "");
       const body: Record<string, unknown> = { by: ctx.agent };
-      for (const k of ["title", "acceptance_criteria", "blast_radius", "request_id", "role", "blocked_by"]) if (args[k] !== undefined) body[k] = args[k];
+      for (const k of ["title", "acceptance_criteria", "blast_radius", "request_id", "role", "blocked_by", "planning_note"]) if (args[k] !== undefined) body[k] = args[k];
       const resp = await authedPost(ctx.host, ctx.hubEnv, `/tickets/${encodeURIComponent(id)}/edit`, body);
       if (resp.status !== 200) toolError(resp, "edit_ticket");
       const unchanged = (resp.json as { idempotent?: boolean } | undefined)?.idempotent;

@@ -4,7 +4,7 @@
 import { Database } from "bun:sqlite";
 import { chmodSync } from "node:fs";
 import { rename, unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import {
   JSON_BODY_MAX,
@@ -18,6 +18,7 @@ import {
 } from "./core/auth";
 import { DropQueue, HEARTBEAT_MS, makeSSE, type SSESend } from "./core/sse";
 import { createAgentRegistry } from "./core/agents";
+import { createLeadInbound } from "./core/lead-inbound";
 import {
   buildAllowedExtensions,
   IMAGE_URL_RE,
@@ -26,13 +27,20 @@ import { createDispatcher } from "./core/dispatcher";
 import { createFanout } from "./core/fanout";
 import { createBriefingDispatcher } from "./core/briefing-dispatcher";
 import { createCapBuilder } from "./core/capabilities";
+import { readHumanToken } from "./core/human-token";
 import { createFactoryFeature } from "./features/factory";
 import { createUsageFeature } from "./features/usage";
+import { createConfigFeature } from "./features/config";
 import { createSessionsFeature } from "./features/sessions";
 import { createAttachmentsFeature } from "./features/attachments";
 import { createRosterFeature } from "./features/roster";
+import { createSearchFeature } from "./features/search";
+import { createSettingsFeature } from "./features/settings";
 import { createTranscriptFeature } from "./features/transcript";
 import { createChatFeature } from "./features/chat";
+import { createTerminalFeature, createTerminalSocket, defaultCapturesRoot } from "./features/terminal";
+import { createTmux, tmuxFromEnv } from "./core/tmux";
+import { runFactoryCleanup } from "./core/factory-cleanup";
 import { createStreamHandlers } from "./features/streams";
 import {
   openLedger as openLedgerCore,
@@ -50,6 +58,7 @@ import {
   readSummariserConfigFromEnv,
   type Summariser,
 } from "./core/summariser";
+import { createLaunchRecord, loadLaunchBindings } from "./core/launch-record";
 import {
   createBriefingBuilder,
   briefingSignature as computeBriefingSignature,
@@ -66,7 +75,7 @@ import {
   nutshellEntry,
   type NutshellSnapshot,
 } from "./nutshell";
-import { buildKinds } from "./kinds";
+import { buildKinds, roomLeadOf } from "./kinds";
 import {
   expireHandoff as expireHandoffK,
   findExpirable as findExpirableK,
@@ -87,6 +96,14 @@ process.umask(0o077);
 
 const PORT = Number(process.env.PORT ?? 8011);
 const AUTH_TOKEN = (process.env.CUBILOT_TOKEN ?? "").trim();
+const HUMAN_TOKEN = await (async () => {
+  const t = await readHumanToken(Bun.stdin.stream());
+  if (t && t === AUTH_TOKEN) {
+    console.error("[hub] the human token equals the agent token — ignored, no caller is the human");
+    return "";
+  }
+  return t;
+})();
 const ATTACHMENTS_DIR = (process.env.CUBILOT_ATTACHMENTS_DIR ?? "").trim();
 const LEDGER_DB = (process.env.CUBILOT_LEDGER_DB ?? "").trim();
 const HUMAN_NAME = (process.env.CUBILOT_HUMAN_NAME ?? "human").trim();
@@ -126,7 +143,24 @@ const uiSubscribers = new Set<DropQueue<Entry>>();
 let entrySeq = 0;
 const SESSION_ID = randomId(8);
 
+const leadInbound = createLeadInbound({
+  file: join(dirname(LEDGER_DB || join(ATTACHMENTS_DIR || ".", "x")), "metrics", "lead-inbound.jsonl"),
+  leads: () => {
+    const out: Array<{ room: string; lead: string }> = [];
+    for (const a of agents.values()) {
+      if (!a.room) continue;
+      if ((ledgerDb ? roomLeadOf(ledgerDb, a.room) : "Orchestrator") === a.name) out.push({ room: a.room, lead: a.name });
+    }
+    return out;
+  },
+  isLead: (name) => {
+    const room = agents.get(name)?.room;
+    return !!room && (ledgerDb ? roomLeadOf(ledgerDb, room) : "Orchestrator") === name;
+  },
+});
+
 const agents = createAgentRegistry({
+  onEnqueue: (name, entry) => leadInbound.record(name, entry),
   defaultRoom: DEFAULT_ROOM,
   staleMs: STALE_AGENT_MS,
   queueMax: AGENT_QUEUE_MAX,
@@ -140,6 +174,16 @@ const agents = createAgentRegistry({
     briefingDispatcher.scheduleFanout();
   },
 });
+// The context files change with no roster event: re-send the roster when a percentage changed.
+const CONTEXT_REFRESH_MS = 5000;
+let lastContextKey = "";
+setInterval(() => {
+  const snap = agents.rosterSnapshot();
+  const key = JSON.stringify((snap.agents as any[]).map((a) => a.context_pct));
+  if (key === lastContextKey) return;
+  lastContextKey = key;
+  fanout.send(snap, { kind: "ui-only-ambient" });
+}, CONTEXT_REFRESH_MS).unref?.();
 const ensureAgent = agents.ensure;
 const removeAgent = agents.remove;
 
@@ -207,6 +251,8 @@ const fanout = createFanout({
   nextEntryId: () => ++entrySeq,
 });
 
+// Filled below, after the Kind migrations and before the server listens (no agent stream is open yet).
+const launchRecord = createLaunchRecord();
 // Lazy-init: depends on KINDS, defined below in source order.
 let _briefingBuilder: BriefingBuilder | null = null;
 function buildBriefing(agent: string): BriefingPayload {
@@ -216,6 +262,11 @@ function buildBriefing(agent: string): BriefingPayload {
       defaultRoom: DEFAULT_ROOM, attachmentsDir: ATTACHMENTS_DIR, humanName: HUMAN_NAME,
       factoryVersion: (process.env.CUBILOT_FACTORY_VERSION ?? "").trim() || null,
       buildCap: () => buildCap(),
+      isLead: (name) => {
+        const room = agents.get(name)?.room;
+        return !!room && (ledgerDb ? roomLeadOf(ledgerDb, room) : "Orchestrator") === name;
+      },
+      stageSessions: () => launchRecord.sessions(),
     });
   }
   return _briefingBuilder.build(agent);
@@ -225,7 +276,7 @@ const briefingDispatcher = createBriefingDispatcher({
   agents, buildBriefing, briefingSignature: computeBriefingSignature,
 });
 
-const { requireAuth, requireReadAuth, requireJsonBody } = makeAuthHelpers(AUTH_TOKEN);
+const { requireAuth, requireReadAuth, requireJsonBody } = makeAuthHelpers(AUTH_TOKEN, HUMAN_TOKEN);
 
 function ledgerGuard(): Response | null {
   return ledgerEnabled ? null : json({ error: "ledger disabled" }, { status: 503 });
@@ -242,35 +293,48 @@ const buildCap = createCapBuilder({
 });
 
 // Add a Kind: one entry in `hub/kinds/index.ts`. hub.ts unchanged.
-const KINDS: readonly KindModule[] = buildKinds(ledgerDb);
+const KINDS: readonly KindModule[] = buildKinds(ledgerDb, launchRecord);
 
 if (ledgerDb) {
   for (const k of KINDS) k.migrate(ledgerDb);
+  launchRecord.load(loadLaunchBindings(ledgerDb));
   for (const k of KINDS) k.start?.(buildCap());
 }
+
+const terminalTmux = (() => { try { return createTmux(tmuxFromEnv()); } catch { return null; } })();
+try { for (const line of runFactoryCleanup()) console.error(line); } catch (e) { console.error(`[factory] cleanup failed: ${(e as Error).message}`); }
+const terminalSocket = createTerminalSocket({ tmux: terminalTmux, agents, requireReadAuth });
 
 const FEATURES: readonly HubFeature[] = [
   ...KINDS,
   createUsageFeature(),
+  createConfigFeature(),
   createFactoryFeature({
     dir: (process.env.CUBILOT_FACTORY_DIR ?? "").trim(),
     version: (process.env.CUBILOT_FACTORY_VERSION ?? "").trim(),
     online: (name) => (agents.presenceSnapshot().agents as Record<string, boolean> | undefined)?.[name] === true,
   }),
-  ...(ledgerDb ? [createSessionsFeature(ledgerDb)] : []),
+  createSessionsFeature({ tmux: terminalTmux }),
   createAttachmentsFeature({
     attachmentsDir: ATTACHMENTS_DIR,
     allowedExtensions: ALLOWED_EXTENSIONS,
     imageMaxBytes: IMAGE_MAX_BYTES,
   }),
-  createRosterFeature({ agents, removeAgent, defaultRoom: DEFAULT_ROOM, readNutshell }),
+  createRosterFeature({ agents, removeAgent, readNutshell }),
+  createSettingsFeature({ agents, defaultRoom: DEFAULT_ROOM }),
+  createTerminalFeature({
+    tmux: terminalTmux,
+    capturesRoot: defaultCapturesRoot(),
+  }),
+  createSearchFeature({ db: ledgerDb, agents, humanName: HUMAN_NAME }),
   ...(ledgerDb
-    ? [createTranscriptFeature({ db: ledgerDb, chatLog, roomSummariser })]
+    ? [createTranscriptFeature({ db: ledgerDb, chatLog, roomSummariser, onRoleLimitsChanged: (room, cap) => { for (const k of KINDS) k.onRoomLimitsChanged?.(room, cap); } })]
     : []),
   createChatFeature({
     agents,
     broadcastUI: (entry, scope) => fanout.send(entry, scope ?? { kind: "ui-only" }),
     attachmentsDir: ATTACHMENTS_DIR,
+    chatLog,
   }),
 ];
 
@@ -279,6 +343,7 @@ const { dispatch } = createDispatcher({
   auth: { requireAuth, requireReadAuth, requireJsonBody },
   ledgerGuard,
   buildCap,
+  humanName: HUMAN_NAME,
 });
 
 const { handleStream, handleAgentStream } = createStreamHandlers({
@@ -306,7 +371,8 @@ const server = Bun.serve({
   hostname: "127.0.0.1",
   port: PORT,
   idleTimeout: 0,
-  async fetch(req) {
+  websocket: terminalSocket.websocket,
+  async fetch(req, srv) {
     const url = new URL(req.url);
     const { pathname } = url;
 
@@ -317,16 +383,25 @@ const server = Bun.serve({
     try {
       // SSE long-lived routes are wired directly (own per-connection state).
       if (req.method === "GET" && pathname === "/stream") {
-        const authFail = requireReadAuth(req, url);
-        return authFail ?? handleStream(req);
+        const who = requireReadAuth(req, url);
+        if (who instanceof Response) return who;
+        // The UI stream is for the human: an agent token never opens it.
+        if (who !== "human") return json({ error: "only the human may open the UI stream" }, { status: 403 });
+        return handleStream(req);
       }
       if (req.method === "GET" && pathname === "/agent-stream") {
-        const authFail = requireReadAuth(req, url);
-        if (authFail) return authFail;
+        const who = requireReadAuth(req, url);
+        if (who instanceof Response) return who;
+        // A human caller never gets the agent tools.
+        if (who === "human") return json({ error: "the agent stream is for agents" }, { status: 403 });
         const agent = url.searchParams.get("agent") ?? "";
         const room = url.searchParams.get("room");
         return handleAgentStream(agent, room);
       }
+
+      const ws = await terminalSocket.upgrade(req, url, srv as never);
+      if (ws === "upgraded") return undefined;
+      if (ws) return ws;
 
       const featResp = await dispatch(req, url);
       if (featResp) return featResp;
@@ -347,6 +422,8 @@ if (validName(HUMAN_NAME)) {
   console.error(`[hub] invalid CUBILOT_HUMAN_NAME "${HUMAN_NAME}" — human not registered`);
 }
 
+leadInbound.start();
+
 const sweepTimer = setInterval(() => {
   if (!ledgerEnabled || !ledgerDb) return;
   try {
@@ -363,6 +440,7 @@ const sweepTimer = setInterval(() => {
 
 function shutdown() {
   clearInterval(sweepTimer);
+  leadInbound.stop();
   briefingDispatcher.dispose();
   try { ledgerDb?.close(); } catch {}
 }

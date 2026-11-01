@@ -1,6 +1,6 @@
 # Part 4: visible sessions, one session for each ticket stage
 
-Status: decision 2026-10-18. Build it with Part 2.
+Status: done on 2026-10-28. Stage sessions and spec review were archived on 2026-10-27, the context pack on 2026-10-28 (live check 7.1 passed; cache finding in `test-reports/t_1d56be14bddc5d3b.md`, no change chosen). Stage diagnosis (`openspec/changes/stage-diagnosis`) is proposed and is built after Part 6 items 7 and 11.
 
 ## Decision
 
@@ -104,6 +104,11 @@ A new session must not read the codebase again for each ticket. It gets a small 
 14. The context pack of a Worker session has the graph query result and the symbol signatures. Its size stays under the budget.
 15. A result handoff without `notes` fails the schema check. The next session of the ticket gets all earlier notes.
 16. The hub records the first-message tokens and the cache read tokens for each session.
+
+## Mockups (2026-10-28)
+
+Designed in `design/mockups/cubilot-prototype.html`: the live terminal of each stage session (`#session`), the agent list with context % and finished sessions (`#agents`), the Ticket stage timeline with a link to each session (`#ticket`), and the stage cards in the Room (`#room-cards`).
+Stage diagnosis (OpenSpec change `stage-diagnosis`, tasks 10.2 to 10.5) is designed at `#why-it-failed` (desktop and phone): "Why it failed" on the Ticket screen under Stages (category, cause key, evidence, proven or probable, tier and score, action, gap ticket with its failure count), the trace dialog with masked secrets, the Decisions groups "Failures" (Dismiss) and "Check a diagnosis" (Right, Wrong, note, "Ignore this key"), and the Dashboard panel "Diagnosis results" per tier (`GET /rooms/<room>/diagnosis-metrics`).
 
 ---
 

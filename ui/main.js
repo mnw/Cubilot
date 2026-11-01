@@ -57,7 +57,7 @@ function handleEvent(data) {
     return;
   }
   if (data.type === 'roster')   { applyRoster(data.agents || []); return; }
-  if (data.type === 'presence') { applyPresence(data.agents || {}); return; }
+  if (data.type === 'presence') { applyPresence(data.agents || {}); window.noteHeld?.(data.held || {}); return; }
   if (data.type === 'nutshell.updated') { applyNutshell(data.snapshot || null); return; }
   if (typeof data.id === 'number') {
     if (data.id <= lastSeenId) return;
@@ -101,6 +101,7 @@ async function connect() {
     window.syncTicketBoard?.();
     window.syncFinishedSessions?.();
     window.syncPlanApproval?.();
+    window.syncDecisions?.();
   };
   es.onmessage = (e) => {
     try { handleEvent(JSON.parse(e.data)); }
@@ -159,14 +160,15 @@ async function bootstrap() {
       dot.className = 'dot error';
       return;
     }
-    try {
-      const name = await invoke('get_human_name');
-      if (typeof name === 'string' && name) {
-        HUMAN_NAME = name;
-        NAMES[HUMAN_NAME] = cap(HUMAN_NAME);
-      }
-    } catch {}
   }
+  window.dispatchEvent(new Event('cubilot:hub-ready'));
+  try {
+    const { name } = await hubGet('/settings/human');
+    if (typeof name === 'string' && name) {
+      HUMAN_NAME = name;
+      NAMES[HUMAN_NAME] = cap(HUMAN_NAME);
+    }
+  } catch {}
   try {
     await loadRoster();
     // Per-room nutshell: fetch selected room or pre-cache all known rooms for instant switching.
@@ -192,7 +194,7 @@ const settingsBtn = document.getElementById('settings-btn');
 if (settingsBtn) {
   settingsBtn.addEventListener('click', async () => {
     try {
-      await tauriInvoke('open_config_file');
+      await openNative('config');
     } catch (e) {
       addMessage({
         from: 'system',
@@ -208,7 +210,7 @@ const skillsBtn = document.getElementById('skills-btn');
 if (skillsBtn) {
   skillsBtn.addEventListener('click', async () => {
     try {
-      await tauriInvoke('open_skills_folder');
+      await openNative('skills');
     } catch (e) {
       addMessage({
         from: 'system',
@@ -224,7 +226,7 @@ const mcpGlobalBtn = document.getElementById('mcp-global-btn');
 if (mcpGlobalBtn) {
   mcpGlobalBtn.addEventListener('click', async () => {
     try {
-      await tauriInvoke('open_global_mcp_config');
+      await openNative('mcp');
     } catch (e) {
       addMessage({
         from: 'system',
@@ -239,6 +241,7 @@ if (mcpGlobalBtn) {
 const reloadBtn = document.getElementById('reload-btn');
 if (reloadBtn) {
   reloadBtn.addEventListener('click', async () => {
+    if (reloadInBrowser()) return;
     reloadBtn.disabled = true;
     const prevTitle = reloadBtn.title;
     reloadBtn.title = 'Reloading…';
@@ -255,7 +258,7 @@ if (reloadBtn) {
         try { await window.CUBILOT_UI.reload(); } catch {}
       }
       try {
-        const name = await tauriInvoke('get_human_name');
+        const { name } = await hubGet('/settings/human');
         if (typeof name === 'string' && name) {
           HUMAN_NAME = name;
           NAMES[HUMAN_NAME] = cap(HUMAN_NAME);

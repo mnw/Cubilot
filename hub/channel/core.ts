@@ -3,7 +3,7 @@
 // Runtime adapters implement `Host` and forward turn/tool events; they decide nothing.
 
 import type { DeliveryMode, Host } from "./host";
-import { authedPost, resolveHub, URL_PATH, TOKEN_PATH } from "./hub-client";
+import { authedGet, authedPost, resolveHub, URL_PATH, TOKEN_PATH } from "./hub-client";
 
 // Every adapter bounds host.reload() to RELOAD_MS and rejects with a ReloadTimeout. That is not a failure: the
 // runtime reload may still be running, so the core does not forget the hub's order for it.
@@ -20,6 +20,7 @@ const RETRY_MS = 2000;
 
 export type BridgeEvent = {
   id?: number;
+  reply_to?: number; // the id of the chat message this one answers
   type?: string;
   force?: boolean; // agent.reload: reload the version the agent already has
   reload_id?: string; // agent.reload: the id of the request, echoed back with the result
@@ -49,7 +50,8 @@ export type BridgeEvent = {
   by?: string;
   paused?: boolean;
   // permission.* events carry the permission snapshot; only tool_name is read here.
-  snapshot?: { tool_name?: string; assignee?: string | null; creator?: string; status?: string };
+  snapshot?: { tool_name?: string; assignee?: string | null; creator?: string; status?: string; id?: string; title?: string; approval_request_id?: string | null; fail_count?: number };
+  fail_count?: number; // a FAIL entry: the hub count after this FAIL
 };
 
 export type BridgeOpts = {
@@ -119,12 +121,6 @@ const CONTEXT_KINDS = new Set(["permission.resolved", "permission.dismissed", "i
 
 export function modeFor(evt: BridgeEvent, agent: string, stageSession = false): DeliveryMode {
   if (evt.type === "briefing" || evt.type === "nutshell.updated") return "context";
-  // A ticket:done approval: the human's answer wakes the requester (it waits for it),
-  // and nobody else is woken for the request (only the human votes on it).
-  if (evt.snapshot?.tool_name === "ticket:done") {
-    if (evt.kind === "permission.resolved" && evt.from === agent) return "wake";
-    if (evt.kind === "permission.new") return "context";
-  }
   if (evt.kind && CONTEXT_KINDS.has(evt.kind)) return "context";
   // A paused agent (the hub stamps `paused`) reads handoff, interrupt and ticket events as context; nothing wakes or steers it.
   if (evt.paused && !evt.kind?.startsWith("permission.")) return "context";
@@ -162,6 +158,35 @@ export function modeFor(evt: BridgeEvent, agent: string, stageSession = false): 
   return "wake";
 }
 
+// The room lead reads ticket events that need no decision as one digest.
+// ponytail: a constant; it becomes a setting when the lead-inbound measure says so.
+export const DIGEST_MS = 10 * 60 * 1000;
+
+// A ticket entry the lead must read at once: a FAIL with count 2 or more, or a request that waits for approval.
+// A decision entry is not a `ticket.*` kind, so it never waits.
+export function isUrgentTicket(evt: BridgeEvent): boolean {
+  // No snapshot (ticket.held): the text is the only source of ticket ids and reason, and a digest line would lose it.
+  if (!evt.snapshot) return true;
+  const fails = evt.fail_count ?? evt.snapshot?.fail_count;
+  if (typeof fails === "number" && fails >= 2) return true;
+  return evt.snapshot?.status === "in_review" && !!evt.snapshot.approval_request_id;
+}
+
+// One message for the held ticket entries: one line for each ticket, the newest state of it.
+export function renderDigest(held: BridgeEvent[]): string {
+  const byTicket = new Map<string, { evt: BridgeEvent; n: number }>();
+  for (const e of held) {
+    const key = e.snapshot?.id ?? `#${e.id ?? byTicket.size}`;
+    byTicket.set(key, { evt: e, n: (byTicket.get(key)?.n ?? 0) + 1 });
+  }
+  const lines = [...byTicket.entries()].map(([id, { evt, n }]) => {
+    const s = evt.snapshot;
+    const title = (s?.title ?? "").replace(/\s+/g, " ").trim();
+    return `- ${id} ${evt.kind} (${n}x)${title ? ` "${title}"` : ""} status=${s?.status ?? "?"} assignee=${s?.assignee ?? "none"}`;
+  });
+  return `[Cubilot ticket digest] ${held.length} ticket events, ${byTicket.size} tickets:\n${lines.join("\n")}`;
+}
+
 export function renderBriefing(evt: BridgeEvent, agent: string, room: string): string {
   const parts: string[] = [`[Cubilot briefing] You are "${agent}" in room "${room}".`];
   if (evt.human_name) parts.push(`The human's name is "${evt.human_name}".`);
@@ -196,6 +221,7 @@ export function renderEnvelope(evt: BridgeEvent, room: string): string {
     if (typeof v === "number" && Number.isFinite(v)) bits.push(`${k}=${v}`);
   };
   num("id", evt.id);
+  num("reply_to", evt.reply_to);
   str("from", evt.from);
   str("to", evt.to);
   str("room", evt.room ?? room);
@@ -210,9 +236,33 @@ export function renderEnvelope(evt: BridgeEvent, room: string): string {
   return `[chatbridge ${bits.join(" ")}]`;
 }
 
+// A result handoff (context.verdict) sent to the room lead shows as one line: sender, ticket or request id, verdict,
+// finding counts and the handoff id. No finding text and no notes: the lead calls read_handoff for the full result.
+// Any other event, and any other reader, gets the full text as before.
+export function resultSummary(evt: BridgeEvent, agent: string): string | null {
+  if (evt.kind !== "handoff.new" || !evt.lead || evt.lead !== agent || evt.to !== agent || !evt.handoff_id) return null;
+  let snap: { context?: unknown };
+  try {
+    snap = JSON.parse(evt.text ?? "");
+  } catch {
+    return null;
+  }
+  const c = snap.context && typeof snap.context === "object" ? (snap.context as Record<string, unknown>) : null;
+  if (!c || typeof c.verdict !== "string") return null;
+  const subject = typeof c.ticket_id === "string" ? `ticket ${c.ticket_id}` : typeof c.request_id === "string" ? `request ${c.request_id}` : "no ticket";
+  const findings = Array.isArray(c.findings) ? c.findings : [];
+  const count = (sev: string) => findings.filter((f) => (f as { severity?: unknown } | null)?.severity === sev).length;
+  const blocking = count("blocking");
+  const suggestion = count("suggestion");
+  const bySeverity = blocking + suggestion > 0 ? ` (${blocking} blocking, ${suggestion} suggestion)` : "";
+  return `Result from ${evt.from ?? "unknown"}: ${subject}, ${c.verdict}, ${findings.length} findings${bySeverity}. Handoff ${evt.handoff_id}. Call read_handoff for the full result.`;
+}
+
 export function renderEvent(evt: BridgeEvent, agent: string, room: string): string {
   if (evt.type === "briefing") return renderBriefing(evt, agent, room);
   if (evt.type === "nutshell.updated") return `[Cubilot nutshell update]\n${evt.text ?? ""}`;
+  const summary = resultSummary(evt, agent);
+  if (summary) return `${renderEnvelope(evt, room)}\n${summary}`;
   return `${renderEnvelope(evt, room)}\n${evt.text ?? ""}`;
 }
 
@@ -345,6 +395,41 @@ export function startBridge(host: Host, opts: BridgeOpts): Bridge {
     void maybeReload();
   }
 
+  // Ticket digest (room lead only). Held entries wait for the timer or for the next waking entry.
+  let isLeadKnown: boolean | null = null;
+  async function isLead(): Promise<boolean> {
+    if (isLeadKnown !== null) return isLeadKnown;
+    try {
+      const r = await authedGet(host, hubEnv, `/rooms/${encodeURIComponent(room)}/lead`);
+      if (r.status < 200 || r.status >= 300) return false;
+      isLeadKnown = (r.json as { lead?: string | null } | null)?.lead === agent;
+      return isLeadKnown;
+    } catch {
+      return false; // not cached: the next ticket entry asks again
+    }
+  }
+  let held: BridgeEvent[] = [];
+  let digestTimer = false;
+  async function flushDigest(): Promise<void> {
+    if (!held.length) return;
+    const batch = held;
+    held = [];
+    await host
+      .deliver({ id: null, text: renderDigest(batch), mode: "context", onRead: () => {} })
+      .catch((e) => host.log(`[channel] digest not delivered: ${(e as Error).message ?? e}`));
+  }
+  async function digestLoop(): Promise<void> {
+    if (digestTimer) return;
+    digestTimer = true;
+    try {
+      await sleep(DIGEST_MS);
+      if (!ac.signal.aborted) await flushDigest();
+    } finally {
+      digestTimer = false;
+    }
+    if (held.length && !ac.signal.aborted) void digestLoop();
+  }
+
   async function deliver(evt: BridgeEvent): Promise<void> {
     const id = typeof evt.id === "number" ? evt.id : null;
     // The hub writes several named recipients as "A,B"; "all" never matches an agent name.
@@ -355,12 +440,19 @@ export function startBridge(host: Host, opts: BridgeOpts): Bridge {
       (evt.to ?? "").split(",").some((n) => n.trim() === agent);
     const system = evt.kind === "ticket.assigned" && evt.from === "system"; // only this event reads the stage id
     const check = qualifies ? { armed: false, from: evt.from } : null;
+    const mode = modeFor(evt, agent, system && (await currentStageId()) !== null);
+    if (mode === "context" && evt.kind?.startsWith("ticket.") && !isUrgentTicket(evt) && (await isLead())) {
+      held.push(evt);
+      void digestLoop();
+      return;
+    }
+    if (mode !== "context") await flushDigest();
     if (check) checks.add(check);
     try {
       await host.deliver({
         id,
         text: renderEvent(evt, agent, room),
-        mode: modeFor(evt, agent, system && (await currentStageId()) !== null),
+        mode,
         onRead: () => {
           if (check) check.armed = true;
         },
@@ -392,6 +484,7 @@ export function startBridge(host: Host, opts: BridgeOpts): Bridge {
       trigger();
       return;
     }
+    if (evt.type === "briefing") isLeadKnown = null; // the lead may have changed
     await deliver(evt);
     if (evt.type === "briefing" && evt.factory_version) {
       sawVersion = evt.factory_version;

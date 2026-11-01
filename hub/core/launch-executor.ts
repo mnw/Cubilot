@@ -1,0 +1,249 @@
+// The hub's own launch executor (hub-first-browser 7.2). It takes the `launch`, `close` and `input` requests of the
+// launch queue, does the work with launch-role.ts (setup), launch-command.ts (command) and tmux.ts (session), and
+// answers each request with the same ack the Rust shell sent before. It decides nothing: the stage logic decides what
+// a launch is (hub/kinds/stage.ts), and this file never runs git.
+//
+// The queue gives the executor a `host`: attach a consumer, ack a request, send the failed closes again. A test
+// replaces the executor with a module named by CUBILOT_LAUNCH_EXECUTOR (tests/helpers/fake-executor.ts); that module
+// exports a `start(host)` function. No session is ever killed on hub exit.
+
+import { prepareLaunch, type LaunchDeps } from "./launch-role";
+import { startAgentSession } from "./session-create";
+import { createTerminal, type Terminal } from "./terminal";
+import { createTmux, tmuxFromEnv, type Tmux } from "./tmux";
+import type { AckOutcome, AckStatus, LaunchRequest } from "./launch-types";
+
+type Env = Record<string, string | undefined>;
+
+export type ExecutorHost = {
+  /** The newest consumer replaces the older one. Requests that were never delivered are sent at once. */
+  attach(send: (req: LaunchRequest) => void, signal: AbortSignal): void;
+  ack(id: string, outcome: AckOutcome): { status: AckStatus; message?: string };
+  /** Sends again every close that has no ack. */
+  resendCloses(): void;
+};
+
+export type ExecutorModule = { start(host: ExecutorHost, env: Env): void | Promise<void> };
+
+/** The text must be one line of at most 1024 bytes without a control character (pty.rs input_line). */
+export function inputLine(text: string): string | null {
+  if (!text || Buffer.byteLength(text) > 1024 || /\p{Cc}/u.test(text)) return null;
+  return `${text}\r`;
+}
+
+/** Same ack bodies as the shell: killed -> spawned, no such session -> absent, tmux failure -> plain error. */
+export function closeAck(outcome: { ok: boolean } | { error: string }): AckOutcome {
+  if ("error" in outcome) return { result: "error", error: outcome.error };
+  return outcome.ok ? { result: "spawned" } : { result: "error", error: "no such session", absent: true };
+}
+
+export type ExecutorDeps = {
+  /** Null: tmux is not available; every request is answered with an error. */
+  tmux: Tmux | null;
+  env?: Env;
+  prepare?: typeof prepareLaunch;
+  launchDeps?: LaunchDeps;
+  /** How often one ack is sent again when the hub could not record it (default 10) and the pause (default 1 s). The hub drops a launch with no ack in 15 s. */
+  ackTries?: number;
+  ackPauseMs?: number;
+  /** A close that failed stays pending; it is sent again after this time (default 5 s). */
+  closeRetryMs?: number;
+  /** After the write, the client output must show the input text within this time, else the input is an error (default 2 s). */
+  inputEchoMs?: number;
+  /** The input client must show the session within this time, else the input is an error (default 5 s). */
+  inputAttachMs?: number;
+  inputSettleMs?: number;
+  /** Test seam: the terminal that attaches the input client. */
+  terminal?: Terminal;
+  /** Test hook: awaited after a launch has its outcome and before it removes its map entry. */
+  beforeLaunchCleanup?: (req: LaunchRequest) => void | Promise<void>;
+};
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+export function startLaunchExecutor(host: ExecutorHost, deps: ExecutorDeps): { stop(): void } {
+  const env = deps.env ?? process.env;
+  const prepare = deps.prepare ?? prepareLaunch;
+  const tries = deps.ackTries ?? 10;
+  const pause = deps.ackPauseMs ?? 1000;
+  const retryMs = deps.closeRetryMs ?? 5000;
+  const echoMs = deps.inputEchoMs ?? 2000;
+  const attachMs = deps.inputAttachMs ?? 5000;
+  const settleMs = deps.inputSettleMs ?? 150;
+  const ac = new AbortController();
+
+  /** Session names with a launch in progress. A close for the name waits until the launch ends (no "no such session" before new-session). */
+  type Launch = { work: Promise<AckOutcome>; wait: Promise<void>; finished: boolean };
+  const launching = new Map<string, Launch>();
+  /** Close ids that ended for good (killed, or absent): a repeated id only sends the stored ack again. */
+  const closed = new Map<string, AckOutcome>();
+  const closing = new Set<string>();
+
+  /** Sends one answer until the hub records it. The work is never repeated because an ack failed. */
+  async function reply(id: string, outcome: AckOutcome): Promise<void> {
+    for (let n = 1; n <= tries && !ac.signal.aborted; n++) {
+      let r: { status: AckStatus; message?: string };
+      try {
+        r = host.ack(id, outcome);
+      } catch (e) {
+        r = { status: "error", message: (e as Error).message };
+      }
+      if (r.status === "pending") {
+        // A close that failed: the hub keeps it pending. Send it again later.
+        const t = setTimeout(() => host.resendCloses(), retryMs);
+        (t as { unref?: () => void }).unref?.();
+        return;
+      }
+      if (r.status !== "error") return;
+      console.error(`[launch-executor] ack ${id}: ${r.message ?? "not recorded"} (try ${n} of ${tries})`);
+      if (n < tries) await sleep(pause);
+    }
+  }
+
+  async function runLaunch(req: Extract<LaunchRequest, { kind: "launch" }>): Promise<AckOutcome> {
+    try {
+      if (!deps.tmux) throw new Error("tmux is not available");
+      if (!req.cwd) throw new Error("the launch has no working folder");
+      const plan = await prepare(
+        {
+          agent: req.session, room: req.room, role: req.role, cwd: req.cwd, harness: req.harness as "claude" | "pi",
+          model: req.model, provider: req.provider, effort: req.effort,
+          stageId: req.stage_id, firstMessage: req.prompt || null,
+        },
+        env,
+        deps.launchDeps,
+      );
+      await startAgentSession(deps.tmux, plan);
+      return { result: "spawned" };
+    } catch (e) {
+      return { result: "error", error: (e as Error).message };
+    }
+  }
+
+  async function runClose(req: Extract<LaunchRequest, { kind: "close" }>): Promise<void> {
+    const stored = closed.get(req.id);
+    if (stored) return void (await reply(req.id, stored));
+    if (closing.has(req.id)) return; // already waiting or running: the repeat adds nothing
+    closing.add(req.id);
+    try {
+      const wait = launching.get(req.session);
+      if (wait) await wait.wait;
+      let outcome: AckOutcome;
+      try {
+        if (!deps.tmux) throw new Error("tmux is not available");
+        outcome = closeAck({ ok: await deps.tmux.killSession(req.session) });
+        closed.set(req.id, outcome); // final: never kill again for this id
+      } catch (e) {
+        outcome = closeAck({ error: (e as Error).message }); // a tmux failure is not final
+      }
+      await reply(req.id, outcome);
+    } finally {
+      closing.delete(req.id);
+    }
+  }
+
+  async function runInput(req: Extract<LaunchRequest, { kind: "input" }>): Promise<AckOutcome> {
+    try {
+      const line = inputLine(req.text);
+      if (!line) throw new Error("the input is empty, too long or holds a control character");
+      if (!deps.tmux) throw new Error("tmux is not available");
+      if (!(await deps.tmux.hasSession(req.session))) throw new Error(`unknown session: ${req.session}`);
+      // Raw PTY write to a client of that one session; never `tmux send-keys`. The client has `ignore-size`, so it
+      // never resizes the session. It writes only after tmux drew the session to it (the client is attached), writes
+      // all bytes, then waits until the client output shows the text (tmux took the bytes and the session echoed or
+      // redrew them). No echo within `echoMs` (2 s) is an error, never `spawned`. Bun's `drain` does not fire for a PTY write
+      // (probed on the pinned Bun), so the echo is the delivery proof.
+      let ready!: () => void;
+      const attached = new Promise<void>((r) => (ready = r));
+      let seen = "";
+      let writing = false;
+      let lastData = 0;
+      const decoder = new TextDecoder();
+      const viewer = await (deps.terminal ?? createTerminal(deps.tmux)).attach(req.session, {
+        ignoreSize: true,
+        onData: (chunk) => {
+          ready();
+          lastData = Date.now();
+          if (writing) seen += decoder.decode(chunk, { stream: true });
+        },
+      });
+      try {
+        const first = await Promise.race([attached.then(() => true), viewer.exited.then(() => false), sleep(attachMs).then(() => false)]);
+        if (!first) throw new Error(`could not attach to the session: ${req.session}`);
+        // Wait until the first screen is fully drawn (output quiet for `settleMs`, at most `attachMs`). Only output
+        // after the write counts as proof, so an equal text already on the screen cannot satisfy the check.
+        const settleEnd = Date.now() + attachMs;
+        while (Date.now() - lastData < settleMs && Date.now() < settleEnd) await sleep(10);
+        const bytes = Buffer.from(line);
+        writing = true;
+        seen = "";
+        for (let off = 0; off < bytes.length; ) {
+          const n = viewer.write(bytes.subarray(off));
+          if (n <= 0) await sleep(10);
+          off += Math.max(n, 0);
+        }
+        const needle = line.replace(/[\r\n]+$/, "");
+        const strip = (t: string) => t.replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, "").replace(/\x1b[()][A-Za-z0-9]/g, "");
+        const end = Date.now() + echoMs;
+        while (!strip(seen).includes(needle)) {
+          if (Date.now() >= end) throw new Error(`no echo of the input from the session: ${req.session}`);
+          await sleep(10);
+        }
+      } finally {
+        viewer.close();
+      }
+      return { result: "spawned" };
+    } catch (e) {
+      return { result: "error", error: (e as Error).message };
+    }
+  }
+
+  function handle(req: LaunchRequest): void {
+    if (req.kind === "close") {
+      void runClose(req);
+    } else if (req.kind === "input") {
+      void runInput(req).then((o) => reply(req.id, o));
+    } else {
+      // One launch of a session at a time: a later request (a retry after the ack time-out) waits for the running
+      // launch and gets its outcome. Only a launch whose work is not finished is joined.
+      const running = launching.get(req.session);
+      if (running && !running.finished) {
+        void running.work.then((o) => reply(req.id, o));
+        return;
+      }
+      const work = runLaunch(req);
+      const entry: Launch = { work, wait: work.then(() => {}), finished: false };
+      void work.then(() => { entry.finished = true; });
+      launching.set(req.session, entry);
+      void work.then(async (o) => {
+        try {
+          await deps.beforeLaunchCleanup?.(req);
+        } finally {
+          // Only the launch that set the entry removes it.
+          if (launching.get(req.session) === entry) launching.delete(req.session);
+        }
+        await reply(req.id, o);
+      });
+    }
+  }
+
+  host.attach(handle, ac.signal);
+  return { stop: () => ac.abort() };
+}
+
+/** What the hub starts: the test module of CUBILOT_LAUNCH_EXECUTOR, else the real executor on the tmux of the env. */
+export async function startExecutor(host: ExecutorHost, env: Env = process.env): Promise<void> {
+  const path = env.CUBILOT_LAUNCH_EXECUTOR?.trim();
+  if (path) {
+    const mod = (await import(path)) as ExecutorModule;
+    await mod.start(host, env);
+    return;
+  }
+  let tmux: Tmux | null = null;
+  try {
+    tmux = createTmux(tmuxFromEnv(env));
+  } catch (e) {
+    console.error("[launch-executor] tmux is not available:", (e as Error).message);
+  }
+  startLaunchExecutor(host, { tmux, env });
+}

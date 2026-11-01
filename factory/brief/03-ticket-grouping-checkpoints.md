@@ -1,6 +1,6 @@
 # Part 3: ticket grouping and context checkpoints
 
-Status: the grouping (`request_id`, `blocked_by`, the `draft` status) is a decision (2026-10-19). Build it before Part 4. The context checkpoints stay an idea.
+Status: the grouping (`request_id`, `blocked_by`, the `draft` status) is a decision (2026-10-19). Build it before Part 4. The context checkpoints for the Orchestrator are planned in Part 6, item 7 (decision 2026-10-27). For the other roles they stay an idea, because each stage gets a new session (Part 4).
 
 **Change 2026-10-18 (Part 4).** The app launches a new session for each ticket stage, so most agents never fill their context. The checkpoints in this part then apply to the Orchestrator only, because it stays open for the whole room. The first message of a new session comes from the ticket: criteria, earlier verdicts, findings and files (Part 4). The grouping in this part (`request_id`, `blocked_by`) does not change. Build the checkpoint design only if the Orchestrator's context fills in real use.
 

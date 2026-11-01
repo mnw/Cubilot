@@ -35,10 +35,12 @@ function makeEnv() {
     const session = `validator-${++sessions}`;
     rt.api.move(s.id, { to: "launching", session }, "system", cap);
     rt.api.move(s.id, { to: "running" }, "system", cap);
-    rt.hooks.onResult(session, { stage_id: s.id, review: "spec", request_id: request, verdict, findings, suggestions: [], questions_for_human: [] }, cap);
+    // The handoff route stamps the hub count into the context, then passes the stamped context to onResult.
+    const result = { stage_id: s.id, review: "spec", request_id: request, verdict, findings, suggestions: [], questions_for_human: [] };
+    rt.hooks.onResult(session, rt.hooks.stampResult(session, result), cap);
   };
   const notices = () => emitted.filter((x) => x.s.kind === "ui-only" && x.e.from === "system");
-  return { review, ticket, notices, emitted };
+  return { review, ticket, notices, emitted, db };
 }
 
 describe("second FAIL notice", () => {
@@ -116,5 +118,21 @@ describe("second FAIL notice", () => {
     expect(n[0].e).toMatchObject({ room: "r1" });
     expect(n[0].e.text).toContain("failed 2 times");
     expect(n[0].e.text).toContain("a2");
+  });
+
+  // spec-fail-gate 3: the hub count is computed once per spec result and shared by fail_count, the queued-stage gate and the notice.
+  test("one spec FAIL result computes the FAIL count once", () => {
+    const e = makeEnv();
+    const a = e.ticket();
+    e.review("req-1", [a], "FAIL");
+    let counts = 0;
+    const query = e.db.query.bind(e.db) as (sql: string) => unknown;
+    (e.db as unknown as { query: (sql: string) => unknown }).query = (sql: string) => {
+      if (sql.includes("MAX(s.created_seq)") && sql.includes("verdict = 'PASS'")) counts++;
+      return query(sql);
+    };
+    e.review("req-1", [a], "FAIL");
+    expect(counts).toBe(1);
+    expect(e.notices()).toHaveLength(1);
   });
 });

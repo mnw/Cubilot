@@ -15,6 +15,7 @@ import { LedgerConflict } from "../core/types";
 import { createLedgerEntity, ledgerConflictResponse, withLedgerRequired } from "../core/ledger-entity";
 import { mintInterruptId, ts, validName, validRoomLabel } from "../core/ids";
 import { pausedRefusal } from "../core/auth";
+import type { LaunchRecord } from "../core/launch-record";
 
 // ---------- Types ----------
 
@@ -30,6 +31,9 @@ export type InterruptSnapshot = {
   acknowledged_at_ms: number | null;
   acknowledged_by: string | null;
   room: string;
+  /** Set by the hub from the launch record at send time; null when the sender is no stage session. */
+  ticket_id: string | null;
+  stage_id: string | null;
   version: number;
 };
 
@@ -58,6 +62,8 @@ const interruptDecl: StateMachineDecl<InterruptSnapshot> = {
     acknowledged_at_ms: "INTEGER_NULL",
     acknowledged_by: "TEXT_NULL",
     room: "TEXT",
+    ticket_id: "TEXT_NULL",
+    stage_id: "TEXT_NULL",
   },
   forColumn: "to_agent",
   terminalStatuses: new Set(["acknowledged"]),
@@ -71,6 +77,8 @@ const interruptDecl: StateMachineDecl<InterruptSnapshot> = {
     acknowledged_at_ms: row.acknowledged_at_ms == null ? null : Number(row.acknowledged_at_ms),
     acknowledged_by: row.acknowledged_by == null ? null : (row.acknowledged_by as string),
     room: row.room as string,
+    ticket_id: row.ticket_id == null ? null : (row.ticket_id as string),
+    stage_id: row.stage_id == null ? null : (row.stage_id as string),
     version: Number(row.version ?? 0),
   }),
   snapshotToRow: (snap) => {
@@ -84,6 +92,8 @@ const interruptDecl: StateMachineDecl<InterruptSnapshot> = {
     if (snap.acknowledged_at_ms !== undefined) out.acknowledged_at_ms = snap.acknowledged_at_ms;
     if (snap.acknowledged_by !== undefined) out.acknowledged_by = snap.acknowledged_by;
     if (snap.room !== undefined) out.room = snap.room;
+    if (snap.ticket_id !== undefined) out.ticket_id = snap.ticket_id;
+    if (snap.stage_id !== undefined) out.stage_id = snap.stage_id;
     return out;
   },
 };
@@ -112,7 +122,7 @@ export function interruptEntry(
 
 // ---------- Verbs ----------
 
-type CreateInput = { id: string; from: string; to: string; text: string; room: string };
+type CreateInput = { id: string; from: string; to: string; text: string; room: string; ticket_id?: string | null; stage_id?: string | null };
 
 const createInterruptVerb: VerbDecl<InterruptSnapshot, CreateInput> = {
   decide(prior, payload, _actor): Decision<InterruptSnapshot> {
@@ -129,6 +139,8 @@ const createInterruptVerb: VerbDecl<InterruptSnapshot, CreateInput> = {
       acknowledged_at_ms: null,
       acknowledged_by: null,
       room: payload.room,
+      ticket_id: payload.ticket_id ?? null,
+      stage_id: payload.stage_id ?? null,
       version: 0,
     };
     return {
@@ -172,7 +184,7 @@ const ackInterruptVerb: VerbDecl<InterruptSnapshot, AckInput> = {
 
 // ---------- Factory ----------
 
-export function createInterruptKind(db: Database): KindModule {
+export function createInterruptKind(db: Database, launchRecord?: LaunchRecord): KindModule {
   const entity = createLedgerEntity({ decl: interruptDecl, db });
 
   const routes: RouteDef[] = [
@@ -243,8 +255,13 @@ export function createInterruptKind(db: Database): KindModule {
         }
         const interruptRoom = fromAgent.room ?? toAgent.room ?? cap.config.defaultRoom;
         const id = mintInterruptId();
+        // The launch record, not the body, names the stage of the sender: a session the hub did not launch gets no ticket.
+        const stage_id = launchRecord?.stageOf(from) ?? null;
+        const ticket_id = stage_id
+          ? (db.query<{ ticket_id: string | null }, [string]>("SELECT ticket_id FROM stage WHERE id = ?").get(stage_id)?.ticket_id ?? null)
+          : null;
         try {
-          const r = entity.apply(id, createInterruptVerb, { id, from, to, text, room: interruptRoom }, from, cap);
+          const r = entity.apply(id, createInterruptVerb, { id, from, to, text, room: interruptRoom, ticket_id, stage_id }, from, cap);
           return Response.json({ id: r.snapshot.id }, { status: 201 });
         } catch (e) {
           if (e instanceof LedgerConflict) return ledgerConflictResponse(e);

@@ -97,7 +97,7 @@ Two dispatch paths based on the command type:
 - **Panel commands** (`/context`, `/usage`, `/cost`, `/memory`, `/agents`, `/skills`, `/help`, `/mcp`, `/model`, `/status`, `/permissions`, `/config`, `/release-notes`, `/doctor`) go through a deterministic capture orchestrator that forces tmux geometry to 240×100 (avoiding narrow-width self-corruption), tees the panel render to a per-turn log, and posts the cleaned content back to chat under the agent's avatar.
 - **Everything else** (custom `.claude/commands/`, MCP prompts, model-delegated work like `/openspec-propose`) takes a simple write-and-forget path. ` - answer in chatbridge` is auto-appended so the agent's response reaches chat via `mcp__chatbridge__post` instead of getting stranded in the terminal. The directive is skipped if you already wrote it in your args.
 
-Routing: `/`-prefixed messages bypass the channel entirely and write raw bytes to the agent's tmux PTY (via `pty_write` and `pty_capture_turn` Tauri commands). They do **not** become MCP `notifications/claude/channel` messages.
+Routing: `/`-prefixed messages bypass the channel entirely and write raw bytes to the agent's tmux PTY (via the hub routes `POST /terminal/<agent>/input` and `POST /terminal/<agent>/capture-turn`). They do **not** become MCP `notifications/claude/channel` messages.
 
 Guardrails:
 
@@ -210,6 +210,41 @@ Edit, click **↻** in the header to reload — hub restarts with the new values
 - `claude_path` defaults to Anthropic's installer location; override if yours lives elsewhere.
 - `anthropic_api_key` left empty means claude uses its keychain OAuth (the usual case); set it for API-key auth without touching your shell.
 - `chat_history_limit` is the in-memory ring-buffer cap. Hub restart wipes the chat log regardless of persistence — JSONL stays on disk as forensic record but is not replayed.
+
+**Stage models (`role_models`).** The human decides which harness and model each stage role uses. The key maps a role (`worker`, `tester`, `validator`, `writer`, `editor`, `reviewer`) to an entry. All fields are optional strings:
+
+```yaml
+role_models:
+  worker:
+    model: sonnet
+    effort: high              # the Claude effort, or the Pi thinking level
+  validator:
+    harness: pi               # claude | pi
+    provider: anthropic       # Pi only
+    model: claude-sonnet-4-5
+    effort: medium
+```
+
+- The hub reads `config.yml` at each stage launch. An edit applies at the next launch. Do not click Reload.
+- Only stages that the hub starts use it. The spawn modal and the new-room form do not change.
+- A role with no entry runs as before. Its harness comes from the role file.
+- If the harness differs from the role's own, the role's own model, provider and effort are dropped, and the entry must give a `model`. Otherwise the launch is refused.
+- A mistake in the entry of one role (not a map, a field that is not a string, an unknown field, a harness that is not `claude` or `pi`, or a value that the launch refuses) fails the launch of that role only. The stage retries once and then goes to the room lead with the reason `role_models.<role>: ...`. Other roles launch as before.
+- A key that is not a role is ignored (one log line). A `config.yml` that is missing, not valid YAML, or has a `role_models` that is not a map gives no entries (one log line). Every role then launches as before.
+- An empty string counts as not set.
+
+**Default model (`default_model`).** The model that the launch form offers for a new agent, for each harness. Both keys are optional strings:
+
+```yaml
+default_model:
+  claude: opus
+  pi: claude-sonnet-4-5
+```
+
+- The hub returns the values on `GET /config/default-model` as `{"default_model": {...}}`. It reads `config.yml` at each request. Do not click Reload.
+- Only agents that the human adds use it. Stage launches use `role_models`.
+- A missing key gives `{}`. The form then starts as before.
+- A key that is not `claude` or `pi`, a value that is not a string, or a `default_model` that is not a map is ignored (one log line). An empty string counts as not set.
 
 **Global MCP servers** at `~/Library/Application Support/Cubilot/mcp.json` (open via the connector-graph icon in the titlebar). Servers in this file are merged into every per-agent `.mcp.json` at spawn time; the `chatbridge` server name is reserved by Cubilot and silently stripped from your config.
 

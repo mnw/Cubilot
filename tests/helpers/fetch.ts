@@ -3,6 +3,22 @@
 
 import type { HubHandle } from "./hub";
 
+// The credential of a request. A body whose by or from names someone but the human is an agent's request, so it takes the
+// agent token. Every other request is the human's, as the UI sends it: the human token. A test that wants the other one
+// sets the Authorization header itself.
+const ACTING_FIELDS = ["by", "from", "actor", "voter", "requester", "creator"];
+function tokenFor(hub: HubHandle, init: RequestInit): string {
+  if (typeof init.body !== "string") return hub.humanToken;
+  try {
+    const o = JSON.parse(init.body) as Record<string, unknown>;
+    const names = ACTING_FIELDS.map((f) => o?.[f]).filter((v): v is string => typeof v === "string");
+    // `system` is the hub's reserved actor: a test that sends it checks a refusal of the guard, as the human's UI would.
+    return names.some((n) => n.trim() !== hub.humanName && n.trim().toLowerCase() !== "system") ? hub.token : hub.humanToken;
+  } catch {
+    return hub.humanToken;
+  }
+}
+
 export async function authedFetch(
   hub: HubHandle,
   path: string,
@@ -10,11 +26,29 @@ export async function authedFetch(
 ): Promise<Response> {
   const url = `${hub.url}${path}`;
   const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${hub.token}`);
+  if (!headers.has("Authorization")) headers.set("Authorization", `Bearer ${tokenFor(hub, init)}`);
   if (init.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
   return fetch(url, { ...init, headers });
+}
+
+/**
+ * A ticket names a request that exists (plan-approval). Tests that are not about the request rule get a factory request
+ * with no feature in the room of the caller, so the lead's queue and the spec PASS follow the low-radius rule.
+ * A test about the rule passes `noSeed: true` in the body, or posts with authedFetch.
+ */
+async function seedRequestFor(hub: HubHandle, body: Record<string, unknown>): Promise<void> {
+  let room: string | null = typeof body.room === "string" ? body.room : null;
+  if (body.by !== hub.humanName) {
+    const roster = (await (await authedFetch(hub, "/agents")).json().catch(() => [])) as Array<{ name: string; room: string | null }>;
+    room = roster.find((a) => a.name === body.by)?.room ?? null;
+  }
+  if (!room) return;
+  await authedFetch(hub, "/requests", {
+    method: "POST",
+    body: JSON.stringify({ by: hub.humanName, room, request_id: body.request_id, origin: "factory" }),
+  });
 }
 
 export async function postJson(
@@ -22,6 +56,17 @@ export async function postJson(
   path: string,
   body: unknown,
 ): Promise<{ status: number; json: unknown }> {
+  let b = body as Record<string, unknown> | null;
+  // A plain agent queues a ticket only with a request (criterion 2.2): a test that is not about the rule gets one.
+  if (path === "/tickets" && b && b.noSeed !== true && b.by !== hub.humanName && b.request_id === undefined && b.status !== "draft") {
+    b = { ...b, request_id: "req-default" };
+    body = b;
+  }
+  if (path === "/tickets" && b && typeof b.request_id === "string" && b.noSeed !== true) await seedRequestFor(hub, b);
+  if (b && "noSeed" in b) {
+    const { noSeed: _drop, ...rest } = b;
+    body = rest;
+  }
   const r = await authedFetch(hub, path, {
     method: "POST",
     body: JSON.stringify(body),
@@ -67,7 +112,7 @@ export function openSSE(
   hub: HubHandle,
   path: string,
 ): { events: AsyncGenerator<any, void, void>; close: () => void } {
-  const url = `${hub.url}${path}${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(hub.token)}`;
+  const url = `${hub.url}${path}${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(path.startsWith("/agent-stream") ? hub.token : hub.humanToken)}`;
   const ac = new AbortController();
   let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 

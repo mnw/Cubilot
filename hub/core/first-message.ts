@@ -5,6 +5,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { packDepth, type PackPart } from "./pack-depth";
 
 export type FirstMessageInput = {
   stageId: string;
@@ -19,7 +20,54 @@ export type FirstMessageInput = {
   recipient?: string;
   /** The to_role handoff that started this stage, if any: its sender, task and context follow the ticket part. */
   handoff?: { id: string; from: string; task: string; context: unknown };
+  /** The stable block (renderStable): the first bytes of the message, the same for every stage of a room. Default: none. */
+  stable?: string;
+  /** Earlier notes of the ticket (earlierNotes), oldest first. Filled only when the depth table of the role allows notes. */
+  notes?: PackNote[];
+  /** Pack parts as text. Each is filled only when the depth table of the role allows it. Empty until the pack builder exists. */
+  pack?: PackText;
 };
+
+export type PackNote = { source: "planning" | "spec" | "stage"; role: string | null; notes: string };
+export type PackText = Partial<Record<Exclude<PackPart, "notes">, string>>;
+
+/** Section caps in bytes. They keep the largest first message bounded (hub/core/stage-metrics.ts). */
+export const NOTES_SECTION_MAX = 32 * 1024;
+export const PACK_SECTION_MAX = 16 * 1024;
+
+function cutBytes(text: string, max: number, what: string): string {
+  if (Buffer.byteLength(text, "utf8") <= max) return text;
+  const notice = `\n[${what} cut at ${max / 1024} KB]`;
+  const room = max - Buffer.byteLength(notice, "utf8");
+  return Buffer.from(text, "utf8").subarray(0, room).toString("utf8").replace(/\uFFFD+$/, "") + notice;
+}
+
+// The agent notes (tickets.planning_note) reach every role, whatever its depth: "## Agent notes" comes once, before the earlier notes.
+function renderAgentNotes(notes: PackNote[] | undefined): string {
+  const mine = notes?.find((n) => n.source === "planning")?.notes.trim();
+  return mine ? cutBytes(`## Agent notes\n${mine}`, NOTES_SECTION_MAX, "Agent notes") : "";
+}
+
+function renderNotes(notes: PackNote[] | undefined, depth: ReadonlySet<PackPart>): string {
+  const earlier = (notes ?? []).filter((n) => n.source !== "planning");
+  const agent = renderAgentNotes(notes);
+  if (!earlier.length || !depth.has("notes")) return agent;
+  const label = (n: PackNote) => (n.source === "spec" ? "spec review" : n.role ?? "stage");
+  const body = earlier.map((n) => `### ${label(n)}\n${n.notes.trim()}`).join("\n\n");
+  return (agent ? agent + "\n\n" : "") + cutBytes(`## Earlier notes\n${body}`, NOTES_SECTION_MAX, "Earlier notes");
+}
+
+const PACK_TITLES: Record<Exclude<PackPart, "notes">, string> = {
+  graph: "Graph query",
+  signatures: "Symbol signatures",
+  diffStat: "Diff stat",
+  changedFiles: "Changed files",
+};
+
+function renderPack(pack: PackText | undefined, depth: ReadonlySet<PackPart>, parts: Array<Exclude<PackPart, "notes">>): string {
+  const out = parts.filter((p) => depth.has(p) && pack?.[p]?.trim()).map((p) => `## ${PACK_TITLES[p]}\n${pack![p]!.trim()}`);
+  return out.length ? cutBytes(out.join("\n\n"), PACK_SECTION_MAX, "Pack") : "";
+}
 
 /** The most the handoff section holds, in bytes. */
 export const HANDOFF_SECTION_MAX = 64 * 1024;
@@ -57,6 +105,9 @@ Work in the worktree below. Report with a result handoff that names the stage id
 
 ## Acceptance criteria
 {{acceptance_criteria}}
+{{notes}}
+{{pack}}
+{{diff}}
 `;
 
 export function loadTemplate(role: string, factoryDir = process.env.CUBILOT_FACTORY_DIR, version = process.env.CUBILOT_FACTORY_VERSION): string {
@@ -71,6 +122,13 @@ export function loadTemplate(role: string, factoryDir = process.env.CUBILOT_FACT
 }
 
 export function renderFirstMessage(i: FirstMessageInput, template: string = loadTemplate(i.role)): string {
+  const depth = packDepth(i.role);
+  // {{notes}}, {{pack}} and {{diff}} stand alone on a line. A part that is empty removes its line.
+  const sections: Record<string, string> = {
+    notes: renderNotes(i.notes, depth),
+    pack: renderPack(i.pack, depth, ["graph", "signatures"]),
+    diff: renderPack(i.pack, depth, ["diffStat", "changedFiles"]),
+  };
   const v: Record<string, string> = {
     role: i.role,
     ticket_id: i.ticket.id,
@@ -83,12 +141,18 @@ export function renderFirstMessage(i: FirstMessageInput, template: string = load
     acceptance_criteria: i.ticket.acceptance_criteria.trim(),
     recipient: i.recipient ?? "Orchestrator",
   };
+  // One pass: a part line (a placeholder alone on its line) takes its section, or vanishes when the section is empty.
   // A name the template does not know stays as written.
-  let text = template.replace(/\{\{([a-z_]+)\}\}/g, (m, k: string) => (k in v ? v[k] : m));
+  let text = template.replace(/^\{\{(notes|pack|diff)\}\}[ \t]*(?:\n|$)|\{\{([a-z_]+)\}\}/gm, (m, part: string | undefined, k: string | undefined) => {
+    if (part) return sections[part] ? "\n" + sections[part] + "\n" : "";
+    return k! in v ? v[k!] : m;
+  });
   if (!text.endsWith("\n")) text += "\n";
+  if (i.role === "tester" && i.ticket.blast_radius === "high") text += "\nThis ticket has high blast radius. Run the full suite with ./scripts/test.sh. Put it in context.full_suite: command, exit_code, pass, fail, log_path.\n";
+  if (i.role === "tester" && i.ticket.blast_radius !== "high") text += "\nA PASS needs context.full_suite {command, exit_code, pass, fail, log_path}, or context.full_suite false with context.tests_run, a list of test file paths relative to the repo root.\n";
   if (i.handoff) text += renderHandoffSection(i.handoff, i.stageId);
   if (i.reason) text += `\nNote: the earlier session of this stage stopped: ${oneLine(i.reason)}\n`;
-  return text;
+  return (i.stable ?? "") + text;
 }
 
 export type SpecFirstMessageInput = {
@@ -100,13 +164,26 @@ export type SpecFirstMessageInput = {
   /** From the spec handoff (context.request_text). */
   requestText: string;
   specPaths: string[];
-  scope: Array<{ id: string; title: string; acceptance_criteria: string; role?: string | null; blast_radius?: string; blocked_by?: string[] }>;
+  scope: Array<{ id: string; title: string; acceptance_criteria: string; planning_note?: string | null; role?: string | null; blast_radius?: string; blocked_by?: string[] }>;
   /** The commit the worktree is at. */
   commit?: string | null;
   /** The findings of the FAIL results of this request since its last PASS, oldest first (spec-review-stage 2.5). */
   earlierFindings?: Array<{ ticket_id: string; severity: string; text: string }>;
+  /** The hub count of FAILs since the last PASS, plus one (spec-fail-gate 6). */
+  reviewNumber?: number;
   reason?: string;
+  /** The stable block (renderStable): the first bytes of the message. Default: none. */
+  stable?: string;
+  /** Pack parts; the spec depth allows the graph query only. Empty until the pack builder exists. */
+  pack?: PackText;
 };
+
+// One "## Agent notes" heading for the scope; a ticket with notes gets "### <id> <title>"; none with notes, no heading.
+function agentNotesLines(scope: SpecFirstMessageInput["scope"]): string[] {
+  const withNotes = scope.filter((t) => t.planning_note?.trim());
+  if (!withNotes.length) return [];
+  return ["## Agent notes", ...withNotes.flatMap((t) => [`### ${t.id} ${oneLine(t.title)}`, t.planning_note!.trim(), ""])];
+}
 
 /** The first message of a spec-review stage (spec-review-stage 4.1b): the request, the tickets in scope and where the result goes. */
 export function renderSpecFirstMessage(i: SpecFirstMessageInput): string {
@@ -122,6 +199,7 @@ export function renderSpecFirstMessage(i: SpecFirstMessageInput): string {
     ...(i.commit ? [`- Commit: ${i.commit}`] : []),
     `- Result goes to: ${i.recipient}`,
     ...(i.specPaths.length ? ["- Spec files:", ...i.specPaths.map((p) => `  - ${p}`)] : []),
+    ...(i.reviewNumber ? ["", `This is spec review ${i.reviewNumber} of this request since its last PASS.`] : []),
     "",
     "## Request text",
     i.requestText.trim(),
@@ -136,6 +214,7 @@ export function renderSpecFirstMessage(i: SpecFirstMessageInput): string {
       t.acceptance_criteria.trim(),
       "",
     ]),
+    ...agentNotesLines(i.scope),
     ...(i.earlierFindings?.length
       ? [
           "## Findings of earlier reviews of this request",
@@ -146,6 +225,59 @@ export function renderSpecFirstMessage(i: SpecFirstMessageInput): string {
       : []),
   ];
   let text = lines.join("\n").replace(/\n+$/, "\n");
+  const pack = renderPack(i.pack, packDepth("validator", "spec"), ["graph"]);
+  if (pack) text += `\n${pack}\n`;
   if (i.reason) text += `\nNote: the earlier session of this stage stopped: ${oneLine(i.reason)}\n`;
-  return text;
+  return (i.stable ?? "") + text;
+}
+
+export type RetroFirstMessageInput = {
+  role: string;
+  stageId: string;
+  worktree: string;
+  /** Where the evidence file is on disk, and its text. */
+  evidencePath: string;
+  evidence: string;
+  /** The proposal titles of the previous retrospective of the room. */
+  previousWeekTitles: string[];
+  reason?: string;
+  stable?: string;
+};
+
+// Same text as factory/retrospective/first-message.md, for a hub with no staged factory folder.
+const RETRO_DEFAULT_TEMPLATE = `You are the {{role}} for one week. Your role instructions are already loaded.
+Work in the read-only worktree below. Use the \`retrospective-review\` skill. Post one result that names the stage id.
+
+## Week
+- Stage: {{stage_id}}
+- Request: {{request}}
+- Worktree: {{worktree}}
+
+## Evidence file
+{{evidence_file}}
+
+## Proposals of the previous retrospective
+{{previous_proposals}}
+`;
+
+/** The first message of a retrospective stage: `factory/retrospective/first-message.md` with the evidence file and the previous proposals. */
+const loadRetroTemplate = (role: string): string => {
+  const t = loadTemplate(role);
+  return t === DEFAULT_TEMPLATE ? RETRO_DEFAULT_TEMPLATE : t;
+};
+
+export function renderRetroFirstMessage(i: RetroFirstMessageInput, template: string = loadRetroTemplate(i.role)): string {
+  const v: Record<string, string> = {
+    role: i.role,
+    stage_id: i.stageId,
+    request: "none",
+    worktree: i.worktree,
+    evidence_file: `File: ${i.evidencePath}\n\n${i.evidence.trim()}`,
+    previous_proposals: i.previousWeekTitles.length ? i.previousWeekTitles.map((t) => `- ${oneLine(t)}`).join("\n") : "none",
+  };
+  // One pass, as in renderFirstMessage. A part line that no retro section fills vanishes.
+  let text = template.replace(/^\{\{(?:notes|pack|diff)\}\}[ \t]*(?:\n|$)|\{\{([a-z_]+)\}\}/gm, (m, k: string | undefined) => (k === undefined ? "" : k in v ? v[k] : m));
+  if (!text.endsWith("\n")) text += "\n";
+  if (i.reason) text += `\nNote: the earlier session of this stage stopped: ${oneLine(i.reason)}\n`;
+  return (i.stable ?? "") + text;
 }

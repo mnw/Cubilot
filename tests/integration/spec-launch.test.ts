@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type Launch = { id: string; kind: string; harness: string; stage_id: string; session: string; role: string; room: string; cwd: string | null; env: Record<string, string> };
@@ -14,6 +15,7 @@ type Launch = { id: string; kind: string; harness: string; stage_id: string; ses
 describe("spec stage launch", () => {
   let hub: HubHandle;
   const open: Array<{ close: () => void }> = [];
+  const streams: Record<string, { close: () => void }> = {};
   const launches: Launch[] = [];
   let stream: ReturnType<typeof openSSE>;
   let first = "";
@@ -25,7 +27,7 @@ describe("spec stage launch", () => {
     open.push(await registerAgent(hub, "sl-alice", { room: "sl" }));
     // The result of a spec review goes to the room lead (spec-review 4.1b): the default lead is "Orchestrator".
     open.push(await registerAgent(hub, "Orchestrator", { room: "sl" }));
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) launches.push(e as Launch); } catch { /* closed */ } })();
     await sleep(200);
   });
@@ -50,7 +52,9 @@ describe("spec stage launch", () => {
     expect((await postJson(hub, `/stages/${stageId}/turn-end`, { agent: session })).json).toEqual({ action: "close" });
     for (let i = 0; i < 60 && launches.filter((l) => l.kind === "close").length === n; i++) await sleep(50);
     const close = launches.filter((l) => l.kind === "close").at(-1)!;
-    expect((await postJson(hub, `/launches/${close.id}/ack`, { result: "spawned" })).status).toBe(200);
+    streams[session]?.close(); // the shell kills the session first: its agent stream drops, as a real one does
+    await sleep(100);
+    expect((await ackLaunch(hub, close.id, { result: "spawned" })).status).toBe(200);
   };
   const stages = async () => (await getJson(hub, "/stages?status=all")).json as Array<{ id: string; status: string; role: string; review: string | null; ticket_id: string | null; request_id: string | null; session: string | null }>;
 
@@ -67,8 +71,8 @@ describe("spec stage launch", () => {
     // no ticket was assigned: nobody owns a ticket for this stage
     expect((await stages())[0]).toMatchObject({ review: "spec", ticket_id: null, status: "launching" });
     first = l.stage_id;
-    expect((await postJson(hub, `/launches/${l.id}/ack`, { result: "spawned" })).status).toBe(200);
-    open.push(await registerAgent(hub, "validator-1", { room: "sl" }));
+    expect((await ackLaunch(hub, l.id, { result: "spawned" })).status).toBe(200);
+    open.push((streams["validator-1"] = await registerAgent(hub, "validator-1", { room: "sl" })));
     expect((await stages())[0].status).toBe("running");
   });
 
@@ -83,7 +87,7 @@ describe("spec stage launch", () => {
 
     const bad = await postJson(hub, "/handoffs", {
       from: "validator-1", to: "Orchestrator", task: "result",
-      context: { stage_id: first, review: "spec", request_id: "req-1", verdict: "pass", findings: [], suggestions: [], questions_for_human: [] },
+      context: { notes: "n", stage_id: first, review: "spec", request_id: "req-1", verdict: "pass", findings: [], suggestions: [], questions_for_human: [] },
     });
     expect(bad.status).toBe(400);
     expect(((await getJson(hub, `/stages/${first}`)).json as { status: string }).status).toBe("running");
@@ -100,7 +104,7 @@ describe("spec stage launch", () => {
   test("when the first validator stage ends, the oldest queued stage (the second spec stage) starts", async () => {
     const pass = await postJson(hub, "/handoffs", {
       from: "validator-1", to: "Orchestrator", task: "result",
-      context: { stage_id: first, review: "spec", request_id: "req-1", verdict: "PASS", findings: [], suggestions: [], questions_for_human: [] },
+      context: { notes: "n", stage_id: first, review: "spec", request_id: "req-1", verdict: "PASS", findings: [], suggestions: [], questions_for_human: [] },
     });
     expect(pass.status, JSON.stringify(pass.json)).toBe(201);
     await sleep(300);

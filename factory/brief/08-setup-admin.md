@@ -92,6 +92,11 @@ The same screen has these tabs:
 7. The setup does not continue after the backup password is shown, until the human ticks that the password is stored.
 8. A restore in step 0 skips steps 1 to 3 and step 5, and ends with the checks.
 
+## Mockups (2026-10-28)
+
+Partly designed in `design/mockups/cubilot-prototype.html`: Settings (`#app-settings`) has Appearance, Config and hub, Agents (global MCP servers, skills folder, launch command, default model), Room and Cancel traces.
+The setup flow is designed, before sign-in and without the app header: `#setup` (step 0: new factory or restore), `#setup-components` (step 1), `#setup-install` (step 3: status per step, Retry and Skip on a failed step, live log), `#setup-accounts` (step 4: sign-ins in a terminal pane, the backup password shown once with the tick box, the OpenRouter key). Steps 2, 5 and 6 use the same layout. The admin screen is `#admin`, reached from Settings: Checks (the Doctor, one fix button each), Components, Accounts, Projects (mutation, triage, disclosure, backup target, primer), Backup and Updates.
+
 ---
 
 Index: [00-index.md](00-index.md). This part is one file of the implementation brief. "Part N" means file `NN-*.md` in this folder.

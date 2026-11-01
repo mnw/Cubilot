@@ -1,10 +1,8 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
-// Runs the production ui/kinds/ticket.js against a fake hub list. Checks that the
-// permission preview's ticket_id is only a hint: an approval reaches a ticket only when
-// its request id equals the ticket's current approval_request_id.
+// Runs the production ui/kinds/ticket.js against a fake hub list.
 const SRC = readFileSync("ui/kinds/ticket.js", "utf8");
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
@@ -41,16 +39,11 @@ const ticket = (pointer: string, approval: any) => ({
   creator: "a", assignee: "a", approval_request_id: pointer, external_ref: null,
   status: "in_review", created_at_ms: 1, updated_at_ms: 1, version: 5, approval,
 });
-const perm = (id: string, status: string, version: number, resolved_by: string | null = "human") => ({
-  kind: "permission.resolved", permission_id: id, version,
-  snapshot: { id, tool_name: "ticket:done", input_preview: JSON.stringify({ ticket_id: "t_1" }), status, resolved_by, version },
-});
 const draft = () => ({
   title: { value: "T" }, criteria: { value: "c" }, radius: { value: "high" }, priority: { value: "medium" },
   external_ref: { value: "" }, reset: () => {},
 });
 const paths = () => posts.map((p) => [p.path, p.body.to ?? null]);
-const approvalOf = () => ctx.TicketBoard._tickets.get("t_1").approval;
 
 beforeEach(async () => {
   list = [ticket("abcde", { id: "abcde", status: "pending", resolved_by: null })];
@@ -92,6 +85,7 @@ beforeEach(async () => {
     setAttribute(k: string, v: string) { this.attrs[k] = v; }, focus() { active = this; }, contains(n: any) { return n === this; } });
   els["ticket-filter-panel"] = control({ hidden: true, contains(n: any) { return !!n?.inPanel; } });
   els["ticket-filter-done"] = control();
+  els["ticket-filter-id"] = control({ value: "", focus() { active = this; } });
   for (const k of ["highest", "high", "medium", "low", "lowest"]) els[`ticket-filter-p-${k}`] = control();
   els["ticket-lead"] = control({ value: "", innerHTML: "", disabled: false });
   els["ticket-lead-wrap"] = control({ hidden: true });
@@ -192,31 +186,7 @@ beforeEach(async () => {
   await ctx.TicketBoard.load();
 });
 
-describe("ticket board approval binding", () => {
-  test("an unrelated request naming the ticket does not replace the current approval", async () => {
-    expect(ctx.TicketBoard.onPermission(perm("zzzzz", "allowed", 9))).toBe("reload");
-    await settle();
-    expect(approvalOf()).toMatchObject({ id: "abcde", status: "pending" });
-  });
-
-  test("a late event of a superseded request does not replace the new approval", async () => {
-    list = [ticket("fghij", { id: "fghij", status: "pending", resolved_by: null })];
-    await ctx.TicketBoard.load();                     // pointer moved to fghij
-    ctx.TicketBoard.onPermission(perm("abcde", "allowed", 9));
-    await settle();
-    expect(approvalOf()).toMatchObject({ id: "fghij", status: "pending" });
-    const before = fetches;
-    expect(ctx.TicketBoard.onPermission(perm("abcde", "allowed", 10))).toBe("ignored");  // no reload loop
-    expect(fetches).toBe(before);
-  });
-
-  test("the current request's verdict is applied, and an older version is not", () => {
-    expect(ctx.TicketBoard.onPermission(perm("abcde", "allowed", 7))).toBe("applied");
-    expect(approvalOf()).toMatchObject({ id: "abcde", status: "allowed", resolved_by: "human" });
-    expect(ctx.TicketBoard.onPermission(perm("abcde", "pending", 6))).toBe("ignored");
-    expect(approvalOf().status).toBe("allowed");
-  });
-
+describe("ticket board version merge", () => {
   test("a ticket event with an older version is ignored", () => {
     ctx.TicketBoard.onTicket({ ticket_id: "t_1", version: 4, snapshot: { ...ticket("abcde", null), status: "queued", version: 4 } });
     expect(ctx.TicketBoard._tickets.get("t_1").status).toBe("in_review");
@@ -228,25 +198,6 @@ describe("ticket board approval binding", () => {
     list = stale;                            // the delayed read now lands
     await ctx.TicketBoard.load();
     expect(ctx.TicketBoard._tickets.get("t_1")).toMatchObject({ status: "done", version: 6 });
-  });
-
-  test("a delayed list read does not roll back a newer approval verdict", async () => {
-    ctx.TicketBoard.onPermission(perm("abcde", "allowed", 8));
-    list = [ticket("abcde", { id: "abcde", status: "pending", resolved_by: null, version: 3 })];
-    await ctx.TicketBoard.load();
-    expect(approvalOf()).toMatchObject({ id: "abcde", status: "allowed", version: 8 });
-  });
-
-  test("a verdict that arrives during the first list read is applied after the read", async () => {
-    ctx.TicketBoard._tickets.clear();        // first load: no cached ticket
-    let release!: () => void;
-    gate = new Promise((r) => { release = r; });
-    const loading = ctx.TicketBoard.load();  // reads the pending approval, then waits
-    await settle();
-    expect(ctx.TicketBoard.onPermission(perm("abcde", "allowed", 8))).toBe("deferred");
-    release();
-    await loading;
-    expect(approvalOf()).toMatchObject({ id: "abcde", status: "allowed", version: 8 });
   });
 
   test("the create form keeps its input after a failure and resets after success", async () => {
@@ -942,33 +893,33 @@ describe("board filters", () => {
     expect(ctx.TicketBoard._filter().priorities).toEqual(["high", "medium", "lowest"]);
     // Reset restores everything
     els["ticket-filter-reset"].handlers.click();
-    expect(ctx.TicketBoard._filter()).toEqual({ radius: "all", request: "", priorities: all5, showArchived: false, showCancelled: false });
+    expect(ctx.TicketBoard._filter()).toEqual({ id: "", radius: "all", request: "", priorities: all5, showArchived: false, showCancelled: false });
     expect(radio()).toBe("all");
   });
 
   test("the choice is saved per room and restored on the room's return", async () => {
     await show(...board());
     ctx.TicketBoard.setFilter({ radius: "high", priorities: ["low"] });
-    expect(JSON.parse(store.get("cubilot_board_filter:r")!)).toEqual({ radius: "high", request: "", priorities: ["low"], showArchived: false, showCancelled: false, v: 2 });
+    expect(JSON.parse(store.get("cubilot_board_filter:r")!)).toEqual({ id: "", radius: "high", request: "", priorities: ["low"], showArchived: false, showCancelled: false, v: 2 });
     ctx.SELECTED_ROOM = "r2";
     await ctx.TicketBoard.load();
-    expect(ctx.TicketBoard._filter()).toEqual({ radius: "all", request: "", priorities: all5, showArchived: false, showCancelled: false });   // another room starts clean
+    expect(ctx.TicketBoard._filter()).toEqual({ id: "", radius: "all", request: "", priorities: all5, showArchived: false, showCancelled: false });   // another room starts clean
     ctx.TicketBoard.setFilter({ radius: "low", priorities: all5 });
     ctx.SELECTED_ROOM = "r";
     await ctx.TicketBoard.load();
-    expect(ctx.TicketBoard._filter()).toEqual({ radius: "high", request: "", priorities: ["low"], showArchived: false, showCancelled: false });
+    expect(ctx.TicketBoard._filter()).toEqual({ id: "", radius: "high", request: "", priorities: ["low"], showArchived: false, showCancelled: false });
     expect(radio()).toBe("high");                                      // the controls follow the room
-    expect(JSON.parse(store.get("cubilot_board_filter:r2")!)).toEqual({ radius: "low", request: "", priorities: all5, showArchived: false, showCancelled: false, v: 2 });
+    expect(JSON.parse(store.get("cubilot_board_filter:r2")!)).toEqual({ id: "", radius: "low", request: "", priorities: all5, showArchived: false, showCancelled: false, v: 2 });
   });
 
   test("damaged storage falls back to no filter; unknown values are dropped", () => {
     store.set("cubilot_board_filter:r", "{not json");
-    expect(ctx.TicketBoard.readFilter("r")).toEqual({ radius: "all", request: "", priorities: all5, showArchived: false, showCancelled: false });
+    expect(ctx.TicketBoard.readFilter("r")).toEqual({ id: "", radius: "all", request: "", priorities: all5, showArchived: false, showCancelled: false });
     store.set("cubilot_board_filter:r", JSON.stringify({ radius: "extreme", priorities: ["high", "bogus", "constructor"] }));
-    expect(ctx.TicketBoard.readFilter("r")).toEqual({ radius: "all", request: "", priorities: ["high"], showArchived: false, showCancelled: false });
+    expect(ctx.TicketBoard.readFilter("r")).toEqual({ id: "", radius: "all", request: "", priorities: ["high"], showArchived: false, showCancelled: false });
     store.set("cubilot_board_filter:r", JSON.stringify({ radius: "low", priorities: "high" }));
-    expect(ctx.TicketBoard.readFilter("r")).toEqual({ radius: "low", request: "", priorities: all5, showArchived: false, showCancelled: false });
-    expect(ctx.TicketBoard.sanitizeFilter(null)).toEqual({ radius: "all", request: "", priorities: all5, showArchived: false, showCancelled: false });
+    expect(ctx.TicketBoard.readFilter("r")).toEqual({ id: "", radius: "low", request: "", priorities: all5, showArchived: false, showCancelled: false });
+    expect(ctx.TicketBoard.sanitizeFilter(null)).toEqual({ id: "", radius: "all", request: "", priorities: all5, showArchived: false, showCancelled: false });
   });
 });
 
@@ -1205,20 +1156,18 @@ describe("ticket view dialog", () => {
   const click = (card: any, inside = false) => card.handlers.click({ target: { closest: () => (inside ? {} : null) } });
 
   // (The harness escHtml/escAttr are String, so these checks read the raw text; the real helpers escape it.)
-  // Status light (the human's rules): red = cannot advance without the human (pending approval or human assignee),
+  // Status light (the human's rules): red = cannot advance without the human (human assignee),
   // orange = claimed / in_progress, green = queued and in_review, none when finished.
-  test("lightOf: every status, a pending approval or a human assignee wins", () => {
+  test("lightOf: every status, a human assignee wins", () => {
     const light = (status: string, extra: any = {}) => ctx.TicketBoard.lightOf({ status, assignee: "alice", ...extra })?.[0] ?? null;
     for (const s of ["queued", "in_review"]) expect(light(s)).toBe("green");
     for (const s of ["claimed", "in_progress"]) expect(light(s)).toBe("orange");
     for (const s of ["done", "cancelled"]) expect(light(s)).toBeNull();
     for (const s of ["queued", "claimed", "in_progress", "in_review"]) {
-      expect(light(s, { approval: { status: "pending" } })).toBe("red");
       expect(light(s, { assignee: "human" })).toBe("red");
     }
-    expect(light("in_progress", { approval: { status: "allowed" } })).toBe("orange");
     expect(light("queued", { assignee: null })).toBe("green");
-    expect(light("done", { approval: { status: "pending" }, assignee: "human" })).toBeNull();   // finished: no light
+    expect(light("done", { assignee: "human" })).toBeNull();   // finished: no light
   });
 
   // The human's rule 2026-10-24: when a ticket needs the human's action the light is red. Two more cases where only the human
@@ -1250,9 +1199,8 @@ describe("ticket view dialog", () => {
       }
     });
 
-    test("the order: pending approval, then the human, then a gone assignee, then only-you-can-queue", async () => {
+    test("the order: the human, then a gone assignee, then only-you-can-queue", async () => {
       const gone = { status: "in_progress", assignee: "ghost" };
-      expect(S({ ...gone, approval: { status: "pending" } })).toBe("Waiting for your approval");
       expect(S({ ...gone, assignee: "human" })).toBe("Assigned to you");
       expect(S(gone)).toBe(GONE);
       // a draft with a gone assignee in a request with a high ticket: the gone line comes before "only you"
@@ -1385,21 +1333,20 @@ describe("ticket view dialog", () => {
     expect(b("bogus")).toBe(2);
   });
 
-  test("statusLine: approval, then the human, then blockers; null otherwise; never disagrees with lightOf", () => {
+  test("statusLine: the human, then blockers; null otherwise; never disagrees with lightOf", () => {
     const sl = (t: any) => ctx.TicketBoard.statusLine({ status: "queued", assignee: "alice", ...t });
     expect(sl({})).toBeNull();
     expect(sl({ blocked_by: ["x"], open_blockers: ["x"] })).toBe("Blocked by 1 open ticket");
     expect(sl({ blocked_by: ["x", "y"], open_blockers: ["x", "y"] })).toBe("Blocked by 2 open tickets");
     expect(sl({ blocked_by: ["x"], open_blockers: [] })).toBeNull();                                  // blocker is done
     expect(sl({ assignee: "human", blocked_by: ["x"], open_blockers: ["x"] })).toBe("Assigned to you");
-    expect(sl({ approval: { status: "pending" }, assignee: "human", open_blockers: ["x"], blocked_by: ["x"] })).toBe("Waiting for your approval");
-    for (const status of ["done", "cancelled"]) expect(sl({ status, approval: { status: "pending" }, assignee: "human" })).toBeNull();
-    // Whenever the line is the approval or the human line, the light is red.
+    for (const status of ["done", "cancelled"]) expect(sl({ status, assignee: "human" })).toBeNull();
+    // Whenever the line is the human line, the light is red.
     for (const status of ["queued", "claimed", "in_progress", "in_review", "done", "cancelled"]) {
-      for (const extra of [{}, { assignee: "human" }, { approval: { status: "pending" } }, { blocked_by: ["x"], open_blockers: ["x"] }]) {
+      for (const extra of [{}, { assignee: "human" }, { blocked_by: ["x"], open_blockers: ["x"] }]) {
         const t = { status, assignee: "alice", ...extra };
         const line = ctx.TicketBoard.statusLine(t);
-        if (line === "Waiting for your approval" || line === "Assigned to you") expect(ctx.TicketBoard.lightOf(t)?.[0]).toBe("red");
+        if (line === "Assigned to you") expect(ctx.TicketBoard.lightOf(t)?.[0]).toBe("red");
       }
     }
   });
@@ -1420,11 +1367,37 @@ describe("ticket view dialog", () => {
 
   test("a card is focusable, has a role and an accessible name", async () => {
     await board(T());
-    expect(cols.innerHTML).toContain('role="button" tabindex="0" draggable="true" data-ticket="t_9" aria-label="Open ticket: Fix <it>"');
+    expect(cols.innerHTML).toContain('role="button" tabindex="0" draggable="true" data-ticket="t_9" aria-label="Open ticket t_9: Fix <it>"');
+  });
+
+  test("two PASS marks, no approval state", async () => {
+    const cards = await board(T({ blast_radius: "high", validator_passes: 1 }));
+    expect(cols.innerHTML).toContain("PASS 1/2");
+    expect(cols.innerHTML).not.toMatch(/approval/i);
+    click(cards.t_9);
+    expect(content()).not.toMatch(/approval|Allow|Deny/i);
+    await board(T({ blast_radius: "high", validator_passes: 2 }));
+    expect(cols.innerHTML).toContain("PASS 2/2");
+    await board(T({ blast_radius: "low", validator_passes: 1 }));
+    expect(cols.innerHTML).not.toContain("PASS ");
+  });
+
+  test("a Validator PASS stage event refreshes the PASS marks of an open board", async () => {
+    await board(T({ blast_radius: "high", validator_passes: 0 }));
+    expect(cols.innerHTML).toContain("PASS 0/2");
+    list = [T({ blast_radius: "high", validator_passes: 1 })];                 // the hub counts the new PASS
+    expect(observers.stage).toBe(ctx.TicketBoard.onStage);
+    ctx.TicketBoard.onStage({ kind: "stage.passed", snapshot: { role: "validator", ticket_id: "t_9", verdict: "PASS", review: null } });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(cols.innerHTML).toContain("PASS 1/2");
+    list = [T({ blast_radius: "high", validator_passes: 0 })];                 // a rework clears the marks
+    ctx.TicketBoard.onStage({ kind: "stage.queued", snapshot: { role: "worker", ticket_id: "t_9", review: null } });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(cols.innerHTML).toContain("PASS 0/2");
   });
 
   test("a click on the card opens the dialog with the whole ticket", async () => {
-    const cards = await board(T({ blast_radius: "high", approval_request_id: "abcde", approval: { id: "abcde", status: "pending", resolved_by: null, version: 1 } }));
+    const cards = await board(T({ blast_radius: "high", approval_request_id: null }));
     click(cards.t_9);
     expect(view().open).toBe(true);
     expect(els["ticket-view-title"].textContent).toBe("Fix <it>");
@@ -1433,7 +1406,7 @@ describe("ticket view dialog", () => {
     expect(content()).toContain("line one<br>line two <b>");
     expect(panel()).toContain("Copy");                                        // the ID has a copy button
     expect(content()).toContain("Acceptance criteria");
-    expect(content()).toContain("Waiting for your approval.");              // the approval banner
+    expect(content()).not.toContain("approval");                            // no approval state
     expect(active).toBe(els["ticket-view-x"]);                             // focus moves into the dialog: the header Close, the first control
   });
 
@@ -1533,18 +1506,6 @@ describe("ticket view dialog", () => {
     expect(head()).toContain("In review");
     expect(panel()).toContain("bob");
     expect(view().open).toBe(true);
-  });
-
-  test("an approval verdict updates the open dialog", async () => {
-    const cards = await board(T({ blast_radius: "high", approval_request_id: "abcde", approval: { id: "abcde", status: "pending", resolved_by: null, version: 1 } }));
-    click(cards.t_9);
-    expect(content()).toContain("Waiting for your approval.");
-    expect(content()).toContain("asks to move this high-radius ticket to Done.");
-    expect(content()).toContain('data-approval="deny" data-request="abcde"');
-    expect(content()).toContain('data-approval="allow" data-request="abcde"');
-    observers.permission({ kind: "permission.resolved", permission_id: "abcde", version: 9, snapshot: { id: "abcde", tool_name: "ticket:done", input_preview: JSON.stringify({ ticket_id: "t_9" }), status: "allowed", resolved_by: "human", version: 9 } });
-    expect(content()).toContain("Approved by human · abcde");
-    expect(content()).not.toContain("data-approval=");                       // the banner is gone once the request is answered
   });
 
   test("the keyboard stays on the same control after a live redraw", async () => {
@@ -1791,6 +1752,42 @@ describe("ticket notes", () => {
     observers.ticket({ kind: "ticket.noted", ticket_id: "a", room: "r", notes_count: 2, note: N(2, "alice", "Tested: ok") });
     expect(content()).toContain('Notes <span class=\"ticket-view-count\">2</span>');
     expect(content()).toContain("Tested: ok");
+  });
+
+  const openFull = async (extra: object) => {
+    const card: any = { dataset: { ticket: "a" }, isConnected: true, handlers: {}, addEventListener(t: string, f: any) { this.handlers[t] = f; }, focus() {} };
+    cols.querySelectorAll = (q: string) => (q === ".ticket-card" ? [card] : []);
+    await show(T("a", 0, extra));
+    card.handlers.click({ target: { closest: () => null } });
+    await settle();
+    return els["ticket-view-content"].innerHTML as string;
+  };
+
+  test("agent notes in details, closed, summary text For the agents", async () => {
+    const html = await openFull({ planning_note: "Files: a.ts\nBase commit: abc" });
+    expect(html).toContain('<details class="ticket-agent-notes"><summary>For the agents</summary>');
+    expect(html).not.toMatch(/<details class="ticket-agent-notes"[^>]*\bopen\b/);
+    expect(html).toContain("Files: a.ts\nBase commit: abc");
+    expect(await openFull({ planning_note: null })).not.toContain("For the agents");
+  });
+
+  test("hostile agent notes show as text", async () => {
+    ctx.escHtml = (x: unknown) => String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");   // the real helper escapes; the harness one is String
+    const html = await openFull({ planning_note: "<img src=x onerror=alert(1)>" });
+    expect(html).not.toContain("<img src=x");
+    expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
+  });
+
+  test("summary has a focus style", () => {
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toMatch(/\.ticket-agent-notes summary:focus-visible[^{]*\{\s*outline: 2px solid/);
+  });
+
+  test("board card hides agent notes", async () => {
+    await show(T("a", 0, { planning_note: "SECRET-AGENT-FACT" }));
+    expect(cols.innerHTML).toContain('data-ticket="a"');
+    expect(cols.innerHTML).not.toContain("SECRET-AGENT-FACT");
+    expect(cols.innerHTML).not.toContain("For the agents");
   });
 
   test("the full view says so when there are no notes", async () => {
@@ -2119,18 +2116,18 @@ describe("filters panel", () => {
     expect(btn().attrs["aria-label"]).toBe("Filters");
   });
 
-  test("the button opens the panel (aria-expanded, focus on the chosen radius) and toggles it shut", () => {
+  test("the button opens the panel (aria-expanded, focus on the id field) and toggles it shut", () => {
     expect(panel().hidden).toBe(true);
     btn().handlers.click();
     expect(panel().hidden).toBe(false);
     expect(btn().attrs["aria-expanded"]).toBe("true");
-    expect(active).toBe(els["ticket-filter-radius-all"]);
+    expect(active).toBe(els["ticket-filter-id"]);
     btn().handlers.click();
     expect(panel().hidden).toBe(true);
     expect(btn().attrs["aria-expanded"]).toBe("false");
     set({ radius: "low" });
     btn().handlers.click();
-    expect(active).toBe(els["ticket-filter-radius-low"]);                        // the selected segment gets the focus
+    expect(active).toBe(els["ticket-filter-id"]);                                // the id field gets the focus, whatever the radius
   });
 
   test("Done closes it and returns the focus to the button", () => {
@@ -2203,6 +2200,138 @@ describe("filters panel", () => {
     btn().handlers.click();
     for (const fn of docListeners["cubilot:right-pane"] ?? []) fn({ detail: { pane: "terminal" } });
     expect(panel().hidden).toBe(true);
+  });
+
+  describe("ticket id field", () => {
+    const idf = () => els["ticket-filter-id"];
+    const T = (id: string, extra: object = {}) => ({ ...ticket("", null), id, title: id, status: "queued", blast_radius: "low", priority: "medium", approval_request_id: null, assignee: null, archived_at_ms: null, ...extra });
+    let pending: any = null, delay = 0;
+    const typeRaw = (v: string) => { idf().value = v; idf().handlers.input({ target: idf() }); };
+    const flush = () => { const f = pending; pending = null; f?.(); };
+    const type = (v: string) => { typeRaw(v); flush(); };
+    const shown = () => ctx.TicketBoard._filter();
+    const count = () => els["ticket-filter-summary"].textContent;
+    beforeEach(async () => {
+      list = [T("t_a5e022f7f59ca72d", { request_id: "r1" }), T("t_b7710000aaaa0000", { request_id: "r2", blast_radius: "high" }), T("t_c5e0ffff00001111", { request_id: "r1", blast_radius: "high" })];
+      ctx.TicketBoard._tickets.clear();
+      await ctx.TicketBoard.load();
+      pending = null;
+      ctx.setTimeout = (fn: any, ms: number) => { pending = fn; delay = ms; return 1; };
+      ctx.clearTimeout = () => { pending = null; };
+      idf().value = "";
+      active = null;
+      set({ id: "" });
+    });
+    afterEach(() => { ctx.setTimeout = setTimeout; ctx.clearTimeout = clearTimeout; });
+
+    test("typing renders once after a 150 ms pause, not on every key", () => {
+      typeRaw("a");
+      typeRaw("a5");
+      typeRaw("a5e0");
+      expect(delay).toBe(150);
+      expect(count()).toBe("All 3 tickets");                                      // nothing rendered yet
+      flush();
+      expect(count()).toBe("Showing 1 of 3 tickets");
+      expect(shown().id).toBe("a5e0");
+    });
+
+    test("another filter change within the pause keeps the typed id", () => {
+      typeRaw("5e0");
+      set({ radius: "high" });
+      expect(shown().id).toBe("5e0");
+      expect(count()).toBe("Showing 1 of 3 tickets");
+      expect(pending).toBe(null);
+    });
+
+    test("Reset within the pause wins over the typed text", () => {
+      typeRaw("5e0");
+      els["ticket-filter-reset"].handlers.click();
+      expect(shown().id).toBe("");
+      expect(idf().value).toBe("");
+    });
+
+    test("substring with or without t_, any case, full id; trimmed in the match only", () => {
+      for (const q of ["a5e0", "t_a5e0", "T_A5E0", "t_a5e022f7f59ca72d", "  a5e0  "]) {
+        type(q);
+        expect(count()).toBe("Showing 1 of 3 tickets");
+      }
+      expect(shown().id).toBe("  a5e0  ");                                        // raw text stored
+      type("5e0");
+      expect(count()).toBe("Showing 2 of 3 tickets");
+    });
+
+    test("empty or spaces only is no id filter", () => {
+      type("   ");
+      expect(count()).toBe("All 3 tickets");
+      expect(btn().textContent).toBe("Filters");
+    });
+
+    test("no match: empty board, Showing 0 of M, no error", () => {
+      type("zzzz");
+      expect(count()).toBe("Showing 0 of 3 tickets");
+    });
+
+    test("ANDs with radius and request", () => {
+      type("5e0");
+      set({ radius: "high" });
+      expect(count()).toBe("Showing 1 of 3 tickets");
+      set({ radius: "all", request: "r1" });
+      expect(count()).toBe("Showing 2 of 3 tickets");
+      set({ radius: "high" });
+      expect(count()).toBe("Showing 1 of 3 tickets");
+      expect(ctx.TicketBoard.matchesFilter(T("t_a5e0"), shown())).toBe(false);   // low radius, id matches
+    });
+
+    test("sanitize: a number or a missing id reads as empty; an old v:2 value without id still loads", () => {
+      expect(ctx.TicketBoard.sanitizeFilter({ id: 5 }).id).toBe("");
+      expect(ctx.TicketBoard.sanitizeFilter({ radius: "high" }).id).toBe("");
+      expect(ctx.TicketBoard.sanitizeFilter({ id: " ab " }).id).toBe(" ab ");
+      store.set("cubilot_board_filter:r", JSON.stringify({ v: 2, radius: "high", request: "", priorities: all5 }));
+      const f = ctx.TicketBoard.readFilter("r");
+      expect(f.id).toBe("");
+      expect(f.radius).toBe("high");
+    });
+
+    test("counts as one active filter and is stored per room", () => {
+      type("a5e0");
+      expect(btn().textContent).toBe("Filters · 1");
+      expect(JSON.parse(store.get("cubilot_board_filter:r")!).id).toBe("a5e0");
+    });
+
+    test("Reset clears the field and the filter", () => {
+      type("a5e0");
+      els["ticket-filter-reset"].handlers.click();
+      expect(idf().value).toBe("");
+      expect(shown().id).toBe("");
+      expect(btn().textContent).toBe("Filters");
+    });
+
+    test("typing is not overwritten while the field has focus (caret and spaces stay)", () => {
+      active = idf();
+      type("a5e0 ");
+      expect(idf().value).toBe("a5e0 ");
+      set({ radius: "high" });
+      expect(idf().value).toBe("a5e0 ");
+    });
+
+    test("Escape in a non-empty field clears it and keeps the panel open; in an empty field it closes the panel", () => {
+      btn().handlers.click();
+      type("a5e0");
+      expect(key("Escape").prevented).toBe(true);
+      expect(idf().value).toBe("");
+      expect(shown().id).toBe("");
+      expect(panel().hidden).toBe(false);
+      expect(key("Escape").prevented).toBe(true);
+      expect(panel().hidden).toBe(true);
+      expect(active).toBe(btn());
+    });
+
+    test("markup: label bound to a search input, first section, no autocomplete or spellcheck", () => {
+      const html = readFileSync("ui/index.html", "utf8");
+      const p = html.slice(html.indexOf('id="ticket-filter-panel"'));
+      expect(p.indexOf('for="ticket-filter-id"')).toBeLessThan(p.indexOf("ff-radius-label"));
+      expect(p).toContain('<input type="search" id="ticket-filter-id" autocomplete="off" spellcheck="false" placeholder="e.g. a5e0 or t_a5e0"');
+    });
   });
 
   test("Showing N of M stays next to the button", async () => {
@@ -3108,7 +3237,7 @@ describe("moving tickets: the Move to select and drag and drop", () => {
   async function show(...tickets: any[]) {
     selects = {}; cards = {}; columns = {};
     for (const t of tickets) {
-      selects[t.id] = Object.assign(el(), { dataset: { ticket: t.id }, value: "" });
+      selects[t.id] = Object.assign(el(), { dataset: { ticket: t.id }, value: "", focus() { active = this; } });
       cards[t.id] = Object.assign(el(), { dataset: { ticket: t.id } });
     }
     for (const k of ["queued", "in_progress", "in_review", "done", ""]) columns[k] = Object.assign(el(), { dataset: { status: k } });
@@ -3227,7 +3356,8 @@ describe("moving tickets: the Move to select and drag and drop", () => {
     expect(own.prevented).toBe(false);                             // no highlight on its own column
     const cancelled = ev();
     columns[""].handlers.dragover(cancelled);
-    expect(cancelled.prevented).toBe(false);
+    expect(cancelled.prevented).toBe(true);                        // enabled so the browser sends drop, which shows the failure line
+    expect(columns[""].cls.has("drop-target")).toBe(false);       // but never highlighted
     columns.queued.handlers.drop(ev());
     columns[""].handlers.drop(ev());
     expect(posts.filter((p) => p.path.endsWith("/transition"))).toEqual([]);
@@ -3293,6 +3423,209 @@ describe("moving tickets: the Move to select and drag and drop", () => {
     const over = ev();
     columns.in_progress.handlers.dragover(over);
     expect(over.prevented).toBe(false);                            // nothing is being dragged
+  });
+
+  describe("failed move shows its error", () => {
+    let status: any;
+    let timers: Array<{ fn: () => void; ms: number; live: boolean }>;
+    beforeEach(() => {
+      status = el();
+      status.textContent = "";
+      status.innerHTML = "";
+      els["ticket-move-status"] = status;
+      timers = [];
+      ctx.setTimeout = (fn: () => void, ms: number) => { timers.push({ fn, ms, live: true }); return timers.length; };
+      ctx.clearTimeout = (id: number) => { if (timers[id - 1]) timers[id - 1].live = false; };
+    });
+    afterEach(() => { ctx.setTimeout = setTimeout; ctx.clearTimeout = clearTimeout; delete els["ticket-move-status"]; });
+    const fire = () => timers.filter((t) => t.live).forEach((t) => { t.live = false; t.fn(); });
+    const hold = () => {
+      const normal = ctx.authedFetch;
+      let release!: () => void;
+      const held = new Promise<void>((r) => { release = r; });
+      ctx.authedFetch = async (path: string, init?: any) => { if (path.endsWith("/transition")) await held; return normal(path, init); };
+      return release;
+    };
+
+    test("reproduced path: a drag from In review to Done that the hub refuses shows a board line, not only a chat line", async () => {
+      await show(T("a", "in_review"));
+      postOk = false;
+      refuseText = "needs a tester PASS";
+      cards.a.handlers.dragstart(ev());
+      columns.done.handlers.drop(ev());
+      await settle();
+      expect(messages.at(-1).text).toBe("Ticket move to done failed: needs a tester PASS");   // the chat line stays
+      expect(status.textContent).toBe("Move of T a failed: needs a tester PASS");
+    });
+
+    test("(a) a hub refusal from the Move control shows the hub text", async () => {
+      await show(T("a", "queued"));
+      postOk = false;
+      selects.a.value = "done";
+      await selects.a.handlers.change();
+      expect(status.textContent).toBe("Move of T a failed: upload refused");
+    });
+
+    test("(b) a network error shows the error text", async () => {
+      await show(T("a", "queued"));
+      ctx.authedFetch = async () => { throw new Error("Failed to fetch"); };
+      selects.a.value = "done";
+      await selects.a.handlers.change();
+      expect(status.textContent).toBe("Move of T a failed: Failed to fetch");
+    });
+
+    test("(c) a drop on a column that refuses the ticket shows a fixed text; a drop on its own column shows nothing", async () => {
+      await show(T("a", "queued"));
+      cards.a.handlers.dragstart(ev());
+      const over = ev();
+      columns[""].handlers.dragover(over);                         // browser order: drop reaches only a target whose dragover was cancelled
+      if (over.prevented) columns[""].handlers.drop(ev());
+      expect(over.prevented).toBe(true);
+      expect(status.textContent).toBe("Move of T a failed: that column does not take tickets");
+      expect(posts.filter((p) => p.path.endsWith("/transition")).length).toBe(0);
+      status.textContent = "";
+      cards.a.handlers.dragstart(ev());
+      columns.queued.handlers.drop(ev());
+      expect(status.textContent).toBe("");
+    });
+
+    test("(d1) a Move-control change while a move is in flight shows a fixed text and focus returns to the Move control", async () => {
+      await show(T("a", "queued"));
+      const release = hold();
+      selects.a.value = "in_progress";
+      const first = selects.a.handlers.change();
+      selects.a.value = "done";
+      await selects.a.handlers.change();
+      expect(status.textContent).toBe("Move of T a failed: a move is in flight");
+      expect(active).toBe(selects.a);
+      release();
+      await first;
+    });
+
+    test("(d2) a drag start while a move is in flight is cancelled and shows a fixed text; focus does not move", async () => {
+      await show(T("a", "queued"));
+      const release = hold();
+      selects.a.value = "in_progress";
+      const first = selects.a.handlers.change();
+      active = "elsewhere";
+      const e = ev();
+      cards.a.handlers.dragstart(e);
+      expect(e.prevented).toBe(true);
+      expect(status.textContent).toBe("Move of T a failed: a move is in flight");
+      expect(active).toBe("elsewhere");
+      release();
+      await first;
+    });
+
+    test("a failed Move-control change returns focus to the Move control; a failed drag does not move focus", async () => {
+      await show(T("a", "queued"));
+      postOk = false;
+      active = "elsewhere";
+      selects.a.value = "done";
+      await selects.a.handlers.change();
+      expect(active).toBe(selects.a);
+      active = "elsewhere";
+      cards.a.handlers.dragstart(ev());
+      columns.done.handlers.drop(ev());
+      await settle();
+      expect(active).toBe("elsewhere");
+    });
+
+    test("refocus works when the controls are hidden until focus-within", async () => {
+      await show(T("a", "queued"));
+      // Real CSS: the select takes focus only while its card has focus (visibility hidden otherwise).
+      cards.a.focus = () => { active = cards.a; };
+      selects.a.closest = (q: string) => (q === ".ticket-card" ? cards.a : null);
+      selects.a.focus = () => { if (active === cards.a) active = selects.a; };
+      postOk = false;
+      active = "elsewhere";
+      selects.a.value = "done";
+      await selects.a.handlers.change();
+      expect(active).toBe(selects.a);
+      // A move in flight takes the same path.
+      const release = hold();
+      selects.a.value = "in_progress";
+      const first = selects.a.handlers.change();
+      active = "elsewhere";
+      selects.a.value = "done";
+      await selects.a.handlers.change();
+      expect(active).toBe(selects.a);
+      release();
+      await first;
+    });
+
+    test("two concurrent failing moves of different tickets each show their own reason", async () => {
+      await show(T("a", "queued"), T("b", "queued"));
+      const normal = ctx.authedFetch;
+      const gates: Record<string, () => void> = {};
+      ctx.authedFetch = async (path: string, init?: any) => {
+        if (!path.endsWith("/transition")) return normal(path, init);
+        const id = path.split("/")[2];
+        await new Promise<void>((r) => { gates[id] = r; });
+        return { ok: false, json: async () => ({}), text: async () => `reason ${id}` };
+      };
+      ctx.parseErrorBody = async (r: any) => r.text();
+      selects.a.value = "done"; selects.b.value = "done";
+      const pa = selects.a.handlers.change();
+      const pb = selects.b.handlers.change();
+      gates.a(); await pa;
+      expect(status.textContent).toBe("Move of T a failed: reason a");
+      gates.b(); await pb;
+      expect(status.textContent).toBe("Move of T b failed: reason b");
+      ctx.parseErrorBody = async () => refuseText;
+    });
+
+    test("hostile hub text and title show as text, never as markup", async () => {
+      await show(T("a", "queued", { title: "<b>x</b>" }));
+      postOk = false;
+      refuseText = "<img src=x onerror=alert(1)>";
+      selects.a.value = "done";
+      await selects.a.handlers.change();
+      expect(status.textContent).toBe("Move of <b>x</b> failed: <img src=x onerror=alert(1)>");
+      expect(status.innerHTML).toBe("");
+    });
+
+    test("the line clears 10 s after it shows; a new failure replaces it and restarts the 10 s", async () => {
+      await show(T("a", "queued"));
+      postOk = false;
+      selects.a.value = "done";
+      await selects.a.handlers.change();
+      expect(timers.filter((t) => t.live).map((t) => t.ms)).toEqual([10000]);
+      refuseText = "second";
+      selects.a.value = "done";
+      await selects.a.handlers.change();                           // clears at the attempt, then shows the new failure
+      expect(status.textContent).toBe("Move of T a failed: second");
+      expect(timers.filter((t) => t.live).length).toBe(1);          // the first timer is gone, one new timer runs
+      fire();
+      expect(status.textContent).toBe("");
+    });
+
+    test("the next move attempt of the same ticket clears the line; a move of another ticket does not", async () => {
+      await show(T("a", "queued"), T("b", "queued"));
+      postOk = false;
+      selects.a.value = "done";
+      await selects.a.handlers.change();
+      expect(status.textContent).not.toBe("");
+      postOk = true;
+      selects.b.value = "done";
+      await selects.b.handlers.change();
+      expect(status.textContent).toBe("Move of T a failed: upload refused");
+      selects.a.value = "in_progress";
+      await selects.a.handlers.change();
+      expect(status.textContent).toBe("");
+    });
+
+    test("the status region is the same element after a re-render", async () => {
+      await show(T("a", "queued"));
+      const before = ctx.document.getElementById("ticket-move-status");
+      postOk = false;
+      selects.a.value = "done";
+      await selects.a.handlers.change();
+      expect(ctx.document.getElementById("ticket-move-status")).toBe(before);
+      expect(cols.innerHTML).not.toContain("ticket-move-status");   // the board re-render does not write it
+      const html = readFileSync("ui/index.html", "utf8");
+      expect(html).toMatch(/<div[^>]*id="ticket-move-status"[^>]*role="status"[^>]*aria-live="polite"|<div[^>]*role="status"[^>]*aria-live="polite"[^>]*id="ticket-move-status"/);
+    });
   });
 
   // t_2a272087075e960f: the Draft column sits 4 px from the 6 px splitter, so a splitter drag used to pick up a card.
@@ -3375,6 +3708,20 @@ describe("request label and blockers (6.2, 6.3)", () => {
     expect(lock("a")).toBe("2");
   });
 
+  test("merged blocker shows no lock", async () => {
+    await show(mk("a", "queued", { blocked_by: ["b"], open_blockers: [] }), mk("b", "in_review"));   // b is not done, the hub cleared it (merged into staging)
+    expect(lock("a")).toBeNull();
+    await show(mk("a", "queued", { blocked_by: ["b"], open_blockers: ["b"] }), mk("b", "cancelled"));
+    expect(lock("a")).toBe("1");                         // a cancelled blocker still blocks
+  });
+
+  test("merged then cancelled blocker shows a lock", async () => {
+    await show(mk("a", "queued", { blocked_by: ["b"], open_blockers: [] }), mk("b", "in_review"));
+    expect(lock("a")).toBeNull();                        // merged: the hub cleared it
+    ev(mk("b", "cancelled"), 9);
+    expect(lock("a")).toBe("1");                         // cancelled still blocks, with no fresh list for a
+  });
+
   test("a blocker the board does not hold keeps the server's result; absence never counts as done", async () => {
     await show(mk("a", "queued", { blocked_by: ["x", "y"], open_blockers: ["x"] }));
     expect(lock("a")).toBe("1");                         // x open on the server, y done on the server
@@ -3401,6 +3748,17 @@ describe("request label and blockers (6.2, 6.3)", () => {
     expect(card("a")).toContain("<i></i><i></i><i></i><i></i></span>Lowest");                  // no bars on
   });
 
+  test("a card with radius_source rule shows it as text", async () => {
+    await show(cardOf({ blast_radius: "high", radius_source: "rule" }), mk("b", "queued"));
+    expect(card("a")).toContain('<span class="ticket-chip ticket-radius-source">Radius: rule</span>');
+    expect(card("b")).not.toContain("Radius:");
+  });
+
+  test("a low card with radius_source shows it as text", async () => {
+    await show(cardOf({ blast_radius: "low", radius_source: "human" }));
+    expect(card("a")).toContain('<span class="ticket-chip ticket-radius-source">Radius: human</span>');
+  });
+
   test("15.3 chips: request, external ref and High radius; no meta line; a chip is one nowrap block", async () => {
     await show(cardOf({ request_id: "r-1", external_ref: "GH-142", blast_radius: "high" }), mk("b", "queued"));
     const c = card("a");
@@ -3413,16 +3771,14 @@ describe("request label and blockers (6.2, 6.3)", () => {
     expect(css).toMatch(/\.ticket-chip \{[^}]*white-space: nowrap; overflow: hidden; text-overflow: ellipsis;/);
   });
 
-  test("15.3 the status line: blockers, the human, the approval; none otherwise", async () => {
+  test("15.3 the status line: blockers, the human; none otherwise", async () => {
     await show(
       cardOf({ blocked_by: ["x"], open_blockers: ["x"] }),
       mk("h", "queued", { assignee: "human" }),
-      mk("p", "in_review", { assignee: "alice", blast_radius: "high", approval_request_id: "req1", approval: { id: "req1", status: "pending", version: 1 } }),
       mk("n", "queued"),
     );
     expect(card("a")).toMatch(/ticket-status-line is-blocked">.*Blocked by 1 open ticket<\/div>/s);
     expect(card("h")).toMatch(/ticket-status-line is-human">.*Assigned to you<\/div>/s);
-    expect(card("p")).toMatch(/ticket-status-line is-approval">.*Waiting for your approval<\/div>/s);
     expect(card("n")).not.toContain("ticket-status-line");
   });
 
@@ -3445,11 +3801,47 @@ describe("request label and blockers (6.2, 6.3)", () => {
     for (const t of ["Criteria checked", "Attachments", 'title="Notes"']) expect(b).not.toContain(t);
   });
 
+  test("the card top row shows the ticket id after the tag and code, before the priority; no tag puts it first", async () => {
+    await show(cardOf({ title: "[code] 8.3a Hot reload", priority: "high" }, "t_<x>"));
+    const top = card("t_<x>").match(/<div class="ticket-card-top">(.*?)<\/div>/s)![1];
+    expect(top).toMatch(/^<span class="ticket-tag tag-code">code<\/span><span class="ticket-code">8\.3a<\/span><span class="ticket-id" title="t_<x>">t_<x><\/span><span class="ticket-prio"/);
+    await show(cardOf({ title: "plain title" }, "t_plain"));
+    expect(card("t_plain")).toMatch(/<div class="ticket-card-top"><span class="ticket-id"[^>]*>t_plain<\/span><span class="ticket-prio"/);
+  });
+
+  test("the card aria-label is \"Open ticket <id>: <title>\" and escapes both", async () => {
+    const esc = (x: unknown) => String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    ctx.escHtml = esc; ctx.escAttr = esc;
+    await show(cardOf({ title: "Fix <it>" }, 't_"q"'));
+    expect(cols.innerHTML).toContain('aria-label="Open ticket t_&quot;q&quot;: Fix &lt;it&gt;"');
+  });
+
+  test("the card id is HTML-escaped in its text and its title", async () => {
+    const esc = (x: unknown) => String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    ctx.escHtml = esc; ctx.escAttr = esc;
+    await show(cardOf({ title: "x" }, "t_<b>&"));
+    const c = cols.innerHTML;
+    expect(c).not.toContain("<b>");
+    expect(c).toContain('<span class="ticket-id" title="t_&lt;b&gt;&amp;">t_&lt;b&gt;&amp;</span>');
+  });
+
+  test("the card id is never cut: the top row wraps and the id does not shrink; the tag and priority do not shrink; the view header does not show it twice", async () => {
+    const css = readFileSync("ui/styles/kinds.css", "utf8");
+    expect(css).toContain(".ticket-card-top .ticket-id { font-family: var(--mono); color: var(--text-meta); white-space: nowrap; }");
+    expect(css).toContain(".ticket-card-top .ticket-id { flex: none; }");
+    expect(css).not.toMatch(/\.ticket-card-top \.ticket-id \{[^}]*text-overflow/);
+    expect(css).toMatch(/\.ticket-card-top \{[^}]*flex-wrap: wrap;/);
+    expect(css).toContain(".ticket-card-top .ticket-tag, .ticket-card-top .ticket-prio { flex-shrink: 0; }");
+    await show(mk("a", "in_review", { title: "[code] 8.3b Hot reload", assignee: "alice" }));
+    ctx.TicketBoard.openView("a");
+    expect(headMeta()).not.toContain("ticket-id");
+  });
+
   test("15.3 the card has no details, no always-visible controls and no orange border; the hooks stay", async () => {
     await show(cardOf({ acceptance_criteria: "c", notes_count: 3 }));
     const c = card("a");
     expect(c).not.toContain("<details");
-    expect(c).toContain('role="button" tabindex="0" draggable="true" data-ticket="a" aria-label="Open ticket: title-a"');
+    expect(c).toContain('role="button" tabindex="0" draggable="true" data-ticket="a" aria-label="Open ticket a: title-a"');
     expect(c).toMatch(/<div class="ticket-card-controls">.*class="ticket-move".*data-to="cancelled"/s);
     const css = readFileSync("ui/styles/kinds.css", "utf8");
     expect(css).toMatch(/\.ticket-card-controls \{ visibility: hidden; height: 0;/);            // hidden until hover or focus, not display: none
@@ -3580,7 +3972,7 @@ describe("request label and blockers (6.2, 6.3)", () => {
 
   test("15.5 section headings are sentence case in the sans font with no uppercase mono label", () => {
     const css = readFileSync("ui/styles/kinds.css", "utf8");
-    expect(css).toMatch(/\.ticket-view-h \{[^}]*font-size: var\(--fs-xl\); font-weight: 600;[^}]*text-transform: none;[^}]*font-family: var\(--sans\)/);
+    expect(css).toMatch(/\.ticket-view-h \{[^}]*font-size: var\(--fs-base\); font-weight: 600;[^}]*text-transform: none;[^}]*font-family: var\(--sans\)/);
   });
 
   test("15.5 the header Close button asks first when there are changes, like the footer Close and Escape", async () => {
@@ -3633,20 +4025,6 @@ describe("request label and blockers (6.2, 6.3)", () => {
     const ids = [...content().matchAll(/<li role="option" id="ticket-blocker-opt-\d+"[^>]*data-id="(\w+)"/g)].map((m) => m[1]);
     expect(ids).toEqual(["o", "d"]);
     delete els["ticket-view-content"].querySelector;
-  });
-
-  test("15.11 the approval line after an answer: Approved by human · id, Denied by human · id; another resolver keeps the old text", async () => {
-    const hi = (a: object) => mk("a", "in_review", { blast_radius: "high", approval_request_id: "req1", approval: { id: "req1", version: 1, ...a } });
-    await show(hi({ status: "denied", resolved_by: "human" }));
-    ctx.TicketBoard.openView("a");
-    expect(content()).toContain("Denied by human · req1");
-    expect(content()).not.toContain("not your approval");
-    await show(hi({ status: "allowed", resolved_by: "human" }));
-    ctx.TicketBoard.openView("a");
-    expect(content()).toContain("Approved by human · req1");
-    await show(hi({ status: "allowed", resolved_by: "Worker1" }));
-    ctx.TicketBoard.openView("a");
-    expect(content()).toContain("request allowed by Worker1 — not your approval");
   });
 
   test("15.11 layout: the dialog fills the board pane; the panel is at least 220 px; labels sit above their fields; long values wrap", () => {
@@ -4107,34 +4485,6 @@ describe("request label and blockers (6.2, 6.3)", () => {
     unmount();
   });
 
-  test("15.6 with a pending approval, edit mode shows the warning; without one it does not", async () => {
-    await show(inReview({ blast_radius: "high", approval_request_id: "req1", approval: { id: "req1", status: "pending", version: 1 } }), mk("n", "in_review", { assignee: "alice" }));
-    startEdit("r");
-    expect(els["ticket-view-content"].innerHTML).toContain("This ticket waits for your approval. If you save new acceptance criteria or set the blast radius to low, alice&#39;s approval request is cancelled.".replace("&#39;", "'"));
-    els["ticket-view"].close();
-    ctx.TicketBoard.openView("r");
-    expect(els["ticket-view-content"].innerHTML).not.toContain("waits for your approval. If you save");   // read mode: no warning
-    els["ticket-view"].close();
-    startEdit("n");
-    expect(els["ticket-view-content"].innerHTML).not.toContain("ticket-edit-warning");
-  });
-
-  test("15.6 saving new criteria on a ticket with a pending approval: the hub clears the pointer, and the card light is no longer red", async () => {
-    await show(inReview({ blast_radius: "high", approval_request_id: "req1", approval: { id: "req1", status: "pending", version: 1 }, version: 1 }));
-    expect(card("r")).toContain("Waiting for your approval");
-    expect(card("r")).toContain("light-red");
-    const m = mount({ ...editVals, radius: "high" });
-    posts = [];
-    startEdit();
-    m.type("criteria", "new criteria");
-    await m.submit();
-    expect(posts[0].body).toEqual({ by: "human", acceptance_criteria: "new criteria" });
-    ev(inReview({ blast_radius: "high", approval_request_id: null, acceptance_criteria: "new criteria" }), 9);   // the hub's event: pointer cleared
-    expect(card("r")).not.toContain("Waiting for your approval");
-    expect(card("r")).not.toContain("light-red");
-    unmount();
-  });
-
   test("15.6 the blast radius is a Low and High radio pair; the checked radio is what Save sends", async () => {
     await show(inReview());
     const m = mount({ ...editVals, radius: "ignored" });
@@ -4353,7 +4703,7 @@ describe("request label and blockers (6.2, 6.3)", () => {
   test("15.10 the drop area says what it takes; browse opens the file picker; a file dropped on it is attached", async () => {
     const html = readFileSync("ui/index.html", "utf8");
     expect(html).toContain('Drop files here or <button type="button" class="ticket-browse" id="ticket-view-attach-btn">browse</button> &middot; pdf, md, txt, png, jpg &middot; up to 8 MB');
-    expect(readFileSync("ui/styles/kinds.css", "utf8")).toContain(".ticket-view-attach { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--sp-8); margin-top: var(--sp-8); padding: var(--sp-14, 14px) var(--sp-10, 10px); border: 1px dashed var(--line-hover);");
+    expect(readFileSync("ui/styles/kinds.css", "utf8")).toContain(".ticket-view-attach { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--sp-8); margin-top: var(--sp-8); padding: var(--sp-14) var(--sp-10); border: 1px dashed var(--line-hover);");
     await show(mk("a", "in_progress"));
     ctx.TicketBoard.openView("a");
     posts = []; uploads.length = 0;

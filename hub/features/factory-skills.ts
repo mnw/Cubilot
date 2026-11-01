@@ -1,7 +1,7 @@
 // The hub's half of the per-agent skill switches (C6b; design: factory/brief/04a-c6-design.md, sections 2a and 5).
-// The app prepares a build (`<hex>.view-<gen>` and `<hex>.skills-prepared`) and never publishes it. The hub publishes at
+// POST /agents/<name>/skills/apply (core/skills.ts) prepares a build (`<hex>.view-<gen>` and `<hex>.skills-prepared`) and never publishes it. The hub publishes at
 // the reload boundary, inside POST /factory/relink, under the publication lock. Files in `<dir>/agents/`:
-//   <hex>.skills-prepared   { gen, off, skills, kind }          written by the app
+//   <hex>.skills-prepared   { gen, off, skills, kind }          written by the apply route
 //   <hex>.skills-published  { gen, off, skills, version }       what the paths on disk give now; survives every failure
 //   <hex>.skills-pending    { attempt, ...published }           one copy for every accepted reload attempt
 //   <hex>.skills-applied    { version, gen, off, skills }       written on a success report of the matching attempt
@@ -207,7 +207,7 @@ const isDir = (p: string): boolean => {
 };
 
 // <hex>.view -> <target> by temp link and rename: a run reads a whole old view or a whole new one.
-function swapView(dir: string, key: string, target: string | null): void {
+export function swapView(dir: string, key: string, target: string | null): void {
   const link = agentsPath(dir, key, ".view");
   if (target === null) {
     rmSync(link, { force: true });

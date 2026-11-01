@@ -36,29 +36,17 @@ describe("ticket kind over HTTP", () => {
 
     const blocked = await postJson(hub, `/tickets/${id}/transition`, { by: "bob", to: "done" });
     expect(blocked.status).toBe(409);
-    expect((blocked.json as { approval_request_id: unknown }).approval_request_id).toBeNull();
+    expect((blocked.json as { error: string }).error).toContain("Validator PASS");   // L4: the missing item, no approval key
 
-    const ask = await postJson(hub, `/tickets/${id}/approval`, { by: "bob" });
-    expect(ask.status).toBe(200);
-    const rid = (ask.json as { request_id: string; created: boolean }).request_id;
-    expect((ask.json as { created: boolean }).created).toBe(true);
-
-    const pending = await getJson(hub, `/permissions?status=pending&token=${hub.token}`);
-    expect((pending.json as Array<{ id: string; tool_name: string }>).some((p) => p.id === rid && p.tool_name === "ticket:done")).toBe(true);
-
-    const verdict = await postJson(hub, `/permissions/${rid}/verdict`, { by: hub.humanName, behavior: "allow" });
-    expect(verdict.status).toBe(200);
-    const verdictVersion = (verdict.json as { version?: number; snapshot?: { version?: number } }).snapshot?.version
-      ?? (verdict.json as { version?: number }).version;
-    expect(typeof verdictVersion).toBe("number");
-    const done = await postJson(hub, `/tickets/${id}/transition`, { by: "bob", to: "done" });
+    // L4: an agent's done needs the PASSes. The human's own move closes the ticket.
+    const done = await postJson(hub, `/tickets/${id}/transition`, { by: hub.humanName, to: "done" });
     expect(done.status).toBe(200);
 
     const all = await getJson(hub, `/tickets?room=r1&status=all&token=${hub.token}`);
-    const item = (all.json as Array<{ id: string; status: string; approval: unknown }>).find((t) => t.id === id)!;
+    const item = (all.json as Array<{ id: string; status: string; validator_passes: number }>).find((t) => t.id === id)!;
     expect(item.status).toBe("done");
-    // version = the permission's events.seq, so the board can order it against live events
-    expect(item.approval).toEqual({ id: rid, status: "allowed", resolved_by: hub.humanName, version: verdictVersion });
+    expect(item.validator_passes).toBe(0);
+    expect("approval" in item).toBe(false);
   });
 
   test("auth: mutating routes need the bearer token; list needs room", async () => {
@@ -66,40 +54,6 @@ describe("ticket kind over HTTP", () => {
     expect(noAuth.status).toBe(401);
     expect((await getJson(hub, "/tickets")).status).toBe(400);
     expect((await authedFetch(hub, "/tickets?room=r1")).status).toBe(200);
-  });
-
-  // What a reconnecting agent is replayed: the permission.new events of its pending requests.
-  async function replayedRequests(agent: string): Promise<string[]> {
-    const sse = openSSE(hub, `/agent-stream?agent=${agent}&room=r1`);
-    const ids: string[] = [];
-    (async () => {
-      try { for await (const e of sse.events) if (e.kind === "permission.new" && e.permission_id) ids.push(e.permission_id); } catch {}
-    })();
-    await new Promise((r) => setTimeout(r, 400));
-    sse.close();
-    return ids;
-  }
-
-  test("a request made moot by rework, cancel or a human done is not replayed on reconnect", async () => {
-    const mkReview = async () => {
-      const id = ((await postJson(hub, "/tickets", {
-        by: "alice", title: "x", acceptance_criteria: "y", blast_radius: "high",
-      })).json as { snapshot: { id: string } }).snapshot.id;
-      await postJson(hub, `/tickets/${id}/claim`, { by: "bob" });
-      for (const to of ["in_progress", "in_review"]) await postJson(hub, `/tickets/${id}/transition`, { by: "bob", to, ...(to === "in_review" ? { note: "built and tested" } : {}) });
-      return id;
-    };
-    const ask = async (id: string) => ((await postJson(hub, `/tickets/${id}/approval`, { by: "bob" })).json as { request_id: string }).request_id;
-    const a = await mkReview(), ra = await ask(a);
-    const b = await mkReview(), rb = await ask(b);
-    const c = await mkReview(), rc = await ask(c);
-    expect(await replayedRequests("bob")).toEqual(expect.arrayContaining([ra, rb, rc]));
-
-    await postJson(hub, `/tickets/${a}/transition`, { by: "bob", to: "in_progress" });          // rework
-    await postJson(hub, `/tickets/${b}/transition`, { by: hub.humanName, to: "cancelled" });    // cancel
-    await postJson(hub, `/tickets/${c}/transition`, { by: hub.humanName, to: "done" });         // human done
-    const after = await replayedRequests("bob");
-    for (const rid of [ra, rb, rc]) expect(after).not.toContain(rid);
   });
 
   test("assign over the real hub: the creator assigns, the room's agents see ticket.assigned, auth is required", async () => {

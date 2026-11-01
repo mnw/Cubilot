@@ -1,6 +1,7 @@
 // types.ts — KindModule runtime contract + LedgerEntity types + DI surface for persistent state-machine kinds.
 
 import type { Database } from "bun:sqlite";
+import type { Caller } from "./auth";
 
 // ---------- LedgerEntity / Kind orchestration types (architecture-cycle-2a) ----------
 //
@@ -146,6 +147,10 @@ export type Entry = {
   version?: number;
   replay?: boolean;
   room?: string | null;
+  /** Called by the agent stream just before it sends this entry. False skips the send. Not serialised. */
+  claim?: () => boolean;
+  /** Called when the send after a true claim() did not enqueue (stream closed). Undoes the claim. Not serialised. */
+  unclaim?: () => void;
   [extra: string]: unknown;
 };
 
@@ -162,6 +167,8 @@ export type RouteDef = {
   method: "GET" | "POST" | "PUT";
   path: string | RegExp;
   auth: "mutating" | "read";
+  /** "human": the dispatcher answers 403 to an agent caller (design decision 5 of hub-first-browser). */
+  caller?: "human";
   bodyMax?: number;
   /**
    * If true, dispatcher returns 503 when ledger is disabled. Default: false (in-memory
@@ -193,10 +200,14 @@ export type HubFeature = {
 // Sole access path kinds have to shared hub services.
 export type HubCapabilities = {
   db: Database;
+  /** Who made the request. A call from inside the hub (no request) counts as an agent: the safe default. */
+  caller: Caller;
   agents: {
     get(name: string): AgentCtx | null;
     isPermanent(name: string): boolean;
     isPaused(name: string): boolean;
+    /** Open agent streams of a name. Optional: a fake without it falls back to `get`. */
+    connectionCount?(name: string): number;
     all(): AgentCtx[];
     // `room` defaults to DEFAULT_ROOM; pass null for permanent member (human).
     ensure(name: string, room?: string | null): AgentCtx | null;
@@ -205,8 +216,8 @@ export type HubCapabilities = {
     emit(entry: Entry, scope: Scope): void;
   };
   auth: {
-    requireAuth(req: Request): Response | null;
-    requireReadAuth(req: Request, url: URL): Response | null;
+    requireAuth(req: Request): Response | Caller;
+    requireReadAuth(req: Request, url: URL): Response | Caller;
     requireJsonBody(req: Request, max?: number): Response | null;
   };
   events: {
@@ -255,4 +266,8 @@ export type KindModule = HubFeature & {
   dispose?: () => void;
   /** Runs once when the hub has started, after migrate, with a capabilities object (e.g. to settle work a restart interrupted). */
   start?: (cap: HubCapabilities) => void;
+  /** Called after the commit of a room settings change that can free role slots (role_limits). It never throws. */
+  onRoomLimitsChanged?: (room: string, cap: HubCapabilities) => void;
+  /** The agent stream of `agent` is alive: the hub wrote its heartbeat or the agent connected. Memory only; it never writes an event. */
+  onAgentBeat?: (agent: string) => void;
 };

@@ -93,10 +93,10 @@ fn stage_role(src: &Path, role: &str, tmp: &Path) -> Result<(), String> {
     if src.join("first-message.md").is_file() {
         fs::copy(src.join("first-message.md"), dst.join("first-message.md")).map_err(|e| e.to_string())?;
     }
-    // hooks/hooks.json only; no `agents/` (the role plugin has skills and hooks only).
+    // hooks/ with hooks.json and the scripts it names (the Orchestrator checkpoint hooks); no `agents/` (the role plugin
+    // has skills and hooks only).
     if src.join("hooks/hooks.json").is_file() {
-        fs::create_dir_all(dst.join("hooks")).map_err(|e| e.to_string())?;
-        fs::copy(src.join("hooks/hooks.json"), dst.join("hooks/hooks.json")).map_err(|e| e.to_string())?;
+        copy_tree(&src.join("hooks"), &dst.join("hooks"))?;
     }
     Ok(())
 }
@@ -375,91 +375,7 @@ pub(crate) fn staged_version_or_log(staged: Result<String, String>, what: &str) 
 
 pub(crate) fn materialize_factory() -> Result<String, String> {
     let version = stage_factory(&resolve_factory_src()?, &factory_dir(), &super::app_data_dir().join("factory-user"))?;
-    for line in cleanup_versions(&factory_dir(), super::pty::live_tmux_state(), std::time::SystemTime::now()) {
-        eprintln!("{line}");
-    }
     Ok(version)
-}
-
-const CLEANUP_MIN_AGE: std::time::Duration = std::time::Duration::from_secs(10 * 60);
-
-// `v-<16 hex>` names found anywhere in a text (the start commands of live panes: legacy launches name a version).
-fn version_names_in(text: &str) -> Vec<String> {
-    let b = text.as_bytes();
-    (0..b.len())
-        .filter(|&i| b[i..].starts_with(b"v-") && b.len() >= i + 18 && b[i + 2..i + 18].iter().all(u8::is_ascii_hexdigit))
-        .map(|i| text[i..i + 18].to_string())
-        .collect()
-}
-
-// Delete what no launch can still use. `live` is (names of live tmux sessions, start commands of live panes), or the
-// error of asking tmux. In use: `current`, `active`, any agent link, any version a live pane command names. An agent
-// link whose session is gone, and older than CLEANUP_MIN_AGE, is deleted first, so it no longer holds its version. Unused versions younger than
-// CLEANUP_MIN_AGE stay: a spawn may have read `current` just before a publish and not made its link yet. Any failed
-// read deletes nothing. Returns the log lines.
-pub(crate) fn cleanup_versions(dest: &Path, live: Result<(Vec<String>, String), String>, now: std::time::SystemTime) -> Vec<String> {
-    let fail = |what: String| vec![format!("[factory] cleanup skipped, nothing deleted: {what}")];
-    let (sessions, panes) = match live {
-        Ok(l) => l,
-        Err(e) => return fail(format!("tmux: {e}")),
-    };
-    let keys: std::collections::HashSet<String> = sessions.iter().map(|a| agent_key(a)).collect();
-    let agents = dest.join("agents");
-    let mut links: Vec<(PathBuf, String)> = Vec::new(); // (link, target version name)
-    if agents.is_dir() {
-        let entries = match fs::read_dir(&agents) {
-            Ok(r) => r,
-            Err(e) => return fail(format!("read {}: {e}", agents.display())),
-        };
-        for e in entries.flatten() {
-            let name = e.file_name().to_string_lossy().into_owned();
-            // The skill records, the view symlink, its builds and the lock (skills.rs) are not agent links.
-            if name.contains(".tmp-") || name.contains(".skills-") || name.contains(".view") || AGENT_RECORD_SUFFIXES.iter().any(|x| name.ends_with(x)) {
-                continue;
-            }
-            match fs::read_link(e.path()) {
-                Ok(t) => links.push((e.path(), t.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())),
-                Err(err) => return fail(format!("read link {}: {err}", e.path().display())),
-            }
-        }
-    }
-    let mut in_use: std::collections::HashSet<String> = version_names_in(&panes).into_iter().collect();
-    match fs::read_to_string(dest.join("current")) {
-        Ok(c) => { in_use.insert(c.trim().to_string()); }
-        Err(e) => return fail(format!("read current: {e}")),
-    }
-    if dest.join("active").symlink_metadata().is_ok() {
-        match fs::read_link(dest.join("active")) {
-            Ok(t) => { in_use.extend(t.file_name().map(|n| n.to_string_lossy().into_owned())); }
-            Err(e) => return fail(format!("read link active: {e}")),
-        }
-    }
-    let mut log = Vec::new();
-    for (link, target) in links {
-        let key = link.file_name().unwrap().to_string_lossy().into_owned();
-        // A link younger than the age rule may belong to a spawn whose tmux session does not exist yet.
-        let young = link.symlink_metadata().and_then(|m| m.modified()).ok().and_then(|m| now.duration_since(m).ok()).is_none_or(|age| age < CLEANUP_MIN_AGE);
-        if keys.contains(&key) || young {
-            in_use.insert(target);
-        } else if fs::remove_file(&link).is_ok() {
-            for x in AGENT_RECORD_SUFFIXES {
-                let _ = fs::remove_file(agents.join(format!("{key}{x}")));
-            }
-            log.push(format!("[factory] deleted agent link {key}: its session is gone"));
-        }
-    }
-    let Ok(entries) = fs::read_dir(dest) else { return fail(format!("read {}", dest.display())) };
-    for e in entries.flatten() {
-        let name = e.file_name().to_string_lossy().into_owned();
-        if !name.starts_with("v-") || !e.path().is_dir() || in_use.contains(&name) {
-            continue;
-        }
-        let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|m| now.duration_since(m).ok()).is_some_and(|age| age >= CLEANUP_MIN_AGE);
-        if old && fs::remove_dir_all(e.path()).is_ok() {
-            log.push(format!("[factory] deleted unused version {name}"));
-        }
-    }
-    log
 }
 
 // ---- Per-agent settings (task 2.3; same rules as write_settings in factory/scripts/factory-launch.sh, task 1.3) ----
@@ -497,7 +413,7 @@ fn skill_override_names(root: &Path) -> Vec<String> {
 // settings for one launch: installed marketplace plugins off (not the --plugin-dir ones: role, shared and
 // chatbridge are never in installed_plugins.json), user and project skills and commands off. Account-synced
 // plugins stay on: no setting turns them off (check 0.2).
-pub(crate) fn build_agent_settings(role: &str, user_claude: &Path, project: &Path) -> serde_json::Value {
+pub(crate) fn build_agent_settings(role: &str, user_claude: &Path, project: &Path, shared: &Path) -> serde_json::Value {
     let mut plugins: Vec<String> = fs::read_to_string(user_claude.join("plugins/installed_plugins.json"))
         .ok()
         .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
@@ -511,22 +427,25 @@ pub(crate) fn build_agent_settings(role: &str, user_claude: &Path, project: &Pat
     skills.extend(skill_override_names(&project.join(".claude")));
     skills.sort();
     skills.dedup();
+    // The status line command keeps the context percentage for the roster (it replaces the user's own in factory sessions).
+    let status_line = format!("bash '{}'", shared.join("scripts/statusline.sh").display().to_string().replace('\'', "'\\''"));
     serde_json::json!({
         "enabledPlugins": plugins.into_iter().map(|k| (k, false.into())).collect::<serde_json::Map<_, _>>(),
         "skillOverrides": skills.into_iter().map(|k| (k, "off".into())).collect::<serde_json::Map<_, _>>(),
+        "statusLine": { "type": "command", "command": status_line },
     })
 }
 
 // <dir>/<agent>.json, mode 0600, tmpfile + rename. One file per agent, outside the version folders, because the
 // lists depend on the agent's project folder.
-pub(crate) fn write_agent_settings(agent: &str, role: &str, project: &Path, user_claude: &Path, dir: &Path) -> Result<PathBuf, String> {
+pub(crate) fn write_agent_settings(agent: &str, role: &str, project: &Path, user_claude: &Path, shared: &Path, dir: &Path) -> Result<PathBuf, String> {
     use std::io::Write as _;
     use std::os::unix::fs::OpenOptionsExt;
     if agent.is_empty() || agent.starts_with('.') || agent.contains('/') || agent.contains('\\') {
         return Err(format!("invalid agent name for a settings file: {agent:?}"));
     }
     fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
-    let text = serde_json::to_string_pretty(&build_agent_settings(role, user_claude, project)).map_err(|e| e.to_string())?;
+    let text = serde_json::to_string_pretty(&build_agent_settings(role, user_claude, project, shared)).map_err(|e| e.to_string())?;
     let run = STAGE_RUNS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let tmp = dir.join(format!(".{agent}.json.tmp-{}-{run}", std::process::id()));
     let path = dir.join(format!("{agent}.json"));
@@ -553,6 +472,7 @@ pub(crate) struct RoleSpec {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub thinking: Option<String>,
+    pub effort: Option<String>, // Claude roles only; a Pi role file with `effort` is refused (Pi uses `thinking`)
     pub disallowed_tools: Vec<String>,
     pub exclude_tools: Vec<String>,
 }
@@ -588,12 +508,22 @@ pub(crate) fn parse_role_spec(role: &str, text: &str) -> Result<RoleSpec, String
         return Err(format!("role '{role}': unknown harness '{harness}'"));
     }
     let opt = |k: &str| frontmatter_value(text, k).filter(|v| !v.is_empty());
+    let effort = opt("effort");
+    if let Some(e) = &effort {
+        if harness == "pi" {
+            return Err(format!("role '{role}': 'effort' is for Claude roles; a Pi role uses 'thinking'"));
+        }
+        if !CLAUDE_EFFORTS.contains(&e.as_str()) {
+            return Err(format!("role '{role}': invalid effort '{e}' (allowed: {})", CLAUDE_EFFORTS.join(", ")));
+        }
+    }
     Ok(RoleSpec {
         name,
         harness,
         provider: opt("provider"),
         model: opt("model"),
         thinking: opt("thinking"),
+        effort,
         disallowed_tools: csv_list(frontmatter_value(text, "disallowedTools")),
         exclude_tools: csv_list(frontmatter_value(text, "excludeTools")),
     })
@@ -630,7 +560,7 @@ pub(crate) struct RoleLaunch {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub thinking: Option<String>,
-    pub effort: Option<String>, // Claude only: set by the human's choice for one launch (roles have no default)
+    pub effort: Option<String>, // Claude only: the role's effort, replaced by the human's choice for one launch
     pub disallowed_tools: Vec<String>, // Claude
     pub exclude_tools: Vec<String>,    // Pi
 }
@@ -651,7 +581,7 @@ pub(crate) fn role_launch_on(spec: &RoleSpec, harness: &str, version_dir: &Path,
         provider: spec.provider.clone().filter(|_| own),
         model: spec.model.clone().filter(|_| own),
         thinking: spec.thinking.clone().filter(|_| own),
-        effort: None,
+        effort: spec.effort.clone().filter(|_| own),
         disallowed_tools: spec.disallowed_tools.clone(),
         exclude_tools: spec.exclude_tools.clone(),
     }
@@ -742,7 +672,7 @@ pub(crate) fn resolve_role_launch(agent: &str, role: &str, cwd: &Path, harness: 
     check_role_harness(&spec, harness, choice)?;
     let settings = if harness == "claude" {
         let user_claude = dirs::home_dir().ok_or_else(|| "no home dir".to_string())?.join(".claude");
-        Some(write_agent_settings(agent, role, cwd, &user_claude, &factory_settings_dir())?)
+        Some(write_agent_settings(agent, role, cwd, &user_claude, &launch_root.join("shared"), &factory_settings_dir())?)
     } else {
         None
     };
@@ -824,37 +754,24 @@ pub(crate) fn with_choice(mut launch: RoleLaunch, choice: &LaunchChoice) -> Role
     launch
 }
 
-// ---- Role list for the spawn modal (task 5.1) ----
-#[derive(Debug, PartialEq, serde::Serialize)]
-pub(crate) struct RoleInfo {
-    pub name: String,
-    pub harness: String,
-    pub provider: Option<String>,
-    pub model: Option<String>,
-    pub thinking: Option<String>,
-}
-
-// Single-agent roles that the given staged version contains, sorted by name. A council (a11y, seo), a folder without
-// a role file and `shared` are not roles and are left out.
-pub(crate) fn list_roles_in(src: &Path, version_dir: &Path) -> Vec<RoleInfo> {
-    let mut out: Vec<RoleInfo> = fs::read_dir(version_dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|e| load_role_spec(&e.file_name().to_string_lossy(), src, version_dir).ok())
-        .map(|s| RoleInfo { name: s.name, harness: s.harness, provider: s.provider, model: s.model, thinking: s.thinking })
-        .collect();
-    out.sort_by(|a, b| a.name.cmp(&b.name));
-    out
-}
-
-pub(crate) fn list_roles() -> Result<Vec<RoleInfo>, String> {
-    Ok(list_roles_in(&resolve_factory_src()?, &current_version_dir()?))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The hub (VALUE_REFUSAL in hub/kinds/stage.ts) puts `role_models.<role>:` before a launch ack error only when it
+    // starts with one of these texts. A change here needs the same change there.
+    #[test]
+    fn value_refusal_texts_start_as_the_hub_expects() {
+        let starts = |e: String, p: &str| assert!(e.starts_with(p), "{e}");
+        starts(launch_choice(false, Some("bad model!"), None, None).unwrap_err(), "invalid model");
+        starts(launch_choice(false, None, Some("p"), None).unwrap_err(), "a provider (");
+        starts(launch_choice(true, None, Some("bad provider!"), None).unwrap_err(), "invalid provider");
+        starts(launch_choice(false, None, None, Some("max9")).unwrap_err(), "invalid effort");
+        starts(launch_choice(true, None, None, Some("max9")).unwrap_err(), "invalid thinking level");
+        let spec = RoleSpec { name: "worker".into(), harness: "claude".into(), provider: None, model: None, thinking: None, effort: None, disallowed_tools: vec![], exclude_tools: vec![] };
+        let e = check_role_harness(&spec, "pi", &LaunchChoice::default()).unwrap_err();
+        starts(e, "role 'worker' runs on claude by default; to launch it on");
+    }
 
     fn tmp_root(tag: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!("cubilot-factory-{tag}-{}", std::process::id()));
@@ -874,6 +791,7 @@ mod tests {
         fs::write(w.join("skills/tdd/SKILL.md"), "tdd v1").unwrap();
         fs::write(w.join("agents/helper.md"), "agent").unwrap();
         fs::write(w.join("hooks/hooks.json"), "{\"hooks\":{}}").unwrap();
+        fs::write(w.join("hooks/run.sh"), "#!/bin/bash\n").unwrap();
         let e = src.join("editor");
         fs::create_dir_all(e.join("skills/ste")).unwrap();
         fs::write(e.join("editor.md"), "no frontmatter body").unwrap();
@@ -901,6 +819,7 @@ mod tests {
         assert!(w.join("skills/tdd/SKILL.md").is_file());
         assert!(!w.join("agents").exists(), "test 7: no agents/ folder");
         assert!(w.join("hooks/hooks.json").is_file(), "test 8: hooks copied");
+        assert!(w.join("hooks/run.sh").is_file(), "the scripts that hooks.json names are copied too");
         let e = dest.join(&v).join("editor");
         assert!(!e.join("hooks").exists());
         assert_eq!(fs::read_to_string(e.join("role.md")).unwrap(), "no frontmatter body");
@@ -1002,58 +921,6 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_keeps_what_is_in_use_and_deletes_old_unused_versions() {
-        use std::time::{Duration, SystemTime};
-        let root = tmp_root("cleanup");
-        let dest = root.join("out");
-        let mk = |n: &str| fs::create_dir_all(dest.join(n)).unwrap();
-        let ver = |c: char| format!("v-{}", c.to_string().repeat(16));
-        for c in ['a', 'b', 'c', 'd', 'e', 'f', '1'] {
-            mk(&ver(c));
-        }
-        fs::write(dest.join("current"), ver('a')).unwrap();
-        std::os::unix::fs::symlink(ver('b'), dest.join("active")).unwrap();
-        fs::create_dir_all(dest.join("agents")).unwrap();
-        std::os::unix::fs::symlink(dest.join(ver('c')), dest.join("agents").join(agent_key("live one"))).unwrap();
-        std::os::unix::fs::symlink(dest.join(ver('f')), dest.join("agents").join(agent_key("dead one"))).unwrap();
-        fs::write(dest.join("agents").join(format!("{}.applied", agent_key("dead one"))), ver('f')).unwrap();
-        fs::write(dest.join("agents").join(format!("{}.applied", agent_key("live one"))), ver('c')).unwrap();
-        let pane = format!("sh -c \"claude --plugin-dir /x/factory/{}/worker\"", ver('d'));
-        let later = SystemTime::now() + Duration::from_secs(11 * 60);
-        let live = || Ok((vec!["live one".to_string()], pane.clone()));
-        // Too young: nothing goes, not even the link with no session (a spawn may not have its session yet).
-        let log = cleanup_versions(&dest, live(), SystemTime::now());
-        assert!(log.is_empty(), "{log:?}");
-        assert!(dest.join("agents").join(agent_key("dead one")).symlink_metadata().is_ok(), "a young link with no session stays");
-        assert!(dest.join("agents").join(format!("{}.applied", agent_key("dead one"))).exists());
-        assert!(dest.join(ver('e')).is_dir() && dest.join(ver('f')).is_dir(), "younger than 10 minutes stays");
-        // A failed tmux query deletes nothing.
-        let log = cleanup_versions(&dest, Err("boom".into()), later);
-        assert_eq!(log.len(), 1);
-        assert!(dest.join(ver('e')).is_dir());
-        // Old: current (a), active (b), agent link (c), pane command (d) stay. The old link with no session goes
-        // with its .applied, so e, f and 1 go too (4 log lines).
-        let log = cleanup_versions(&dest, live(), later);
-        assert_eq!(log.len(), 4, "{log:?}");
-        assert!(dest.join("agents").join(agent_key("dead one")).symlink_metadata().is_err());
-        assert!(!dest.join("agents").join(format!("{}.applied", agent_key("dead one"))).exists(), "its .applied goes with it");
-        assert!(dest.join("agents").join(format!("{}.applied", agent_key("live one"))).exists());
-        for c in ['a', 'b', 'c', 'd'] {
-            assert!(dest.join(ver(c)).is_dir(), "{c} is in use");
-        }
-        for c in ['e', 'f', '1'] {
-            assert!(!dest.join(ver(c)).exists(), "{c} is unused");
-        }
-        // An unreadable link deletes nothing.
-        mk(&ver('2'));
-        fs::write(dest.join("agents").join("notalink"), "x").unwrap();
-        let log = cleanup_versions(&dest, live(), later);
-        assert_eq!(log.len(), 1);
-        assert!(dest.join(ver('2')).is_dir());
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
     fn a_role_launch_writes_the_link_and_applied_and_a_new_session_clears_both() {
         let root = tmp_root("applied");
         let src = make_src(&root);
@@ -1096,60 +963,6 @@ mod tests {
         clear_agent_records(&dest, "bob").unwrap();
         assert_eq!(all(), (false, false, false));
         assert!(!last(), "the last reload result of an earlier session goes too");
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    // C6b: the skill records, the view link, its builds and the lock sit in agents/ too. They are not agent links, so
-    // they must not stop the cleanup (a "read link" error deletes nothing) and a live agent's view keeps working.
-    #[test]
-    fn cleanup_is_not_stopped_by_skill_records_view_builds_and_a_lock() {
-        use std::time::{Duration, SystemTime};
-        let root = tmp_root("cleanup-skills");
-        let src = make_src(&root);
-        let dest = root.join("out");
-        let v = stage_factory(&src, &dest, &root.join("user")).unwrap();
-        let old = format!("v-{}", "3".repeat(16));
-        fs::create_dir_all(dest.join(&old)).unwrap();
-        let agents = dest.join("agents");
-        link_agent(&dest, "bob", &v).unwrap();
-        let key = agent_key("bob");
-        for suffix in [".skills-off", ".skills-prepared", ".skills-published", ".skills-pending", ".skills-applied"] {
-            fs::write(agents.join(format!("{key}{suffix}")), "{}").unwrap();
-        }
-        fs::create_dir_all(agents.join(format!("{key}.skills-lock"))).unwrap();
-        fs::create_dir_all(agents.join(format!("{key}.view-1/worker"))).unwrap();
-        std::os::unix::fs::symlink(format!("{key}.view-1"), agents.join(format!("{key}.view"))).unwrap();
-        let later = SystemTime::now() + Duration::from_secs(11 * 60);
-        let log = cleanup_versions(&dest, Ok((vec!["bob".into()], String::new())), later);
-        assert!(!dest.join(&old).exists(), "skill records blocked the cleanup: {log:?}");
-        assert!(agents.join(format!("{key}.view-1")).exists() && agents.join(format!("{key}.skills-off")).exists());
-        assert!(dest.join(&v).exists(), "the live agent's version stays");
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn cleanup_ignores_a_pending_record_and_removes_it_with_a_stale_link() {
-        use std::time::{Duration, SystemTime};
-        let root = tmp_root("cleanup-pending");
-        let src = make_src(&root);
-        let dest = root.join("out");
-        let v = stage_factory(&src, &dest, &root.join("user")).unwrap();
-        let old = format!("v-{}", "2".repeat(16));
-        fs::create_dir_all(dest.join(&old)).unwrap();
-        let agents = dest.join("agents");
-        link_agent(&dest, "bob", &v).unwrap();
-        let key = agent_key("bob");
-        fs::write(agents.join(format!("{key}.pending")), &v).unwrap();
-        let later = SystemTime::now() + Duration::from_secs(11 * 60);
-        // A live session with a pending record: the record is not read as a link, the old version goes.
-        let log = cleanup_versions(&dest, Ok((vec!["bob".into()], String::new())), later);
-        assert!(!dest.join(&old).exists(), "a pending record blocked the cleanup: {log:?}");
-        assert!(agents.join(format!("{key}.pending")).exists(), "a live agent keeps its pending record");
-        // Its session is gone and the link is old: link, .applied and .pending go together.
-        let log = cleanup_versions(&dest, Ok((vec![], String::new())), later);
-        assert!(agents.join(&key).symlink_metadata().is_err(), "{log:?}");
-        assert!(!agents.join(format!("{key}.applied")).exists());
-        assert!(!agents.join(format!("{key}.pending")).exists());
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1315,7 +1128,7 @@ mod tests {
     }
 
     #[test]
-    fn an_existing_empty_folder_is_preserved_not_replaced_by_the_publish_step() {
+    fn an_existing_folder_with_nothing_in_it_is_preserved_not_replaced_by_the_publish_step() {
         let root = tmp_root("seed-empty");
         let src = make_src(&root);
         let (dest, user) = (root.join("out"), root.join("user"));
@@ -1480,7 +1293,7 @@ mod tests {
         fs::write(proj.join(".claude/skills/projskill/SKILL.md"), "---\nname: projskill\n---\n").unwrap();
         fs::create_dir_all(proj.join(".claude/commands/x")).unwrap();
         fs::write(proj.join(".claude/commands/x/y.md"), "x").unwrap();
-        let path = write_agent_settings("worker-1", "worker", &proj, &home.join(".claude"), &root.join("out")).unwrap();
+        let path = write_agent_settings("worker-1", "worker", &proj, &home.join(".claude"), &root.join("shared"), &root.join("out")).unwrap();
         let v: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(v["enabledPlugins"]["ponytail@ponytail"], false);
         assert_eq!(v["enabledPlugins"]["figma@official"], false);
@@ -1488,10 +1301,24 @@ mod tests {
             assert_eq!(v["skillOverrides"][k], "off", "{k}");
         }
         assert!(v["skillOverrides"].get("synced").is_none());
-        let text = fs::read_to_string(&path).unwrap();
+        // statusLine holds a path under the temp folder (cubilot-factory-...), so only the two lists are checked.
+        let text = format!("{}{}", v["enabledPlugins"], v["skillOverrides"]);
         assert!(!text.contains("chatbridge") && !text.contains("factory-"), "test 8a: role, shared and chatbridge stay on");
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn role_settings_name_the_status_line_command_of_the_shared_plugin() {
+        let root = tmp_root("settings-sl");
+        let home = fake_home(&root);
+        let shared = root.join("it's shared");
+        let path = write_agent_settings("worker-1", "worker", &root, &home.join(".claude"), &shared, &root.join("out")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(v["statusLine"]["type"], "command");
+        let want = format!("bash '{}'", shared.join("scripts/statusline.sh").display().to_string().replace('\'', "'\\''"));
+        assert_eq!(v["statusLine"]["command"], want.as_str());
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1505,14 +1332,14 @@ mod tests {
             fs::write(p.join(".claude/skills").join(skill).join("SKILL.md"), "x").unwrap();
         }
         let dir = root.join("out");
-        let a = write_agent_settings("worker-1", "worker", &p1, &home.join(".claude"), &dir).unwrap();
-        let b = write_agent_settings("worker-2", "worker", &p2, &home.join(".claude"), &dir).unwrap();
+        let a = write_agent_settings("worker-1", "worker", &p1, &home.join(".claude"), &root.join("shared"), &dir).unwrap();
+        let b = write_agent_settings("worker-2", "worker", &p2, &home.join(".claude"), &root.join("shared"), &dir).unwrap();
         assert_ne!(a, b);
         let (ta, tb) = (fs::read_to_string(&a).unwrap(), fs::read_to_string(&b).unwrap());
         assert!(ta.contains("only-one") && !ta.contains("only-two"));
         assert!(tb.contains("only-two") && !tb.contains("only-one"));
         // a relaunch rewrites the same file and leaves no temp file
-        write_agent_settings("worker-1", "worker", &p1, &home.join(".claude"), &dir).unwrap();
+        write_agent_settings("worker-1", "worker", &p1, &home.join(".claude"), &root.join("shared"), &dir).unwrap();
         let names: Vec<_> = fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
         assert_eq!(names.len(), 2, "{names:?}");
         let _ = fs::remove_dir_all(&root);
@@ -1523,9 +1350,18 @@ mod tests {
         let root = tmp_root("settings3");
         let home = fake_home(&root);
         for bad in ["", "../x", "a/b", ".hidden"] {
-            assert!(write_agent_settings(bad, "worker", &root, &home.join(".claude"), &root.join("out")).is_err(), "{bad}");
+            assert!(write_agent_settings(bad, "worker", &root, &home.join(".claude"), &root.join("shared"), &root.join("out")).is_err(), "{bad}");
         }
         let _ = fs::remove_dir_all(&root);
+    }
+
+    // The roles whose role file blocks the file tools. The hub keeps READ_ONLY_ROLES (hub/core/worktrees.ts) for worktrees;
+    // `retrospective` is read-only in both lists.
+    const READ_ONLY_ROLES: [&str; 4] = ["orchestrator", "validator", "reviewer", "retrospective"];
+
+    #[test]
+    fn read_only_roles_include_retrospective() {
+        assert!(READ_ONLY_ROLES.contains(&"retrospective"));
     }
 
     // Tool limits for both harnesses (task 9.3): the launch harness is the user's choice, so every single-agent
@@ -1542,13 +1378,13 @@ mod tests {
             assert!(dis.is_some() && exc.is_some(), "{role}: needs both disallowedTools and excludeTools");
             let (dis, exc) = (csv_list(dis), csv_list(exc));
             for t in ["Task", "Agent"] { assert!(dis.iter().any(|x| x == t), "{role}: disallowedTools lacks {t}"); }
-            let read_only = ["orchestrator", "validator", "reviewer"].contains(&role.as_str());
+            let read_only = READ_ONLY_ROLES.contains(&role.as_str());
             for t in ["Edit", "Write", "NotebookEdit"] { assert_eq!(dis.iter().any(|x| x == t), read_only, "{role}: {t}"); }
             for t in ["edit", "write"] { assert_eq!(exc.iter().any(|x| x == t), read_only, "{role}: {t}"); }
             seen.push(role);
         }
         seen.sort();
-        assert_eq!(seen, ["editor", "orchestrator", "reviewer", "tester", "validator", "worker", "writer"]);
+        assert_eq!(seen, ["editor", "orchestrator", "retrospective", "reviewer", "tester", "validator", "worker", "writer"]);
     }
 
     #[test]
@@ -1589,18 +1425,17 @@ mod tests {
     }
 
     #[test]
-    fn list_roles_has_the_seven_single_agent_roles_and_no_council_or_shared() {
-        let root = tmp_root("listroles");
+    fn role_effort_frontmatter_is_read_checked_and_listed() {
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
-        let dest = root.join("out");
-        let v = stage_factory(&src, &dest, &root.join("user")).unwrap();
-        let roles = list_roles_in(&src, &dest.join(&v));
-        let names: Vec<&str> = roles.iter().map(|r| r.name.as_str()).collect();
-        assert_eq!(names, ["editor", "orchestrator", "reviewer", "tester", "validator", "worker", "writer"]);
-        let val = roles.iter().find(|r| r.name == "validator").unwrap();
-        assert_eq!((val.harness.as_str(), val.model.as_deref()), ("pi", Some("gpt-5.6-sol")));
-        assert_eq!(list_roles_in(&src, &root.join("missing")), vec![]);
-        let _ = fs::remove_dir_all(&root);
+        let spec = |r: &str| parse_role_spec(r, &fs::read_to_string(src.join(r).join(format!("{r}.md"))).unwrap()).unwrap();
+        assert_eq!(spec("orchestrator").effort.as_deref(), Some("medium"));
+        assert_eq!(spec("worker").effort, None);
+        let ok = parse_role_spec("x", "---\nname: x\neffort: max\n---\nbody").unwrap();
+        assert_eq!(ok.effort.as_deref(), Some("max"));
+        let bad = parse_role_spec("x", "---\nname: x\neffort: huge\n---\nbody").unwrap_err();
+        assert!(bad.contains("invalid effort 'huge'"), "{bad}");
+        let pi = parse_role_spec("x", "---\nname: x\nharness: pi\neffort: high\n---\nbody").unwrap_err();
+        assert!(pi.contains("Pi role uses 'thinking'"), "{pi}");
     }
 
     // Not a check by itself: tests/unit/role-harness.test.ts runs it with CUBILOT_TEST_STAGE_OUT set to get a tree staged by
@@ -1636,5 +1471,45 @@ mod tests {
             assert!(t.contains("{{ticket_id}}") && t.contains("{{acceptance_criteria}}"), "{r}");
         }
         let _ = fs::remove_dir_all(&root);
+    }
+
+    // Part 21 group 2: the staged retrospective folder holds its role file, first message and 8 skill folders.
+    #[test]
+    fn staged_retrospective_holds_role_first_message_and_eight_skills() {
+        let root = tmp_root("retro");
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../factory");
+        let dest = root.join("out");
+        let v = stage_factory(&src, &dest, &root.join("user")).unwrap();
+        let d = dest.join(&v).join("retrospective");
+        assert!(d.join("role.md").is_file() && d.join("first-message.md").is_file());
+        let mut skills: Vec<String> = fs::read_dir(d.join("skills")).unwrap().flatten()
+            .map(|e| { assert!(e.path().join("SKILL.md").is_file(), "{:?}", e.file_name()); e.file_name().to_string_lossy().to_string() })
+            .collect();
+        skills.sort();
+        assert_eq!(skills, ["agency-testing-test-results-analyzer", "agency-testing-workflow-optimizer", "agent-architecture-audit",
+            "agent-introspection-debugging", "context-engineering", "growth-log", "loop-design-check", "retrospective-review"]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // Every factory/<role>/<role>.md that a stage role can name (a council is refused) must be bundled by tauri.conf.json.
+    // Without it the installed app answers "unknown role: <role>" (install 33, retrospective).
+    #[test]
+    fn every_launchable_role_folder_is_in_the_tauri_bundle_resources() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let conf: serde_json::Value = serde_json::from_str(&fs::read_to_string(root.join("tauri.conf.json")).unwrap()).unwrap();
+        let res = conf["bundle"]["resources"].as_object().expect("bundle.resources is an object");
+        let mut roles = vec![];
+        for e in fs::read_dir(root.join("../factory")).unwrap().flatten() {
+            let role = e.file_name().to_string_lossy().to_string();
+            let Ok(text) = fs::read_to_string(e.path().join(format!("{role}.md"))) else { continue };
+            if parse_role_spec(&role, &text).is_ok() {
+                roles.push(role);
+            }
+        }
+        assert!(roles.iter().any(|r| r == "retrospective") && roles.iter().any(|r| r == "worker"), "{roles:?}");
+        for role in roles {
+            let (k, v) = (format!("../factory/{role}/"), format!("factory/{role}/"));
+            assert_eq!(res.get(&k).and_then(|x| x.as_str()), Some(v.as_str()), "tauri.conf.json bundle.resources lacks {k}");
+        }
     }
 }

@@ -33,6 +33,13 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+// The error code of a failed call; "none" when the call does not throw.
+const errCode = (fn: () => void) => {
+  try { fn(); } catch (e) { return String((e as NodeJS.ErrnoException).code); }
+  return "none";
+};
+const DENIED = /^(EACCES|EPERM)$/;
+
 const req = (o: Partial<Parameters<typeof createWorktree>[0]> = {}) => ({ project: repo, room: "cubilot", ticketId: "t_1", session: "worker-1", role: "worker", ...o });
 
 describe("worktrees (4.5)", () => {
@@ -81,7 +88,7 @@ describe("worktrees (4.5)", () => {
     sh(w.path, "git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "on the ticket branch");
     const head = sh(w.path, "git", "rev-parse", "HEAD");
     expect(head).not.toBe(second);
-    for (const role of ["tester", "validator", "editor", "reviewer"]) {
+    for (const role of ["tester", "validator", "reviewer"]) {
       expect(sh(createWorktree(req({ role, session: `${role}-1` }), root).path, "git", "rev-parse", "HEAD")).toBe(head);
     }
     expect(sh(createWorktree(req({ role: "tester", session: "tester-2", commit: first }), root).path, "git", "rev-parse", "HEAD")).toBe(first);
@@ -103,11 +110,13 @@ describe("worktrees (4.5)", () => {
     sh(repo, "git", "commit", "-qm", "sub");
     const w = createWorktree(req({ role, session: `${role}-1` }), root);
     // writes fail: a file, a new file at the root, a new file in a subfolder, a delete
-    expect(() => writeFileSync(join(w.path, "a.txt"), "changed")).toThrow();
-    expect(() => writeFileSync(join(w.path, "new.txt"), "x")).toThrow();
-    expect(() => writeFileSync(join(w.path, "sub", "new.txt"), "x")).toThrow();
-    expect(() => rmSync(join(w.path, "sub", "b.txt"))).toThrow();
+    expect(errCode(() => writeFileSync(join(w.path, "a.txt"), "changed"))).toMatch(DENIED);
+    expect(errCode(() => writeFileSync(join(w.path, "new.txt"), "x"))).toMatch(DENIED);
+    expect(errCode(() => writeFileSync(join(w.path, "sub", "new.txt"), "x"))).toMatch(DENIED);
+    expect(errCode(() => rmSync(join(w.path, "sub", "b.txt")))).toMatch(DENIED);
     // reads and git work
+    expect(Bun.spawnSync(["git", "status"], { cwd: w.path }).exitCode).toBe(0);
+    expect(Bun.spawnSync(["git", "diff"], { cwd: w.path }).exitCode).toBe(0);
     expect(sh(w.path, "git", "status", "--porcelain")).toBe("");
     expect(sh(w.path, "git", "diff")).toBe("");
     expect(sh(w.path, "git", "log", "--oneline", "-1")).toContain("sub");

@@ -141,6 +141,10 @@ The human keeps only two things safe: the backup password, and the target addres
 5. An agent session has no restic password and no target credentials in its environment.
 6. After a restore, the app makes the worktrees again for the tickets that are in work.
 
+## Mockups (2026-10-28)
+
+Designed in `design/mockups/cubilot-prototype.html`: Delivery (`#delivery`), the human's test before main. The Deliver step is designed at `#deliver` (from Delivery, "Deliver to the client"): the six steps with their status, the leak gate findings with a fix for each, the commit and diff, "Approve and push" only after the gate passes, the merge request template and disclosure. Backup is the Backup section of `#admin` (last result, Back up now, Restore test, keep policy, second copy, snapshots). Restore is step 0 of the setup (`#setup`).
+
 ---
 
 Index: [00-index.md](00-index.md). This part is one file of the implementation brief. "Part N" means file `NN-*.md` in this folder.

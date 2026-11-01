@@ -93,6 +93,12 @@ describe("envelope", () => {
     );
   });
 
+  test("reply_to shows right after id; absent or non-number reply_to is omitted", () => {
+    expect(renderEnvelope({ id: 7, reply_to: 3, from: "a" }, "r")).toBe('[chatbridge id=7 reply_to=3 from="a" room="r"]');
+    expect(renderEnvelope({ id: 7, from: "a" }, "r")).toBe('[chatbridge id=7 from="a" room="r"]');
+    expect(renderEnvelope({ id: 7, reply_to: "3" as unknown as number, from: "a" }, "r")).toBe('[chatbridge id=7 from="a" room="r"]');
+  });
+
   test("room falls back to the bridge room; absent keys are omitted", () => {
     expect(renderEnvelope({ from: "you", to: "bob" }, "r1")).toBe('[chatbridge from="you" to="bob" room="r1"]');
   });
@@ -553,21 +559,6 @@ describe("ticket kinds and kind briefing lines", () => {
     expect(modeFor({ kind: "ticket.update", by: "human", lead: "lee", snapshot: { assignee: null, creator: "human" } }, "lee")).toBe("context");
   });
 
-  test("ticket:done approval: the verdict wakes the requester only; the request wakes nobody", () => {
-    const done = { snapshot: { tool_name: "ticket:done" }, from: "alice" };
-    // verdict (permission.resolved) for alice's request
-    expect(modeFor({ ...done, kind: "permission.resolved" }, "alice")).toBe("wake");
-    expect(modeFor({ ...done, kind: "permission.resolved" }, "bob")).toBe("context");
-    expect(modeFor({ ...done, kind: "permission.dismissed" }, "alice")).toBe("context");
-    // the request (permission.new) never wakes, the requester included
-    expect(modeFor({ ...done, kind: "permission.new" }, "bob")).toBe("context");
-    expect(modeFor({ ...done, kind: "permission.new" }, "alice")).toBe("context");
-    // other tools keep their rules: a peer's request wakes, a verdict is context
-    const bash = { snapshot: { tool_name: "Bash" }, from: "alice" };
-    expect(modeFor({ ...bash, kind: "permission.new" }, "bob")).toBe("wake");
-    expect(modeFor({ ...bash, kind: "permission.resolved" }, "alice")).toBe("context");
-  });
-
   test("renderBriefing appends kind lines, and omits them when absent", () => {
     const base: BridgeEvent = { type: "briefing", human_name: "human" };
     const withLines = renderBriefing({ ...base, kind_lines: ["Your open tickets:", "- t1"] }, "alice", "r1");
@@ -585,8 +576,6 @@ describe("modeFor with a paused agent", () => {
     });
   }
   test("permission events keep their mode", () => {
-    const done = { kind: "permission.resolved", from: "alice", paused: true, snapshot: { tool_name: "ticket:done" } };
-    expect(modeFor(done, "alice")).toBe("wake");
     expect(modeFor({ kind: "permission.new", from: "bob", paused: true }, "alice")).toBe("wake");
   });
 });

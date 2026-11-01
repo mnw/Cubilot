@@ -9,16 +9,17 @@ import { migrateLedger, setRoomSettings } from "../../hub/core/ledger";
 import { createTicketKind } from "../../hub/kinds/ticket";
 import { createStageRuntime, type LaunchInput, type StageRuntime } from "../../hub/kinds/stage";
 import type { LaunchRequest } from "../../hub/core/launch-queue";
+import { createLaunchRecord, type LaunchRecord } from "../../hub/core/launch-record";
 import type { Entry, HubCapabilities, Scope } from "../../hub/core/types";
 
 const ACK_MS = 60;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function makeEnv(o: { retainMs?: number; db?: Database } = {}) {
+function makeEnv(o: { retainMs?: number; db?: Database; sweepMs?: number; bootGraceMs?: number; launchRecord?: LaunchRecord } = {}) {
   const db = o.db ?? new Database(":memory:");
   migrateLedger(db);
   createTicketKind(db).migrate(db);
-  const rt: StageRuntime = createStageRuntime(db, { ackMs: ACK_MS, retainMs: o.retainMs });
+  const rt: StageRuntime = createStageRuntime(db, { ackMs: ACK_MS, retainMs: o.retainMs, sweepMs: o.sweepMs, bootGraceMs: o.bootGraceMs, launchRecord: o.launchRecord });
   rt.module.migrate(db);
   const cap = { db, sse: { emit: (_e: Entry, _s: Scope) => {} }, briefing: { refresh: () => {} } } as unknown as HubCapabilities;
   const sent: LaunchRequest[] = [];
@@ -39,7 +40,7 @@ function makeEnv(o: { retainMs?: number; db?: Database } = {}) {
   const input = (stage_id: string, session = "worker-1", room = "r1"): LaunchInput => ({
     stage_id, session, room, harness: "claude", cwd: "/tmp/p", prompt: "first message",
   });
-  return { db, rt, cap, sent, connect, ticket, stageFor, input, stop: () => { ac.abort(); rt.queue.dispose(); } };
+  return { db, rt, cap, sent, connect, ticket, stageFor, input, stop: () => { ac.abort(); rt.module.dispose!(); } };
 }
 
 describe("launch queue and ack", () => {
@@ -115,6 +116,97 @@ describe("launch queue and ack", () => {
   });
 });
 
+describe("input requests (P6-15)", () => {
+  test("an input names one session, is sent once, is not repeated after a reconnect and its ack ends it", async () => {
+    const e = makeEnv();
+    e.connect();
+    const id = e.rt.sendInput("Orchestrator", "/clear");
+    expect(e.sent).toEqual([{ id, kind: "input", session: "Orchestrator", text: "/clear" }]);
+    expect(e.rt.queue.ack(id, { result: "spawned" }, e.cap).status).toBe("ok");
+    expect(e.rt.queue.ack(id, { result: "spawned" }, e.cap).status).toBe("idempotent");
+    e.connect(); // a new shell connection: nothing is sent again
+    expect(e.sent).toHaveLength(1);
+    e.stop();
+  });
+
+  test("an input with no shell waits, is dropped by id, and is never held by a name reservation", () => {
+    const e = makeEnv();
+    const id = e.rt.sendInput("Orchestrator", "/clear");
+    expect(e.rt.queue.undelivered(id)).not.toBeNull();
+    expect(e.rt.dropInput(id)).toBe(true);
+    e.connect();
+    expect(e.sent).toEqual([]);
+    e.stop();
+  });
+
+  test("an error ack or a missing ack ends the input and changes no stage", async () => {
+    const e = makeEnv();
+    e.connect();
+    const id = e.rt.sendInput("Orchestrator", "/clear");
+    expect(e.rt.queue.ack(id, { result: "error", error: "unknown session: Orchestrator" }, e.cap).status).toBe("ok");
+    const id2 = e.rt.sendInput("Orchestrator", "/clear");
+    await sleep(ACK_MS * 3);
+    expect(e.rt.queue.ack(id2, { result: "spawned" }, e.cap).status).toBe("conflict"); // timed out: a late ack changes nothing
+    expect(e.rt.queue.size().awaitingAck).toBe(0);
+    e.stop();
+  });
+});
+
+describe("the stage runtime releases the session from the launch record", () => {
+  test("close ack releases the session", () => {
+    const launchRecord = createLaunchRecord();
+    const e = makeEnv({ launchRecord });
+    e.connect();
+    const s = e.stageFor(e.ticket());
+    e.rt.enqueueLaunch(e.input(s.id), e.cap);
+    expect(launchRecord.sessions().has("worker-1")).toBe(true);
+    e.rt.queue.ack(e.sent[0].id, { result: "spawned" }, e.cap);
+    expect(launchRecord.sessions().has("worker-1")).toBe(true); // still bound while it runs
+    e.rt.queue.push({ id: "l_00000000000000bb", kind: "close", session: "worker-1" });
+    e.rt.queue.ack("l_00000000000000bb", { result: "spawned" }, e.cap);
+    expect(launchRecord.sessions().has("worker-1")).toBe(false);
+    e.stop();
+  });
+
+  test("final launch error releases the session", async () => {
+    const launchRecord = createLaunchRecord();
+    const e = makeEnv({ launchRecord });
+    e.connect();
+    const s = e.stageFor(e.ticket());
+    e.rt.enqueueLaunch(e.input(s.id), e.cap);
+    e.rt.queue.ack(e.sent[0].id, { result: "error", error: "tmux failed" }, e.cap);
+    // attempt 2 is a relaunch that binds the session again; its error ack is the final one
+    const second = e.sent.filter((r) => r.kind === "launch")[1];
+    expect(second).toBeDefined();
+    expect(launchRecord.sessions().has("worker-1")).toBe(true);
+    e.rt.queue.ack(second.id, { result: "error", error: "tmux failed" }, e.cap);
+    expect(e.rt.api.load(s.id)!.status).toBe("failed");
+    expect(launchRecord.sessions().has("worker-1")).toBe(false);
+    e.stop();
+  });
+
+  test("final launch error keeps the binding that a waiting stage of the same role took", () => {
+    const launchRecord = createLaunchRecord();
+    const e = makeEnv({ launchRecord });
+    setRoomSettings(e.db, "r1", { role_limits: { worker: 1 } });
+    e.connect();
+    const a = e.stageFor(e.ticket());
+    const b = e.stageFor(e.ticket());
+    e.rt.enqueueLaunch(e.input(a.id), e.cap);
+    e.rt.queue.ack(e.sent[0].id, { result: "error", error: "tmux failed" }, e.cap);
+    const second = e.sent.filter((r) => r.kind === "launch")[1];
+    expect(second.session).toBe("worker-1");
+    e.rt.queue.ack(second.id, { result: "error", error: "tmux failed" }, e.cap);
+    expect(e.rt.api.load(a.id)!.status).toBe("failed");
+    // the drain inside the move gave the name to stage b; the release step of stage a must not delete that bind
+    const third = e.sent.filter((r) => r.kind === "launch")[2];
+    expect(third).toMatchObject({ session: "worker-1" });
+    expect(e.rt.api.load(b.id)!.status).toBe("launching");
+    expect(launchRecord.sessions().has("worker-1")).toBe(true);
+    e.stop();
+  });
+});
+
 describe("a failed stage change keeps the request pending (4.1 review)", () => {
   const failRunning = (db: Database) =>
     db.exec("CREATE TRIGGER fail_running BEFORE UPDATE ON stage WHEN NEW.status = 'running' BEGIN SELECT RAISE(ABORT, 'boom'); END");
@@ -137,18 +229,22 @@ describe("a failed stage change keeps the request pending (4.1 review)", () => {
     e.stop();
   });
 
-  test("the ack route answers 500 for a failed record and 200 after recovery", async () => {
+  test("the ack answers error for a failed record and ok after recovery (the executor sends it again)", () => {
     const e = makeEnv();
     e.connect();
     const s = e.stageFor(e.ticket());
     e.rt.enqueueLaunch(e.input(s.id), e.cap);
-    const ack = e.rt.module.routes.find((r) => r.method === "POST" && String(r.path).includes("ack"))!;
-    const post = (body: unknown) =>
-      ack.handler(new Request("http://x", { method: "POST", body: JSON.stringify(body) }), e.cap, { id: e.sent[0].id }) as Promise<Response>;
+    const orig = console.error;
+    console.error = () => {};
     failRunning(e.db);
-    expect((await post({ result: "spawned" })).status).toBe(500);
+    try {
+      expect(e.rt.queue.ack(e.sent[0].id, { result: "spawned" }, e.cap).status).toBe("error");
+    } finally {
+      console.error = orig;
+    }
+    expect(e.rt.api.load(s.id)!.status).toBe("launching");
     healRunning(e.db);
-    expect((await post({ result: "spawned" })).status).toBe(200);
+    expect(e.rt.queue.ack(e.sent[0].id, { result: "spawned" }, e.cap).status).toBe("ok");
     expect(e.rt.api.load(s.id)!.status).toBe("running");
     e.stop();
   });
@@ -224,6 +320,42 @@ describe("close requests (4.1 review)", () => {
     e.stop();
   });
 
+  test("a close ack whose durable release fails is refused, then a retry persists the mark and releases the record", () => {
+    const record = createLaunchRecord(new Map());
+    const db = new Database(":memory:");
+    const e = makeEnv({ db });
+    // makeEnv does not pass a record: build a second runtime on the same db with one.
+    e.stop();
+    const rt = createStageRuntime(db, { ackMs: ACK_MS, launchRecord: record });
+    const cap = e.cap;
+    const sent: LaunchRequest[] = [];
+    rt.queue.attach((r) => sent.push(r), new AbortController().signal, cap);
+    const s = rt.api.create({ ticket_id: e.ticket(), role: "worker" }, "system", cap);
+    rt.enqueueLaunch(e.input(s.id), cap);
+    rt.queue.ack(sent[0].id, { result: "spawned" }, cap);
+    expect(rt.api.load(s.id)!.status).toBe("running");
+    expect(record.sessions()).toContain("worker-1");
+    const close: LaunchRequest = { id: "l_00000000000000cc", kind: "close", session: "worker-1" };
+    rt.queue.push(close);
+    db.exec("CREATE TRIGGER fail_release BEFORE UPDATE OF session_released_at_ms ON stage BEGIN SELECT RAISE(ABORT, 'forced'); END");
+    const orig = console.error;
+    console.error = () => {};
+    try {
+      expect(rt.queue.ack(close.id, { result: "spawned" }, cap).status).toBe("error");
+      expect(db.query<{ v: number | null }, []>("SELECT session_released_at_ms AS v FROM stage").get()!.v).toBeNull();
+      expect(record.sessions()).toContain("worker-1");
+      expect(rt.queue.pendingCloses()).toEqual(["worker-1"]);
+      db.exec("DROP TRIGGER fail_release");
+      expect(rt.queue.ack(close.id, { result: "spawned" }, cap).status).toBe("ok");
+    } finally {
+      console.error = orig;
+    }
+    expect(db.query<{ v: number | null }, []>("SELECT session_released_at_ms AS v FROM stage").get()!.v).not.toBeNull();
+    expect(record.sessions()).not.toContain("worker-1");
+    expect(rt.queue.pendingCloses()).toEqual([]);
+    rt.module.dispose!();
+  });
+
   test("an error ack keeps a close pending (it is sent again); only 'the session is absent' completes it", () => {
     const e = makeEnv();
     const first: LaunchRequest[] = [];
@@ -272,25 +404,19 @@ describe("close requests (4.1 review)", () => {
     e.stop();
   });
 
-  test("the ack route reads absent: a boolean that goes with result error", async () => {
+  test("a close ack reads absent: an error without absent stays pending, an error with absent completes the close", () => {
     const e = makeEnv();
     e.connect();
     e.rt.queue.push(closeReq());
-    const ack = e.rt.module.routes.find((r) => r.method === "POST" && String(r.path).includes("ack"))!;
-    const post = async (body: unknown) =>
-      (await ack.handler(new Request("http://x", { method: "POST", body: JSON.stringify(body) }), e.cap, { id: closeReq().id })) as Response;
-    expect((await post({ result: "spawned", absent: true })).status).toBe(400);
-    expect((await post({ result: "error", error: "x", absent: "yes" })).status).toBe(400);
     const orig = console.error;
     console.error = () => {};
     try {
-      const pending = await post({ result: "error", error: "tmux unavailable" });
-      expect(pending.status).toBe(200);
-      expect(await pending.json()).toMatchObject({ ok: true, pending: true });
+      expect(e.rt.queue.ack(closeReq().id, { result: "error", error: "tmux unavailable" }, e.cap).status).toBe("pending");
     } finally {
       console.error = orig;
     }
-    expect((await post({ result: "error", error: "gone", absent: true })).status).toBe(200);
+    expect(e.rt.queue.pendingCloses()).toEqual([closeReq().session]);
+    expect(e.rt.queue.ack(closeReq().id, { result: "error", error: "gone", absent: true }, e.cap).status).toBe("ok");
     expect(e.rt.queue.pendingCloses()).toEqual([]);
     e.stop();
   });
@@ -333,6 +459,22 @@ describe("a closed session name is not reused before its close is acked (4.1 rev
     const made = e.rt.evaluateStages(t, e.cap, [{ role: "worker", seq: 1_000_000 }], { launch: true });
     expect(made).toHaveLength(1); // a worker role handoff
     expect(e.rt.api.load(made[0].id)).toMatchObject({ status: "launching", session: "worker-2" });
+    e.stop();
+  });
+
+  test("a handoff stage starts after the retrying stage of its role, inside the limit (criterion 2)", () => {
+    const e = makeEnv();
+    e.connect();
+    setRoomSettings(e.db, "r1", { role_limits: { worker: 1 } });
+    const retrying = e.stageFor(e.ticket());
+    e.db.run("UPDATE stage SET status = 'retrying' WHERE id = ?", [retrying.id]);
+    expect(e.rt.api.load(retrying.id)!.status).toBe("retrying");
+    const made = e.rt.evaluateStages(e.ticket(), e.cap, [{ role: "worker", seq: 1_000_000 }], { launch: true });
+    expect(made).toHaveLength(1);
+    // one free slot: the retrying stage takes it, the new stage waits
+    expect(e.rt.api.load(retrying.id)!.status).toBe("launching");
+    expect(e.rt.api.load(made[0].id)!.status).toBe("queued");
+    expect(e.sent.filter((r) => r.kind === "launch")).toHaveLength(1);
     e.stop();
   });
 });
@@ -390,51 +532,71 @@ describe("a hub restart settles launching stages (4.1 review)", () => {
     // the events record it as a normal change
     expect(db.query("SELECT kind FROM events WHERE entity_id = ? ORDER BY seq DESC LIMIT 1").get(a.id)).toEqual({ kind: "stage.launching" });
     // a second restart settles the relaunch of a the same way: attempt 2 has no ack, so it fails for good
+    second.rt.module.dispose!(); // a second start() would overwrite sweepTimer and leak the first interval
     second.rt.module.start!(second.cap);
     expect(before(a.id)).toBe("failed");
     second.stop();
   });
 });
 
-describe("stream and ack routes", () => {
-  test("a launch is written to the SSE stream; the ack route moves the stage; a dropped shell does not lose the request", async () => {
-    const e = makeEnv();
-    const route = (method: string, re: string) => e.rt.module.routes.find((r) => r.method === method && String(r.path).includes(re))!;
+describe("teardown", () => {
+  test("stop() clears the sweep interval that module.start set", async () => {
+    const e = makeEnv({ sweepMs: 5, bootGraceMs: 0 });
+    e.connect();
     const s = e.stageFor(e.ticket());
-    e.rt.enqueueLaunch(e.input(s.id), e.cap); // no shell yet: waits
-
-    const ac = new AbortController();
-    const res = (await route("GET", "stream").handler(new Request("http://x/launches/stream", { signal: ac.signal }), e.cap, {})) as Response;
-    expect(res.headers.get("content-type")).toBe("text/event-stream");
-    const reader = res.body!.getReader();
-    const dec = new TextDecoder();
-    let buf = "";
-    let frame: { id: string; kind: string; stage_id: string } | null = null;
-    while (!frame) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value);
-      const line = buf.split("\n").find((l) => l.startsWith("data: "));
-      if (line) frame = JSON.parse(line.slice(6));
+    e.rt.enqueueLaunch(e.input(s.id), e.cap);
+    e.rt.queue.ack(e.sent[0].id, { result: "spawned" }, e.cap); // running: the sweep reads cap.agents, which the stub cap lacks
+    e.rt.module.start!(e.cap);
+    e.stop();
+    const errors: unknown[][] = [];
+    const orig = console.error;
+    console.error = (...a: unknown[]) => { errors.push(a); };
+    try {
+      await sleep(40);
+    } finally {
+      console.error = orig;
     }
-    expect(frame).toMatchObject({ kind: "launch", stage_id: s.id });
+    expect(errors.filter((a) => String(a[0]).includes("[stage] sweep of"))).toEqual([]);
+  });
+});
 
-    const ack = route("POST", "ack");
-    const post = (body: unknown) =>
-      ack.handler(new Request("http://x", { method: "POST", body: JSON.stringify(body) }), e.cap, { id: frame!.id }) as Promise<Response>;
-    expect((await post({ result: "spawned" })).status).toBe(200);
+describe("consumer and ack", () => {
+  test("a launch reaches the attached consumer; the ack moves the stage; a repeated ack is idempotent; another answer is a conflict", () => {
+    const e = makeEnv();
+    const s = e.stageFor(e.ticket());
+    e.rt.enqueueLaunch(e.input(s.id), e.cap); // no consumer yet: waits
+    expect(e.sent).toHaveLength(0);
+    expect(e.rt.module.routes.some((r) => String(r.path).includes("launches"))).toBe(false); // the hub runs its own queue: no stream and no ack route
+    e.connect();
+    expect(e.sent[0]).toMatchObject({ kind: "launch", stage_id: s.id });
+    const id = e.sent[0].id;
+    expect(e.rt.queue.ack(id, { result: "spawned" }, e.cap)).toEqual({ status: "ok" });
     expect(e.rt.api.load(s.id)!.status).toBe("running");
-    expect((await post({ result: "spawned" })).status).toBe(200); // idempotent
-    expect((await post({ result: "error", error: "late" })).status).toBe(409);
-    // the body must be a JSON object
-    for (const bad of [null, [], "x", 5, true]) {
-      const r = (await ack.handler(new Request("http://x", { method: "POST", body: JSON.stringify(bad) }), e.cap, { id: frame!.id })) as Response;
-      expect(r.status).toBe(400);
-    }
-    const garbage = (await ack.handler(new Request("http://x", { method: "POST", body: "not json" }), e.cap, { id: frame!.id })) as Response;
-    expect(garbage.status).toBe(400);
-    ac.abort();
-    try { await reader.cancel(); } catch { /* closed */ }
+    expect(e.rt.queue.ack(id, { result: "spawned" }, e.cap)).toEqual({ status: "idempotent" });
+    expect(e.rt.queue.ack(id, { result: "error", error: "late" }, e.cap).status).toBe("conflict");
+    expect(e.rt.queue.ack("l_00000000000000ee", { result: "spawned" }, e.cap)).toEqual({ status: "unknown" });
+    expect(e.rt.api.load(s.id)!.status).toBe("running");
+    e.stop();
+  });
+
+  test("the executor host given to startExecutor attaches, acks and sends failed closes again", async () => {
+    const e = makeEnv();
+    let host: import("../../hub/core/launch-executor").ExecutorHost | null = null;
+    const rt = createStageRuntime(e.db, { ackMs: 60_000, startExecutor: (h) => { host = h; } });
+    rt.module.start?.(e.cap);
+    expect(host).not.toBeNull();
+    const got: any[] = [];
+    host!.attach((r) => got.push(r), new AbortController().signal);
+    rt.queue.push({ id: "l_00000000000000d1", kind: "close", session: "worker-7" });
+    expect(got).toHaveLength(1);
+    expect(host!.ack("l_00000000000000d1", { result: "error", error: "tmux down" })).toMatchObject({ status: "pending" });
+    host!.resendCloses();
+    expect(got).toHaveLength(2);
+    expect(got[1]).toEqual(got[0]);
+    expect(host!.ack("l_00000000000000d1", { result: "spawned" })).toEqual({ status: "ok" });
+    host!.resendCloses();
+    expect(got).toHaveLength(2); // a closed request is not sent again
+    rt.module.dispose!();
     e.stop();
   });
 });
@@ -518,30 +680,37 @@ describe("only the stage logic queues launches", () => {
   test("the launch queue is imported only by hub/kinds/stage.ts", () => {
     const users = hubFiles
       .filter((p) => !p.endsWith("hub/core/launch-queue.ts"))
-      .filter((p) => /launch-queue/.test(readFileSync(p, "utf8")))
+      .filter((p) => /(?:from\s+|import\s*\(\s*|require\s*\(\s*)["'][^"']*launch-queue["']/.test(readFileSync(p, "utf8")))
       .map(rel);
     expect(users).toEqual(["hub/kinds/stage.ts"]);
   });
 
-  test("inside stage.ts, enqueueLaunch is called only from evaluateStages and drainQueue (the retry path, 5.3, adds a caller)", () => {
+  test("inside stage.ts, enqueueLaunch is called only from startWaiting (drainQueue, evaluateStages and a saved limit all go through it) and the second Validator start (L4)", () => {
     const src = readFileSync(join(import.meta.dir, "../../hub/kinds/stage.ts"), "utf8");
     const code = src.split("\n").filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*") && !l.trim().startsWith("/*"));
     const calls = code.map((l, i) => ({ l, i })).filter(({ l }) => /\benqueueLaunch\(/.test(l) && !/function enqueueLaunch\(/.test(l) && !/^\s*enqueueLaunch\(input/.test(l));
     expect(calls).toHaveLength(2);
-    const start = code.findIndex((l) => /function evaluateStages\(/.test(l));
-    const drain = code.findIndex((l, i) => i > start && /function drainQueue\(/.test(l));
+    const start = code.findIndex((l) => /function startWaiting\(/.test(l));
     const end = code.findIndex((l, i) => i > start && /^  function enqueueLaunch\(/.test(l));
     expect(calls[0].i).toBeGreaterThan(start);
-    expect(calls[0].i).toBeLessThan(drain);
-    expect(calls[1].i).toBeGreaterThan(drain);
-    expect(calls[1].i).toBeLessThan(end);
+    expect(calls[0].i).toBeLessThan(end);
+    expect(calls[1].i).toBeGreaterThan(end);
+    expect(calls[1].l).toContain('roleHarness("validator")');
+    // the two other launch paths reach it through startWaiting
+    const body = (name: string) => {
+      const from = code.findIndex((l) => new RegExp(`function ${name}\\(`).test(l));
+      return code.slice(from, from + 80).join("\n");
+    };
+    expect(body("drainQueue")).toMatch(/startWaiting\(/);
+    expect(body("evaluateStages")).toMatch(/startWaiting\(/);
   });
 
   test("inside stage.ts, a launch is queued only from enqueueLaunch (the other pushes are closes: 5.2, 5.3)", () => {
     const src = readFileSync(join(import.meta.dir, "../../hub/kinds/stage.ts"), "utf8");
     const pushes = [...src.matchAll(/queue\.push\(/g)].length;
-    expect(pushes).toBe(5);
-    expect([...src.matchAll(/queue\.push\(\{[^}]*kind: "close"/g)]).toHaveLength(4); // turn end (5.2), stop (5.3), lost turn end and start sweep (5.3b)
+    expect(pushes).toBe(8);
+    expect([...src.matchAll(/queue\.push\(\{[^}]*kind: "input"/g)]).toHaveLength(1); // the checkpoint /clear (P6-15): text for one session, no launch
+    expect([...src.matchAll(/queue\.push\(\{[^}]*kind: "close"/g)]).toHaveLength(6); // turn end (5.2), stop (5.3), lost turn end and start sweep (5.3b), cancel and late launch end of a cancelled stage (G4)
     const fn = src.slice(src.indexOf("function enqueueLaunch("), src.indexOf("function passSpecStage("));
     expect(fn).toContain("queue.push(req)");
   });

@@ -183,6 +183,21 @@ An agent MAY transition between states:
 - **AND** a tab for `alice` appears in the pane in the `live` state with an xterm attached to the PTY
 - **AND** within a few seconds `channel-bin` (spawned by claude via `.mcp.json`) registers `alice` with the hub and the legend pill turns online
 
+#### Scenario: Launch needs every required field
+
+- **GIVEN** the spawn modal is open and the roles are loaded
+- **THEN** the required fields are, in form order, `Agent name`, `Role`, `Harness`, `Model and effort` (`Model and thinking` on Pi), `Project folder` and `Room`; `Session` is optional
+- **AND** Launch is disabled while any required field has no valid value, and one live line under it reads `Fill in: ` followed by the missing names joined with `, ` and a full stop
+- **AND** with no missing field the line is empty and Launch is enabled
+- **AND** each required label ends with ` (required)` and is linked to its control, the harness is a `radiogroup`, and a field that is not valid gets `aria-invalid="true"` after its first change
+
+#### Scenario: Roles are read at each opening
+
+- **WHEN** the modal opens
+- **THEN** it reads the roles again and uses no value of an earlier opening
+- **AND** while the read runs Launch is disabled and the line reads `Loading roles…`
+- **AND** when the read fails Launch stays disabled and the line reads `Could not load the roles: <error>. Close and open the form again.`, and nothing is launched
+
 #### Scenario: Reactive agent creation
 
 - **GIVEN** the user has a pre-existing `.mcp.json` in `/code/project-bob` with `CHATBRIDGE_AGENT=bob` and runs `claude` from Terminal.app in that directory
@@ -208,9 +223,9 @@ The tab strip SHALL also merge the hub's `knownAgents` roster so agents whose tm
 #### Scenario: Roster member with no terminal session
 
 - **GIVEN** the hub's roster contains `bob` but no tmux session exists for `bob`
-- **WHEN** the user opens the terminal pane
-- **THEN** a `bob` tab appears with a "Launch" button
-- **AND** clicking "Launch" invokes `pty_spawn(agent="bob", cwd=<chosen>)` and the tab switches to the attached state
+- **WHEN** the user clicks the agent column `+`
+- **THEN** the blank spawn form opens with no prefill
+- **AND** a role is required, so Launch stays disabled until the human picks one and fills every other required field
 
 ### Requirement: Agent PTY accepts writes from the chat composer in slash mode
 

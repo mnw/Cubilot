@@ -13,3 +13,6 @@ Send the result handoff to {{recipient}}.
 
 ## Acceptance criteria
 {{acceptance_criteria}}
+{{notes}}
+{{pack}}
+{{diff}}

@@ -25,12 +25,12 @@ Cubilot is a macOS desktop app. It runs a team of coding agents (Claude Code, an
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/02-roles-dark.png">
-  <img alt="Roles, models and skills: Orchestrator, Worker, Tester, Validator, Writer, Editor, Reviewer, and the SEO and accessibility councils" src="docs/readme/02-roles-light.png" width="100%">
+  <img alt="Roles, models and skills: Orchestrator, Worker, Tester, Validator, Writer, Editor, Reviewer, the planned Diagnostician, the SEO council, the planned plan council, the design system and mockups (done) and the design council, and the accessibility council" src="docs/readme/02-roles-light.png" width="100%">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/03-workflows-dark.png">
-  <img alt="Workflows: intake with spec review, the technical, writing, SEO and accessibility tracks" src="docs/readme/03-workflows-light.png" width="100%">
+  <img alt="Workflows: intake with spec review, the technical and writing tracks, stage failure diagnosis, and the SEO, plan council, design council and accessibility tracks" src="docs/readme/03-workflows-light.png" width="100%">
 </picture>
 
 <picture>
@@ -40,12 +40,12 @@ Cubilot is a macOS desktop app. It runs a team of coding agents (Claude Code, an
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/05-jev-dark.png">
-  <img alt="Jev decision points: narrow typed decisions, one planned and six ideas" src="docs/readme/05-jev-light.png" width="100%">
+  <img alt="Jev decision points: narrow typed decisions, three planned (Orchestrator checkpoint, model routing, mutation survivors) and four ideas" src="docs/readme/05-jev-light.png" width="100%">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/06-build-order-dark.png">
-  <img alt="Build order: migration, rebrand, roles and ticket grouping done, then Parts 4 to 15" src="docs/readme/06-build-order-light.png" width="100%">
+  <img alt="Build order: migration, rebrand, roles, ticket grouping, the agent column (4a) and the ticket card and dialog (15) done; Part 4 done; then Part 6, Part 12 (hub-first, browser access, sign-in, Linux), Part 14 (UI redesign from the finished mockups), Part 5, Parts 7, 8, 11 and 13, and at the end the councils (9, 16 design council, 10, 17 plan council)" src="docs/readme/06-build-order-light.png" width="100%">
 </picture>
 
 ## Build from source
@@ -63,6 +63,11 @@ bun run tauri:build
 
 The images above are screenshots of [`docs/factory-map.html`](docs/factory-map.html), in a light and a dark version. To update them after a change to the map, see [`docs/readme/README.md`](docs/readme/README.md).
 
-## Licence
+## License
 
-See [`LICENSE`](LICENSE). Third-party skills and suites keep their own licences, listed in [`factory/licenses/`](factory/licenses/).
+Cubilot is under the Business Source License 1.1 (BSL 1.1). See [`LICENSE`](LICENSE).
+
+- You may use Cubilot for your own purposes and for the internal purposes of your organization. This includes client work.
+- You may not sell Cubilot or host it for third parties without a separate agreement with the licensor.
+- From 2030-11-01 Cubilot is under the Apache License, Version 2.0.
+- Third-party parts keep their own licenses. See [`NOTICE`](NOTICE) and [`factory/licenses/`](factory/licenses/).

@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cubilot</title>
 <!-- v0.9.6 semantic split. Order: foundations → primitives → feature surfaces → kinds. -->
-<link rel="stylesheet" href="styles/fonts.css">
 <link rel="stylesheet" href="styles/tokens.css">
+<link rel="stylesheet" href="styles/fonts.css">
 <link rel="stylesheet" href="styles/reset.css">
 <link rel="stylesheet" href="styles/animations.css">
 <link rel="stylesheet" href="styles/layout.css">
@@ -175,6 +175,10 @@
       <button type="button" class="ticket-new-btn" id="ticket-new-btn">+ New ticket</button>
       <div class="ticket-filter-panel" id="ticket-filter-panel" role="group" aria-label="Board filters" hidden>
         <div class="ff-section">
+          <label class="ff-label" for="ticket-filter-id">Ticket id</label>
+          <input type="search" id="ticket-filter-id" autocomplete="off" spellcheck="false" placeholder="e.g. a5e0 or t_a5e0" />
+        </div>
+        <div class="ff-section">
           <div class="ff-label" id="ff-radius-label">Blast radius</div>
           <div class="ff-seg" role="radiogroup" aria-labelledby="ff-radius-label">
             <label><input type="radio" name="ticket-filter-radius" id="ticket-filter-radius-all" value="all" checked /><span>All</span></label>
@@ -205,7 +209,9 @@
         </div>
       </div>
     </div>
-    <div class="plan-waiting" id="plan-waiting" aria-live="polite" hidden></div>
+    <div class="plan-waiting" id="decisions-needs" role="region" aria-label="Decisions waiting for you" tabindex="0" aria-live="polite" hidden></div>
+    <div class="plan-waiting" id="plan-waiting" role="region" aria-label="Needs you and plans waiting" tabindex="0" aria-live="polite" hidden></div>
+    <div class="ticket-move-status" id="ticket-move-status" role="status" aria-live="polite"></div>
     <div class="ticket-board-columns" id="ticket-board-columns"></div>
   </div>
 
@@ -240,69 +246,69 @@
       Creates a tmux session on <code>~/Library/Application Support/Cubilot/tmux.sock</code>
       running the chosen harness in the chosen directory.
     </p>
-    <label>Agent name</label>
-    <input id="spawn-agent-input" spellcheck="false" autocomplete="off" placeholder="alice" style="width:100%;" />
-    <label>Role/Skill</label>
+    <label for="spawn-agent-input">Agent name (required)</label>
+    <input id="spawn-agent-input" spellcheck="false" autocomplete="off" placeholder="alice" aria-required="true" style="width:100%;" />
+    <label for="spawn-role-btn">Role (required)</label>
     <div class="spawn-role-combo">
       <select id="spawn-role-select" hidden>
-        <option value="">None</option>
+        <option value="">Pick a role</option>
       </select>
-      <button type="button" class="spawn-role-btn" id="spawn-role-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Role">
-        <span class="role-label">None</span>
+      <button type="button" class="spawn-role-btn" id="spawn-role-btn" aria-haspopup="listbox" aria-expanded="false">
+        <span class="role-label">Pick a role</span>
         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="spawn-role-menu" id="spawn-role-menu" role="listbox"></div>
     </div>
-    <div id="spawn-role-error" role="alert" hidden style="margin-top:4px; font-family:var(--sans); font-size:11px; color:#ff6b6b;"></div>
-    <div id="spawn-harness-row" style="margin-top:6px;">
-      <label style="text-transform:uppercase; letter-spacing:0.1em; font-family:var(--mono); font-size:10px; color:var(--text-dim);">Harness</label>
-      <div style="display:flex; flex-direction:column; gap:6px; margin-top:4px; font-family:var(--sans); font-size:12px; color:var(--text-muted);">
-        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; text-transform:none; letter-spacing:0;">
+    <div id="spawn-harness-row" style="margin-top:var(--sp-6);">
+      <span id="spawn-harness-label" class="spawn-label">Harness (required)</span>
+      <div role="radiogroup" aria-labelledby="spawn-harness-label" aria-required="true" id="spawn-harness-group" style="display:flex; flex-direction:column; gap:var(--sp-6); margin-top:var(--sp-4); font-family:var(--sans); font-size:var(--fs-sm); color:var(--text-muted);">
+        <label style="display:flex; align-items:center; gap:var(--sp-8); cursor:pointer; text-transform:none; letter-spacing:0;">
           <input type="radio" name="spawn-harness" value="claude" id="spawn-harness-claude" checked />
-          <span><code style="font-family:var(--mono); font-size:11px; color:var(--text);">claude</code> <span class="sub">Claude Code</span></span>
+          <span><code style="font-family:var(--mono); font-size:var(--fs-sm); color:var(--text);">claude</code> <span class="sub">Claude Code</span></span>
         </label>
-        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; text-transform:none; letter-spacing:0;">
+        <label style="display:flex; align-items:center; gap:var(--sp-8); cursor:pointer; text-transform:none; letter-spacing:0;">
           <input type="radio" name="spawn-harness" value="pi" id="spawn-harness-pi" />
-          <span><code style="font-family:var(--mono); font-size:11px; color:var(--text);">pi</code> <span class="sub">pi.dev</span></span>
+          <span><code style="font-family:var(--mono); font-size:var(--fs-sm); color:var(--text);">pi</code> <span class="sub">pi.dev</span></span>
         </label>
       </div>
     </div>
-    <div id="spawn-grid-row" style="margin-top:6px;">
-      <label>Model × effort <span id="spawn-grid-count" class="grid-count"></span></label>
-      <input id="spawn-grid-filter" class="grid-filter" spellcheck="false" autocomplete="off" placeholder="type to filter models" hidden />
-      <div id="spawn-grid" class="model-grid" role="grid" aria-label="Model and effort"></div>
+    <div id="spawn-grid-row" style="margin-top:var(--sp-6);">
+      <span id="spawn-grid-label" class="spawn-label">Model and effort (required)</span><span id="spawn-grid-count" class="grid-count"></span>
+      <input id="spawn-grid-filter" class="grid-filter" spellcheck="false" autocomplete="off" placeholder="type to filter models" aria-label="Filter models" hidden />
+      <div id="spawn-grid" class="model-grid" role="grid" aria-labelledby="spawn-grid-label"></div>
       <div id="spawn-grid-note" class="grid-note"></div>
     </div>
-    <label>Working directory</label>
-    <div style="display:flex; gap:6px; align-items:center;">
-      <input id="spawn-cwd-input" spellcheck="false" autocomplete="off" placeholder="/Users/you/project" style="flex:1;" readonly />
+    <label for="spawn-cwd-input">Project folder (required)</label>
+    <div style="display:flex; gap:var(--sp-6); align-items:center;">
+      <input id="spawn-cwd-input" spellcheck="false" autocomplete="off" placeholder="/Users/you/project" aria-required="true" style="flex:1;" readonly />
       <button type="button" id="spawn-cwd-pick">Pick…</button>
     </div>
-    <label>Room</label>
+    <label for="spawn-room-input">Room (required)</label>
     <div class="spawn-room-combo">
-      <input id="spawn-room-input" spellcheck="false" autocomplete="off" placeholder="defaults to git-root basename" />
+      <input id="spawn-room-input" spellcheck="false" autocomplete="off" placeholder="defaults to git-root basename" aria-required="true" />
       <button type="button" class="spawn-room-picker-btn" id="spawn-room-picker-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Pick from existing rooms">
         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="spawn-room-menu" id="spawn-room-menu" role="listbox"></div>
     </div>
-    <div id="spawn-session-row" style="margin-top:6px;">
-      <label style="text-transform:uppercase; letter-spacing:0.1em; font-family:var(--mono); font-size:10px; color:var(--text-dim);">Session</label>
-      <div style="display:flex; flex-direction:column; gap:6px; margin-top:4px; font-family:var(--sans); font-size:12px; color:var(--text-muted);">
-        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; text-transform:none; letter-spacing:0;">
+    <div id="spawn-session-row" style="margin-top:var(--sp-6);">
+      <label style="text-transform:uppercase; letter-spacing:0.1em; font-family:var(--mono); font-size:var(--fs-sm); color:var(--text-dim);">Session</label>
+      <div style="display:flex; flex-direction:column; gap:var(--sp-6); margin-top:var(--sp-4); font-family:var(--sans); font-size:var(--fs-sm); color:var(--text-muted);">
+        <label style="display:flex; align-items:center; gap:var(--sp-8); cursor:pointer; text-transform:none; letter-spacing:0;">
           <input type="radio" name="spawn-session-mode" value="continue" id="spawn-session-continue" />
-          <span><code style="font-family:var(--mono); font-size:11px; color:var(--text);">--continue</code> most recent session in this directory</span>
+          <span><code style="font-family:var(--mono); font-size:var(--fs-sm); color:var(--text);">--continue</code> most recent session in this directory</span>
         </label>
-        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; text-transform:none; letter-spacing:0;">
+        <label style="display:flex; align-items:center; gap:var(--sp-8); cursor:pointer; text-transform:none; letter-spacing:0;">
           <input type="radio" name="spawn-session-mode" value="resume" id="spawn-session-resume" />
-          <span><code style="font-family:var(--mono); font-size:11px; color:var(--text);">--resume</code> pick from an interactive list (claude's picker)</span>
+          <span><code style="font-family:var(--mono); font-size:var(--fs-sm); color:var(--text);">--resume</code> pick from an interactive list (claude's picker)</span>
         </label>
       </div>
     </div>
     <div class="modal-actions">
       <button type="button" id="spawn-cancel">Cancel</button>
-      <button type="button" id="spawn-submit">Launch</button>
+      <button type="button" id="spawn-submit" aria-describedby="spawn-launch-line" disabled>Launch</button>
     </div>
+    <div id="spawn-launch-line" class="spawn-launch-line" aria-live="polite"></div>
   </div>
 </div>
 
@@ -310,21 +316,23 @@
   <div class="modal">
     <h2>New factory room</h2>
     <p>Starts one <code>orchestrator</code> agent in a new room. It asks for the workers and testers it needs.</p>
-    <label>Room name</label>
-    <input id="factory-room-name" spellcheck="false" autocomplete="off" placeholder="my-product" style="width:100%;" />
-    <label>Project folder</label>
-    <div style="display:flex; gap:6px; align-items:center;">
-      <input id="factory-room-cwd" spellcheck="false" autocomplete="off" placeholder="/Users/you/project" style="flex:1;" readonly />
+    <label for="factory-room-name">Room name (required)</label>
+    <input id="factory-room-name" spellcheck="false" autocomplete="off" placeholder="my-product" aria-required="true" style="width:100%;" />
+    <label for="factory-room-cwd">Project folder (required)</label>
+    <div style="display:flex; gap:var(--sp-6); align-items:center;">
+      <input id="factory-room-cwd" spellcheck="false" autocomplete="off" placeholder="/Users/you/project" aria-required="true" style="flex:1;" readonly />
       <button type="button" id="factory-room-pick">Pick…</button>
     </div>
-    <label>Worker limit</label>
-    <input id="factory-room-workers" type="number" min="1" max="20" value="2" style="width:100%;" />
-    <label>Tester limit</label>
-    <input id="factory-room-testers" type="number" min="1" max="20" value="2" style="width:100%;" />
+    <label for="factory-room-workers">Worker limit (required)</label>
+    <input id="factory-room-workers" type="number" min="1" max="20" value="2" aria-required="true" style="width:100%;" />
+    <label for="factory-room-testers">Tester limit (required)</label>
+    <input id="factory-room-testers" type="number" min="1" max="20" value="2" aria-required="true" style="width:100%;" />
+    <p id="factory-room-orchestrator" class="factory-room-orchestrator">Orchestrator: not loaded</p>
     <div class="modal-actions">
       <button type="button" id="factory-room-cancel">Cancel</button>
-      <button type="button" id="factory-room-submit">Launch</button>
+      <button type="button" id="factory-room-submit" aria-describedby="factory-room-line" disabled>Launch</button>
     </div>
+    <div id="factory-room-line" class="spawn-launch-line" aria-live="polite"></div>
   </div>
 </div>
 
@@ -438,6 +446,19 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="path-modal">
+  <div class="modal">
+    <h2 id="path-title"></h2>
+    <p id="path-note"></p>
+    <textarea id="path-value" readonly spellcheck="false"></textarea>
+    <div class="modal-actions">
+      <span class="status" id="path-copied-status">copied</span>
+      <button type="button" id="path-copy-btn">Copy</button>
+      <button type="button" id="path-close-btn">Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="mcp-modal">
   <div class="modal">
     <h2>Claude launch command</h2>
@@ -486,6 +507,7 @@
 <script src="features/slash-command.js"></script>
 <script src="features/composer.js"></script>
 <script src="features/mcp-modal.js"></script>
+<script src="features/native-actions.js"></script>
 <script src="features/theme.js"></script>
 
 <!-- Tier 3: orchestrator + kinds + pill + terminal -->
@@ -499,9 +521,11 @@
 <script src="kinds/ticket.js"></script>
 <script src="kinds/stage.js"></script>
 <script src="features/plan-approval.js"></script>
+<script src="features/decisions.js"></script>
 <script src="terminal/pty.js"></script>
 <script src="terminal/role-memory.js"></script>
 <script src="terminal/model-grid.js"></script>
+<script src="terminal/spawn-form.js"></script>
 <script src="terminal/role-list.js"></script>
 <script src="terminal/factory-room.js"></script>
 <script src="terminal/xterm-themes.js"></script>

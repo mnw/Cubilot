@@ -5,7 +5,7 @@ import { chmodSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomId } from "./ids";
 
-export const LEDGER_SCHEMA_VERSION = 16;
+export const LEDGER_SCHEMA_VERSION = 20;
 
 export type LedgerOpenResult =
   | { db: Database; enabled: true }
@@ -434,13 +434,60 @@ export function migrateLedger(db: Database): void {
     })();
     console.log(`[ledger] applied migration v16`);
   }
+  if (current < 17) {
+    // v17: context-pack 1.1. Per-stage measurement of the first message and the first token use.
+    // tickets.planning_note is added by the ticket kind's migrate (the table belongs to that kind). Guarded.
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS stage_metrics (
+          stage_id                 TEXT    NOT NULL,
+          attempt                  INTEGER NOT NULL,
+          role                     TEXT    NOT NULL,
+          first_message_bytes      INTEGER NOT NULL,
+          first_message_tokens_est INTEGER NOT NULL,
+          prompt_tokens_first      INTEGER,
+          cache_read_tokens        INTEGER,
+          tokens_before_action     INTEGER,
+          source                   TEXT    NOT NULL,
+          created_seq              INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (stage_id, attempt)
+        );
+      `);
+      db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '17')");
+    })();
+    console.log(`[ledger] applied migration v17`);
+  }
+  if (current < 18) {
+    // v18: P6-01. The `decisions` table belongs to the decision kind's migrate (CREATE TABLE IF NOT EXISTS).
+    // This step only raises the version, so that openLedger copies the ledger before the new table appears.
+    db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '18')");
+    console.log(`[ledger] applied migration v18`);
+  }
+  if (current < 19) {
+    // v19: the stage kind's migrate adds `stage.session_released_at_ms`. This step only raises the version,
+    // so that openLedger copies the ledger before the column appears.
+    db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '19')");
+    console.log(`[ledger] applied migration v19`);
+  }
+  if (current < 20) {
+    // v20: an interrupt of a stage session carries the ticket and the stage that the launch record held at send time.
+    // Null for old rows and for a sender that is no stage session.
+    db.transaction(() => {
+      // Re-run safe: a ledger that was moved back in version, or one whose kind migrate ran first, already holds the columns.
+      const have = new Set(db.query<{ name: string }, []>("PRAGMA table_info(interrupts)").all().map((c) => c.name));
+      for (const col of ["ticket_id", "stage_id"]) if (!have.has(col)) db.exec(`ALTER TABLE interrupts ADD COLUMN ${col} TEXT`);
+      db.exec("CREATE INDEX IF NOT EXISTS idx_interrupts_ticket ON interrupts(ticket_id, status)");
+      db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '20')");
+    })();
+    console.log(`[ledger] applied migration v20`);
+  }
 }
 
-export const STAGE_ROLES = ["worker", "tester", "validator", "writer", "editor", "reviewer"] as const;
+export const STAGE_ROLES = ["worker", "tester", "validator", "writer", "editor", "reviewer", "retrospective"] as const;
 export type StageRole = (typeof STAGE_ROLES)[number];
 export type RoleLimits = Record<StageRole, number>;
 /** Applied while room_settings.role_limits / stage_timeout_min are NULL: the columns store only what the human set. */
-export const DEFAULT_ROLE_LIMITS: Readonly<RoleLimits> = { worker: 2, tester: 2, validator: 1, writer: 1, editor: 1, reviewer: 1 };
+export const DEFAULT_ROLE_LIMITS: Readonly<RoleLimits> = { worker: 2, tester: 2, validator: 1, writer: 1, editor: 1, reviewer: 1, retrospective: 1 };
 export const DEFAULT_STAGE_TIMEOUT_MIN = 30;
 
 export type RoomSettings = {

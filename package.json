@@ -2,6 +2,7 @@
   "name": "cubilot",
   "version": "0.12.0",
   "private": true,
+  "license": "BUSL-1.1",
   "type": "module",
   "scripts": {
     "dev": "bun run hub/hub.ts",
@@ -16,6 +17,8 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.5",
     "@types/bun": "latest",
+    "@xterm/addon-unicode11": "^0.9.0",
+    "@xterm/headless": "^6.0.0",
     "typescript": "^5.9.3",
     "yaml": "2.9.0"
   }

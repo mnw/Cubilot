@@ -13,7 +13,7 @@ describe("GET /requests/<room>/needs-you", () => {
     expect((await getJson(hub, "/requests/bad%20room%21/needs-you")).status).toBe(400);
     const ok = await getJson(hub, "/requests/r1/needs-you");
     expect(ok.status).toBe(200);
-    expect(ok.json).toEqual({ room: "r1", requests: [] });
+    expect(ok.json).toEqual({ room: "r1", requests: [], waiting: [], deliveries: [] });
   });
 
   test("the same auth as the other read routes: the Bearer header or ?token=", async () => {

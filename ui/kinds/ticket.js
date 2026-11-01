@@ -3,11 +3,8 @@
 // Loaded AFTER kind-renderer.js; shares main.js lexical scope
 // (authedFetch, parseErrorBody, escHtml, HUMAN_NAME, SELECTED_ROOM, ROOM_ALL, addMessage).
 //
-// Two event streams feed it: ticket.* (the tickets themselves, reconciled by version)
-// and permission.* for tool_name "ticket:done" (approval state). The permission's
-// input_preview.ticket_id is only a lookup hint — an approval is applied only when its
-// request id equals the ticket's current approval_request_id; an unknown id for a ticket
-// triggers one list re-read, because setting the pointer writes no ticket event.
+// One event stream feeds it: ticket.* (the tickets themselves, reconciled by version).
+// A high ticket's card shows its Validator PASS marks as text (validator_passes, read with the list).
 
 const TicketBoard = (() => {
   // `status`: the status a ticket gets when it is created from the column's "+" (one call).
@@ -23,15 +20,16 @@ const TicketBoard = (() => {
   const PRIORITIES = { highest: [5, 'Highest'], high: [4, 'High'], medium: [3, 'Medium'], low: [2, 'Low'], lowest: [1, 'Lowest'] };
   const prio = (t) => (Object.hasOwn(PRIORITIES, t.priority) ? PRIORITIES[t.priority] : PRIORITIES.medium);
 
-  // Board filters (blast radius, priority, request, show archived, show cancelled), kept per room in localStorage. No filter = all five
+  // Board filters (ticket id, blast radius, priority, request, show archived, show cancelled), kept per room in localStorage. No filter = all five
   // priorities ticked and radius "all". An unticked-everything choice is honoured: it shows nothing.
   const FILTER_KEY = (r) => `cubilot_board_filter:${r}`;
   const RADII = ['all', 'low', 'high'];
-  const defaultFilter = () => ({ radius: 'all', request: '', priorities: Object.keys(PRIORITIES), showArchived: false, showCancelled: false });
+  const defaultFilter = () => ({ id: '', radius: 'all', request: '', priorities: Object.keys(PRIORITIES), showArchived: false, showCancelled: false });
   function sanitizeFilter(f) {
     const d = defaultFilter();
     if (!f || typeof f !== 'object') return d;
     return {
+      id: typeof f.id === 'string' ? f.id : d.id,   // the raw text; only the match trims it
       radius: RADII.includes(f.radius) ? f.radius : d.radius,
       request: typeof f.request === 'string' ? f.request : d.request,
       priorities: Array.isArray(f.priorities) ? d.priorities.filter((k) => f.priorities.includes(k)) : d.priorities,
@@ -49,20 +47,17 @@ const TicketBoard = (() => {
   }
   // An unknown priority reads as medium (as everywhere on the board).
   const priorityKey = (t) => (Object.hasOwn(PRIORITIES, t.priority) ? t.priority : 'medium');
-  const matchesFilter = (t, f) => (f.radius === 'all' || t.blast_radius === f.radius) && (f.request === '' || t.request_id === f.request) && f.priorities.includes(priorityKey(t));
-  const isDefaultFilter = (f) => f.radius === 'all' && f.request === '' && f.priorities.length === Object.keys(PRIORITIES).length && !f.showArchived && !f.showCancelled;
+  const matchesIdText = (t, f) => { const q = (f.id ?? '').trim(); return q === '' || String(t.id).toLowerCase().includes(q.toLowerCase()); };
+  const matchesFilter = (t, f) => matchesIdText(t, f) && (f.radius === 'all' || t.blast_radius === f.radius) && (f.request === '' || t.request_id === f.request) && f.priorities.includes(priorityKey(t));
+  const isDefaultFilter = (f) => f.id.trim() === '' && f.radius === 'all' && f.request === '' && f.priorities.length === Object.keys(PRIORITIES).length && !f.showArchived && !f.showCancelled;
   // Hidden unless asked for: an archived ticket (archived_at_ms set) and a cancelled one.
   const isVisible = (t, f) => (f.showArchived || !t.archived_at_ms) && (f.showCancelled || t.status !== 'cancelled');
 
   const LIST_LIMIT = 500;   // mirrors TICKET_LIST_LIMIT in hub/kinds/ticket.ts
   const CANCELLED = { key: 'cancelled', label: 'Cancelled', statuses: ['cancelled'] };   // no "+": nothing is created cancelled
 
-  /** @type {Map<string, any>} id → snapshot (+ approval {id,status,resolved_by,version}) */
+  /** @type {Map<string, any>} id → snapshot (+ validator_passes from the list) */
   const tickets = new Map();
-  /** request ids already re-read for, so a late superseded event cannot loop reloads */
-  const reloadedFor = new Set();
-  /** permission events for tickets not known yet, held while a list read is in flight */
-  const deferred = [];
   let loading = false;
   let room = null;
   let newColumn = COLUMNS[0];
@@ -87,24 +82,15 @@ const TicketBoard = (() => {
 
   const boardRoom = () => (typeof SELECTED_ROOM === 'string' && SELECTED_ROOM !== ROOM_ALL ? SELECTED_ROOM : null);
 
-  // The newer of two approvals for the ticket's current pointer; anything else is dropped.
-  function pickApproval(pointer, ...candidates) {
-    let best = null;
-    for (const a of candidates) {
-      if (a && a.id === pointer && (!best || Number(a.version) > Number(best.version))) best = a;
-    }
-    return best;
-  }
-
   async function load() {
     const target = boardRoom();
-    if (target !== room) { tickets.clear(); reloadedFor.clear(); deferred.length = 0; notes.clear(); openNotes.clear(); files.clear(); }
+    if (target !== room) { tickets.clear(); notes.clear(); openNotes.clear(); files.clear(); }
     const roomChanged = target !== room;
     if (roomChanged) { listLoaded = false; filter = target ? readFilter(target) : defaultFilter(); syncFilterControls(); }
     room = target;
     if (roomChanged) { closeView(); loadLead(); } else renderLead();   // the roster may have changed since
     const seq = ++loadSeq;
-    if (!room) { loading = false; deferred.length = 0; render(); return; }
+    if (!room) { loading = false; render(); return; }
     loading = true;
     freshDuringLoad.clear();
     try {
@@ -113,14 +99,13 @@ const TicketBoard = (() => {
       const list = await r.json();
       if (seq !== loadSeq || !Array.isArray(list)) return;
       // A list read can be older than events that arrived while it was in flight:
-      // keep whichever ticket and approval carries the higher version.
+      // keep whichever ticket carries the higher version.
       for (const item of list) {
         const prior = tickets.get(item.id);
-        const listApproval = item.approval ? { ...item.approval, version: Number(item.approval.version) || 0 } : null;
         const base = prior && prior.version > item.version ? prior : { ...item };
         base.notes_count = Math.max(Number(prior?.notes_count) || 0, Number(item.notes_count) || 0);   // counts only grow
         base.attachments_count = Number(base.attachments_count) || 0;   // follows the newer of list and event: a count can fall
-        base.approval = pickApproval(base.approval_request_id, prior?.approval, listApproval);
+        base.validator_passes = Number(item.validator_passes) || 0;   // only the list carries it; an event keeps the last read
         tickets.set(item.id, base);
         syncNotes(base);
         syncFiles(base);
@@ -142,18 +127,25 @@ const TicketBoard = (() => {
     } catch (e) {
       console.warn('[tickets] load failed:', e);
     } finally {
-      // Only the newest read replays: a verdict that arrived before its ticket was known
-      // is applied now, after the version merge.
-      if (seq === loadSeq) {
-        loading = false;
-        for (const e of deferred.splice(0)) onPermission(e);
-      }
+      if (seq === loadSeq) loading = false;
     }
   }
 
   function snapshotOf(event) {
     if (event.snapshot) return event.snapshot;
     try { return JSON.parse(event.text || '{}'); } catch { return null; }
+  }
+
+  // A Validator PASS adds a PASS mark and a new worker stage clears them. Neither writes a ticket event, so one list read
+  // (debounced) refreshes the count of that ticket's card.
+  let passReload = null;
+  function onStage(event) {
+    const snap = event?.snapshot;
+    if (!snap?.ticket_id || !tickets.has(snap.ticket_id) || snap.review) return;
+    const passed = snap.role === 'validator' && event.kind === 'stage.passed' && snap.verdict === 'PASS';
+    if (!passed && !(snap.role === 'worker' && event.kind === 'stage.queued')) return;
+    clearTimeout(passReload);
+    passReload = setTimeout(load, 200);
   }
 
   function onTicket(event) {
@@ -166,48 +158,17 @@ const TicketBoard = (() => {
     const prior = tickets.get(s.id);
     const version = Number(event.version ?? s.version ?? 0);
     if (prior && prior.version >= version) return;
-    const approval = prior && prior.approval_request_id === s.approval_request_id ? prior.approval : null;
     // notes_count rides on the entry (a ticket.update that carried a note), not in the snapshot.
-    tickets.set(s.id, { ...s, version, approval, notes_count: Math.max(Number(prior?.notes_count) || 0, Number(event.notes_count ?? s.notes_count) || 0),
+    tickets.set(s.id, { ...s, version, validator_passes: Number(prior?.validator_passes) || 0, notes_count: Math.max(Number(prior?.notes_count) || 0, Number(event.notes_count ?? s.notes_count) || 0),
       attachments_count: Number(event.attachments_count ?? s.attachments_count ?? prior?.attachments_count) || 0 });
     syncNotes(tickets.get(s.id));
     syncFiles(tickets.get(s.id));
-    if (s.approval_request_id && !approval) load();
-    else {
-      if (listLoaded && !loading) dropStaleRequest();   // the event may have hidden the last ticket of the selected request
-      render();
-    }
-  }
-
-  // Returns 'applied' | 'ignored' | 'reload' | 'deferred' — exposed for the unit test.
-  function onPermission(event) {
-    const p = snapshotOf(event);
-    if (!p || p.tool_name !== 'ticket:done') return 'ignored';
-    let hint = null;
-    try { hint = JSON.parse(p.input_preview || '{}').ticket_id ?? null; } catch {}
-    const t = hint ? tickets.get(hint) : null;
-    if (!t) {
-      if (!hint || !loading) return 'ignored';
-      deferred.push(event);
-      return 'deferred';
-    }
-    if (p.id !== t.approval_request_id) {
-      // Unknown to this ticket: either a new pointer we have not seen, or an unrelated /
-      // superseded request. Never applied; re-read once so the list decides.
-      if (reloadedFor.has(p.id)) return 'ignored';
-      reloadedFor.add(p.id);
-      load();
-      return 'reload';
-    }
-    const version = Number(event.version ?? p.version ?? 0);
-    if (t.approval && t.approval.id === p.id && t.approval.version >= version) return 'ignored';
-    t.approval = { id: p.id, status: p.status, resolved_by: p.resolved_by ?? null, version };
+    if (listLoaded && !loading) dropStaleRequest();   // the event may have hidden the last ticket of the selected request
     render();
-    return 'applied';
   }
 
   let lastActError = '';   // the text of the last refused call, for inline display
-  async function act(path, body, label) {
+  async function act(path, body, label, out = null) {   // `out.reason`: this call's own refusal text (lastActError is shared)
     lastActError = '';
     try {
       const r = await authedFetch(path, {
@@ -218,9 +179,11 @@ const TicketBoard = (() => {
       if (r.ok) return (await r.json().catch(() => null)) ?? {};
       const err = await parseErrorBody(r);
       lastActError = String(err);
+      if (out) out.reason = lastActError;
       addMessage({ from: 'system', to: HUMAN_NAME, text: `Ticket ${label} failed: ${err}`, ts: '' });
     } catch (e) {
       lastActError = String(e?.message ?? e);
+      if (out) out.reason = lastActError;
       addMessage({ from: 'system', to: HUMAN_NAME, text: `Ticket ${label} error: ${e?.message ?? e}`, ts: '' });
     }
     return null;
@@ -240,16 +203,49 @@ const TicketBoard = (() => {
     return `<label class="ticket-move-label">${escHtml(label)} <select class="ticket-move" data-ticket="${escAttr(t.id)}" data-current="${escAttr(cur)}" aria-label="Move ${escAttr(t.title)} to column">${options}</select></label>`;
   }
 
+  // A failed move shows one line in the persistent status region (static markup in index.html: a re-render never replaces it).
+  // It clears at the next move attempt of the same ticket, or 10 s after it shows; a new failure replaces it and restarts the 10 s.
+  const MOVE_LINE_MS = 10000;
+  let moveLineFor = null;
+  let moveLineTimer = null;
+  function clearMoveLine() {
+    if (moveLineTimer != null) clearTimeout(moveLineTimer);
+    moveLineTimer = null;
+    moveLineFor = null;
+    const line = document.getElementById('ticket-move-status');
+    if (line) line.textContent = '';
+  }
+  function failMove(id, reason) {
+    const line = document.getElementById('ticket-move-status');
+    if (!line) return;
+    if (moveLineTimer != null) clearTimeout(moveLineTimer);
+    moveLineFor = id;
+    line.textContent = `Move of ${tickets.get(id)?.title ?? id} failed: ${reason}`;
+    moveLineTimer = setTimeout(clearMoveLine, MOVE_LINE_MS);
+  }
+
   // Send the human move. Nothing moves on screen until the hub's event arrives, so a refused move
-  // (the hub error goes to the chat) only redraws the board: the card and the select are back where they were.
+  // (the hub error goes to the chat and to the board line) only redraws the board: the card and the select are back where they were.
+  // `fromControl`: the Move select started it, so a failure puts the keyboard back on that card's select.
   const moving = new Set();   // tickets with a move in flight: a second move waits for the hub's answer
-  async function moveTicket(id, to) {
+  async function moveTicket(id, to, fromControl = false) {
     const t = tickets.get(id);
-    if (!t || !movable(t) || columnStatus(t) === to || moving.has(id)) return;
+    if (!t || !movable(t) || columnStatus(t) === to) return;
+    if (moveLineFor === id) clearMoveLine();
+    const refocus = () => {
+      if (!fromControl) return;
+      const board = document.getElementById('ticket-board-columns');
+      const sel = [...(board?.querySelectorAll?.('.ticket-move') ?? [])].find((s) => s.dataset.ticket === id);
+      // The controls are visibility: hidden until the card has focus (kinds.css), so the card takes focus first.
+      sel?.closest?.('.ticket-card')?.focus?.();
+      sel?.focus?.();
+    };
+    if (moving.has(id)) { failMove(id, 'a move is in flight'); refocus(); return; }
     moving.add(id);
     try {
-      const ok = await act(`/tickets/${encodeURIComponent(id)}/transition`, { to }, `move to ${to}`);
-      if (!ok) render();
+      const out = { reason: '' };
+      const ok = await act(`/tickets/${encodeURIComponent(id)}/transition`, { to }, `move to ${to}`, out);
+      if (!ok) { failMove(id, out.reason); render(); refocus(); }
     } finally {
       moving.delete(id);
     }
@@ -686,33 +682,6 @@ const TicketBoard = (() => {
     return done;
   }
 
-  function approvalHtml(t) {
-    if (t.blast_radius !== 'high' || !t.approval_request_id) return '';
-    const a = t.approval;
-    if (a?.status === 'pending' && a.id === t.approval_request_id) {   // the human's question, with the same verdict call as the chat card
-      return `<div class="ticket-approval-banner" role="group" aria-label="Approval needed"><div class="ticket-approval-text"><strong>Waiting for your approval.</strong> ${escHtml(t.assignee || 'The assignee')} asks to move this high-radius ticket to Done.</div>`
-        + `<div class="ticket-approval-actions"><button type="button" data-approval="deny" data-request="${escAttr(t.approval_request_id)}">Deny</button><button type="button" class="primary" data-approval="allow" data-request="${escAttr(t.approval_request_id)}">Allow</button></div></div>`;
-    }
-    const state = !a ? 'waiting for approval'
-      : a.status === 'pending' ? 'waiting for your approval'
-      : a.status === 'allowed' && a.resolved_by === HUMAN_NAME ? `Approved by ${HUMAN_NAME}`
-      : a.status === 'denied' && a.resolved_by === HUMAN_NAME ? `Denied by ${HUMAN_NAME}`
-      : `request ${a.status}${a.resolved_by ? ` by ${a.resolved_by}` : ''} — not your approval`;
-    return `<div class="ticket-approval">${escHtml(state)} · ${escHtml(t.approval_request_id)}</div>`;
-  }
-
-  // Allow and Deny in the banner: both are disabled while the call runs. The redraw that follows the permission event removes the banner.
-  function wireApproval(root) {
-    const btns = [...(root.querySelectorAll?.('[data-approval]') ?? [])];
-    for (const b of btns) {
-      b.addEventListener('click', async () => {
-        btns.forEach((x) => { x.disabled = true; });
-        try { await handlePermissionAction(b.dataset.request, b.dataset.approval); }
-        finally { btns.forEach((x) => { x.disabled = false; }); }
-      });
-    }
-  }
-
   // Only a finished ticket can be archived (the hub enforces it too); an archived one can be restored.
   const archivable = (t) => t.status === 'done' || t.status === 'cancelled';
   function archiveButton(t) {
@@ -744,13 +713,13 @@ const TicketBoard = (() => {
   }
 
   // Status light, macOS window-button style (the human's rules, id=233). Red: the ticket cannot advance without the
-  // human: a pending approval, the human is the assignee, the assignee is gone, or only the human may queue it. Orange: an
+  // human: the human is the assignee, the assignee is gone, or only the human may queue it. Orange: an
   // agent works on it now (claimed, in_progress). Green: nobody works on it now: queued, and in_review, which waits for a check;
   // it is green because no "check started" state exists on the hub. Done and cancelled: no light. Only the active dot is lit.
   // statusLine() follows the same order, so the light and the line never disagree.
   function lightOf(t) {
     if (t.status === 'done' || t.status === 'cancelled') return null;
-    if (t.approval?.status === 'pending' || t.assignee === HUMAN_NAME) return ['red', 'waiting for the human'];
+    if (t.assignee === HUMAN_NAME) return ['red', 'waiting for the human'];
     if (assigneeGone(t)) return ['red', 'the assignee is gone: only the human can act'];
     if (onlyHumanCanQueue(t)) return ['red', 'only the human can queue it'];
     if (t.status === 'claimed' || t.status === 'in_progress') return ['orange', 'an agent is busy with it'];
@@ -792,11 +761,10 @@ const TicketBoard = (() => {
     return { done, total };
   }
   const priorityBars = (t) => PRIORITIES[priorityKey(t)][0] - 1;
-  // The one line under a card title. Same order as lightOf(): the approval, the human, the gone assignee and the only-you lines are
+  // The one line under a card title. Same order as lightOf(): the human, the gone assignee and the only-you lines are
   // the red light. A finished ticket has no light and no line.
   function statusLine(t) {
     if (t.status === 'done' || t.status === 'cancelled') return null;
-    if (t.approval?.status === 'pending') return 'Waiting for your approval';
     if (t.assignee === HUMAN_NAME) return 'Assigned to you';
     if (assigneeGone(t)) return `Assignee ${t.assignee} is gone: cancel or assign it`;
     if (onlyHumanCanQueue(t)) return 'Only you can queue this';
@@ -835,16 +803,17 @@ const TicketBoard = (() => {
     root.querySelectorAll?.('.ticket-cancel-btn').forEach((btn) => btn.addEventListener('click', () => cancelClick(btn.dataset.ticket)));
   }
 
-  // Open blockers, calculated from the tickets the board holds so a card and an open dialog follow a blocker's
-  // status with no extra hub broadcast (design decision 8). A blocker is open until it is `done`: a cancelled
-  // one still blocks. A blocker the board does not hold keeps the server's answer (`open_blockers`); absence
-  // never counts as done.
+  // Open blockers: the hub's list (`open_blockers`), which also clears a blocker merged into staging. A blocker the
+  // board holds as `done` is closed at once, so a card follows it with no extra hub broadcast. A cancelled one still
+  // blocks. Absence from the hub's list never counts as done for a ticket the hub has not sent a list for.
   const blockerIds = (t) => (Array.isArray(t.blocked_by) ? t.blocked_by : []);
   function openBlockers(t) {
-    const serverOpen = Array.isArray(t.open_blockers) ? t.open_blockers : [];
+    const serverOpen = Array.isArray(t.open_blockers) ? t.open_blockers : null;
     return blockerIds(t).filter((id) => {
       const b = tickets.get(id);
-      return b ? b.status !== 'done' : serverOpen.includes(id);
+      if (b && b.status === 'done') return false;
+      if (b && b.status === 'cancelled') return true;
+      return serverOpen ? serverOpen.includes(id) : true;
     });
   }
   function lockHtml(t) {
@@ -868,6 +837,9 @@ const TicketBoard = (() => {
   };
   const icon = (name) => `<svg class="ticket-icon" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
 
+  // The two Validator PASS marks of a high ticket, as text: "PASS 1/2".
+  const passMarks = (t) => `PASS ${Math.min(Number(t.validator_passes) || 0, 2)}/2`;
+
   // The card, top to bottom: tag, code and priority; title and subtitle; chips; one status line; footer (assignee, counters, light).
   // The controls (Move to, Assignee, Cancel) stay in the markup but show only on hover or keyboard focus (P4).
   function cardHtml(t) {
@@ -875,13 +847,14 @@ const TicketBoard = (() => {
     const bars = priorityBars(t);
     const prioLabel = prio(t)[1];
     const status = statusLine(t);
-    const approval = t.approval?.status === 'pending';
     const crit = criteriaProgress(t.acceptance_criteria);
     const files = attachCount(t), notes = noteCount(t);
     const chips = [
       t.request_id ? `<span class="ticket-chip">${icon('layers')}<span class="ticket-request-label">${escHtml(t.request_id)}</span></span>` : '',
       t.external_ref ? `<span class="ticket-chip">${escHtml(t.external_ref)}</span>` : '',
       t.blast_radius === 'high' ? '<span class="ticket-chip ticket-radius">High radius</span>' : '',
+      t.blast_radius === 'high' ? `<span class="ticket-chip ticket-passes">${passMarks(t)}</span>` : '',
+      t.radius_source ? `<span class="ticket-chip ticket-radius-source">Radius: ${escHtml(t.radius_source)}</span>` : '',
       t.archived_at_ms ? '<span class="ticket-chip">archived</span>' : '',
     ].join('');
     const who = t.assignee
@@ -893,12 +866,12 @@ const TicketBoard = (() => {
       notes > 0 ? `<span class="ticket-count" title="Notes">${icon('note')}${notes}</span>` : '',
     ].join('');
     return `
-      <div class="ticket-card status-${escAttr(t.status)}${t.archived_at_ms ? ' archived' : ''}" role="button" tabindex="0"${movable(t) ? ' draggable="true"' : ''} data-ticket="${escAttr(t.id)}" aria-label="Open ticket: ${escAttr(t.title)}">
-        <div class="ticket-card-top">${p.tag ? `<span class="ticket-tag${p.tag === 'code' ? ' tag-code' : ''}">${escHtml(p.tag)}</span>` : ''}${p.code ? `<span class="ticket-code">${escHtml(p.code)}</span>` : ''}<span class="ticket-prio" title="Priority ${escAttr(prioLabel)}"><span class="ticket-bars" aria-hidden="true">${[1, 2, 3, 4].map((n) => `<i${n <= bars ? ' class="on"' : ''}></i>`).join('')}</span>${escHtml(prioLabel)}</span></div>
+      <div class="ticket-card status-${escAttr(t.status)}${t.archived_at_ms ? ' archived' : ''}" role="button" tabindex="0"${movable(t) ? ' draggable="true"' : ''} data-ticket="${escAttr(t.id)}" aria-label="Open ticket ${escAttr(t.id)}: ${escAttr(t.title)}">
+        <div class="ticket-card-top">${p.tag ? `<span class="ticket-tag${p.tag === 'code' ? ' tag-code' : ''}">${escHtml(p.tag)}</span>` : ''}${p.code ? `<span class="ticket-code">${escHtml(p.code)}</span>` : ''}<span class="ticket-id" title="${escAttr(t.id)}">${escHtml(t.id)}</span><span class="ticket-prio" title="Priority ${escAttr(prioLabel)}"><span class="ticket-bars" aria-hidden="true">${[1, 2, 3, 4].map((n) => `<i${n <= bars ? ' class="on"' : ''}></i>`).join('')}</span>${escHtml(prioLabel)}</span></div>
         <div class="ticket-title">${escHtml(p.main)}</div>
         ${p.sub ? `<div class="ticket-sub">${escHtml(p.sub)}</div>` : ''}
         ${chips ? `<div class="ticket-chips">${chips}</div>` : ''}
-        ${status ? `<div class="ticket-status-line ${approval ? 'is-approval' : t.assignee === HUMAN_NAME ? 'is-human' : 'is-blocked'}">${icon(approval || t.assignee === HUMAN_NAME ? 'clock' : 'lock')}${escHtml(status)}</div>` : ''}
+        ${status ? `<div class="ticket-status-line ${t.assignee === HUMAN_NAME ? 'is-human' : 'is-blocked'}">${icon(t.assignee === HUMAN_NAME ? 'clock' : 'lock')}${escHtml(status)}</div>` : ''}
         <div class="ticket-card-foot">${who}<span class="ticket-counts">${counters}</span>${lightHtml(t)}</div>
         <div class="ticket-card-controls">
           ${moveHtml(t)}
@@ -928,7 +901,8 @@ const TicketBoard = (() => {
   function wireDrag(el) {
     el.querySelectorAll('.ticket-card[draggable="true"]').forEach((card) => {
       card.addEventListener('dragstart', (e) => {
-        if (e.target?.closest?.(INTERACTIVE) || moving.has(card.dataset.ticket) || nearSplitter(e)) { e.preventDefault(); return; }   // a control is not a drag handle
+        if (moving.has(card.dataset.ticket)) { e.preventDefault(); failMove(card.dataset.ticket, 'a move is in flight'); return; }
+        if (e.target?.closest?.(INTERACTIVE) || nearSplitter(e)) { e.preventDefault(); return; }   // a control is not a drag handle
         dragId = card.dataset.ticket;
         card.classList.add('dragging');
         if (e.dataTransfer) { e.dataTransfer.setData('text/plain', dragId); e.dataTransfer.effectAllowed = 'move'; }
@@ -942,16 +916,24 @@ const TicketBoard = (() => {
         return !!(t && movable(t) && col.dataset.status && columnStatus(t) !== col.dataset.status);
       };
       col.addEventListener('dragover', (e) => {
-        if (!accepts()) return;
+        // A browser sends `drop` only to a target whose dragover was cancelled, so a refusing column is enabled too:
+        // its drop shows the failure line. Only an accepting column is highlighted; the card's own column stays a no-op.
+        const dragged = dragId ? tickets.get(dragId) : null;
+        if (!dragged || (!accepts() && columnStatus(dragged) === col.dataset.status)) return;
         e.preventDefault();
         if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-        col.classList.add('drop-target');
+        if (accepts()) col.classList.add('drop-target');
       });
       col.addEventListener('dragleave', (e) => {
         if (!col.contains?.(e.relatedTarget)) col.classList.remove('drop-target');
       });
       col.addEventListener('drop', (e) => {
-        if (!accepts()) return;
+        if (!accepts()) {
+          // Dropped on its own column is a no-op; any other refusal (the Cancelled strip, a closed ticket) says why.
+          const t = dragId ? tickets.get(dragId) : null;
+          if (t && !(movable(t) && columnStatus(t) === col.dataset.status)) failMove(t.id, 'that column does not take tickets');
+          return;
+        }
         e.preventDefault();
         const id = dragId, to = col.dataset.status;
         endDrag();
@@ -1006,7 +988,7 @@ const TicketBoard = (() => {
       });
     });
     root.querySelectorAll('.ticket-move').forEach((sel) => {
-      sel.addEventListener('change', () => moveTicket(sel.dataset.ticket, sel.value));
+      sel.addEventListener('change', () => moveTicket(sel.dataset.ticket, sel.value, true));
     });
     root.querySelectorAll('.ticket-archive').forEach((btn) => {
       btn.addEventListener('click', () => act(`/tickets/${encodeURIComponent(btn.dataset.ticket)}/archive`, { archived: btn.dataset.archive === 'true' }, 'archive'));
@@ -1023,6 +1005,8 @@ const TicketBoard = (() => {
 
   // The controls mirror `filter`: set them whenever the filter changes or the room does.
   function syncFilterControls() {
+    const idField = document.getElementById('ticket-filter-id');
+    if (idField && document.activeElement !== idField && idField.value !== filter.id) idField.value = filter.id;   // never under the caret
     for (const v of RADII) {
       const r = document.getElementById(`ticket-filter-radius-${v}`);
       if (r) r.checked = filter.radius === v;
@@ -1122,10 +1106,10 @@ const TicketBoard = (() => {
     renderLead();   // refused: the select goes back to the real lead
   }
 
-  // The "Filters" button: how many of the five filter dimensions are active (radius, request, priority, archived,
+  // The "Filters" button: how many of the six filter dimensions are active (ticket id, radius, request, priority, archived,
   // cancelled), and the "Showing N of M" summary beside it.
   const activeFilterCount = (f) =>
-    (f.radius !== 'all' ? 1 : 0) + (f.request !== '' ? 1 : 0) + (f.priorities.length !== Object.keys(PRIORITIES).length ? 1 : 0)
+    (f.id.trim() !== '' ? 1 : 0) + (f.radius !== 'all' ? 1 : 0) + (f.request !== '' ? 1 : 0) + (f.priorities.length !== Object.keys(PRIORITIES).length ? 1 : 0)
     + (f.showArchived ? 1 : 0) + (f.showCancelled ? 1 : 0);
 
   function updateFiltersButton(total, shown) {
@@ -1151,7 +1135,7 @@ const TicketBoard = (() => {
     filterPanelOpen = open;
     panel.hidden = !open;
     btn.setAttribute('aria-expanded', String(open));
-    if (open) document.getElementById(`ticket-filter-radius-${filter.radius}`)?.focus?.();
+    if (open) document.getElementById('ticket-filter-id')?.focus?.();
     else if (focusButton) btn.focus?.();
   }
 
@@ -1170,11 +1154,27 @@ const TicketBoard = (() => {
   function onDocumentKeydown(e) {
     if (e.key === 'Escape' && filterPanelOpen) {
       e.preventDefault?.();
+      const idField = document.getElementById('ticket-filter-id');
+      if (idField && idField.value !== '' && document.activeElement === idField) {   // first Escape clears the field, the next closes
+        idField.value = '';
+        setFilter({ ...filter, id: '' });
+        return;
+      }
       setFilterPanel(false, { focusButton: true });
     }
   }
 
+  // Typing in the id field renders after a 150 ms pause (a full render of a big board costs far more than one keystroke).
+  // A pending id is folded into the next filter change, so no other control can drop it.
+  const ID_DEBOUNCE_MS = 150;
+  let idTimer = null;
   function setFilter(next) {
+    if (idTimer !== null) {
+      clearTimeout(idTimer);
+      idTimer = null;
+      const idField = document.getElementById('ticket-filter-id');
+      if (idField && next.id === filter.id) next = { ...next, id: idField.value };
+    }
     const before = filter.showArchived;
     filter = sanitizeFilter(next);
     dropStaleRequest();
@@ -1235,7 +1235,7 @@ const TicketBoard = (() => {
   // The blocker ids the dialog shows: the typed list in edit mode, the ticket's own list otherwise.
   const shownBlockerIds = (t) => (isEditMode(t) ? formValues(t).blockers.split(',').map((x) => x.trim()).filter(Boolean) : blockerIds(t));
   // Is this blocker still open? Done is closed; a cancelled blocker still blocks. A blocker the board does not hold keeps the server's answer.
-  const blockerOpen = (t, id) => { const b = tickets.get(id); return b ? b.status !== 'done' : Array.isArray(t.open_blockers) && t.open_blockers.includes(id); };
+  const blockerOpen = (t, id) => openBlockers({ blocked_by: [id], open_blockers: t.open_blockers }).length > 0;
 
   function blockerRowHtml(t, id, edit) {
     const b = tickets.get(id);
@@ -1390,10 +1390,7 @@ const TicketBoard = (() => {
     if (!isEditMode(t)) return '';
     const v = formValues(t);
     const md = (a, label, html) => `<button type="button" data-edit-md="${a}" aria-label="${label}">${html}</button>`;
-    const pendingApproval = t.approval?.status === 'pending';
-    return (pendingApproval
-        ? `<div class="ticket-edit-warning" role="note">This ticket waits for your approval. If you save new acceptance criteria or set the blast radius to low, ${escHtml(t.assignee || 'the assignee')}'s approval request is cancelled.</div>` : '')
-      + `<form class="ticket-request-form" id="ticket-request-form">`
+    return `<form class="ticket-request-form" id="ticket-request-form">`
       + `<div class="ticket-crit-head"><label for="ticket-edit-criteria">Acceptance criteria <span class="ticket-view-count" id="ticket-edit-progress">${critProgressText(v.criteria)}</span></label>`
       + `<div class="ticket-tabs" role="tablist" aria-label="Acceptance criteria">`
       + ['write', 'preview'].map((k) => `<button type="button" role="tab" id="ticket-tab-${k}" aria-controls="ticket-pane-${k}" aria-selected="${critTab === k}" tabindex="${critTab === k ? 0 : -1}">${k === 'write' ? 'Write' : 'Preview'}</button>`).join('')
@@ -1614,12 +1611,19 @@ const TicketBoard = (() => {
 
   const STATUS_PILL = { draft: 'Draft', queued: 'Queued', claimed: 'In progress', in_progress: 'In progress', in_review: 'In review', done: 'Done', cancelled: 'Cancelled' };
 
-  // The body's left column: criteria, blockers, the editor, approval, notes, files. The properties are in the panel (panelHtml).
+  // The body's left column: criteria, blockers, the editor, notes, files. The properties are in the panel (panelHtml).
+  // The agent notes (planning_note): a native closed details; the text is escaped, so it shows as text.
+  function agentNotesHtml(t) {
+    const text = String(t.planning_note ?? '').trim();
+    if (!text) return '';
+    return `<details class="ticket-agent-notes"><summary>For the agents</summary><div class="ticket-agent-notes-text">${escHtml(text)}</div></details>`;
+  }
+
   function viewHtml(t) {
     const draft = isEditMode(t);
     const crit = criteriaProgress(t.acceptance_criteria);
-    return approvalHtml(t)
-      + (draft ? '' : `<h3 class="ticket-view-h">Acceptance criteria${crit.total ? ` <span class="ticket-view-count">${crit.done} of ${crit.total} checked</span>` : ''}</h3><div class="ticket-view-criteria md">${mdHtml(t.acceptance_criteria)}</div>`)
+    return (draft ? '' : `<h3 class="ticket-view-h">Acceptance criteria${crit.total ? ` <span class="ticket-view-count">${crit.done} of ${crit.total} checked</span>` : ''}</h3><div class="ticket-view-criteria md">${mdHtml(t.acceptance_criteria)}</div>`)
+      + agentNotesHtml(t)
       + requestFormHtml(t)
       + blockersHtml(t)
       + filesHtml(t);
@@ -1705,7 +1709,6 @@ const TicketBoard = (() => {
     if (notesEl) { notesEl.innerHTML = notesHtml(t, true); wireNotes(notesEl); }
     actions.innerHTML = panelHtml(t);                                  // before the form is wired: the editor's fields are in the panel
     wireRequestForm(content);
-    wireApproval(content);
     wireBlockerPicker(content);
     wireFileButtons(content);
     if (fileFocus) content.querySelector?.(`.ticket-file-remove[data-attachment="${fileFocus}"]`)?.focus?.();
@@ -1893,13 +1896,17 @@ const TicketBoard = (() => {
         priorities: Object.keys(PRIORITIES).filter((k) => document.getElementById(`ticket-filter-p-${k}`)?.checked),
       }));
     }
+    document.getElementById('ticket-filter-id')?.addEventListener('input', (e) => {
+      clearTimeout(idTimer);
+      idTimer = setTimeout(() => setFilter({ ...filter, id: e.target.value }), ID_DEBOUNCE_MS);
+    });
     document.getElementById('ticket-filter-request')?.addEventListener('change', (e) => setFilter({ ...filter, request: e.target.value }));
     document.getElementById('ticket-show-archived')?.addEventListener('change', (e) => setFilter({ ...filter, showArchived: e.target.checked }));
     document.getElementById('ticket-show-cancelled')?.addEventListener('change', (e) => setFilter({ ...filter, showCancelled: e.target.checked }));
     document.getElementById('ticket-lead')?.addEventListener('change', (e) => setLead(e.target.value));
     loadLead();   // the selected room's lead, before the board is ever opened
     document.getElementById('ticket-new-btn')?.addEventListener('click', () => openNew('queued'));
-    document.getElementById('ticket-filter-reset')?.addEventListener('click', () => setFilter(defaultFilter()));
+    document.getElementById('ticket-filter-reset')?.addEventListener('click', () => { clearTimeout(idTimer); idTimer = null; setFilter(defaultFilter()); });   // a pending id dies with the reset
     document.getElementById('ticket-new-form')?.addEventListener('submit', (e) => {
       e.preventDefault();
       return submit(e.target);
@@ -1983,9 +1990,9 @@ const TicketBoard = (() => {
   globalThis.refreshRoomLead = () => { renderLead(); if (room) render(); };
 
   KindCardRenderer.observe('ticket', onTicket);
-  KindCardRenderer.observe('permission', onPermission);
+  KindCardRenderer.observe('stage', onStage);
   KindCardRenderer.observe('room', onRoomLead);
   if (typeof document !== 'undefined' && document.getElementById) wire();
 
-  return { load, onTicket, onPermission, openNew, setFilter, matchesFilter, sanitizeFilter, readFilter, setLead, onRoomLead, archiveAllDone, setFilterPanel, attachFiles, addPendingFiles, applyMarkdownAction, mdHtml, applyToCriteria, onCriteriaKeydown, openView, closeView, _commitBlockers: (ids) => commitBlockers(ids), onNoted, lightOf, parseTitle, criteriaProgress, priorityBars, statusLine, _tickets: tickets, _filter: () => filter, _lead: () => lead };
+  return { load, onTicket, onStage, openNew, setFilter, matchesFilter, sanitizeFilter, readFilter, setLead, onRoomLead, archiveAllDone, setFilterPanel, attachFiles, addPendingFiles, applyMarkdownAction, mdHtml, applyToCriteria, onCriteriaKeydown, openView, closeView, _commitBlockers: (ids) => commitBlockers(ids), onNoted, lightOf, parseTitle, criteriaProgress, priorityBars, statusLine, _tickets: tickets, _filter: () => filter, _lead: () => lead };
 })();

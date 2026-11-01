@@ -1,0 +1,103 @@
+/* ui/kinds/<kind>.css
+ *
+ * Per-kind styles. Load via <link> or @import from ui/index.html.
+ * Layout / composer / header CSS stays in ui/style.css (design.md Non-Goals).
+ * Scope everything under .<kind>-card (or a kind-specific root) so selectors
+ * can't leak into adjacent cards.
+ *
+ * Pre-v0.9.5: paste this block into ui/style.css after the existing
+ * .permission-card section. The color vars below (--bg-inset, --red, --green,
+ * --text-dim, --line) are already defined at the top of style.css.
+ *
+ * The starter values below mirror .permission-card (reskin as needed):
+ *   - pending: red-accented, blinking border, sticky-at-top
+ *   - resolved: grey-dim, no animation, flows back into chat timeline
+ *
+ * Remove the blink/sticky rules if your kind isn't approval-flavored.
+ */
+
+.<kind>-card {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--red);
+  border-radius: 6px;
+  padding: 11px 12px;
+  margin: 8px 0;
+  font-size: 12.5px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 12px;
+}
+
+/* Pending variant — sticky at top of #messages so it can't scroll out of
+   view. Multiple pending cards stack in DOM order. */
+.<kind>-card[data-state="pending"] {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(26, 23, 20, 0.97);
+  backdrop-filter: blur(4px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  animation: blink-border 2.5s ease-in-out infinite;
+}
+
+/* Resolved variants — inert, flows back into the timeline. */
+.<kind>-card[data-state="resolved"],
+.<kind>-card[data-state="cancelled"] {
+  position: static;
+  border-left-color: var(--text-dim);
+  background: rgba(107, 93, 81, 0.06);
+  opacity: 0.8;
+  animation: none;
+  box-shadow: none;
+}
+
+.<kind>-card header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-family: var(--mono);
+  font-weight: 700;
+  color: var(--red);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 10px;
+  grid-column: 1 / -1;
+}
+
+.<kind>-id {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
+.<kind>-body {
+  color: var(--text);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  grid-column: 1 / -1;
+}
+
+.<kind>-card footer {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.<kind>-card footer button {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 5px 14px;
+  border-radius: 4px;
+  background: var(--red);
+  color: var(--bg-inset);
+  border: none;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.<kind>-card footer button:hover { background: #e07a63; }
+
+/* blink-border keyframes already live in ui/style.css — don't re-declare. */

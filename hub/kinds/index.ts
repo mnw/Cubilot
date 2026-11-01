@@ -5,24 +5,60 @@
 
 import type { Database } from "bun:sqlite";
 import type { KindModule } from "../core/types";
+import { createCancelTraceKind } from "./cancel-trace";
+import { createCheckpointKind } from "./checkpoint";
+import { createDecisionKind } from "./decision";
+import { createDeliveryCheckKind } from "./delivery-check";
 import { createHandoffKind, createSystemHandoff } from "./handoff";
 import { createInterruptKind } from "./interrupt";
 import { createPermissionKind } from "./permission";
+import { createRequestKind } from "./request";
+import { buildPack } from "../core/context-pack";
+import type { LaunchRecord } from "../core/launch-record";
+import { startExecutor } from "../core/launch-executor";
+import { createTmux, tmuxFromEnv } from "../core/tmux";
 import { createStageRuntime } from "./stage";
 import { createTicketKind } from "./ticket";
+
+/** The lead of a room: its ticket_room_lead row, else "Orchestrator". */
+export function roomLeadOf(db: Database, room: string): string {
+  return db.query<{ agent: string }, [string]>("SELECT agent FROM ticket_room_lead WHERE room = ?").get(room)?.agent ?? "Orchestrator";
+}
+
+/** The reader of the live tmux session names on the hub socket. Null tmux (no CUBILOT_TMUX): an empty list. A list failure is an empty list too. */
+function liveTmuxSessions(env: Record<string, string | undefined> = process.env): () => string[] {
+  let tmux: ReturnType<typeof createTmux> | null = null;
+  try {
+    tmux = createTmux(tmuxFromEnv(env));
+  } catch {
+    tmux = null;
+  }
+  return () => tmux?.listSessionsSync() ?? [];
+}
 
 export type KindFactory = (db: Database) => KindModule;
 
 /** Construct all Kinds against the live ledger db. Empty array when ledger disabled. */
-export function buildKinds(db: Database | null): readonly KindModule[] {
+export function buildKinds(db: Database | null, launchRecord?: LaunchRecord): readonly KindModule[] {
   if (!db) return [];
+  const cancelTrace = createCancelTraceKind(db);
   // The handoff kind calls the stage runtime when a handoff names a role, so the two share one runtime.
   const stage = createStageRuntime(db, {
+    launchRecord,
+    startExecutor: (host) => startExecutor(host),
     ackMs: Number(process.env.CUBILOT_LAUNCH_ACK_MS) || undefined,
+    sweepMs: Number(process.env.CUBILOT_STAGE_SWEEP_MS) || undefined,
+    // The stage lease time in ms (default 120000) and the live tmux sessions of the hub socket (a launch never takes one).
+    leaseMs: Number(process.env.CUBILOT_STAGE_LEASE_MS) || undefined,
+    liveSessionNames: liveTmuxSessions(),
+    // A failed stage cancel or sweep leaves a row for the human (cancel-trace).
+    traceFailure: (input, cap) => cancelTrace.record(input, cap),
+    // The context pack is built before each launch is queued (context-pack 3.5).
+    buildPack,
     // A stage that failed twice goes to the room's Orchestrator (its lead) as a handoff from the hub (stage-sessions 5.3).
     onFinalFailure({ stage: s, room, reason }, cap) {
       if (!room) return;
-      const lead = db.query<{ agent: string }, [string]>("SELECT agent FROM ticket_room_lead WHERE room = ?").get(room)?.agent ?? "Orchestrator";
+      const lead = roomLeadOf(db, room);
       if (!cap.agents.get(lead)) {
         console.error(`[stage] stage ${s.id} failed for good (${reason}); no Orchestrator "${lead}" in the roster to tell`);
         return;
@@ -37,9 +73,17 @@ export function buildKinds(db: Database | null): readonly KindModule[] {
   });
   return [
     createHandoffKind(db, stage.hooks),
-    createInterruptKind(db),
+    createInterruptKind(db, launchRecord),
     createPermissionKind(db),
     createTicketKind(db, stage.hooks),
+    // After the ticket kind: its migration reads the tickets table.
+    createRequestKind(db),
     stage.module,
+    cancelTrace,
+    createDecisionKind(db),
+    // The delivery check reopens a ticket through the ticket tables and starts its stage: after the ticket kind.
+    createDeliveryCheckKind(db, stage.hooks),
+    // The checkpoint asks the shell for a `/clear` through the stage runtime, the one owner of the launch queue.
+    createCheckpointKind(db, { sendInput: stage.sendInput, dropInput: stage.dropInput }),
   ];
 }

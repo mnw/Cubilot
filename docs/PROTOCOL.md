@@ -9,7 +9,7 @@ in-flight work survives app restarts.
 Today's structured kinds: **`handoff`** (typed work transfer with an explicit
 state machine), **`interrupt`** (high-visibility attention flag), **`permission`**
 (Claude Code tool-use approval relay, v0.8+), **`ticket`** (room work items)
-and **`stage`** (one hub-started session per role and ticket). **`nutshell`** is a single-row
+**`stage`** (one hub-started session per role and ticket), **`request`** (the plan label of tickets with an origin and an Approve), **`decision`** (a human question from the room lead) and **`checkpoint`** (a context reset of the room lead). **`nutshell`** is a single-row
 per-room living project summary — not a kind (no lifecycle) but uses the
 same event ledger for audit. Additional kinds can be added without schema
 migration; every kind writes to the same `events` table and keeps its derived
@@ -118,7 +118,7 @@ there is no creation-side idempotency because `id` is server-minted.
 
 All tools are exposed by the channel-mode `cubilot-bin` sidecar. Every tool call
 becomes an authenticated POST to the hub; the sidecar attaches
-`Authorization: Bearer <hub.token>` and retries once on HTTP 401 after
+`Authorization: Bearer <hub.token>` (the agent token) and retries once on HTTP 401 after
 re-reading the token file (to handle app-restart rotations transparently).
 
 ### `send_handoff`
@@ -128,7 +128,7 @@ Transfer a bounded unit of work to another participant, or to a stage role.
 | Parameter | Type | Required | Notes |
 |---|---|---|---|
 | `to` | `string` | one of `to`, `to_role` | Recipient name (agent or the human's configured name). |
-| `to_role` | `string` | one of `to`, `to_role` | A stage role. Needs `context.ticket_id`. See [role handoffs](#role-handoffs-to_role). |
+| `to_role` | `string` | one of `to`, `to_role` | A stage role. Needs `context.ticket_id`, except a spec review: it needs `review` `"spec"`, `request_id` and `context.request_text`. See [role handoffs](#role-handoffs-to_role). |
 | `task` | `string` | yes | 1–500 chars. |
 | `context` | `object` | no | Arbitrary JSON; ≤ 1 MiB serialized. |
 | `ttl_seconds` | `integer` | no | 1–86 400; default 3 600. |
@@ -226,7 +226,9 @@ All routes are under `http://127.0.0.1:<hub-port>` (dynamic; see
 | POST | `/handoffs/{id}/accept` | Bearer header | 256 KiB | Recipient accepts. |
 | POST | `/handoffs/{id}/decline` | Bearer header | 256 KiB | Recipient declines with `reason`. |
 | POST | `/handoffs/{id}/cancel` | Bearer header | 256 KiB | Sender (or human) cancels. |
+| GET | `/handoffs/{id}?agent=` | Bearer header OR `?token=` query | — | One full snapshot, for the `read_handoff` tool. `agent` is the caller (self-asserted). 400 for a bad id or an unknown agent, 404 for an unknown handoff, 403 when the handoff is in another room (the human reads every room). |
 | GET | `/handoffs?status=&for=&limit=` | Bearer header OR `?token=` query | — | List snapshots. Filters: `status` (default `pending`; `all` returns any), `for` (agent name; matches as sender or recipient), `limit` (1–1000, default 100). |
+| GET | `/config/default-model` | Bearer header OR `?token=` query | — | The `default_model` of `config.yml` for the launch form: `{"default_model": {"claude"?: string, "pi"?: string}}`. Read at each request, writes nothing. A missing key gives `{}`. A key that is not a harness or a value that is not a string is ignored (one log line). Stage launches use `role_models`, not this. |
 
 ### Create request body
 
@@ -250,8 +252,7 @@ All routes are under `http://127.0.0.1:<hub-port>` (dynamic; see
 
 `by` is the actor's name. It is validated against the route's expected
 actor (recipient for accept/decline, sender-or-human for cancel) but NOT
-cryptographically tied to the token — any token-holder can claim any name
-(see trust model below).
+cryptographically tied to the agent token — any agent-token holder can claim any agent name. The human name is the exception: see "Identity and trust model".
 
 ---
 
@@ -330,7 +331,11 @@ recipient acknowledges them.
 | `created_at_ms` | `number` | |
 | `acknowledged_at_ms` | `number \| null` | Set on ack. |
 | `acknowledged_by` | `string \| null` | The `by` of the ack (recipient or human). |
+| `ticket_id` | `string \| null` | The ticket of the sender's stage. The hub sets it at send time from the launch record (`hub/core/launch-record.ts`). Null for a sender that the launch record does not hold, and for old rows. Nothing in the request body sets it. |
+| `stage_id` | `string \| null` | The stage that the launch record held for the sender at send time. Same rules as `ticket_id`. |
 | `version` | `number` | `MAX(events.seq)` for this interrupt's id. |
+
+Migration v20 adds `ticket_id` and `stage_id` (null for old rows). A session name is used again by a later stage, so each interrupt keeps the ids of the stage that held the name when it was sent.
 
 ### HTTP
 
@@ -398,18 +403,16 @@ xterm-only flow.
 | Method | Path | Auth | Body cap | Purpose |
 |---|---|---|---|---|
 | POST | `/permissions` | Bearer | 16 KiB | Create pending. Body `{agent, request_id, tool_name, description, input_preview}`. Same-id replay while pending → idempotent 200; same id already resolved → 409. |
-| POST | `/permissions/{id}/verdict` | Bearer | 16 KiB | Submit verdict. Body `{by, behavior: "allow"\|"deny"}`. `by` must be the human or a registered agent (else 403). A paused agent voting on another agent's request → 423. Same-status retry → idempotent 200; different status → 409; missing id → 404. |
-| POST | `/permissions/{id}/dismiss` | Bearer | 16 KiB | Clear a ghost pending card. Body `{by}`. Only the requesting agent or the human (else 403; an unknown name or an agent of another room → 403). Pending → `dismissed`; same-status retry → idempotent; non-pending non-dismissed → 409. |
+| POST | `/permissions/{id}/verdict` | Bearer (human token) | 16 KiB | Submit verdict. Human only (`RouteDef.caller: "human"`): an agent caller gets 403, also without `by`. Body `{by, behavior: "allow"\|"deny"}`. Same-status retry → idempotent 200; different status → 409; missing id → 404. |
+| POST | `/permissions/{id}/dismiss` | Bearer | 16 KiB | Clear a ghost pending card. Open to the agent token: the relay hook dismisses its own request. An agent caller that names the human gets 403. Body `{by}`. Only the requesting agent or the human (else 403; an unknown name or an agent of another room → 403). Pending → `dismissed`; same-status retry → idempotent; non-pending non-dismissed → 409. |
 | GET | `/permissions?status=&for=&limit=` | Bearer header OR `?token=` | — | List snapshots. Default `status=pending`. |
 | GET | `/permissions/{id}/wait?timeout_ms=` | Bearer header OR `?token=` | — | Long-poll one request. Returns the snapshot as soon as its status is terminal, or the `pending` snapshot when `timeout_ms` elapses. Default 60000, capped at 300000, `0` returns the current snapshot immediately. Invalid id or `timeout_ms` → 400; unknown id → 404. Polls the ledger every 250 ms per waiting request. |
 
 ### MCP tools
 
-- `ack_permission({request_id, behavior})` — any agent may ack any pending permission. First verdict wins; later arrivals are idempotent (same behavior) or rejected with 409 (different behavior).
+- `ack_permission({request_id, behavior})` — the verdict route is human-only. The hub gives 403 to an agent that calls this tool. The tool is kept in the bridge but has no effect for agents. First verdict wins for a human caller; later arrivals are idempotent (same behavior) or rejected with 409 (different behavior).
 
-  Tool return value: `verdict_applied=<allow|deny> resolved_by=<agent> your_verdict_won=<true|false>` (plus `already_resolved=true` suffix when the race was lost). Delegation-minded callers (four-eyes, peer-quorum) must read `your_verdict_won` — a `200` alone means the state is resolved, not that the caller's verdict was the transitioning one.
-
-  **Design note:** `ack_permission` is itself an MCP tool call, so Claude Code's local permission UI gates it for the acking agent unless `chatbridge__ack_permission` is in that agent's allowlist. For delegation to race the human's manual click on the original prompt, pre-allowlist the tool in the delegator's Claude Code config (`"permissions": { "allow": ["mcp__chatbridge__ack_permission"] }` or equivalent). Without pre-allowlist, the human typically wins the race and the peer-ack becomes a signal channel, not an actual delegation mechanism.
+  Peer verdicts end with group 11. A delegation by an agent verdict is not possible. Only the human token gives a verdict.
 
 ### MCP capability
 
@@ -502,7 +505,7 @@ Room-scoped work items that exist before they have an owner. Lifecycle `draft �
 
 ### Snapshot schema
 
-`id` (`t_…`), `room`, `title`, `acceptance_criteria` (required, non-empty), `blast_radius` (`low` | `high`), `archived_at_ms` (null, or when a done/cancelled ticket was archived), `priority` (`highest` | `high` | `medium` | `low` | `lowest`, default `medium`; stored as an integer rank 5–1, a stored value outside 1–5 reads as `medium`), `creator`, `assignee` (null until claimed), `approval_request_id` (null or a permission id), `external_ref` (opaque string, never interpreted), `request_id` (null, or a label that groups the tickets of one request), `role` (null, or the stage role of the first stage: see the `stage` kind), `status` (`draft` | `queued` | `claimed` | `in_progress` | `in_review` | `done` | `cancelled`), `created_at_ms`, `updated_at_ms`, `version`. Read routes and broadcast entries also carry two derived arrays, `blocked_by` (the ids of the tickets that block this one) and `open_blockers` (the ids among them whose status is not `done`). They come from the `ticket_blockers` table and are not snapshot columns.
+`id` (`t_…`), `room`, `title`, `acceptance_criteria` (required, non-empty), `blast_radius` (`low` | `high`), `archived_at_ms` (null, or when a done/cancelled ticket was archived), `priority` (`highest` | `high` | `medium` | `low` | `lowest`, default `medium`; stored as an integer rank 5–1, a stored value outside 1–5 reads as `medium`), `creator`, `assignee` (null until claimed), `approval_request_id` (always null since P6-04; the column stays and nothing writes it), `external_ref` (opaque string, never interpreted), `request_id` (null, or a label that groups the tickets of one request), `role` (null, or the stage role of the first stage: see the `stage` kind), `status` (`draft` | `queued` | `claimed` | `in_progress` | `in_review` | `done` | `cancelled`), `created_at_ms`, `updated_at_ms`, `version`. Read routes and broadcast entries also carry two derived arrays, `blocked_by` (the ids of the tickets that block this one) and `open_blockers` (the ids among them whose status is not `done`). They come from the `ticket_blockers` table and are not snapshot columns.
 
 ### Ownership
 
@@ -511,17 +514,25 @@ Room-scoped work items that exist before they have an owner. Lifecycle `draft �
 - Cancel: the assignee, the creator or the human.
 - Cross-room creation or claim by a non-human → 403.
 
-### Approval for `high` radius
+### Agent notes
 
-`done` on a `high` ticket succeeds only when the human is the actor, or the permission named by `approval_request_id` is `allowed` with `resolved_by` = the human's name. Otherwise 409 with `approval_request_id` (this key appears only on this 409). `POST /tickets/:id/approval` (assignee, `in_review`, `high`) returns the pending request, or creates a `ticket:done` permission request (`input_preview` `{"ticket_id":"…"}`) and sets the pointer in one transaction — one `permission.new` event, no ticket event. `in_review → in_progress` and a human `in_review → queued` clear the pointer. Rework, cancel and a human `done` also dismiss a still-pending request in a separate transaction after the ticket's (`permission.dismissed`), so it is neither pending nor replayed on reconnect. Trust is self-asserted like every route, so `blast_radius: high` is advisory: a token holder can send `by` = the human name, open the gate or complete the ticket itself. The gate stops an agent that reports its own name honestly. Enforcement needs per-agent tokens bound to identity.
+The agent notes are an optional text field of the ticket (`string | null`, default null). The field name is `planning_note`, for compatibility: it is the same column, with no data migration. The Orchestrator or an agent writes the facts that a new agent session needs: files, lines, findings, the base commit. The start message of every stage role holds the agent notes once, under "## Agent notes", after the ticket fields and before "## Earlier notes". A spec review has one "## Agent notes" heading and one "### <ticket id> <title>" subheading for each ticket in scope that has notes. No notes, no heading. `create_ticket` and `edit_ticket` accept the field, and `GET /tickets` returns it. The human, the creator of the ticket, the room lead and the assignee can edit it. The assignee gets no other new right. Other callers get 403 and nothing changes. The ticket view shows the notes in a closed `details` element named "For the agents". The board card does not show them.
+
+### Closing a `high` radius ticket
+
+There is no human Allow step for `done` (P6-04). An agent's `done` needs the Validator PASSes (see L4): 409 with the missing item otherwise. A `high` ticket needs the full suite and two Validator PASSes on one commit (see "High-radius checks" under the `stage` kind). A PASS that its Validator withdrew does not count: its result handoff (the newest handoff from the stage session with `context.stage_id` of the stage) is `cancelled` by its sender. A `pending` interrupt that a Validator stage of the ticket sent holds the ticket: the hub does not read its text, and every such interrupt counts as a stop. The withdrawn-PASS rule applies to `done`, to `merge-message`, to `validator_passes` and to the delivery report. The pending-interrupt rule applies only to `done` and to `merge-message`: `validator_passes` and the delivery report still count PASSes. The human may complete a ticket directly. At start the hub dismisses each permission with the id `ticket:done` that is still `pending` from an older hub, one transaction and one `permission.dismissed` event for each. A second start finds none and changes nothing. A ticket card shows a high ticket's Validator PASS marks as text (`validator_passes` on `GET /tickets`, `PASS 1/2`). Trust is self-asserted like every route, so `blast_radius: high` is advisory.
+
+**Radius rule (P6-03).** The hub reads `radius_rule` (`terms`, `paths`) from `config.yml` at each call and runs it over the title, the criteria and the agent notes. A term matches as a whole word without case. A path matches as a substring. A ticket whose title starts with `[doc]` has one exception: its terms do not count, so it stays `low`, but a path still gives `high`. A `[code]` title or a title with no prefix keeps the full rule. The snapshot carries `radius_rule` (`low` or `high`, the floor), `radius_reasons` (the matched terms and paths) and `radius_source` (`rule`, `raised` by the creator or the room lead, `human`, or `arbiter`). The stored `blast_radius` is never below the floor. The human, the creator and the room lead raise it with `edit_ticket`. Only the human lowers it below the floor (403 otherwise). Any other lower move is raised back to the floor.
+
+**Edits keep the status (L2).** `POST /tickets/{id}/edit` changes no status. New criteria or a new radius do not move a ticket back to `draft` or `queued`. The `ticket.edited` event keeps the old and the new criteria text (`acceptance_criteria: {from, to}`), the radius (`blast_radius: {from, to}`) and the source of the radius.
 
 ### Request label and blockers
 
-`request_id` is a label, not an entity. It has the format `^[A-Za-z0-9._-]{1,64}$`, for example `r-2026-10-22-login`. A request is the set of tickets with the same label in one room. There is no request table. A bad label → 400 and nothing is stored.
+`request_id` is a label, not an entity. It has the format `^[A-Za-z0-9._-]{1,64}$`, for example `r-2026-10-22-login`. A request is the set of tickets with the same label in one room. The `request` kind (see "The `request` kind") adds the origin, the features and the Approve. A bad label → 400 and nothing is stored.
 
-`blocked_by` lists the ids of tickets that must be `done` before this ticket can be claimed. The rows are in the `ticket_blockers` table. The hub checks the list before it writes. At most 20 ids. Each id is a string that names an existing ticket in the same room. A ticket cannot block itself. An id cannot appear twice. The new list cannot make a cycle. Any failure → 400, and nothing is stored or broadcast. An error about one blocker id (a wrong format, the ticket itself, a duplicate, an unknown ticket, another room, a cycle) names that id. A value that is not an array, or a list of more than 20 ids, gets a general message. An omitted `blocked_by` changes nothing. `null` and `[]` clear the list. The event and the rows are written in one transaction.
+`blocked_by` lists the ids of tickets that must be closed before this ticket can be claimed (`done`, or merged into staging, see "Claim gate"). The rows are in the `ticket_blockers` table. The hub checks the list before it writes. At most 20 ids. Each id is a string that names an existing ticket in the same room. A ticket cannot block itself. An id cannot appear twice. The new list cannot make a cycle. Any failure → 400, and nothing is stored or broadcast. An error about one blocker id (a wrong format, the ticket itself, a duplicate, an unknown ticket, another room, a cycle) names that id. A value that is not an array, or a list of more than 20 ids, gets a general message. An omitted `blocked_by` changes nothing. `null` and `[]` clear the list. The event and the rows are written in one transaction.
 
-**Claim gate.** A claim by an agent gets 409 `blocked by <id> (<status>)` while any blocker has a status other than `done`. A `cancelled` blocker still blocks: it must be removed from the list. The human is not gated. The hub reads the blockers before the write transaction, in the same synchronous dispatch with no `await` between the check and the write. This is safe only while both conditions hold: the hub is the only writer of the ledger, and the dispatch stays synchronous. A second writer process or an `await` in the dispatch voids it, and the check must then move into the transaction. The human, the creator or the room lead can remove a blocker from the list before the claim.
+**Claim gate.** A claim by an agent gets 409 `blocked by <id> (<status>)` while any blocker is open (L3). A blocker is closed when its status is `done`, or when the commit of its newest Tester PASS result is an ancestor of the `staging` branch of the room project. The hub runs `git merge-base --is-ancestor` with a fixed argument list and no shell, reads the `staging` head again after 30 seconds, and keeps the blocker open on any git problem. `open_blockers` and the scheduler use the same rule. A `cancelled` blocker still blocks: it must be removed from the list. The human is not gated. The hub reads the blockers before the write transaction, in the same synchronous dispatch with no `await` between the check and the write. This is safe only while both conditions hold: the hub is the only writer of the ledger, and the dispatch stays synchronous. A second writer process or an `await` in the dispatch voids it, and the check must then move into the transaction. The human, the creator or the room lead can remove a blocker from the list before the claim.
 
 **Who edits.** The human, the ticket's creator and the room lead change `request_id` and `blocked_by` with `POST /tickets/{id}/edit`. The assignee does not (403), unless the assignee is also the creator or the lead. An agent changes them only while the ticket is `draft` or `queued`. After the claim, the creator and the room lead get 409. An assignee who is neither of them still gets 403, because the hub checks the role before the status. The hub also checks the role before the terminal state: a `done` or `cancelled` ticket gives 403 to an actor with no right and 409 to one with the right. The human changes them in any non-terminal status. A `done` or `cancelled` ticket refuses every edit, the human included (409). The other fields keep their own rule.
 
@@ -529,7 +540,7 @@ Room-scoped work items that exist before they have an owner. Lifecycle `draft �
 
 A `draft` ticket is a planned ticket that is not released. It cannot be claimed. `ticket.new` and `ticket.assigned` entries for a draft wake no one, and the room lead is not woken to triage it. The entry of a draft carries no `lead`.
 
-- `draft → queued`: the human or the room lead. Others → 403. The lead gets 403 `the request holds a high blast_radius ticket: only the human may queue it` when any non-terminal ticket with the same `request_id` in the room has `blast_radius: high`, this ticket included. A ticket with no `request_id` is checked alone. The same label in another room does not count. The human is never refused.
+- `draft → queued`: the human or the room lead. Others → 403. The lead gets 403 `the request holds a high blast_radius ticket: only the human may queue it` when any non-terminal ticket with the same `request_id` in the room has `blast_radius: high`, this ticket included, and the human has not approved the request. After the Approve (L1) the lead may queue any ticket of the request, also one added later. A ticket with no `request_id` is checked alone. The same label in another room does not count. The human is never refused by the high gate. A ticket with role `writer`, `editor` or `reviewer` queues like any other: the hub starts its stage chain (see "Writing chain").
 - `queued → draft`: the human or the room lead. The radius check does not apply.
 - From a later status, only the human moves a ticket to `queued` or `draft`.
 - The move `draft → queued` writes the ledger event `ticket.queued` and broadcasts the entry kind `ticket.promoted` (not `ticket.update`). The entry always carries `by`, the actor of the move. It carries `lead` (the room lead or null) only when the ticket has no assignee. A repeated move is idempotent and emits nothing, also when the lead repeats it.
@@ -538,25 +549,26 @@ A `draft` ticket is a planned ticket that is not released. It cannot be claimed.
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| POST | `/tickets` | Bearer | Body `{by, room, title, acceptance_criteria, blast_radius, priority?, external_ref?, request_id?, blocked_by?, assignee?, status?}` → 201 `{snapshot}`. `request_id` and `blocked_by` follow the rules under "Request label and blockers". `status` ∈ `draft`, `queued` (default), `in_progress`, `in_review`, `done`: the ticket is created in that column by the one `ticket.created` event, assigned or not; `done` only for the human (403), any other value → 400. `assignee` (optional) must be a registered agent in the room: unknown or the human → 400, another room → 403. `priority` ∈ `highest`, `high`, `medium` (default), `low`, `lowest` — lowercase names only; an integer, another word or a different case → 400 `invalid priority`. |
+| POST | `/tickets` | Bearer | Body `{by, room, title, acceptance_criteria, blast_radius, priority?, external_ref?, request_id?, blocked_by?, assignee?, status?, planning_note?}` → 201 `{snapshot}`. `request_id` and `blocked_by` follow the rules under "Request label and blockers". `status` ∈ `draft`, `queued` (default), `in_progress`, `in_review`, `done`: the ticket is created in that column by the one `ticket.created` event, assigned or not; `done` only for the human (403), any other value → 400. `assignee` (optional) must be a registered agent in the room: unknown or the human → 400, another room → 403. `planning_note` (optional string) holds the agent notes (see "Agent notes"). `priority` ∈ `highest`, `high`, `medium` (default), `low`, `lowest` — lowercase names only; an integer, another word or a different case → 400 `invalid priority`. |
 | POST | `/tickets/{id}/claim` | Bearer | Body `{by}` → 200 `{snapshot}` (or `idempotent: true`).  A `queued` ticket with an assignee is claimable only by that assignee: any other actor, the human included, gets 409 `assigned to <name>`. A `draft` ticket → 409 `ticket is draft: it cannot be claimed`. An agent's claim of a ticket with an open blocker → 409 `blocked by <id> (<status>)`. |
 | POST | `/tickets/{id}/attachments` | Bearer | Body `{by, url, name}`; `url` is a file already uploaded through `/upload` (`/image/<id>.<ext>`, the extension on the upload allowlist, the file present); `name` a one-line label ≤ 200 chars. `by` is the human, the ticket's creator or its assignee (403 otherwise); any ticket status, archived included. Append-only; one `ticket.attached` event; the ticket's version does not change. The same file twice on one ticket is an idempotent 200 (`idempotent: true`, no event) → 201 `{attachment: {id, author, name, url, created_at_ms}, attachments_count}`. The link goes to the UI stream only (ambient entry `ticket.attached`), never to an agent. |
 | POST | `/tickets/{id}/attachments/{attachment_id}/remove` | Bearer | Body `{by}`. Removes the link, not the uploaded file (it stays on disk). One `ticket.detached` event (payload `{attachment_id}`) and the `ticket_attachments` DELETE in one transaction. `by` is the human, the ticket's creator or the attachment's author (403 otherwise). The human may remove on any open ticket. The creator and the author only while the ticket is `draft` or `queued` (409 otherwise). A `done` or `cancelled` ticket → 409 for everyone. Unknown attachment id → 404. A retry of a removed attachment → 200 `{idempotent: true}`, no event. → 200 `{attachments_count}`. The removal goes to the UI stream only (ambient entry `ticket.detached` with `attachment_id` and `attachments_count`), never to an agent. |
 | GET | `/tickets/{id}/attachments` | Bearer header OR `?token=` | Plain array of `{id, author, name, url, path, created_at_ms}`, oldest first; `path` is where an agent reads the file on this machine. 404 for an unknown ticket. |
+| GET | `/tickets/{id}/code` | Bearer header OR `?token=` | The code state of the ticket branch (H2): `{branch, head, on_staging, files, totals}`. `branch` is `ticket/<id>`. With an open branch, `head` is its 40-character sha, `on_staging` is true when `head` is an ancestor of `staging`, and `files` (`{path, added, removed}`) are the changes from `merge-base(staging, head)` to `head`. When the branch is deleted, the hub finds the merge commit on `staging`: a commit that a `ticket.done` note of the ticket names (newest note first, a 7 to 40 character hex token), else the newest merge whose subject starts `Merge ticket/<id>:`. `head` is its second parent, `on_staging` is true, and `files` are the diff from its first parent to the merge commit. With no branch and no merge commit, `head` is null, `on_staging` is false and `files` is empty. `totals` is `{added, removed}`, the sum of `files`. A binary file counts 0 and 0. 400 for a bad id, 404 for an unknown ticket. Read only git (`rev-parse`, `rev-list`, `merge-base`, `log`, `diff --numstat`) in the project folder of the room, 10 s limit. The hub writes nothing. |
+| GET | `/tickets/{id}/merge-message` | Bearer header OR `?token=` | `text/plain`: `Merge ticket/<id>: <title> (validator PASS <h1>)` for a low ticket, `... (validator PASS <h1>, second review PASS <h2>)` for a high ticket. `h1`, `h2` are the result handoff ids of the Validator PASS stages since the latest worker stage. 409 `{error}` names the missing PASS or result handoff, or the id of a `pending` Validator interrupt of the ticket ("merge message needs an answer to the Validator interrupt `i_...`: acknowledge it first"). A PASS with a withdrawn result handoff is missing. 404 for an unknown ticket. Read only; the hub writes nothing to `main`. |
 | POST | `/tickets/{id}/notes` | Bearer | Body `{by, text}`; `by` is the ticket's assignee or the human (403 otherwise); `text` non-empty, ≤ 4096 UTF-8 bytes (400). Any ticket status, archived included. Append-only; one `ticket.noted` event; the ticket's version does not change → 201 `{note: {id, author, text, created_at_ms}, notes_count}`. The note goes to the UI stream only (ambient entry `ticket.noted`), never to an agent. |
 | GET | `/tickets/{id}/notes` | Bearer header OR `?token=` | Plain array of `{id, author, text, created_at_ms}`, oldest first. 404 for an unknown ticket. |
 | POST | `/tickets/{id}/archive` | Bearer | Body `{by, archived: true\|false}`; `by` is the human or the room lead (403 otherwise). Only a `done` or `cancelled` ticket (409 otherwise). Sets or clears `archived_at_ms`; the status is unchanged → 200 `{snapshot}` (or `idempotent: true`). One `ticket.archived` event. The update goes to the UI stream only (ambient entry `ticket.archived` with the snapshot), never to an agent. |
-| POST | `/tickets/{id}/assign` | Bearer | Body `{by, assignee}`; `by` is the human, the ticket's creator or the room lead; the ticket is not `done`/`cancelled`. `assignee: null` unassigns, only while the ticket is `draft` or `queued` (409 otherwise). Unassigning a draft wakes no one. Sets or changes the assignee without changing the status → 200 `{snapshot}` (or `idempotent: true` for the current assignee). Unknown assignee or the human → 400; assignee in another room, or `by` neither the human nor the creator → 403; terminal ticket → 409. Reassigning a ticket in `in_review` clears its approval pointer and dismisses a pending request. |
+| POST | `/tickets/{id}/assign` | Bearer | Body `{by, assignee}`; `by` is the human, the ticket's creator or the room lead; the ticket is not `done`/`cancelled`. `assignee: null` unassigns, only while the ticket is `draft` or `queued` (409 otherwise). Unassigning a draft wakes no one. Sets or changes the assignee without changing the status → 200 `{snapshot}` (or `idempotent: true` for the current assignee). Unknown assignee or the human → 400; assignee in another room, or `by` neither the human nor the creator → 403; terminal ticket → 409. Reassigning a ticket in `in_review` changes only the assignee. |
 | GET | `/rooms/{room}/lead` | Bearer header OR `?token=` | → `{room, lead}`; `lead` is null when none is set or the stored agent is no longer a registered agent of the room. |
 | POST | `/rooms/{room}/lead` | Bearer | Body `{by, agent}`; human only (403 otherwise). `agent` is a registered agent of the room (unknown or the human → 400, another room → 403), or `null` to clear. One `ticket.lead` event; refreshes the Briefings → 200 `{room, lead}` (or `idempotent: true`). |
-| POST | `/tickets/{id}/edit` | Bearer | Body `{by, title?, acceptance_criteria?, blast_radius?, priority?, external_ref?, request_id?, blocked_by?}`, at least one field (400 otherwise); `priority` is a priority name (400 `invalid priority` otherwise); `external_ref` is a string of at most 200 chars, or `null` to clear it (400 `invalid external_ref`); `request_id` is a label, or `null` to clear it; `blocked_by` replaces the whole list; `title` ≤ 200 chars, `acceptance_criteria` ≤ 4000 chars, both non-empty after trim. `by` is the human, the ticket's creator or its assignee (403 otherwise) for `title`, `acceptance_criteria`, `priority`, `external_ref` and `blast_radius`; for `request_id` and `blocked_by` it is the human, the creator or the room lead, and only while the ticket is `draft` or `queued` for an agent (see "Who edits"). An edit that mixes both kinds must pass both rules. A change of only the blocker list still emits one `ticket.edited` event. `blast_radius` is the human's alone: any agent that sends it gets 403 and nothing changes, even with the current value. A `done` or `cancelled` ticket → 409. Values equal to the current ones → 200 `idempotent: true`, no event. One `ticket.edited` event and one `tickets` update in one transaction; the `ticket.update` entry goes to the room and the Briefings refresh → 200 `{snapshot}`. Changing `acceptance_criteria` or lowering `blast_radius` clears `approval_request_id` in the same transaction and dismisses a still-pending request in a separate one; an `allowed` request no longer opens the gate, so a `done` move needs a new Allow. |
+| POST | `/tickets/{id}/edit` | Bearer | Body `{by, title?, acceptance_criteria?, blast_radius?, priority?, external_ref?, request_id?, blocked_by?, planning_note?}`, at least one field (400 otherwise); `priority` is a priority name (400 `invalid priority` otherwise); `external_ref` is a string of at most 200 chars, or `null` to clear it (400 `invalid external_ref`); `request_id` is a label, or `null` to clear it; `blocked_by` replaces the whole list; `title` ≤ 200 chars, `acceptance_criteria` ≤ 4000 chars, both non-empty after trim. `by` is the human, the ticket's creator or its assignee (403 otherwise) for `title`, `acceptance_criteria`, `priority` and `external_ref`; for `request_id` and `blocked_by` it is the human, the creator or the room lead, and only while the ticket is `draft` or `queued` for an agent (see "Who edits"). `planning_note` holds the agent notes: `by` is the human, the creator, the room lead or the assignee (403 otherwise). An edit that mixes kinds must pass every rule. A change of only the blocker list still emits one `ticket.edited` event. A change of the criteria, the role or the blockers keeps the ticket status, a `queued` ticket included. The `ticket.edited` payload holds `{from, to}` for each of `acceptance_criteria`, `role` and `blocked_by` (a list of ids) that changed, and `blast_radius` as before. `blast_radius` may be sent by the human, the room lead or the ticket's creator (403 otherwise, nothing changes). The stored radius is never below the radius rule: an agent value below the rule → 403; only the human lowers it below the rule. The creator or the room lead may lower a raised `high` to the rule when the rule is `low` (200). A `done` or `cancelled` ticket → 409. Values equal to the current ones → 200 `idempotent: true`, no event. One `ticket.edited` event and one `tickets` update in one transaction; the `ticket.update` entry goes to the room and the Briefings refresh → 200 `{snapshot}`.  |
 | POST | `/factory/relink` | Bearer | Body `{agent, force?, reload_id?}`. Hot reload: the records per agent in `<CUBILOT_FACTORY_DIR>/agents/`. The link `<hex of the name's UTF-8 bytes>` is the files the agent sees. `<hex>.applied` is the version its runtime loaded with success. `<hex>.pending` is a reload that this route ordered and nobody has completed. It has three lines: the version, the `reload_id` of the human's request (empty when the bridge started the reload) and the attempt id of this one order. `<hex>.last` is the result of the newest reload that the bridge reported (see `/factory/applied`). The desired version is `CUBILOT_FACTORY_VERSION`, and it must be a `v-<16 hex>` directory under the factory dir. No `agent` → 400. No link (no role, a launch before per-agent links, or a no-role relaunch) → 404: the bridge never reloads. No valid desired version → 409, nothing moves. Link and `.applied` both equal the desired version and `force` is not `true` → 200 `{reload:false}`. `force:true` skips only this same-version short circuit. The route then orders a reload even when the agent already has the desired version (the choice of skills changed, not the version). When the link names another version, the link still moves to the desired version. A `.pending` file exists, for ANY version → 200 `{reload:false, pending:true}`: a reload is running, so the replacement bridge after a Pi reload or a newer version orders no second one. **`.pending` has no time limit.** Only `/factory/applied` (success or failed) or a new session (the app deletes the agent's records at launch) clears it, so a reload with no completion stays blocked and the bridge logs "hot reload still pending: restart the agent". A bridge that gets `pending` keeps its check: it asks again after 5 s, 10, 20, up to 60 s, with no model turn, and stops when the answer is not `pending`. So a newer desired version is applied after the earlier reload ends. Else the link moves by temp link plus rename when it differs, `.pending` is written, → 200 `{reload:true, version, attempt}`. An agent that has skills records (`.skills-prepared` or `.skills-published`) first takes the publication lock (`.skills-lock`): a busy lock after 2 s → 503, any other lock error → 500. Under the lock the route checks for `.pending` again, moves the link, publishes the prepared build (the `.view` link swaps to `.view-<gen>`), and writes `.skills-pending` and `.pending`. A failed write → 500 and the route undoes the swap (the text says `rollback:` when the undo fails). There is no rollback of the reload itself. The bridge asks at the agent's idle point (at once when idle, at run end when busy). After the first reload ends, `.applied` differs from a newer desired version, so the next idle point reloads that one. |
 | POST | `/factory/applied` | Bearer | Body `{agent, version, attempt}` or `{agent, failed:true, attempt}`. A report is accepted only for the order in `.pending`: no `.pending`, or an `attempt` that differs from the third line of `.pending` → 409 `stale or unknown attempt`, and nothing changes. Missing `agent`, or neither `version` nor `failed` → 400. No link → 404. `failed:true`: writes `.last` (`failed`), deletes `.pending` and `.skills-pending`, and writes nothing else. `.skills-published` and `.skills-applied` stay, so the next relink orders the reload again with the same selection. `version`: must be the version the agent's link names (else 409). An agent with a `.skills-pending` record must report the same attempt (else 409). The route copies `.skills-pending` to `.skills-applied`, writes `<hex>.applied` by temp file plus rename, writes `.last` (`applied`), and deletes `.pending` and `.skills-pending`. A write error before `.pending` is deleted (`.skills-applied`, `.applied` or `.last`) → 500 and `.pending` stays, so the same report can be sent again. The final cleanup is not covered: the route deletes `.pending` first, then `.skills-pending`, so a failure of the second delete can return 500 after `.pending` is gone. `.last` is JSON `{result:"applied"|"failed", version, at, reload_id}`; `reload_id` is the human's request id or null. The adapter calls it after a good reload: the Pi `/cubilot-reload` handler after `ctx.reload()` resolves (`session_shutdown` is not success), the Claude mod after `reload-plugins` resolves. If the reload replaced the Claude module, the old module stored the version in `$.state` first and the new module records it at its start. Both adapters bound the wait for a reload to 30 s (a timeout is not a failure, and it reports nothing). The Claude mod keeps success and failure attached to the real command, so a command that ends after the bound still records applied or reports failed. A failed reload is retried once at the next idle point, then logged as "hot reload failed". Accepted limits: chat in flight can be lost when Reload settings restarts the hub. A new run that starts while the relink call is pending can see changed files. A runtime reload that continues after its 30 s bound is not stopped, and `.pending` blocks a second one for as long as it runs. A failed Pi reload needs an agent restart: `ctx.reload()` stops the bridge and invalidates the runtime API before it fails, so the handler reports `failed:true`, posts "<agent>: hot reload failed, restart this agent" to the human through the hub, and logs. |
 | POST | `/agents/{name}/reload` | Bearer | The human's Reload button. Body `{by, force?}`. `by` must be the human name (403 otherwise). An unknown agent or the human → 400. The route sends one control entry `agent.reload` (see "Reload request event") to that agent's bridge only when the agent has a factory link and an open stream. An offline agent, or an agent with no link, gets nothing and the request is not kept for later. → 200 with the status below plus `{requested, reload_id}`. `reload_id` is 16 hex characters when `requested` is true, else null. The status is `{agent, online, paused, room, factory:{desired, linked, applied, pending, pending_reload_id, last}}`: the version names, the `.pending` version and `reload_id`, and the content of `.last`. The route changes no file. |
 | GET | `/agents/{name}/reload-status` | Bearer header OR `?token=` | Read only. The same status as the reload route, and nothing is sent to the agent. An unknown agent or the human → 400. The UI polls it to see its `reload_id` in `pending_reload_id` (the bridge started) and in `last.reload_id` (the result). |
 | POST | `/tickets/{id}/transition` | Bearer | Body `{by, to, note?}`; **an agent's move to `in_review` needs a non-empty `note` (≤ 4096 UTF-8 bytes; 400 otherwise)** saying how it was built and tested; the human may move without one. A note on any move is stored in the same transaction and event (its id is the event's seq); a repeat move stores none; `to` ∈ `draft`, `queued`, `in_progress`, `in_review`, `done`, `cancelled`. `draft` and `queued` follow the rules under "Draft tickets". Same-status → idempotent 200; conflict → 409. |
-| POST | `/tickets/{id}/approval` | Bearer | Body `{by}` → 200 `{request_id, created, status}`; `status` is `pending` or `allowed`. `created: false` with `allowed` means the human already allowed the pointed request: nothing new is made and the tool retries the move. |
-| GET | `/tickets?room=&status=open\|all&request_id=` | Bearer header OR `?token=` | `room` required. Archived tickets are hidden unless `archived=1` is added. `request_id` (optional) keeps only the tickets with that label in the room; the hub filters in SQL before the list limit, and a bad label → 400. Each ticket also carries `blocked_by` and `open_blockers`. Plain array ordered by priority rank (highest first) then `created_at_ms ASC`, each with `approval: {id, status, resolved_by, version} \| null`, `notes_count` and `attachments_count` (`version` = the permission's `events.seq`). Default `status=open` (non-terminal). |
+| GET | `/tickets?room=&status=open\|all&request_id=` | Bearer header OR `?token=` | `room` required. Archived tickets are hidden unless `archived=1` is added. `request_id` (optional) keeps only the tickets with that label in the room; the hub filters in SQL before the list limit, and a bad label → 400. Each ticket also carries `blocked_by` and `open_blockers`. Plain array ordered by priority rank (highest first) then `created_at_ms ASC`, each with `validator_passes` (the Validator PASS stages since the latest worker stage, without a withdrawn PASS), `notes_count` and `attachments_count`. Default `status=open` (non-terminal). |
 
 ### Reload request event
 
@@ -564,17 +576,65 @@ A `draft` ticket is a planned ticket that is not released. It cannot be claimed.
 
 ### Agent tools
 
-`create_ticket` (also `status` `draft`, `request_id`, `blocked_by`), `claim_ticket`, `transition_ticket` (targets include `draft` and `queued`; the hub decides who may use them), `list_tickets` (also a `request_id` filter; each line shows the label and the open blockers), `assign_ticket`, `edit_ticket` (also `request_id` and `blocked_by`; the tool does not send `priority` or `external_ref`). `transition_ticket` to `done` calls the approval route on the approval 409 and returns the request id. `accept_handoff` claims the ticket named in `context.ticket_id` after a successful accept and reports both outcomes.
+`create_ticket` (also `status` `draft`, `request_id`, `blocked_by`), `claim_ticket`, `transition_ticket` (targets include `draft` and `queued`; the hub decides who may use them), `list_tickets` (also a `request_id` filter; each line shows the label and the open blockers), `assign_ticket`, `edit_ticket` (also `request_id` and `blocked_by`; the tool does not send `priority` or `external_ref`). `transition_ticket` to `done` returns the hub's 409 text when the Validator PASSes are missing. Other tools of the room lead and the agents: `read_handoff` (`GET /handoffs/{id}`), `create_request` (see "The `request` kind"), `escalate` (see "The `decision` kind") and `checkpoint_note` (see "Checkpoints"). `accept_handoff` claims the ticket named in `context.ticket_id` after a successful accept and reports both outcomes.
 
 ### SSE events
 
-`ticket.new`, `ticket.update`, `ticket.assigned` (an assignment, status unchanged) and `ticket.promoted` (a draft moved to `queued`) with `ticket_id`, `version`, `snapshot` (which includes `blocked_by` and `open_blockers`); scope `{kind: "room", room}`. The entry's `from` is the actor who made the change (the assignee is only in `snapshot`). The bridge delivers every ticket entry in `context` mode (it enters the agent's context and starts no turn), except these wakes, which start a turn: a `ticket.new` or `ticket.assigned` entry wakes the ticket's assignee (only a `ticket.new` is skipped for the agent that created the ticket, because it just made it; a `ticket.assigned` always wakes the assignee, its creator included); a `ticket.new` entry of an unassigned ticket, or a `ticket.assigned` entry that unassigns, wakes the room lead (the agent named in the entry's `lead`); and a `permission.resolved` for a `ticket:done` request wakes the agent that raised it. A `permission.new` for a `ticket:done` request wakes no one. A draft ticket wakes no one on `ticket.new` or `ticket.assigned`. A `ticket.promoted` entry wakes the assignee once, also when the assignee created the ticket, or wakes the room lead for an unassigned ticket, except when the lead made the move (`by`). A `ticket.update` never wakes. The hub does not broadcast the dependent ticket again when one of its blockers changes status: the board works out the open blockers from the tickets it holds. The entries for archiving (`ticket.archived`), notes (`ticket.noted`) and a lead change (`room.lead`) go to the UI stream only. The `ticket.update` entry of a move that stored a note carries `notes_count` but never the text. Notes are an audit trail, not chat: they are in no Briefing and reach no agent. Tickets are not replayed on reconnect; the agent's own open tickets are in its Briefing (each with the request label, the status `draft` when it applies, and a `Blocked by:` line for blockers that are not `done`), and the room lead's Briefing also lists the open unassigned tickets of its room under "Unassigned tickets to triage:". The `ticket.new` entry of an unassigned ticket carries `lead` (the room lead or null), and so does the `ticket.assigned` entry of an unassign. A lead change is sent to the UI stream only, as an ambient `room.lead` entry `{room, lead}` (not a `ticket.*` kind: no agent receives it). The lead's block starts with a line that tells it to use `assign_ticket`.
+`ticket.new`, `ticket.update`, `ticket.assigned` (an assignment, status unchanged) and `ticket.promoted` (a draft moved to `queued`) with `ticket_id`, `version`, `snapshot` (which includes `blocked_by` and `open_blockers`); scope `{kind: "room", room}`. The entry's `from` is the actor who made the change (the assignee is only in `snapshot`). The bridge delivers every ticket entry in `context` mode (it enters the agent's context and starts no turn), except these wakes, which start a turn: a `ticket.new` or `ticket.assigned` entry wakes the ticket's assignee (only a `ticket.new` is skipped for the agent that created the ticket, because it just made it; a `ticket.assigned` always wakes the assignee, its creator included); a `ticket.new` entry of an unassigned ticket, or a `ticket.assigned` entry that unassigns, wakes the room lead (the agent named in the entry's `lead`). A draft ticket wakes no one on `ticket.new` or `ticket.assigned`. A `ticket.promoted` entry wakes the assignee once, also when the assignee created the ticket, or wakes the room lead for an unassigned ticket, except when the lead made the move (`by`). A `ticket.update` never wakes. The hub does not broadcast the dependent ticket again when one of its blockers changes status: the board works out the open blockers from the tickets it holds. The entries for archiving (`ticket.archived`), notes (`ticket.noted`) and a lead change (`room.lead`) go to the UI stream only. The `ticket.update` entry of a move that stored a note carries `notes_count` but never the text. Notes are an audit trail, not chat: they are in no Briefing and reach no agent. Tickets are not replayed on reconnect; the agent's own open tickets are in its Briefing (each with the request label, the status `draft` when it applies, and a `Blocked by:` line for blockers that are not `done`), and the room lead's Briefing also lists the open unassigned tickets of its room under "Unassigned tickets to triage:". The `ticket.new` entry of an unassigned ticket carries `lead` (the room lead or null), and so does the `ticket.assigned` entry of an unassign. A lead change is sent to the UI stream only, as an ambient `room.lead` entry `{room, lead}` (not a `ticket.*` kind: no agent receives it). The lead's block starts with a line that tells it to use `assign_ticket`.
 
 A `ticket.assigned` entry with `from: "system"` is the hub's own assignment: at a stage launch, or to the room lead after a final PASS (see "Launch ownership" and "Final PASS" under the `stage` kind). It wakes no stage session, because the first message of the session already holds the ticket. An ordinary assignee, for example the room lead, is woken as for any other assignment. The `ticket.update` of a `done` move by `system` wakes no one.
 
+## The `cancel_trace` kind
+
+A failed stage cancel or sweep leaves one row for the human. Before this kind, `cancelStage` and `sweep` only logged the failure, and the stage kept its old status. Source: `hub/kinds/cancel-trace.ts`. Spec: `openspec/changes/cancel-failure-trace`.
+
+### Lifecycle
+
+```
+(catch in cancelStage or sweep) ──► open ──► cleared   (terminal, the human clears it)
+```
+
+The hub writes a row only in the `catch` of `cancelStage` (site `cancel`) or of the sweep (site `sweep`). The stage does not change. Insert writes one `cancel_trace.created` event and one row in one transaction. `clear` writes one `cancel_trace.cleared` event and one row update in one transaction. The actor of `created` is `system`. Both events use scope `ui-only`. Their payload is the snapshot.
+
+### Snapshot schema
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `string` | `ct_` + the first 16 hex of `sha256(stage_id + "\n" + site + "\n" + status_at_failure)`. |
+| `status` | `"open" \| "cleared"` | |
+| `room` | `string` | The room of the stage. |
+| `stage_id` | `string` | |
+| `ticket_id` | `string \| null` | NULL for a spec-review stage. The UI shows "no ticket". |
+| `site` | `"cancel" \| "sweep"` | |
+| `caller` | `string` | `ticket_cancel`, `ticket_draft`, `ticket_done`, `start_sweep` or `sweep`. |
+| `status_at_failure` | `string` | The status of the stage when the call failed. |
+| `error` | `string` | The message with `<private>` parts removed, cut to 500 characters (the last 3 are `...`). |
+| `created_at` | `number` | ms. |
+| `cleared_at` | `number \| null` | ms. |
+| `version` | `number` | `events.seq` of the last event. |
+
+The same id again, open or cleared, writes no row and no event. A cleared row never reopens. A second, different status of the same stage gives a second row.
+
+### HTTP
+
+| Route | Auth | Result |
+|---|---|---|
+| `GET /rooms/<room>/cancel-traces` | bearer | `{room, traces}`: the open rows of the room, oldest first. |
+| `POST /rooms/<room>/cancel-traces/<id>/clear` | bearer | Body `{"by": "<name>"}`. 200 with `{snapshot}`. Already cleared: 200 with `idempotent: true` and no event. |
+
+Clear errors: `by` missing or not in the roster: 400. `by` is not the human: 403. No token: 401. Unknown id, or an id of another room: 404. Nothing changes on an error.
+
+### SSE events
+
+`cancel_trace.created` and `cancel_trace.cleared`. The UI reads `GET` again on these and on `stage.*` events. Old clients ignore them. There is no replay: the UI reads `GET` when the stream opens.
+
+### Logs
+
+A written trace adds no log line: the existing `[stage] cancelling <id> failed:` or `[stage] sweep of <id> failed:` line stays the only one. If the trace write throws, one more line `[stage] trace for <id> failed: <message>` follows. Nothing leaves the `catch`.
+
 ## The `stage` kind
 
-A stage is the work of one role on one ticket. The hub creates the stage, starts one session for it, checks its result and closes the session. Source: `hub/kinds/stage.ts`, `hub/core/launch-queue.ts`, `src-tauri/src/launches.rs`. Spec: `openspec/changes/stage-sessions`.
+A stage is the work of one role on one ticket. The hub creates the stage, starts one session for it, checks its result and closes the session. Source: `hub/kinds/stage.ts`, `hub/core/launch-queue.ts`, `hub/core/launch-executor.ts`. Spec: `openspec/changes/stage-sessions`.
 
 The roles are `worker`, `tester`, `validator`, `writer`, `editor` and `reviewer` (`STAGE_ROLES` in `hub/core/ledger.ts`). The `stage` table also holds request-level spec-review stages (`review = 'spec'`, `ticket_id` NULL). This section describes ticket stages first. "Spec-review stages" below gives the differences.
 
@@ -587,6 +647,7 @@ queued ──► launching ──► running ──► passed     (terminal)
   │            └──► retrying
   └──► failed  (no project folder: no attempt counted)
 launching / running / retrying ──► failed       (terminal, after attempt 2)
+queued / launching / running / retrying ──► cancelled   (terminal, a ticket cancel)
 ```
 
 | Status | Meaning |
@@ -597,8 +658,9 @@ launching / running / retrying ──► failed       (terminal, after attempt 2
 | `retrying` | Attempt 1 ended without a result. The stage waits for its relaunch. |
 | `passed` | A valid result arrived. A `FAIL` verdict also gives `passed`: the stage is a record and the verdict goes to the Orchestrator in the result handoff. |
 | `failed` | Attempt 2 ended without a result, or the room has no project folder. |
+| `cancelled` | The ticket of the stage was cancelled. Terminal. The stage is never retried and never reported as a failure. See "Cancelled stages". |
 
-A stage has at most two attempts (`attempt` 1 and 2). Each transition writes one ledger event (`stage.queued`, `stage.launching`, `stage.running`, `stage.retrying`, `stage.passed`, `stage.failed`) and one `stage` row update in one transaction. The actor of every stage event is `system`.
+A stage has at most two attempts (`attempt` 1 and 2). Each transition writes one ledger event (`stage.queued`, `stage.launching`, `stage.running`, `stage.retrying`, `stage.passed`, `stage.failed`, `stage.cancelled`) and one `stage` row update in one transaction. The actor of every stage event is `system`.
 
 ### Snapshot schema
 
@@ -614,6 +676,7 @@ A stage has at most two attempts (`attempt` 1 and 2). Each transition writes one
 | `status` | `string` | See "Lifecycle". |
 | `session` | `string \| null` | `<role>-<n>`. Set on `launching`. |
 | `slot_seq` | `number \| null` | |
+| `reason` | `string \| null` | The reason of the last `stage.cancelled` event of a `cancelled` stage, else null. Read from the event, not stored in a column. `GET /stages`, `GET /stages/<id>` and the SSE stage entry carry it. Old clients ignore it. |
 | `version` | `number` | `events.seq` of the last stage event. |
 
 The table also has `created_seq` (the queue order) and `updated_seq`. They are not in the snapshot.
@@ -622,14 +685,16 @@ The table also has `created_seq` (the queue order) and `updated_seq`. They are n
 
 The ticket field `role` (one of the six roles, or null) names the role of the first stage. `create_ticket` and `edit_ticket` set it. An unknown role → 400 and nothing is stored. The human, the ticket's creator and the room lead change `role`, with the same rule as `request_id`.
 
-The hub evaluates a ticket (`evaluateStages`) after each change that can make it ready. These changes are a ticket created as `queued`, a draft moved to `queued`, a blocker moved to `done`, and a `to_role` handoff. The hub creates a stage for a role when all of these conditions are true:
+The hub evaluates a ticket (`evaluateStages`) after each change that can make it ready. These changes are a ticket created as `queued`, a draft moved to `queued`, a blocker moved to `done`, a `to_role` handoff, and the end of a stage of the ticket. The hub creates at most one stage per evaluation, when all of these conditions are true:
 
 1. The ticket is not `draft`, `done` or `cancelled`.
 2. No ticket in its `blocked_by` list has a status other than `done`.
-3. No stage of that ticket and role is `queued`, `launching`, `running` or `retrying`.
-4. One of these is true:
-   - The role is the ticket's `role` and the ticket has no stage of that role yet.
-   - A `to_role` handoff for that ticket and role is newer than the last stage of that role. A `cancelled` or `declined` handoff does not count.
+3. No stage of that ticket, of any role, is `queued`, `launching`, `running` or `retrying`. A spec-review stage has no ticket and does not count. A handoff that arrives during a live stage waits.
+4. An item is ready. The hub starts the oldest ready item, of any role. The items are:
+   - The unspent `to_role` handoffs of the ticket, by creation seq. A `cancelled` or `declined` handoff does not count. An expired handoff that is not spent still counts.
+   - The ticket's `role`, only while the ticket has no stage of that role. A `cancelled` stage does not count, whatever its reason. Its ready seq is the `ticket.queued` event, or the `ticket.created` event of a ticket created as `queued`.
+
+A `to_role` handoff H (ticket T, role R) is spent when a stage of (T, R) was created after H, or when a stage of (T, R) was live when H was recorded. A handoff recorded during a live stage of its own role is spent by that stage. The rule reads the existing stage rows. It adds no column.
 
 The ticket's `role` starts only the first stage. Every later stage, of the same role or another role, comes from a `to_role` handoff.
 
@@ -671,14 +736,34 @@ A slot is a stage of the role in the room that is `launching` or `running`. A se
 
 The session name is `<role>-<n>`. `n` is the lowest number of 1 or more that no live session of the role uses, in all rooms. All rooms count because all sessions share one tmux socket. A name whose close has no acknowledgement is not free. The limits stay per room.
 
-### The launch stream
+### The launch queue
 
-The hub does not start or stop an agent session. It queues requests, and the Rust shell does the work. (The hub itself runs `git` subprocesses for the worktrees.)
+The hub starts, closes and feeds the agent sessions itself. (It also runs `git` subprocesses for the worktrees.) `hub/kinds/stage.ts` queues `launch`, `close` and `input` requests in `hub/core/launch-queue.ts`. `hub/core/launch-executor.ts` runs each request with `hub/core/launch-role.ts`, `hub/core/launch-command.ts` and `hub/core/tmux.ts`, and answers it with an ack record: `spawned`, or `error` (a close of a missing session adds `absent`). There is no HTTP route for the queue: the former launch stream and launch ack routes are removed and answer 404.
 
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| GET | `/launches/stream` | Bearer header OR `?token=` | SSE stream of launch and close requests. Each event has `id: <request id>` and `data: <request JSON>`. |
-| POST | `/launches/{id}/ack` | Bearer header | The shell's answer to one request. |
+### Terminal routes
+
+All four routes are human-only: the agent token gets 403 `{"error":"only the human may call this route"}`. Send the human token as Bearer. The hub reads the tmux session of `<agent>`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/terminal/<agent>/capture-turn` | Human-only. Body `{input, timeout_ms?}`. Types `input` into the session and returns the captured turn. |
+| GET | `/terminal/<agent>/tap?ms=` | Human-only. Returns the current screen bytes as text. |
+| GET | `/terminal/<agent>/capture?name=&max_bytes=` | Human-only. Returns a capture log. `max_bytes` above 262144 (`CAPTURE.readMaxBytes`) is clamped to it. |
+| POST | `/terminal/<agent>/heal` | Human-only. Resets the window size of the session to `latest`. |
+
+A missing session gives 404. A tmux error from `has-session` gives 500.
+
+### Session routes
+
+The human creates, lists and kills the agent sessions and the Shell tab session through the hub (`hub/features/sessions.ts`). All five routes are human-only: the agent token gets 403. Without `CUBILOT_TMUX` the routes give 503. The old `claude_sessions` routes on `/sessions` (resume flag capture) had no caller and are removed. The table stays.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/sessions` | Body `{name, cwd, role, room?, harness?, model?, provider?, effort?, resume?}`. `harness` is `claude` (default) or `pi`. `resume` is `resume` or `continue`. `room` defaults to the name of the git root of `cwd`. Answers `{ok, name, created}`. A running session of that name gives `created: false` for the same role and 409 for another role. A new session needs a role. The name `shell`, a name with a dot, a reserved name, an unknown harness, an unknown role or a missing `cwd` give 400. |
+| GET | `/sessions` | `{sessions: [name]}`. The Shell tab session is not in the list. |
+| POST | `/sessions/shell` | Creates the Shell tab session when it is missing. `{ok, created}`. |
+| GET | `/sessions/shell` | `{exists}`. |
+| POST | `/sessions/<name>/kill` | Kills the session. `{ok}`. A missing session gives 404. |
 
 Request formats (`id` has the format `l_[0-9a-f]{16}`):
 
@@ -690,12 +775,16 @@ Request formats (`id` has the format `l_[0-9a-f]{16}`):
   "env": { "CHATBRIDGE_AGENT": "worker-1", "CHATBRIDGE_ROOM": "cubilot", "CUBILOT_STAGE_ID": "s_…" }
 }
 { "id": "l_…", "kind": "close", "session": "worker-1" }
+{ "id": "l_…", "kind": "input", "session": "Orchestrator", "text": "/clear" }
 ```
 
-- `harness` comes from the role's staged `harness` file (`hub/core/role-harness.ts`). The default is `claude`.
+- `harness` comes from the `role_models` entry of the role in `config.yml` (`hub/core/role-models.ts`), else from the role's staged `harness` file (`hub/core/role-harness.ts`). The default is `claude`.
+- `model`, `provider` and `effort` are optional. The hub adds each one only when the `role_models` entry of the role sets it. The hub reads `$CUBILOT_DATA_DIR/config.yml` at each launch. The shell passes them to `pty_spawn` as a modal choice. Without an entry, the request has none of the three fields. `effort` is the Claude effort or the Pi thinking level. A harness other than the role's own needs a `model`, or `pty_spawn` refuses the launch.
+- A shape error in the entry of a role (not a map, a field that is not a string, an unknown field, a harness that is not `claude` or `pi`) queues no launch for that role. The attempt ends with the reason `role_models.<role>: <what>`. A value that `pty_spawn` refuses comes back as an error ack. The hub stores it with the prefix `role_models.<role>: `. Other roles are not affected. A `config.yml` that is missing, unreadable or not valid YAML, or a `role_models` that is not a map, gives no entries.
 - `cwd` is the worktree that the hub made before it queued the launch. The shell never runs git.
 - `prompt` is the ticket part of the first message, rendered from `factory/<role>/first-message.md`. It does not contain the role prompt. `factory-roles` passes the role prompt as a file: Claude Code gets `--append-system-prompt-file <file>`, and pi gets `--append-system-prompt <file>` (`src-tauri/src/pty.rs`). A retry adds one line with the reason of the earlier stop. When a `to_role` handoff started the stage, the prompt also holds a section `## Handoff` with the sender, the task and the context JSON of that handoff. The section is capped at 64 KB. Over the cap, the hub cuts it and adds one line that names the handoff id. A stage that no handoff started gets no such section. A retry gets the same section. The section starts its context with one line that names the session's own stage id: "The stage_id in this context is the sender's stage. Your stage id is <id>. Use your own stage id in your result." The cap includes this line.
 - The shell reads `stage_id` and sets `CUBILOT_STAGE_ID` itself. It does not read `env`.
+- An `input` request (the checkpoint `/clear`, P6-15) carries one line of text for one named session. The shell writes the text and Enter to the PTY of that session and to no other (`pty::write_input`, raw PTY, never `tmux send-keys`). It refuses an unknown session, empty text, text over 1,024 bytes and any control character. The shell does the write once. The hub sends an `input` once: it is not sent again after a reconnect. The ack is `spawned` (written) or `error`. Only `hub/kinds/stage.ts` queues it, through `sendInput`.
 
 Ack body:
 
@@ -712,7 +801,7 @@ Ack body:
 | Unknown request id | 404 |
 | First answer | 200 `{"ok": true}` |
 | Same answer again | 200 `{"idempotent": true}` |
-| Other `result` than the recorded one, or an ack after the time-out | 409 |
+| Other `result` than the recorded one, or an ack after the time-out | 409. Exception: the late `spawned` or `error` ack of a cancelled stage gets 200 (see "Cancelled stages" item 2). |
 | Close with `error` and no `absent` | 200 `{"ok": true, "pending": true, …}`. The close stays pending. |
 | The hub could not record the stage change | 500. Send the ack again. |
 
@@ -729,22 +818,34 @@ Rules:
 
 **Who can queue a launch.** No route and no chatbridge tool has a launch parameter. One function, `enqueueLaunch` in `hub/kinds/stage.ts`, queues launch requests. Only the stage evaluator and the retry path call it. `tests/unit/launch-queue.test.ts` checks that `enqueueLaunch` is named, and the launch queue is imported, only in `hub/kinds/stage.ts`. Each call checks the launch conditions again. The ticket is not `draft`, `done` or `cancelled`, no blocker is open, and the role has a free slot. When a check fails, the stage stays as it is.
 
-**Accepted risk.** There is no per-role token. Any holder of `hub.token` can read `/launches/stream` and send acks. The code path is the only control. See "Identity and trust model".
+**Accepted risk.** There is no per-role token. The launch routes need the human token (they give 403 to the agent token), and no file holds it. The code path is the only control. See "Identity and trust model".
 
 ### Worktrees
 
 The hub makes every stage worktree from the room's project folder (`project_folder` in the room settings). Worktrees are under `<app data>/worktrees/<room>/<ticket>/<session>`.
 
-- `worker` and `writer`: the branch `ticket/<id>`. The hub creates the branch from the room base when it does not exist. A later stage of the same ticket and role uses the same worktree again.
-- `tester`, `validator`, `editor`, `reviewer`: a temporary worktree with `--detach`. Its commit is `context.commit` of the newest live `to_role` handoff for that ticket and role. When that handoff has no commit, the hub uses the head of `ticket/<id>` when that branch exists, else HEAD. The hub removes the worktree after the close of its session is acked. When no session runs (the stage fails for good, or an attempt ends before a retry), the hub removes it at once.
-- `validator` and `reviewer`: the worktree files are read-only (`chmod -R a-w`, not `.git`).
+- `worker`, `writer` and `editor`: the branch `ticket/<id>`. The hub creates the branch from the room base when it does not exist. A later stage of the same ticket uses the same worktree again. The Editor sees the commits of the Writer. A branch-role stage launches only after the close ack of the earlier branch-role session of the same ticket. A stage of another ticket does not wait for that close.
+- `tester`, `validator`, `reviewer`: a temporary worktree with `--detach`. Its commit is `context.commit` of the newest live `to_role` handoff for that ticket and role. When that handoff has no commit, the hub uses the head of `ticket/<id>` when that branch exists, else HEAD. The hub removes the worktree after the close of its session is acked. When no session runs (the stage fails for good, or an attempt ends before a retry), the hub removes it at once.
+- `validator` and `reviewer`: the worktree files are read-only (`chmod -R a-w`, not `.git`). The Reviewer worktree is detached at the commit of the Editor hand-over.
 - A room with no project folder: the stage goes from `queued` to `failed` with the error `room has no project folder: set it in New factory room`. No session starts and no attempt is counted.
 
 ### Launch ownership and the `system` actor
 
-When a stage moves to `launching`, the hub sets the ticket's `assignee` to the session name. The hub writes the `stage.launching` event and a `ticket.assigned` event with actor `system` in one transaction. Three transactions write events of two kinds: this one, the spec-review PASS (`stage.passed` and `ticket.queued`), and the final PASS of a ticket review (`stage.passed` and `ticket.done` or `ticket.assigned`, see "Final PASS"). A retry assigns the ticket to the new session name. After `passed`, the assignee stays the last session name, as a record, unless a final PASS assigns the ticket to the room lead. The assignment clears `approval_request_id`, as every assignment does. The bridge delivers a `ticket.assigned` from `system` in `context` mode to a stage session, so the new session is not woken: its first message already holds the ticket. Session names are used again, so an old open ticket can still name the same session as assignee. Therefore the Briefing of an agent follows the newest stage row of its session name, in any status. It lists only the ticket of that stage while the ticket is open, else no ticket. A spec-review session gets no ticket list. An agent with no stage row keeps the usual list.
+When a stage moves to `launching`, the hub sets the ticket's `assignee` to the session name. The hub writes the `stage.launching` event and a `ticket.assigned` event with actor `system` in one transaction. Three transactions write events of two kinds. The human's Approve of a request is not one of them (see "Approval route"). The three are: this one, the spec-review PASS (`stage.passed` and `ticket.queued`), and the final PASS of a ticket review (`stage.passed` and `ticket.assigned`, see "Final PASS"). A retry assigns the ticket to the new session name. After `passed`, the assignee stays the last session name, as a record, unless a final PASS assigns the ticket to the room lead. The assignment clears `approval_request_id`, as every assignment does. The bridge delivers a `ticket.assigned` from `system` in `context` mode to a stage session, so the new session is not woken: its first message already holds the ticket. Session names are used again, so an old open ticket can still name the same session as assignee. Therefore the Briefing of an agent follows the newest stage row of its session name, in any status. It lists only the ticket of that stage while the ticket is open, else no ticket. A spec-review session gets no ticket list. An agent with no stage row keeps the usual list.
 
 `system` is a reserved name (`RESERVED_NAMES` in `hub/core/ids.ts`). The dispatcher examines the JSON body of every mutating request. When `by`, `from`, `actor`, `voter`, `requester`, `agent` or `creator` is `system` (any case), it returns 400 `the actor 'system' is reserved for the hub`. Nothing is written. Only code in the hub writes events with actor `system`. These are the stage transitions, the launch assignment, the spec-review PASS, the ticket move after a final PASS, the handoff to the Orchestrator after a final failure, and handoff expiry.
+
+### Cancelled stages
+
+`cancelled` is terminal and has no retry. A cancelled stage is not a failure: it has no final-failure handoff to the Orchestrator, no Needs-you line, no FAIL count (`specFailState` reads `verdict` only), no failure record and no input to a diagnosis.
+
+1. **Ticket cancel.** After the commit of `ticket.cancelled`, the hub moves each `queued`, `launching`, `running` or `retrying` stage of the ticket to `cancelled` with the reason `ticket cancelled` and actor `system`. It does this through the stage API, one transaction per stage, after the ticket transaction. This adds no cross-kind transaction. A live stage (`launching`, `running`, or `retrying` with a session) first gets one close request. A `queued` stage gets none. A `passed` or `failed` stage does not change.
+2. **Release rule.** The session name, the role slot and the worktree of a cancelled stage stay reserved until a close ack arrives while no launch of that stage is in flight. A close ack (`absent` included) while its launch is in flight releases nothing. When the launch ends later (`spawned`, `error` or no ack), the hub queues one more close and only the ack of that close releases. When the launch timed out, the hub queues no close at the time-out and keeps the reservation, even after a close ack (`absent` included). The late `spawned` or `error` ack is accepted (200) and queues one more close. A repeat of it is idempotent. A late ack of a stage that is not cancelled gets 409. The stage never moves to `running` and is never retried. A launch the shell never received is dropped, with no close, and releases at once.
+3. **Worktree.** A `ticket/<id>` worktree (worker, writer, editor) stays. A temporary worktree goes at the releasing close ack (or at once for a dropped launch).
+4. **Hub start.** Before the sweep of `launching` stages, each open stage of a cancelled ticket moves to `cancelled` with the reason `ticket cancelled` and each live one gets one close request. The sweep then skips them.
+5. **Move to draft or done (G10).** After the commit of a move of a ticket to `draft` or `done`, the hub moves each `queued` stage of the ticket to `cancelled` with the reason `ticket moved to draft` or `ticket moved to done`, actor `system`, through the stage API, one transaction per stage. The only route is a ticket transition to `draft` or `done` (after its commit). A final Validator or Reviewer PASS does not move the ticket to `done`, so it cancels no queued stage. This adds no cross-kind transaction. A `launching`, `running` or `retrying` stage does not change. At hub start, the queued stages of a draft or done ticket move the same way, before the sweep of `launching` stages. The launch check refuses a stage whose ticket is `draft`, `done` or `cancelled`. A refusal writes nothing, so the stage row does not change.
+6. **Shell close order.** The shell keeps the session names of its launches in progress. A close for such a name waits until that launch ends. A close for another name runs at once. A close waits for at most one launch of its name.
+7. **Limits.** A shell restart (`t_81bfa8a84ecc06e5`) is out of scope. A launch ack that never arrives (for example lost in a shell restart) holds the reservation until the hub restarts. The human closes an orphan pane.
 
 ### Results
 
@@ -757,6 +858,37 @@ A stage ends with a result handoff from its session. The hub treats a handoff as
 | `context.verdict` | — | `"PASS"` or `"FAIL"`, upper case |
 | `context.findings` | — | list of `{ticket_id, text}`. Each `ticket_id` and `text` is a non-empty string. The list can be empty. |
 
+Every stage result, also a spec-review result, needs `context.notes`: a non-empty string of at most 400 words (target 300). The notes say what the stage did, what it found and what is open. A missing, empty or too long `notes` gives the 400 result error that names the field `context.notes`. The stage stays `running`. A handoff to a named agent that is not a stage result needs no notes. The hub gives the notes to later stages of the same ticket (see "Context pack").
+
+A Worker stage (role `worker`) has a stricter rule. Its result is a handoff with `to_role: "tester"`:
+
+| Field | Worker stage |
+|---|---|
+| `to_role` | `"tester"` (the recipient is `role:tester`) |
+| `context.commit` | required. A full 40-character lowercase hex hash. It resolves to a commit, is reachable from `ticket/<ticket_id>`, and is new work. |
+
+New work: the base is an ancestor of `context.commit` and the two hashes differ (`git merge-base --is-ancestor`). The base is the `context.commit` of the newest earlier passed Worker result of the same ticket that has a valid commit (ordered by the creation event of the handoff). With none, the base is `git merge-base ticket/<ticket_id> staging`. Git runs with argv, no shell, with a time limit. Any other handoff with the stage_id of a running Worker stage → 400 `{"error": "result rejected", "errors": ["A worker result needs to_role tester and a new commit on ticket/<id>. To report a block, post to the Orchestrator without stage_id."]}`. A missing project folder, ticket branch or staging branch, or a failed git command, adds the git error text to that message. The hub records no handoff, the stage stays `running`, and the session gets `stage.rejected`.
+
+Writing-chain hand-over (writer and editor results). The same refusal as above: 400 `{"error": "result rejected", "errors": [...]}`, no handoff recorded, the stage stays `running`, and the session gets `stage.rejected`. Four rules:
+
+1. New commit (writer): a Writer result goes to `to_role editor`. `context.commit` is 40 hex, resolves, is on `ticket/<ticket_id>`, and is newer than the base. The base is the `ticket/<ticket_id>` head when the Writer stage first started, which the hub records at launch (`stage.start_commit`). A commit that already existed then is not new work. A recorded start that is malformed or does not resolve refuses the result. A stage with no recorded start uses the newest earlier passed Writer or Editor result, else `git merge-base ticket/<ticket_id> staging`. A commit equal to the base, an ancestor of it, malformed, unresolved or off the branch is refused, and the message says which check failed.
+2. Writer commit kept (editor): an Editor result goes to `to_role reviewer`. `context.commit` is 40 hex, resolves, is on `ticket/<ticket_id>`, holds the newest passed writer commit (`git merge-base --is-ancestor`), and differs from it. With no passed writer commit the result is refused.
+3. Correct next role: a result sent to another role is refused, and the message names the correct one (writer to `to_role editor`, editor to `to_role reviewer`).
+4. A git failure refuses: when git cannot answer (missing project folder, missing branch, a failed command, a time-out), the result is refused with the git error text. It never passes. Git runs with argv, no shell, and the existing time limit. A result needs a small, fixed number of git calls (a rewritten branch adds a few more).
+
+A Reviewer stage (role `reviewer`) has stricter rules. The hub refuses the result with 400 and names the field:
+
+| Field | Reviewer stage |
+|---|---|
+| `context.ticket_id` | required, the stage's ticket (`context.ticket_id must be <id>`) |
+| `context.findings` | list of `{severity, text}`. `severity` is `"blocking"` or `"suggestion"`: another value gives `context.findings[i].severity must be blocking or suggestion`. `text` is a non-empty string. |
+| PASS | no `blocking` finding: `a PASS must not have a blocking finding`. The recipient is the room lead: any other agent gives `to: a Reviewer PASS must be sent to <lead>, not to <to>`. |
+| FAIL | the recipient is `to_role: "writer"`: any other target gives `to: a Reviewer FAIL must be sent with to_role "writer", not to <to>`. A lint FAIL has `context.gate: "ste-lint"` and the recipient is `to_role: "editor"`: any other target gives `to: a Reviewer FAIL with gate "ste-lint" must be sent with to_role "editor", not to <to>`. |
+
+The Validator result keeps its schema: findings are `{ticket_id, text}`, with no severity.
+
+**Writing chain.** A ticket with role `writer` queues and starts like a `worker` ticket. The Writer hands over with `to_role: "editor"` and the Editor with `to_role: "reviewer"`. No stage session accepts or declines these role hand-overs, and none moves the ticket to `done`. A Reviewer PASS gives the ticket to the room lead by the Final PASS rule below. The lead merges the branch and moves the ticket to `done`. A Reviewer FAIL is a handoff with `to_role: "writer"`: the hub starts one Writer stage, and its first message holds the findings. A Reviewer lint FAIL (`gate: "ste-lint"`, sent before the review) is a handoff with `to_role: "editor"`: the hub starts one Editor stage and no Writer stage. The Reviewer runs the lint, not the hub.
+
 Example of a valid Validator result:
 
 ```json
@@ -767,6 +899,7 @@ Example of a valid Validator result:
   "context": {
     "stage_id": "s_0123456789abcdef",
     "ticket_id": "t_0123456789abcdef",
+    "notes": "I checked the 409 path. It has no test. I did not run the full suite.",
     "verdict": "FAIL",
     "findings": [{ "ticket_id": "t_0123456789abcdef", "text": "The 409 path has no test." }]
   }
@@ -777,12 +910,63 @@ Example of a valid Validator result:
 - A handoff whose `context.stage_id` names a `passed` or `failed` stage → 409 `{"error": "<text>"}`. The hub records no handoff and sends no `stage.rejected`. The hub does this check before the schema check, for every sender. When the sender has a `running` stage, the text is `stage <id> is already <status>. Your running stage is <own id>. Send your result with that stage_id.` Otherwise the text is `stage <id> is already <status>; it takes no more results`.
 - A valid result → the hub records the handoff, and the stage moves to `passed` with the verdict (if any). The session stays open until its next end of turn.
 
-**Final PASS.** When a `validator` or `reviewer` stage of a ticket passes with `verdict: "PASS"`, and the ticket is `in_review`, the hub also moves the ticket. It writes the ticket event in the transaction of `stage.passed`, with actor `system`. Both commit or roll back together.
-
-- `blast_radius: low`: one `ticket.done` event. The ticket moves to `done`. The hub then evaluates the tickets that this ticket blocked.
-- `blast_radius: high`: one `ticket.assigned` event to the room lead. The hub never writes `done` on a `high` ticket. The assignment clears `approval_request_id`. The lead then asks the human's Allow with `POST /tickets/:id/approval`.
+**Final PASS.** When a `validator` or `reviewer` stage of a ticket passes with `verdict: "PASS"`, and the ticket is `in_review`, the hub also moves the ticket. It writes one `ticket.assigned` event to the room lead with actor `system`, in the transaction of `stage.passed`. Both commit or roll back together. A final PASS never closes a ticket, whatever its radius (L4). The lead merges the branch and moves the ticket to `done` after the PASSes (a `high` ticket needs two, see "High-radius checks"). The first PASS on a `high` ticket also starts a second Validator stage on the same commit.
 
 Nothing moves for a FAIL, a spec-review stage, a `worker`, `tester` or `writer` stage, or a ticket that is not `in_review`. Nothing moves for a `high` ticket when the room has no lead (the hub logs one line) or when the lead is already the assignee.
+
+### Context pack
+
+The hub builds the first message of a stage with no model call. The parts come in this order:
+
+1. The stable block: `docs/PRIMER.md` (at most 2,000 tokens, counted as `ceil(bytes / 4)`) and the Nutshell. It holds no stage, time, session or worktree field. Two stages of one room get the same bytes while the primer file and the Nutshell do not change.
+2. The ticket block: the role template, then the pack parts below, then the handoff section.
+
+| Part | Content | Roles |
+|---|---|---|
+| Earlier notes | The agent notes are not part of this section: they come first, under "## Agent notes", for every role. This section holds spec-review notes, then the `context.notes` of earlier stage results, oldest first. | worker, writer, reviewer, tester, validator |
+| Graph query | `graphify query` with budget 1500 in the room's project folder, with a status line `fresh` or `stale`. The graph describes the room base, not the ticket branch. | worker, writer, reviewer, spec review |
+| Symbol signatures | `ctags` tags of the files that the criteria and the spec paths name. | worker, writer, reviewer |
+| Diff stat | `git diff --stat` against the room base branch. | validator (code review) |
+| Changed files | `git diff --name-only` against the room base branch. | validator (code review), tester |
+
+The editor gets no pack part. A template cannot widen the parts of a role (`hub/core/pack-depth.ts`). The other pack commands (`ctags`, `git diff`) run in the stage worktree. Each command stops after 20 s. A command that fails or stops marks only its own part `missing` and the launch continues. A `missing` graph part adds no text. Without a usable `ctags`, the signatures part says `missing`. The Agent notes section and the Earlier notes section are each cut at 32 KiB, and the pack parts together at 16 KiB. Source: `hub/core/context-pack.ts`, `hub/core/first-message.ts`, `hub/core/primer.ts`.
+
+### Room flow
+
+| Method and path | Auth | Answer |
+|---|---|---|
+| `GET /rooms/<room>/flow?since=<ms>&until=<ms>` | bearer or `?token=` | Read only. Default window: the last 24 hours. `since` must be less than `until`, else 400. No token: 401. |
+
+The hub computes the answer from the ledger and git on each call. It uses no model and stores nothing. The fields are:
+
+| Field | Meaning |
+|---|---|
+| `limits` | Always `"current"`. The ledger records no limit changes, so `slot_hours` use the role limit of now. |
+| `slot_use.<role>` | `run_hours` (stage launch to end, clipped to the window), `limit`, `slot_hours` (`limit` times the window) and `percent`. |
+| `ready_tickets` | Queued tickets with no uncleared blocker and no live stage. A blocker is cleared as in L3: done, or merged into `staging`. |
+| `wait_hours` | Ticket-hours in the window, one reason for each hour: `draft`, `waiting_approval`, `blocked` (queued, uncleared blocker), `no_slot` (queued, no blocker). `waiting_approval` is the part of a draft after the spec PASS, when the request holds a high ticket. The blocker list is the current list. |
+| `reviews.spec`, `reviews.validator`, `reviews.reviewer` | `pass`, `fail` and `fail_percent` of the verdicts that ended in the window. |
+| `done_without_merge` | Done tickets with no merge commit on `staging` (two or more parents, message names the ticket id). `named_by_non_merge_commit` is true when only a plain commit names it. `null` when git cannot answer (`staging` is `"unavailable"`). |
+
+Tickets and stages of another room do not count.
+
+### Stage metrics
+
+After a stage ends as `passed` or `failed`, the hub writes one `stage_metrics` row for each attempt. The write happens outside the stage transaction. A failure of the write logs one line and never changes the stage.
+
+`GET /rooms/<room>/stage-metrics` returns `{ "room": "<room>", "roles": { "<role>": [row, ...] } }`. It needs a bearer token or `?token=`. A request without a valid token gets 401. A row has these fields:
+
+| Field | Meaning |
+|---|---|
+| `stage_id`, `attempt`, `role` | The stage attempt. |
+| `first_message_bytes`, `first_message_tokens_est` | Size of the first message. The estimate is `ceil(bytes / 4)`. |
+| `prompt_tokens_first` | Input, cache creation and cache read tokens of the first model request. NULL when no usage is readable. |
+| `cache_read_tokens` | `usage.cache_read_input_tokens` of the first request. NULL when no usage is readable. |
+| `tokens_before_action` | Tokens used before the first `Edit` or the result. NULL when no usage is readable. |
+| `source` | `claude` when the Claude transcript gave the numbers, `pi` when the pi session file did (`~/.pi/agent/sessions/--<cwd>--/`, pi 1.4.0), else `none` with three NULL numbers. |
+| `created_seq` | Event sequence of the end of the attempt. |
+
+Source: `hub/core/stage-metrics.ts`.
 
 ### End of turn, reminders and retries
 
@@ -804,6 +988,16 @@ Every 30 s the hub also checks the stages (a sweep). Each time limit starts when
 These clocks are in memory. A hub restart starts the clocks of the `running` stages again. At hub start, the hub queues a close at once for each `passed` stage whose session no live stage uses. The 120 s grace does not start again.
 
 A stop queues a close for the session and ends the attempt. The reason is in the event payload. Attempt 1 goes to `retrying`. The hub relaunches the stage when the close is acknowledged and a slot is free. The relaunch has the same ticket part and one line with the reason. Attempt 2 goes to `failed`. The hub then sends a handoff from `system` to the room lead (default `Orchestrator`). Its context is `{stage_id, ticket_id, request_id, role, reason}`. An interrupt does not change a stage and does not close its session.
+
+### High-radius checks
+
+A `blast_radius: high` ticket needs the full suite and two Validator PASSes before the lead moves it to `done`. The hub checks them in the result of a stage (L4, P6-04). There is no human Allow step.
+
+- **Tester.** The first message names `./scripts/test.sh`. The result carries `commit` (the commit of the handoff that started the stage) and `full_suite`: `{command, exit_code, pass, fail, log_path}`. A result without `full_suite`, or with a missing field, gets 400 and a `stage.rejected` entry.
+- **First Validator PASS.** The hub refuses it when the newest Tester result since the latest worker stage has no `full_suite.exit_code` 0, or when `context.commit` differs from the commit of that run.
+- **Second Validator PASS.** The first PASS starts a second Validator stage in a new session on the `second_review` model of `config.yml` (a bad value gives the default). It does not get the notes of the first Validator. Its PASS must name the commit of the first one. After the second PASS the hub hands the ticket to the room lead (see "Final PASS").
+- **Merge message.** `GET /tickets/{id}/merge-message` names both PASS handoff ids.
+- **Withdrawn PASS and open stop.** The Validator PASS count ignores a PASS whose result handoff its sender cancelled. An agent's move to `done` gets 409 "done needs an answer to the Validator interrupt `i_...`: acknowledge it first" while a Validator interrupt of the ticket is `pending`. `ack_interrupt` clears it. The human may still complete the ticket directly.
 
 ### Spec-review stages
 
@@ -833,10 +1027,10 @@ A spec review is a `validator` stage for the plan of one request: its `draft` ti
 | `request_id` | Format `^[A-Za-z0-9._-]{1,64}$`. | 400 |
 | `context.request_text` | Required. A non-empty string of at most 20 000 characters. | 400 |
 | `context.spec_paths` | Optional. A list of non-empty strings. | 400 |
-| `context.ticket_ids` | Optional. A list of ticket ids. Each ticket is `draft`, has this `request_id` and is in the sender's room. | 400, the message names the ticket |
+| `context.ticket_ids` | Optional for an agent sender. Required and non-empty for the human sender. A list of ticket ids. Each ticket is `draft`, has this `request_id` and is in the room of the review. | 400, the message names the ticket, or `ticket_ids` |
 | `context.commit` | Optional. A hex commit hash of 7 to 64 characters. | 400 |
 
-The room of the review is the sender's room. The scope is the tickets in `context.ticket_ids`. Without that list, the scope is every `draft` ticket of the request in the room. An empty scope gets 400 `no draft ticket to review in request <id>`. When the handoff has no `commit`, the hub runs `git rev-parse HEAD` in the room's project folder. If the room has a project folder and the command succeeds, the hub records that commit in the stored context. Thus a later commit does not change the review. Otherwise the context has no commit, and the launch uses HEAD at launch time. The hub writes the handoff, then one `stage.queued` event. The scope rows (`stage_scope`) are written in the transaction of that event.
+The room of the review is the sender's room. For the human sender, who has no room, it is the room of the tickets in `context.ticket_ids`, and all of them must be in one room (else 400, nothing recorded). The scope is the tickets in `context.ticket_ids`. Without that list, an agent sender gets every `draft` ticket of the request in the room. The human sender must name the tickets. An empty scope gets 400 `no draft ticket to review in request <id>`. When the handoff has no `commit`, the hub runs `git rev-parse HEAD` in the room's project folder. If the room has a project folder and the command succeeds, the hub records that commit in the stored context. Thus a later commit does not change the review. Otherwise the context has no commit, and the launch uses HEAD at launch time. The hub writes the handoff, then one `stage.queued` event. The scope rows (`stage_scope`) are written in the transaction of that event.
 
 **Launch.** A spec stage uses a slot of the `validator` limit of the room. At most one spec stage of a request is `launching`, `running` or `retrying` in a room. A later one stays `queued` until the live one ends. The worktree is read-only and detached at the recorded commit, under `<app data>/worktrees/<room>/request-<request_id>/<session>`. The launch assigns no ticket, so it writes no `ticket.assigned`. The first message holds the request text, the spec paths and the scope tickets (criteria, `blocked_by`, `blast_radius`). It also holds the worktree, the commit, and the findings of the earlier FAIL results since the last PASS.
 
@@ -860,26 +1054,29 @@ A PASS with a `blocking` finding is invalid. An invalid result gets 400 and a `s
 1. `stage.passed` with `verdict = 'PASS'`.
 2. One `ticket.queued` event with actor `system` for each scope ticket that is still `draft` and still has this `request_id`.
 
-A scope ticket that moved or left the request after the review started does not move. When the request has a `blast_radius: high` ticket that is not `done` or `cancelled` in the room, the transaction writes only `stage.passed`. The tickets stay `draft`, and the request waits for the human's approval. After the commit, the hub sends a `ticket.promoted` entry for each queued ticket and evaluates the ticket for its stages.
+A scope ticket that moved or left the request after the review started does not move. When the request needs the human's Approve and has none (see "Waiting for approval"), the transaction writes only `stage.passed`. The tickets stay `draft`, and the request waits for the human's approval. After the commit, the hub sends a `ticket.promoted` entry for each queued ticket and evaluates the ticket for its stages.
 
-**FAIL.** The hub writes `stage.passed` with `verdict = 'FAIL'`. No ticket moves, and the hub starts no automatic repeat review. The end of the stage can free a `validator` slot for other queued stages. The findings stay in the result handoff to the room lead. The hub counts the FAIL results of the request in the room since its last PASS. From the second FAIL, the hub also sends the human a `ui-only` system entry with the findings of this FAIL. A PASS starts the count again.
+**FAIL.** The hub writes `stage.passed` with `verdict = 'FAIL'`. No ticket moves, and the hub starts no automatic repeat review. The end of the stage can free a `validator` slot for other queued stages. The findings stay in the result handoff to the room lead. The hub counts the FAIL results of the request in the room since its last PASS or the human's Approve of the request (`request.approved` in the same room). From the second FAIL, the hub also sends the human a `ui-only` system entry with the findings of this FAIL. A PASS or an Approve starts the count again. An Approve in another room does not.
 
 **Waiting for approval.** This state is not stored. A request in a room waits for approval when all of these are true:
 
 1. A spec stage of the request has `verdict = 'PASS'`.
 2. A scope ticket of that stage is still `draft`, still has this `request_id` and is in the same room.
-3. The request has a `blast_radius: high` ticket that is not `done` or `cancelled`.
+3. The request needs the human's Approve (see "The `request` kind") and has none, or its scope changed since the newest Approve.
 
-**Approval route.** `POST /requests/{room}/{request_id}/approve` with body `{"by": "<human name>"}`.
+**Approval route.** `POST /requests/{room}/{request_id}/approve` with body `{"by": "<human name>", "scope"?: <scope>}`. The human approves a request once (L1): one Approve releases every `draft` ticket of the request, and the room lead may queue any later ticket of it.
 
 | Condition | Response |
 |---|---|
 | Bad room label or bad request id | 400 |
 | `by` is not the human | 403 `only the human may approve a request` |
-| No ticket of the request in the room | 404 |
-| Success | 200 `{"room", "request_id", "queued": [ticket ids]}`. The hub adds `"idempotent": true` when no ticket was `draft`. |
+| No request row and no ticket of the request in the room | 404 |
+| `scope` differs from the scope now (the lead edited the request after the card loaded) | 409 `the scope of the request changed since the card loaded: reload and look again` |
+| Success | 200 `{"room", "request_id", "queued": [ticket ids]}`. The hub adds `"idempotent": true` when nothing was queued. |
 
-The route moves every `draft` ticket of the request in the room to `queued`, not only the scope tickets. It writes one `ticket.queued` event for each ticket in one transaction, with the human as the actor. It then sends a `ticket.promoted` entry for each ticket and evaluates the tickets for their stages. The route does not check that the request waits for approval. Trust is self-asserted, as on every route (see "Identity and trust model").
+The route writes two transactions. The first one writes one `request.approved` event (entity: the id of the request row, payload with the scope) and updates the `requests` row (`approved`, status `approved`). It writes nothing when the scope equals the stored one. The second one writes one `request_approvals` row (if none) and one `ticket.queued` event for each `draft` ticket of the request in the room, not only the scope tickets, with the human as the actor. A crash between the two leaves an Approve and drafts: a repeated Approve queues the drafts that are left. After the commit the hub sends a `ticket.promoted` entry for each ticket and evaluates the tickets for their stages. The route does not check that the request waits for approval. Trust is self-asserted, as on every route (see "Identity and trust model"). The two transactions are not a cross-kind transaction: each writes events of one kind.
+
+The spec-review PASS queues the scope tickets in the same way, whatever their role.
 
 **The `system` actor.** On the spec-review path, the hub writes `system` for every stage event: the creation (`stage.queued`), the launch, `running`, the retry moves, PASS and FAIL. The PASS transaction also writes each `ticket.queued` with `system`. The approval route writes the human's name. Every mutating route refuses `system` as an actor with 400 (see "Launch ownership and the `system` actor").
 
@@ -890,11 +1087,17 @@ The route moves every `draft` ticket of the request in the room to `queued`, not
 | GET | `/stages?status=&role=&limit=` | Bearer header OR `?token=` | List snapshots. `status` is a stage status or `all` (default `queued`). `limit` 1 to 1000, default 100. |
 | GET | `/stages/{id}` | Bearer header OR `?token=` | One snapshot, or 404. |
 | POST | `/stages/{id}/turn-end` | Bearer header | End-of-turn report of the stage's session (see above). |
-| GET | `/requests/{room}/waiting` | Bearer header OR `?token=` | The requests of the room that wait for approval: `{room, waiting: [{request_id, stage_id, high_tickets, draft_tickets}]}`. |
-| GET | `/requests/{room}/needs-you` | Bearer header OR `?token=` | The requests of the room with two or more spec FAILs since the last PASS: `{room, requests: [{request_id, fail_count, findings}]}`. The findings come from the latest FAIL, `blocking` first. |
-| POST | `/requests/{room}/{request_id}/approve` | Bearer header | The human's approval (see "Spec-review stages"). |
+| GET | `/requests/{room}/waiting` | Bearer header OR `?token=` | The requests of the room that wait for approval: `{room, waiting: [{request_id, stage_id, high_tickets, draft_tickets, origin, features, tickets, scope_change}]}`. `tickets` lists each ticket of the request that is not cancelled with `radius`, `source` and `reasons` of its radius. |
+| GET | `/requests/{room}/needs-you` | Bearer header OR `?token=` | The requests of the room with two or more spec FAILs since its last PASS or the human's Approve of the request: `{room, requests: [{request_id, fail_count, latest_fail_stage_id, findings}]}`. The findings come from the latest FAIL, `blocking` first. `latest_fail_stage_id` is the newest FAIL stage of the request (the board keys Collapse and Clear on it). A finding is left out when its ticket has, with `seq` greater than the `stage.passed` event of that FAIL stage, a `ticket.done`, a `ticket.cancelled` or a `ticket.edited` whose `fields` include `acceptance_criteria` or `title`, or when the ticket is `done` or `cancelled` now. Assigned, noted, attached, archived and other edits do not count. A request is left out when all its findings are left out (a FAIL with no findings keeps its row), or when it has tickets in the room and all are `done` or `cancelled`. A request with no ticket left in it stays. Finding titles come from tickets of the same room. A newer open spec review of the request does not hide it: the row stays until a PASS (spec-fail-gate 5). After two FAILs since its last PASS or the human's Approve of the request, `POST /handoffs` with `review: "spec"` from a sender that is not the human gets 409 ("the human must send this review"), and each queued spec stage of the request from a non-human handoff moves to `failed` with the reason "spec FAIL limit: the human must send this review". Each spec FAIL result is stored with `fail_count` (the hub count, over any sender value). A newer FAIL becomes the latest FAIL (count and findings). A newer PASS or Approve removes the row, and the next `fail_count` starts at 1. A newer review that ends `failed` with no verdict does not count as a FAIL. |
+| GET | `/requests/{room}/{request_id}/delivery` | Bearer header OR `?token=` | The delivery report of a request (P6-08), built from the ledger and git with no model: `origin`, `features`, `tickets` (each with its `merge_commit` on staging, or `no merge commit`), `criteria_edits` after the newest Approve (both texts), child `factory_requests`, `known_limits` (follow-up tickets, open suggestions) and `checks` (`high_radius` PASS handoff ids, `test_counts` from the staging suite log or `no staging log`, `live_check`, `marks`). `marks` has one entry for each check of each done ticket: `check_id`, `ticket_id`, `text`, `mark` (`works`, `problem` or `null`), `note`, `attachments` and `marked_at_ms` (see "The `delivery_check` kind"). 409 while a ticket of the request is open, 404 for an unknown request, 400 for a bad room or id. Read only. |
+| POST | `/requests/{room}/{request_id}/delivery/checks` | Bearer (human token) header | Human only (H3, `caller: "human"`: the agent token gets 403). Body `{by, check_id, mark: "works"\|"problem", note?, attachment_ids?}`. See "The `delivery_check` kind". 200 `{snapshot, ticket: {id, status}, reopened}`. 400 bad body, bad mark, empty note on a problem, bad or missing file. 403 when `by` is not the human. 404 unknown request or check. 409 for a works mark on a ticket that is not done, or a mark on a cancelled ticket. |
+| POST | `/requests/{room}/{request_id}/approve` | Bearer (human token) header | The human's approval (see "Spec-review stages"). |
+| POST | `/requests` | Bearer header | Create a request (see "The `request` kind"). |
+| POST | `/requests/{room}/{request_id}/edit` | Bearer header | Change the features or the origin of a request. |
+| GET | `/requests?room=` | Bearer header OR `?token=` | The requests of the room with `scope_change`. |
+| GET | `/rooms/{room}/requests` | Bearer header OR `?token=` | One row for each request of the room: `{room, requests: [{request_id, origin, status, tickets_done, tickets_total, high_radius_count, last_event_ms}]}`. `status` is `draft` (no ticket, or a draft ticket with no Approve), `waiting_for_approve`, `building`, `ready_for_test`, `merged` (each done ticket's staging merge commit is an ancestor of `main`) or `cancelled` (tickets, all cancelled). `tickets_total` and `high_radius_count` skip cancelled tickets. `last_event_ms` is the newest event of the request or of one of its tickets. 400 for a bad room, 200 with an empty list for a room with no request. Read only: no event. |
 
-No endpoint directly accepts a stage-create or arbitrary-transition command. A `to_role` handoff (`POST /handoffs`) can create a stage through the evaluator. Some routes cause fixed moves as a result of their input. `POST /launches/{id}/ack` moves `launching` to `running` (or to `retrying` or `failed` on an error). `POST /stages/{id}/turn-end` can move `running` to `retrying` or `failed` (a stop). A valid result handoff moves `running` to `passed`.
+No endpoint directly accepts a stage-create or arbitrary-transition command. A `to_role` handoff (`POST /handoffs`) can create a stage through the evaluator. Some routes cause fixed moves as a result of their input. The launch executor's ack moves `launching` to `running` (or to `retrying` or `failed` on an error). `POST /stages/{id}/turn-end` can move `running` to `retrying` or `failed` (a stop). A valid result handoff moves `running` to `passed`.
 
 ### SSE events
 
@@ -902,6 +1105,35 @@ No endpoint directly accepts a stage-create or arbitrary-transition command. A `
 - `stage.reminder`: scope `to-agents`, to the stage's session. The bridge delivers it in `wake` mode.
 - `stage.rejected`: scope `to-agents`, to the session that sent the result. The bridge delivers it in `context` mode, because the 400 of the handoff call already told the session.
 - Stages are not replayed on reconnect.
+
+## The `request` kind
+
+The plan label of tickets with an origin, features and the scope of the newest Approve (`hub/kinds/request.ts`, P6-02). Status: `open` until the first Approve, then `approved`. Events: `request.created`, `request.edited`, `request.approved` (entity: the id of the request row). Existing `request_id` labels get a request row at hub start (origin `human`, no features), and an `approved` one when a ticket is past `draft`. A second run changes nothing.
+
+Snapshot: `id`, `room`, `request_id`, `origin` (`human` | `factory`), `features` (up to 50 texts of 200 characters), `parent_request_id`, `source`, `approved` (the scope at the newest Approve: the features and `{id, radius}` of each ticket that was not cancelled), `status`, `created_by`, `created_at_ms`, `version`.
+
+A request **needs the human's Approve** when its origin is `human`, or when it has a non-terminal `high` ticket or any feature. A request of origin `factory` with none of these is queued by the spec-review PASS. A later change of scope (tickets added, removed or raised, features changed) is shown on the Approve card (`scope_change`) and holds no ticket (L1).
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/requests` | Bearer, body `{by, request_id, origin?, features?, parent_request_id?, source?}` | The room lead or the human creates a request (origin default `human`). 403 for another caller, 409 for an existing request, 400 for a bad field. An agent that creates a request of origin `factory` names a `source`: a ticket, decision or stage of this room. When the source belongs to a request, `parent_request_id` names that request. |
+| POST | `/requests/{room}/{request_id}/edit` | Bearer, body `{by, features?, origin?}` | The room lead or the human changes the features. Only the human changes the origin (403 otherwise). |
+| GET | `/requests?room=` | read | The requests of the room, each with `scope_change`. |
+| POST | `/requests/{room}/{request_id}/approve` | Bearer (human token) | The human's Approve (see "Spec-review stages"). |
+
+The agent tool is `create_request`.
+
+## The `decision` kind
+
+A human question from the room lead (`hub/kinds/decision.ts`). The lead opens it with the tool `escalate`, in the five-part format of `factory/orchestrator/unblocking.md`: `block` (one sentence), `facts` (each names a commit or a record id), `options` (2 or 3, one recommended), `human_actions` (full ticket ids with the exact action) and `next`. Status `open`, then `answered` (final). Events: `decision.open`, `decision.answered`. The arbiter statuses of this table are Part 19 and are not part of this protocol.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/decisions` | Bearer, body `{by, reason, block, facts, options, human_actions, next, ticket_id?, request_id?}` | Only the room lead (403 otherwise). `reason` is `scope`, `feature`, `irreversible` or `security`. `ticket_id` or `request_id` is required. → 201 `{id, snapshot}`. |
+| POST | `/decisions/{id}/answer` | Bearer (human token), body `{by, option, text?}` | Only the human (403 otherwise). `option` is one of the option ids. → 200. The hub sends the lead one entry with the answer and, when the decision has a `ticket_id`, writes one note on that ticket (a request-only decision writes no note). A repeat returns `idempotent: true`. |
+| GET | `/decisions?room=` | read | The open decisions of the room, newest first (the Needs-you list). |
+
+Decision entries go to the UI stream only. The lead gets its one entry from the answer route, and gets an answer it has not received at reconnect.
 
 ## Rooms (v0.9)
 
@@ -944,12 +1176,12 @@ project.
 
 | Kind | Same-room only? | Notes |
 |---|---|---|
-| `chat` (`/post`, `/send`) | Yes for `target: "all"`; No for named target | Sender's room tagged on entry. |
+| `chat` (`/post`, `/send`) | Yes for `target: "all"`; No for named target | Sender's room tagged on entry. An optional `reply_to` (integer message id) must name a chat message of the sender's room in the hub chat log, else 400. |
 | `handoff` | Yes (from non-human) | 403 `cross-room handoff not permitted` otherwise. Human is super-user. |
 | `interrupt` (single) | Yes (from non-human) | 403 `cross-room interrupt not permitted`. |
 | `interrupt` (bulk) | Human-only | `{ from: <human>, rooms: [<labels>], text }`. Fans out one interrupt per non-human agent in each listed room. |
 | `permission` request | Fan-out scoped to same room | Peers in other rooms never see the prompt. |
-| `permission` verdict | Voter must be same-room or human | 403 `cross-room verdict not permitted` otherwise. |
+| `permission` verdict | Human only | An agent caller gets 403 (`only the human may call this route`). |
 | `nutshell` | One row per room | Edits propagate to same-room agents live + included in briefing on connect. |
 
 ### Nutshell per room
@@ -986,7 +1218,29 @@ routing bug would show up as a surge, not silent context pollution.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/room-default` | Returns `{ room: <CUBILOT_DEFAULT_ROOM> }`; read-auth. Used as fallback when an external-spawn channel-bin has no `CHATBRIDGE_ROOM`. |
+| GET | `/room-default` | Returns `{ room: <CUBILOT_DEFAULT_ROOM> }`; read-auth. With `?cwd=<dir>` returns `{ room }` of the git-root (else folder) basename of `dir`, the spawn form's Room default. Used as fallback when an external-spawn channel-bin has no `CHATBRIDGE_ROOM`. |
+| GET | `/search?q=&agent=` | Read-auth, read-only. Up to 20 `{kind, id, title, room, status}` for tickets (id prefix with or without `t_`, or all words in the title), requests (`request_id` prefix) and agents (name prefix). `q` under 2 characters gives `[]`. `agent` is required (400 if missing or unknown; the name is self-asserted, as everywhere). The human's name searches all rooms; any other name limits to that agent's room. Order: exact id or name, then open items, then newest. |
+
+### Settings read routes (hub/features/settings.ts)
+
+Read-auth. Each route reads `config.yml` at each call, so an edit shows at the next request with no reload. They replace the Tauri commands `get_ui_settings`, `get_human_name`, `get_app_version`, `get_mcp_template`, `list_roles`, `pty_roles`, `pty_harness` and `resolve_default_room`. The shell sets the env `CUBILOT_APP_VERSION`, `CUBILOT_TMUX`, `CUBILOT_FACTORY_SRC` and `CUBILOT_MOD_DIR` for these routes.
+
+| Method | Path | Returns |
+|---|---|---|
+| GET | `/settings/ui` | `{ theme, font_scale, fonts: { ui, mono } }`. An invalid theme gives `default`; `font_scale` is clamped to 0.85..1.25; an unsafe font name gives `""`. |
+| GET | `/settings/human` | `{ name }`, the hub's own human name (`CUBILOT_HUMAN_NAME`). |
+| GET | `/settings/version` | `{ version }` from `CUBILOT_APP_VERSION` (`""` when unset). |
+| GET | `/settings/mcp-template` | `{ template }`, the Claude launch line for a session outside Cubilot. 503 when the mod folder is stale, missing or incomplete: the hub does not restage it (the shell does, at the next Claude spawn). |
+| GET | `/settings/paths` | `{ config, skills, mcp }`; with `?agent=<name>` also `agent_cwd` (live pane path or `null`). A browser shows these with a Copy button. 400 on an invalid agent name. |
+| GET | `/roles` | `{ roles, pills }`. `roles`: the single-agent roles of the staged version (`name`, `harness`, `provider`, `model`, `thinking`, `effort`), sorted. `pills`: `{ <agent>: { role, model, provider, effort, harness } }` of the running tmux sessions. |
+| GET | `/agents/<name>/harness` | `{ harness: "claude" \| "pi" }` of a roster agent or a tmux session. 404 for an unknown agent. |
+| GET | `/models` | `?harness=claude\|pi` (default `claude`). `{ models: [{ provider, model, thinking, ready }] }`. `claude`: the four fixed models. `pi`: rows of `pi --list-models` (10 s limit, `CUBILOT_PI_LIST_LIMIT_MS` overrides), `ready` from `pi auth check` (cached 5 min). Pi that fails or does not end in time: `{ models: [], warning }`. 400 `invalid harness: <h>`. |
+| GET | `/agents/<name>/slash-commands` | `{ commands: [{ name, description }] }` from the agent's pane folder and the home folder (commands, skills, global MCP `prompts`; Pi: `skill:<name>` and commands). Built-ins not included. 404 for an unknown agent. |
+| GET | `/agents/<name>/skills` | `{ role, mode, relaunch_needed, groups: [{ name, skills: [{ id, on, state }] }] }`. `role` comes from the pane's `@cubilot_role`. `mode` is `none` (no role), `legacy`, `plain` or `view`, proven from the pane start command. `on` is the saved choice in `<hex>.skills-off`. `state` is `loaded`, `not_loaded` or `new`, from `<hex>.skills-applied` only. 404 for an unknown agent. 503 when no factory is staged. |
+| PUT | `/agents/<name>/skills` | Human-only: the agent token gets 403. Body `{off: [skill id]}`. The hub writes `<hex>.skills-off` (sorted, no duplicates, mode 0600, temp file and rename). An empty list removes the file. An unknown id or a bad body → 400, nothing written. An agent with no role → 409. 404 for an unknown agent. → 200 `{ok:true}`. Only the hub writes this file. |
+| POST | `/agents/<name>/skills/apply` | Human-only: the agent token gets 403. Prepares the build from the saved choice under the publication lock: a view build `<hex>.view-<gen>` and `<hex>.skills-prepared`, or an inventory record for a `plain` or `legacy` agent with every skill on. It publishes nothing: `/factory/relink` does. A `plain` or `legacy` agent with a skill off → 409 `Relaunch <agent> to apply: ...`. A busy lock after 2 s → 409. No role → 409. 404 for an unknown agent. → 200 `{ok:true}`. |
+
+`reload_settings` and the native open commands stay in the shell. In a browser the Reload control shows "Restart the hub to apply these settings".
 
 ### Pause / Resume
 
@@ -1007,7 +1261,7 @@ While an agent is paused:
 - **Its writes that reach others get `423 {"error":"agent is paused"}`:**
   `POST /post`, `/handoffs`, `/interrupts`, and the ticket routes create, claim,
   transition, assign, archive, notes and attachments. Not refused: the
-  `ticket:done` approval request, permission requests and verdicts on its own
+  permission requests and verdicts on its own
   requests (a running tool call must not get stuck), and handoff decline, handoff
   cancel and interrupt ack (they only reduce the agent's involvement). Handoff
   accept is refused with 423: taking work is intervening.
@@ -1049,22 +1303,23 @@ does.
 
 ## Identity and trust model
 
-Tokens are issued per running hub instance, written to
-`~/Library/Application Support/Cubilot/hub.token` (mode `0600`), and
-rotated on every app launch and settings reload. The channel-mode sidecar
-reads the file on startup, attaches it to every POST, and re-reads on HTTP
-401 to handle rotations transparently.
+Two tokens are issued per running hub instance, each 32 random bytes in URL-safe base64, and both are re-minted on every app launch and settings reload:
 
-**Trust-on-self-assertion.** The `by` and `from` fields in mutating
-requests are validated against the expected actor for each route (recipient
-for accept/decline; sender or human for cancel) but are **not**
-cryptographically bound to the token — any process holding `hub.token` can
-claim any identity. This matches the trust model of the pre-existing
-`/post` endpoint.
+- The **agent token** is written to `~/Library/Application Support/Cubilot/hub.token` (mode `0600`, atomic write) and to the hub env `CUBILOT_TOKEN`. The channel-mode sidecar reads the file on startup, attaches it to every POST, and re-reads on HTTP 401 to handle rotations transparently.
+- The **human token** is the first line of the hub's stdin. The hub reads it at start within 5 s. If none comes, the hub logs one line and no caller is the human. No file and no env value holds it. The desktop window gets it from `get_hub_url`, which returns `{url, token}`.
+
+Each request has a **caller**: `human` (human token), `agent` (agent token) or none (401). Both tokens are compared in constant time. The caller is `cap.caller` in a route handler.
+
+- An `agent` caller whose JSON body names the human name in `by`, `from`, `actor`, `voter`, `requester`, `agent` or `creator` (case and surrounding spaces ignored) gets `403 {"error":"the human acts only from the UI"}`.
+- For a `human` caller the hub uses the human name as the acting name of `by` and `from`. A field that names a target (`agent` on `/remove`) keeps its value.
+- A route with `RouteDef.caller: "human"` gives `403 {"error":"only the human may call this route"}` to an `agent` caller. On staging these are: `POST /requests/{room}/{request_id}/approve`, `POST /decisions/{id}/answer`, `POST /checkpoints`, `PUT /rooms/{room}/settings`, `POST /agents/{name}/pause`, `POST /remove`, `POST /permissions/{id}/verdict`, `PUT /agents/{name}/skills`, `POST /agents/{name}/skills/apply`. The permission dismiss route stays open to agents (the relay hook dismisses its own request as the agent).
+- `GET /stream` gives 403 to the `agent` caller. `GET /agent-stream` gives 403 to the `human` caller.
+
+**Trust-on-self-assertion (agents).** The `by` and `from` fields of an agent are validated against the expected actor for each route but are **not** cryptographically bound to the agent token. Any process holding `hub.token` can claim any agent identity. The human identity is bound to the human token. Accepted risk: an agent with an unrestricted shell runs as the human's OS user, so the guard stops a forged `by` over HTTP, not a hostile local process.
 
 **The `system` actor.** The hub writes its own events with the actor `system`. Every mutating route refuses `system` as an actor (400). See "Launch ownership and the `system` actor" under the `stage` kind.
 
-**Launch stream.** A holder of `hub.token` can also read `/launches/stream` and acknowledge launch requests. No per-role token exists. This is an accepted risk.
+**Launch stream.** The launch routes are human-only: a caller needs the human token. No per-role token exists. A process of the same OS user that reads the shell memory can still get it. This is an accepted risk.
 
 **Hardening target.** Per-sidecar cryptographic identity (one token per
 channel-mode sidecar, bound to a specific agent name on issue, verified on
@@ -1201,3 +1456,31 @@ Per-room durable chat history. Off by default; flipped on per room via the setti
 **Hub restart hydration:** on startup, opted-in rooms have their **active chunk** tail-loaded into `chatLog` (rotated chunks are NOT loaded). Subsequent SSE replay on `/stream` covers the hydrated entries.
 
 **SQLite invariant:** `room_settings` (added in ledger schema v8) holds the opt-in flag only; rotation size is a code-level constant (`ROTATION_LINES = 10_000`). Kinds (`handoff`, `interrupt`, `permission`, `nutshell`) remain exclusively in SQLite — the JSONL never carries kind state, only chat entries.
+
+### Checkpoints
+
+A checkpoint makes the room lead write a short note, clears its context and starts it again from the note and the state summary (`hub/kinds/checkpoint.ts`). Statuses: `noting`, `clearing`, `done`, `failed`. One event for each change: `checkpoint.started`, `checkpoint.note_asked`, `checkpoint.noted`, `checkpoint.clearing`, `checkpoint.done`, `checkpoint.failed`. No cross-kind transaction.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/checkpoints` | Bearer (human token), body `{by, room}` | The human starts a checkpoint for the lead of `room`. 400 for a Pi lead, 403 for a caller that is not the human, 404 for a room with no lead, 409 when a checkpoint of that lead is not finished. |
+| GET | `/checkpoints?room=` | read | The record of a room, newest first: time (`started_at_ms`), `trigger` (`human` or `rule`), `context_pct_before`, `context_pct_after`, `summary_bytes`, `status`, `reason`. |
+| GET | `/checkpoints/{id}` | read | One record. |
+| POST | `/agents/{name}/turn-end` | Bearer, body `{by}` | The Stop hook of the lead. The first turn end after the start asks the lead to call the tool `checkpoint_note`. The next one writes the summary file (with the note, if one came) and asks the shell for `/clear`. A turn end of any other agent changes nothing (`{"action":"none"}`). |
+| POST | `/agents/{name}/checkpoint-note` | Bearer, body `{by, text}` | The chatbridge tool `checkpoint_note(text)` of the lead posts here. Only after the request (409 otherwise). The hub keeps the first 200 words. No shell and no hook carries the note text. |
+
+With no checkpoint active, a turn end of the room lead (never a Pi lead) starts one with `trigger` `rule` when it is due and the point is safe (`hub/core/checkpoint-due.ts`). Due: a request became done after the lead's newest checkpoint started (the done time follows `events.seq`), or the context use is at least `checkpoint.context_pct` of `config.yml` (default 60). Not safe: a request with an open ticket waits for approval, a decision is `open` or `escalated`, or a spec or arbiter stage is live.
+
+The summary is written to `<app data>/checkpoints/<agent>.md` with mode `0600`. The `SessionStart` hook (matcher `clear`) of the Orchestrator role returns the file as `additionalContext` and removes it (`factory/orchestrator/hooks/`). The sweep moves a `clearing` checkpoint to `done` when the file is gone (`context_pct_after` is the context percentage at that time), and to `failed` after 2 minutes (`CUBILOT_CHECKPOINT_TIMEOUT_MS` in tests). A Pi lead has no checkpoint.
+
+## The `delivery_check` kind
+
+The human's mark on one check of a delivery (Part 14 H3, `hub/kinds/delivery-check.ts`). Status is the mark: `works` or `problem`. Table `delivery_checks` (one row for each room, request and check). Event `delivery_check.marked`: the first mark creates the row, each later mark for the same check replaces it and writes a new event, also with the same content.
+
+**check_id.** A check is one numbered line (`1.`, `2.`, ...) of the acceptance criteria of a ticket of the request, as the delivery report lists it (`checks.marks`). `check_id` is `<ticket_id>#<n>`. **Parse rule.** When the criteria have a heading line `Acceptance criteria` (case ignored, optional `:`), the checks are the numbered lines after that line and before the next heading line (`Verify:`, `Out of scope:` or any other line that ends with `:` and has no number). Numbered lines under `Verify:` or `Out of scope:` make no check, so no `check_id` repeats. Criteria with no such heading (legacy) use every numbered line, as before: two numbered lists that both start at 1 can repeat a `check_id`. A headed block with no numbered line has no check. Legacy criteria with no numbered line have one check, `<ticket_id>#1`, with the whole text. This includes the steps of the live-check ticket, which is a ticket of the request.
+
+**Route.** `POST /requests/{room}/{request_id}/delivery/checks`. Body `{by, check_id, mark, note, attachment_ids}`. `by` must be the human (403 for an agent or any other name). `note` is up to 3500 bytes and is required for `problem` (400). `attachment_ids` is up to 10 uploaded files (`<id>.<ext>` or `/image/<id>.<ext>`): each must pass the upload allowlist and exist (400). `works` needs a `done` ticket (409). A `cancelled` ticket takes no mark (409).
+
+**Fourth cross-kind transaction.** A `problem` mark writes in one transaction: `delivery_check.marked`, `ticket.noted` with its `ticket_notes` row (text `Delivery check <check_id> problem: <note>`, author the human), one `ticket.attached` event and `ticket_attachments` row for each file not yet on the ticket, and, when the ticket is `done`, `ticket.queued` (payload `from: done`, `to: queued`) with the `tickets` row update. A ticket that is not `done` (already reopened) gets the note and the files but no move. After the commit the hub sends the ticket entries and evaluates the ticket for its stage. A failure rolls back all of it.
+
+Migration: `CREATE TABLE IF NOT EXISTS` on start. An older ledger gets an empty table and loses nothing.

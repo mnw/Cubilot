@@ -11,7 +11,6 @@ import { authedFetch, getJson, postJson, registerAgent } from "../helpers/fetch"
 const T = "t_0123456789abcdef";
 const H = "h_0123456789abcdef";
 const I = "i_0123456789abcdef";
-const L = "l_0123456789abcdef";
 const SYS = "system";
 // Every field a route may read an actor from, all set to `system`.
 const actors = { by: SYS, from: SYS, agent: SYS, actor: SYS, voter: SYS, requester: SYS, name: SYS, creator: SYS };
@@ -25,6 +24,8 @@ const ROUTES: R[] = [
   { method: "POST", path: "/remove", body: {} },
   { method: "POST", path: "/upload", body: {} },
   { method: "POST", path: "/sessions", body: {} },
+  { method: "POST", path: "/sessions/shell", body: {} },
+  { method: "POST", path: "/sessions/sw-alice/kill", body: {} },
   { method: "POST", path: "/factory/relink", body: {} },
   { method: "POST", path: "/factory/applied", body: {} },
   { method: "POST", path: "/handoffs", body: { to: "sw-alice", task: "x" } },
@@ -42,7 +43,8 @@ const ROUTES: R[] = [
   { method: "POST", path: `/tickets/${T}/assign`, body: { assignee: "sw-alice" } },
   { method: "POST", path: `/tickets/${T}/edit`, body: { title: "x" } },
   { method: "POST", path: `/tickets/${T}/transition`, body: { to: "in_progress" } },
-  { method: "POST", path: `/tickets/${T}/approval`, body: {} },
+  { method: "POST", path: "/decisions", body: { facts: "x" } },
+  { method: "POST", path: "/decisions/d_0123456789abcdef/answer", body: { option: "a" } },
   { method: "POST", path: `/tickets/${T}/notes`, body: { text: "x" } },
   { method: "POST", path: `/tickets/${T}/archive`, body: {} },
   { method: "POST", path: `/tickets/${T}/attachments`, body: { name: "x", url: "x" } },
@@ -50,9 +52,20 @@ const ROUTES: R[] = [
   { method: "POST", path: "/rooms/sw/lead", body: { agent: SYS } },
   { method: "PUT", path: "/rooms/sw/settings", body: { persist_transcript: true } },
   { method: "POST", path: "/rooms/sw/clear-transcript", body: {} },
-  { method: "POST", path: `/launches/${L}/ack`, body: {} },
   { method: "POST", path: "/requests/sw/req-1/approve", body: {} },
+  { method: "POST", path: "/requests", body: { request_id: "req-1" } },
+  { method: "POST", path: "/requests/sw/req-1/edit", body: { features: ["x"] } },
+  { method: "POST", path: "/requests/sw/req-1/delivery/checks", body: { check_id: `${T}#1`, mark: "works" } },
   { method: "POST", path: "/stages/s_0123456789abcdef/turn-end", body: {} },
+  { method: "POST", path: "/checkpoints", body: { room: "sw" } },
+  { method: "POST", path: "/agents/sw-alice/turn-end", body: {} },
+  { method: "POST", path: "/terminal/sw-alice/capture-turn", body: { input: "/cost" } },
+  { method: "POST", path: "/terminal/sw-alice/heal", body: {} },
+  { method: "POST", path: "/terminal/sw-alice/input", body: { text: "x" } },
+  { method: "PUT", path: "/agents/sw-alice/skills", body: { off: [] } },
+  { method: "POST", path: "/agents/sw-alice/skills/apply", body: {} },
+  { method: "POST", path: "/agents/sw-alice/checkpoint-note", body: { text: "x" } },
+  { method: "POST", path: "/rooms/sw/cancel-traces/ct_0123456789abcdef/clear", body: {} },
   // spec-review-stage 3.5: the spec-review handoff (a role handoff with review spec) and every field a PASS path could read an actor from
   { method: "POST", path: "/handoffs", body: { to_role: "validator", review: "spec", request_id: "req-1", task: "x", context: { request_text: "x" } } },
 ];
@@ -113,7 +126,7 @@ describe("the system actor is refused on every route", () => {
   // 2.5b: the guard must not depend on the Content-Type header. A route parses its body as JSON whatever the header says.
   describe("whatever the Content-Type header", () => {
     const raw = (path: string, method: string, body: string | Uint8Array, headers: Record<string, string>) =>
-      fetch(`${hub.url}${path}`, { method, body, headers: { Authorization: `Bearer ${hub.token}`, ...headers } });
+      fetch(`${hub.url}${path}`, { method, body, headers: { Authorization: `Bearer ${hub.humanToken}`, ...headers } });
     const probe = JSON.stringify({ by: SYS, persist_transcript: true });
     const persist = async () => ((await getJson(hub, "/rooms/sw/settings")).json as { settings: { persist_transcript: boolean } }).settings.persist_transcript;
 

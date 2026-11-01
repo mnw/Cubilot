@@ -7,12 +7,20 @@ TBD - created by archiving change factory-roles. Update Purpose after archive.
 
 ### Requirement: An agent can be launched with a factory role
 
-The app SHALL accept an optional role when it launches an agent. With a role, the launch command SHALL use the harness chosen at launch, and the role's instructions, skills and the tool limits for that harness from the role file. The role's harness SHALL be the default choice only. The role's model SHALL apply only on the role's harness; on the other harness the launch SHALL need a chosen model. Without a role, the launch command SHALL be the same as before this change. An unknown role SHALL be an error, and the app SHALL launch nothing.
+The app SHALL require a role when it launches a new agent. With a role, the launch command SHALL use the harness chosen at launch, and the role's instructions, skills and the tool limits for that harness from the role file. The role's harness SHALL be the default choice only. The role's model SHALL apply only on the role's harness; on the other harness the launch SHALL need a chosen model. A new launch without a role SHALL be an error ("a role is required"), and the app SHALL create nothing: before that error only read-only tmux queries run. The role check SHALL NOT apply when the session already exists: the app SHALL re-attach it, configure it as before, and neither stop it nor set or change its role. An unknown role SHALL be an error, and the app SHALL launch nothing.
 
-#### Scenario: Launch without a role is unchanged
+#### Scenario: Launch without a role is refused
 
-- **WHEN** the human launches an agent with the role "None"
-- **THEN** the launch command is the same as before this change
+- **WHEN** the human or the hub launches an agent without a role and no session of that name exists
+- **THEN** the app returns the error "a role is required"
+- **AND** no tmux session is created and no tmux option is set
+- **AND** the spawn modal keeps Launch off and shows "Pick a role. An agent without a role cannot be spawned."
+
+#### Scenario: Re-attach of a running session without a role
+
+- **WHEN** the session of that name already runs, with or without a role, and the app attaches to it without a role
+- **THEN** the app attaches, and the session keeps running with its own role (if any)
+- **AND** the app does not stop the session and does not set `@cubilot_role`
 
 #### Scenario: Claude role
 
@@ -197,7 +205,7 @@ The app SHALL stage the skills in `<app data>/factory-user/<role>/skills/` on to
 
 ### Requirement: The human picks the model and the effort for one launch
 
-The spawn modal SHALL show a model × effort grid. The rows SHALL be the models of the selected harness: the Claude models for Claude Code, and for Pi all models that `pi --list-models` reports, with a filter box; a provider that is not signed in SHALL be marked. The columns SHALL be the effort levels of that harness. The role's default cell SHALL be marked. A choice SHALL apply to one launch only.
+The spawn modal SHALL show a model × effort grid. The rows SHALL be the models of the selected harness: the Claude models for Claude Code, and for Pi all models that `pi --list-models` reports, with a filter box; a provider that is not signed in SHALL be marked. The columns SHALL be the effort levels of that harness. The role's default cell SHALL be marked. A Claude role with an `effort` SHALL mark and preselect its model row and that effort column, as a Pi role does with `thinking`. A launch SHALL need one selected cell: a preselected default cell counts, and an explicit choice of the human wins. A choice SHALL apply to one launch only.
 
 #### Scenario: A Claude role with a chosen cell
 
@@ -219,16 +227,64 @@ The spawn modal SHALL show a model × effort grid. The rows SHALL be the models 
 - **WHEN** the human selects the role `worker` and then the harness Pi
 - **THEN** the grid marks no default cell and Launch stays off until the human picks a cell
 
-### Requirement: The human picks the orchestrator's harness and model for a new factory room
+#### Scenario: No selected cell, no launch
 
-The New factory room window SHALL show the harness choice and the model × effort grid of the spawn modal, with the same rules. The default SHALL be the `orchestrator` role default.
+- **WHEN** the human selects a role without a default cell, for example `worker` on Claude, and picks no cell
+- **THEN** Launch is off and the line under it names `Model and effort`
+- **AND** a selected cell, or a preselected default cell, turns the name off the line
 
-#### Scenario: Factory room on Pi
+#### Scenario: A Claude role effort is preselected
 
-- **WHEN** the human creates a factory room with the harness Pi and the cell gpt-5.6-sol [openai-codex] × high
-- **THEN** the orchestrator launches on Pi with `--provider openai-codex --model gpt-5.6-sol --thinking high`
+- **WHEN** the human selects the role `orchestrator` on Claude
+- **THEN** the grid marks and selects opus × medium
+- **AND** a click on opus × high replaces the selection and the launch uses `--effort 'high'`
 
-#### Scenario: Factory room with the defaults
+### Requirement: A Claude role file may set a default effort
 
-- **WHEN** the human creates a factory room with no change to the harness or the grid
-- **THEN** the orchestrator launches on Claude Code with `--model opus`
+A role file MAY have an optional `effort` frontmatter line. The value SHALL be one of `low`, `medium`, `high`, `xhigh` and `max`. An unknown value SHALL make the role fail to parse. A role file with `harness: pi` SHALL be refused when it has `effort` (a Pi role uses `thinking`). A Claude launch of a role with `effort` SHALL pass `--effort <value>`. The effort the human picks in the spawn modal SHALL win over the role value. The role list SHALL carry the effort (null when none). The session record and the roster pill SHALL show the effort the command used. A role without `effort` SHALL give the same command as before. The `orchestrator` role SHALL have `effort: medium`.
+
+#### Scenario: The orchestrator launches with its role effort
+
+- **WHEN** the orchestrator launches on Claude and the human picks no effort
+- **THEN** the command has `--effort 'medium'` and the session records effort medium
+
+#### Scenario: The human's effort wins
+
+- **WHEN** the human picks high for an orchestrator launch
+- **THEN** the command has `--effort 'high'` once and the session records effort high
+
+#### Scenario: A bad value is refused
+
+- **WHEN** a role file has `effort: huge`, or `effort` on a Pi role
+- **THEN** the role fails to parse and nothing launches
+
+### Requirement: The New factory room window shows the orchestrator role values and blocks Launch until they load
+
+The New factory room window SHALL NOT show a harness choice or a model × effort grid. It SHALL show one read-only plain-text line, "Orchestrator: <model>, effort <effort> (from role)", with the values of the role `orchestrator` from `list_roles`. The window SHALL read the role again at each opening and SHALL NOT use the role of an earlier opening. The launch SHALL use the harness, model and effort of the role. The window SHALL have one status line under Launch, the only live region (`aria-live="polite"`), named by `aria-describedby` on Launch. The status line SHALL show, first match wins: the loading text, the failure text, the "Fill in: …" text of the missing required fields, else nothing. The required fields, in form order, are "Room name", "Project folder", "Worker limit" and "Tester limit" (whole number 1 to 20).
+
+#### Scenario: Factory room with the role values
+
+- **WHEN** the human creates a factory room and the role `orchestrator` has the model opus and the effort medium
+- **THEN** the window shows "Orchestrator: opus, effort medium (from role)"
+- **AND** the orchestrator launches on Claude Code with `--model opus --effort 'medium'`
+
+#### Scenario: The role loads
+
+- **WHEN** the window opens and `list_roles` has not answered
+- **THEN** the window shows "Orchestrator: not loaded", Launch is off and the status line shows "Loading the orchestrator role…"
+
+#### Scenario: The role fails to load
+
+- **WHEN** `list_roles` rejects, or it has no `orchestrator` role, or the role has no model or no effort
+- **THEN** the window shows "Orchestrator: not loaded", Launch is off and the status line shows "Could not load the orchestrator role: <error>."
+- **AND** no room setting is stored, no Nutshell is written and no agent launches
+
+#### Scenario: A required field is missing
+
+- **WHEN** the role is loaded and a required field is empty or not valid, for example a Worker limit of 0, 21 or 1.5
+- **THEN** Launch is off and the status line shows "Fill in: " and the names of the missing fields in form order
+
+#### Scenario: A reopened window keeps nothing
+
+- **WHEN** the window opens with a loaded role, closes, and opens again while `list_roles` is pending or rejects
+- **THEN** Launch is off and nothing of the first opening launches

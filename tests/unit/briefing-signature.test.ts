@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { briefingSignature, createBriefingBuilder, type BriefingPayload } from "../../hub/core/briefing";
+import { createLaunchRecord } from "../../hub/core/launch-record";
 import { createBriefingDispatcher } from "../../hub/core/briefing-dispatcher";
 import { renderBriefing } from "../../hub/channel/core";
 
@@ -81,5 +82,112 @@ describe("briefing signature agrees with renderBriefing", () => {
     d.scheduleFanout();
     await Bun.sleep(25);
     expect(queued.length).toBe(0);
+  });
+
+  describe("room lead", () => {
+    const lead = (): BriefingPayload => ({ ...base(), stage_peers: ["worker-3"], peers: [...base().peers, { name: "worker-3", online: true, room: "r1" }] });
+
+    test("Stage session joins: the lead's signature does not change", () => {
+      const before = { ...base(), stage_peers: [] as string[] };
+      const joined = lead();
+      expect(briefingSignature(joined)).toBe(briefingSignature(before));
+      const left = { ...joined, peers: joined.peers.map((p) => (p.name === "worker-3" ? { ...p, online: false } : p)) };
+      expect(briefingSignature(left)).toBe(briefingSignature(before));
+    });
+
+    test("a non-stage agent joining still changes the lead's signature", () => {
+      const joined = { ...lead(), peers: [...lead().peers, { name: "cy", online: true, room: "r1" }] };
+      expect(briefingSignature(joined)).not.toBe(briefingSignature(lead()));
+    });
+
+    test("the builder marks stage sessions for a lead only", () => {
+      const mk = (isLead: boolean) => {
+        const agents = {
+          get: (n: string) => ({ name: n, color: "#000", room: "r1" }),
+          entries: () => new Map([["Orchestrator", {}], ["worker-3", { room: "r1" }], ["cy", { room: "r1" }]]).entries(),
+          isPermanent: () => false,
+          connectionCount: () => 1,
+        } as any;
+        return createBriefingBuilder({
+          agents, kinds: [], ledgerDb: null, ledgerEnabled: false, roomSummariser: null,
+          defaultRoom: "r1", attachmentsDir: "/a", humanName: "human",
+          isLead: () => isLead, stageSessions: () => new Set(["worker-3"]),
+        }).build("Orchestrator");
+      };
+      expect(mk(true).stage_peers).toEqual(["worker-3"]);
+      expect(mk(false).stage_peers).toBeUndefined();
+    });
+
+    test("an ordinary agent named like a finished stage session still re-briefs the lead", () => {
+      // The hub binds worker-4 and worker-5 at their launch. worker-3 and worker-6 ended: their close was acked (released).
+      const rec = createLaunchRecord();
+      for (const [n, id] of [["worker-3", "s1"], ["worker-4", "s2"], ["worker-5", "s3"], ["worker-6", "s4"]]) rec.bind(n, id);
+      rec.release("worker-3");
+      rec.release("worker-6");
+      const live = rec.sessions();
+      expect([...live].sort()).toEqual(["worker-4", "worker-5"]);
+      const mk = (names: string[]) => {
+        const agents = {
+          get: (n: string) => ({ name: n, color: "#000", room: "r1" }),
+          entries: () => new Map([["Orchestrator", {}], ...names.map((n) => [n, { room: "r1" }] as [string, object])]).entries(),
+          isPermanent: () => false,
+          connectionCount: () => 1,
+        } as any;
+        return createBriefingBuilder({
+          agents, kinds: [], ledgerDb: null, ledgerEnabled: false, roomSummariser: null,
+          defaultRoom: "r1", attachmentsDir: "/a", humanName: "human",
+          isLead: () => true, stageSessions: () => live,
+        }).build("Orchestrator");
+      };
+      const before = mk([]);
+      const after = mk(["worker-3"]);
+      expect(after.stage_peers).toEqual([]);
+      expect(briefingSignature(after)).not.toBe(briefingSignature(before));
+      expect(mk(["worker-4"]).stage_peers).toEqual(["worker-4"]);
+      expect(briefingSignature(mk(["worker-4"]))).toBe(briefingSignature(before));
+    });
+
+    test("a retrying stage session that leaves keeps the lead signature", () => {
+      const rec = createLaunchRecord();
+      rec.bind("worker-4", "s1"); // retrying: the close is queued, the session runs until the ack
+      const live = rec.sessions();
+      expect([...live]).toEqual(["worker-4"]);
+      const mk = (names: string[]) => {
+        const agents = {
+          get: (n: string) => ({ name: n, color: "#000", room: "r1" }),
+          entries: () => new Map([["Orchestrator", {}], ...names.map((n) => [n, { room: "r1" }] as [string, object])]).entries(),
+          isPermanent: () => false,
+          connectionCount: () => 1,
+        } as any;
+        return createBriefingBuilder({
+          agents, kinds: [], ledgerDb: null, ledgerEnabled: false, roomSummariser: null,
+          defaultRoom: "r1", attachmentsDir: "/a", humanName: "human",
+          isLead: () => true, stageSessions: () => live,
+        }).build("Orchestrator");
+      };
+      expect(briefingSignature(mk(["worker-4"]))).toBe(briefingSignature(mk([])));
+    });
+    test("an ordinary agent that takes the name of a retrying stage whose relaunch failed still re-briefs the lead", () => {
+      // Close ack done (released), relaunch failed: the stage row keeps the old name, but the hub's record does not.
+      const rec = createLaunchRecord();
+      rec.bind("worker-4", "s1");
+      rec.release("worker-4");
+      const live = rec.sessions();
+      expect([...live]).toEqual([]);
+      const mk = (names: string[]) => {
+        const agents = {
+          get: (n: string) => ({ name: n, color: "#000", room: "r1" }),
+          entries: () => new Map([["Orchestrator", {}], ...names.map((n) => [n, { room: "r1" }] as [string, object])]).entries(),
+          isPermanent: () => false,
+          connectionCount: () => 1,
+        } as any;
+        return createBriefingBuilder({
+          agents, kinds: [], ledgerDb: null, ledgerEnabled: false, roomSummariser: null,
+          defaultRoom: "r1", attachmentsDir: "/a", humanName: "human",
+          isLead: () => true, stageSessions: () => live,
+        }).build("Orchestrator");
+      };
+      expect(briefingSignature(mk(["worker-4"]))).not.toBe(briefingSignature(mk([])));
+    });
   });
 });

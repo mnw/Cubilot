@@ -171,7 +171,8 @@ describe("pause display after the hub drops an agent", () => {
     addTab("a");
     vm.runInContext(
       'PAUSED_AGENTS.add("a"); let activeAgent = null;' +
-        'tabs.get("a").outputUnlisten = null; tabs.get("a").exitUnlisten = null; tabs.get("a").term = null;' +
+        'tabs.get("a").socket = null; tabs.get("a").term = null;' +
+        'function closeSocket() {}' +
         'tabs.get("a").tabEl.remove = () => {}; tabs.get("a").paneEl = { remove() {} };' +
         sliceFn("removeTab") + 'removeTab("a");',
       ctx,

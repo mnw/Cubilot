@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { spawnHub, type HubHandle } from "../helpers/hub";
 import { giveProjectHttp } from "../helpers/repo";
 import { authedFetch, getJson, openSSE, postJson, registerAgent } from "../helpers/fetch";
+import { openLaunchStream, ackLaunch } from "../helpers/fake-executor";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -24,7 +25,7 @@ describe("a spec result goes to the Orchestrator", () => {
     await giveProjectHttp(hub, "sr");
     open.push(await registerAgent(hub, "Orchestrator", { room: "sr" }));
     open.push(await registerAgent(hub, "sr-bob", { room: "sr" }));
-    stream = openSSE(hub, "/launches/stream");
+    stream = openLaunchStream(hub);
     void (async () => { try { for await (const e of stream.events) launches.push(e); } catch { /* closed */ } })();
     await sleep(200);
     const t = await postJson(hub, "/tickets", { by: "Orchestrator", title: "Plan item", acceptance_criteria: "It is planned.", blast_radius: "low", request_id: "req-9", status: "draft" });
@@ -40,7 +41,7 @@ describe("a spec result goes to the Orchestrator", () => {
     // The shell acks the launch; the Validator session joins the room under its session name.
     const req = launches.at(-1);
     open.push(await registerAgent(hub, req.session, { room: "sr" }));
-    const ack = await authedFetch(hub, `/launches/${req.id}/ack`, { method: "POST", body: JSON.stringify({ result: "spawned" }) });
+    const ack = await ackLaunch(hub, req.id, { result: "spawned" });
     expect(ack.status).toBe(200);
   });
   afterAll(async () => {
@@ -50,7 +51,7 @@ describe("a spec result goes to the Orchestrator", () => {
   });
 
   const result = (to: string) => ({
-    stage_id: stageId, review: "spec", request_id: "req-9", verdict: "PASS",
+    notes: "n", stage_id: stageId, review: "spec", request_id: "req-9", verdict: "PASS",
     findings: [{ ticket_id: ticketId, severity: "suggestion", text: "ok" }], suggestions: [], questions_for_human: [],
   } as Record<string, unknown>);
   const stage = async () => ((await getJson(hub, `/stages/${stageId}`)).json as any);

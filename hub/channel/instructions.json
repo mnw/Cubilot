@@ -46,7 +46,8 @@
         "- \"send_handoff\": hand a task to another participant. Returns a handoff_id.",
         "- \"accept_handoff\": confirm you've taken a pending handoff addressed to you.",
         "- \"decline_handoff\": refuse a pending handoff addressed to you. A reason is required.",
-        "- \"cancel_handoff\": withdraw a pending handoff you created (or that the human created)."
+        "- \"cancel_handoff\": withdraw a pending handoff you created (or that the human created).",
+        "- \"read_handoff\": read the full handoff of your room by its id."
       ]
     },
     {

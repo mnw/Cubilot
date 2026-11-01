@@ -1,6 +1,6 @@
 # Part 12: hub-first architecture, browser access and Linux hosting
 
-Status: idea, saved for later. Not ready to build.
+Status: planned (decision of the human, 2026-10-27). Build it directly after Part 6, before Part 5 and Parts 7 to 11. Reason: the desktop app approach limits the factory; the human must reach it from other devices, and the factory must be able to run on a Linux server.
 
 ## Idea
 
@@ -45,6 +45,10 @@ The shell (`src-tauri/src/lib.rs`, `src-tauri/src/pty.rs`) exposes these command
    - `local`: a browser on the same computer can open the UI.
    - `network`: the UI is reachable from other devices, only through a private network such as Tailscale (`tailscale serve`). The hub never listens on a public address.
 
+## Accessibility
+
+The browser UI is the UI that other people will use. It must meet WCAG 2.2 AA (Part 14, rule 6a). The accessibility council (Part 9) can audit it once it runs in a browser.
+
 ## Security requirements
 
 A hub that can launch shell commands is a target. Other websites in the user's browser can try to send requests to it.
@@ -56,6 +60,47 @@ A hub that can launch shell commands is a target. Other websites in the user's b
 5. Check the current CORS header `Access-Control-Allow-Origin: *` (`hub/core/auth.ts:11`). It must not let another site read data from a route that needs no token.
 6. Pairing for a new device: the desktop app shows a QR code with a one-time code. The phone exchanges it for a device token. The human can see and remove device tokens.
 7. Actions from a remote device that change state (allow an approval, cancel a handoff, send text to a terminal) need the device token. Sending text to a terminal from a remote device is off by default.
+
+## Internet access and sign-in (decision of the human, 2026-10-28)
+
+The human will reach Cubilot over the internet, not only through a private network. This changes item 1 of the security requirements: the UI can be public, the hub stays private.
+
+### Shape
+
+1. **The hub keeps listening on `127.0.0.1`.** A TLS front forwards to it: Caddy with automatic HTTPS, Cloudflare Tunnel or Tailscale Funnel. A fourth mode `browser_access: internet` sets the expected host name and turns on the rules below. The hub refuses `internet` mode without a host name and HTTPS.
+2. **Nothing is reachable before sign-in.** The front serves only the sign-in page and its files. Every other route needs a valid session, also the files of the UI.
+3. **The human signs in with a passkey (WebAuthn).** Fallback: a password (argon2id) plus a TOTP code. There is no password-only sign-in. Ten one-time recovery codes are made at setup.
+4. **First run.** There is no sign-up page. The first account (the owner) is made with a one-time setup code that the hub prints on the server console, or that the desktop app shows. The code expires after 15 minutes.
+5. **Session.** A server-side session row and a cookie `__Host-cubilot_session` (HttpOnly, Secure, SameSite=Strict, Path=/). Idle time-out 12 hours, absolute limit 7 days. A new session id at each sign-in and at each step-up. Sign-out and "sign out all other sessions" delete the rows.
+6. **Cookie and the other checks together.** Item 2 of the security requirements says header, not cookie. In `internet` mode the browser uses the cookie, and items 3 and 4 (`Origin` and `Host` checks) stay on every route and on the WebSocket. Every request that changes state also needs a CSRF token from the page. Agents keep the header token.
+7. **Step-up.** These actions ask for the passkey or a TOTP code again when the last check is older than 10 minutes: "Take control" of a terminal, the Shell tab, Settings changes (config, MCP servers, room settings), account and security changes, Kill session, Remove agent.
+8. **Limits.** Five failed sign-ins in 15 minutes lock that account and that IP address for 15 minutes. The page says how long to wait. Every sign-in, failure, lock, step-up and session removal is a row in a sign-in log that the human can read in Settings, Security.
+9. **Headers.** HSTS, a strict Content-Security-Policy, `frame-ancestors 'none'`, `Referrer-Policy: same-origin`, no `Access-Control-Allow-Origin: *` (item 5).
+10. **Pairing (item 6) stays.** A signed-in session shows the QR code. A paired phone gets a device session that the human can remove.
+
+### Human and agent are different callers
+
+Today the human and the agents use the same token. The bridge reads `hub.token` (`hub/channel/hub-client.ts`), and a human action is identified only by `by` equal to `human_name` (`hub/core/auth.ts`, `actorOr400`; `hub/kinds/interrupt.ts:150`). So an agent that sends `by: <human_name>` acts as the human. Fix this before `internet` mode:
+1. A human action takes its identity from the session, not from `by`. The hub ignores a `by` that names the human when the caller has an agent token.
+2. The routes that only the human may call (Approve, Allow, rulings and overrule, radius raise, room settings, Pause room, launch and remove agents) refuse an agent token with 403.
+3. An agent token never opens the UI. A UI session never gets the agent tools.
+4. When the human is a separate caller, an Allow or an Approve can come from the phone: one tap on the "Needs you" line, with the passkey step-up. Then a wait for the human no longer means a wait until the human is at the terminal (decision 2026-10-29; see Part 6, item 15).
+
+Until this is built, only the auto-mode classifier of the agent sessions stops an agent that sends a human action through `curl` (seen on 2026-10-29: the classifier refused the Orchestrator's Allow on P6-01). That is not a hub check.
+
+### Tests
+
+1. Without a session, every route except the sign-in page returns 401, also `/stream` and the UI files.
+2. A passkey sign-in makes a session; the cookie has `__Host-`, HttpOnly, Secure and SameSite=Strict.
+3. A request with a wrong `Origin` or `Host`, or without the CSRF token, is refused (403).
+4. The sixth failed sign-in in 15 minutes is refused with the wait time, and the log has the lock.
+5. "Take control" 11 minutes after the last check asks for the passkey again.
+6. A request with the agent token and `by: <human_name>` to an Approve route returns 403.
+7. "Sign out all other sessions" ends a session on a second browser at its next request.
+
+### Accounts: one human or many (open question 4)
+
+The model has one human (`human_name` in `config.yml`). Sign-in above is for that one human on many devices. More accounts need a decision first; see open question 4.
 
 ## Linux checklist
 
@@ -82,15 +127,26 @@ Tests for Linux:
 
 ## Order of work
 
-- Build the earlier parts first, in the current app on macOS. They do not depend on this part.
-- Part 7 (Doctor) and Part 11 (dashboard) come before this part. When you do this part, move their logic into the hub.
-- First step: move the settings commands. Second step: the terminal stream (after the tmux control mode test). Third step: browser access and pairing.
+- Parts 1 to 4 and Part 6 come first, in the current app on macOS.
+- Then this part, before Part 5 and Parts 7 to 11 (decision 2026-10-27). So the Doctor (Part 7), the setup screen (Part 8) and the dashboard (Part 11) are built in the hub and served to the browser from the start. Nothing moves later.
+- Then Part 14 (UI redesign) (decisions 2026-10-28). The token system and the mockups are done (`design/system/`, `design/mockups/`), and Part 14 builds them on the UI that the hub serves, so the redesign is done once, in the browser.
+- First step: the tmux control mode test (open question 1). It decides the terminal design. Second step: move the settings commands. Third step: the terminal stream. Fourth step: browser access, sign-in ("Internet access and sign-in") and pairing. Do not use `internet` mode before the sign-in tests pass. Fifth step: the Linux checklist.
+- Start with an OpenSpec change for steps 1 to 4. The Linux checklist can be a second change.
 
 ## Open questions
 
 1. Does tmux control mode give a stream that is good enough for the Claude Code and Pi interfaces (colours, cursor moves, resize)?
 2. The mobile view: show the board, "Waiting for you" and the chat only, or also the terminals?
 3. Notifications to the phone for "Waiting for you" items: web push from the hub, or a different channel?
+4. More than one human account? Options: (a) one human, many devices (this part); (b) a small team on one instance: accounts with a role (owner, approver, viewer) and room membership, every human action records the account; (c) separate customers: one instance (server or container) for each customer, not shared tenants in one hub. Each Claude subscription belongs to one person, so each human who runs agents needs their own Claude plan or an API key.
+
+## Mockups (2026-10-28)
+
+Designed in `design/mockups/cubilot-prototype.html`:
+- Sign-in (`#sign-in`) and its states (`#sign-in-states`): first run with the setup code, recovery codes, password and code, the lock, the step-up dialog. Settings, Security (`#app-settings`): passkeys, fallback, recovery codes, sessions and devices, pairing, sign-in log, typing into terminals from other devices.
+- The terminal over the hub (`#session`): read-only by default; "Take control" (step-up) and "Hand back"; while the human has control, the hub holds new messages and handoffs for that agent and delivers them at Hand back. The phone version adds a key strip (Esc, Ctrl+C, Tab, Shift+Tab, arrows, Enter).
+
+Hub work these screens need, in this part: the hold queue for an agent under human control (hold, release, show "held: N"), the step-up time on the session, and the routes for sessions, devices and the sign-in log. Part 14 builds the screens (T07, T09, T12).
 
 ---
 

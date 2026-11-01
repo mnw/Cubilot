@@ -95,7 +95,8 @@ describe("an interrupt on a stage session", () => {
   });
 
   test("the interrupt code does not touch the stage kind or the launch queue", async () => {
+    // It reads the launch record (the stage of the sender) and stores ids. It never writes a stage or queues a launch.
     const src = await Bun.file(new URL("../../hub/kinds/interrupt.ts", import.meta.url)).text();
-    expect(src).not.toMatch(/stage|launch/i);
+    expect(src).not.toMatch(/from "\.\/stage"|launch-queue|enqueue|UPDATE stage|INSERT INTO stage|launchRecord\??\.(bind|release|load)/);
   });
 });

@@ -1,20 +1,20 @@
-// Roster feature — read endpoints for agents/presence + manual remove + nutshell GET + room-default.
+// Roster feature — read endpoints for agents/presence + manual remove + nutshell GET.
 // Carved out of hub.ts inline routes in architecture-cycle-2a §4.
 
 import type { HubFeature } from "../core/types";
 import type { AgentRegistry } from "../core/agents";
 import { validRoomLabel } from "../core/ids";
 import type { NutshellSnapshot } from "../nutshell";
+import { readContextPct } from "../core/context-usage";
 
 export type RosterDeps = {
   agents: AgentRegistry;
   removeAgent: (name: string, reason: "manual" | "stale (no connection)") => boolean;
-  defaultRoom: string;
   readNutshell: (room: string) => NutshellSnapshot;
 };
 
 export function createRosterFeature(deps: RosterDeps): HubFeature {
-  const { agents, removeAgent, defaultRoom, readNutshell } = deps;
+  const { agents, removeAgent, readNutshell } = deps;
 
   return {
     routes: [
@@ -22,7 +22,7 @@ export function createRosterFeature(deps: RosterDeps): HubFeature {
         method: "GET",
         path: "/agents",
         auth: "read",
-        handler: () => Response.json([...agents.values()]),
+        handler: () => Response.json([...agents.values()].map((a) => ({ ...a, context_pct: readContextPct(a.name), held: agents.heldCount(a.name) }))),
       },
       {
         method: "GET",
@@ -34,6 +34,7 @@ export function createRosterFeature(deps: RosterDeps): HubFeature {
         method: "POST",
         path: "/remove",
         auth: "mutating",
+        caller: "human",
         handler: async (req) => {
           const body = (await req.json().catch(() => ({}))) as { agent?: string };
           const name = (body.agent ?? "").trim();
@@ -54,12 +55,6 @@ export function createRosterFeature(deps: RosterDeps): HubFeature {
           if (!validRoomLabel(room)) return Response.json({ error: "invalid room" }, { status: 400 });
           return Response.json(readNutshell(room));
         },
-      },
-      {
-        method: "GET",
-        path: "/room-default",
-        auth: "read",
-        handler: () => Response.json({ room: defaultRoom }),
       },
     ],
   };
